@@ -1,0 +1,24 @@
+
+@use "vars" as *;
+
+@import url('https://fonts.googleapis.com/css2?family=Lato&display=swap');
+
+body {
+  margin: 0;
+  font-family: 'Lato', sans-serif;
+}
+
+.center-flex{
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.center-flex-row{
+  @extend .center-flex;
+  flex-direction: column;
+}
+
+.flex-spacer{
+  flex-grow: 1;
+}

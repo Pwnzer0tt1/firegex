@@ -1,0 +1,17 @@
+
+@use "../../vars" as *;
+
+.header{
+    width: 100%;
+    height: 140px;
+    background-color: $primary_color;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.logo{
+    width: 200px;
+    margin-left: 40px;
+    height: 70%;
+}
