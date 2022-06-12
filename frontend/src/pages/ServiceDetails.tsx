@@ -32,7 +32,6 @@ function ServiceDetails() {
             setServiceInfo(res)
         }).catch(
           err =>{
-            errorNotify(`Updater for ${srv_id} service failed [General Info]!`, err.toString())
             error = true;
             navigator("/")
         })
@@ -40,17 +39,15 @@ function ServiceDetails() {
         await serviceregexlist(srv_id).then(res => {
             setRegexesList(res)
         }).catch(
-          err =>{
-            errorNotify(`Updater for ${srv_id} service failed [Regex list]!`, err.toString())
-            error = true;
-        })
+          err => errorNotify(`Updater for ${srv_id} service failed [Regex list]!`, err.toString())
+        )
     }
-  
+
     useEffect(()=>{
         updateInfo()
         const updater = setInterval(updateInfo, update_freq)
         return () => { clearInterval(updater) }
-    }, []);
+    });
 
     const [deleteModal, setDeleteModal] = useState(false)
     

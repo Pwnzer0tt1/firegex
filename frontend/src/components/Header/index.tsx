@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActionIcon, Badge, Modal } from '@mantine/core';
+import { ActionIcon, Badge, Image, Modal } from '@mantine/core';
 import style from "./Header.module.scss";
 import { errorNotify, generalstats } from '../../js/utils';
 import { GeneralStats, update_freq } from '../../js/models';
@@ -37,7 +37,9 @@ function Header() {
   const closeModal = () => {setOpen(false);}
 
   return <div id="header-page" className={style.header}>
-        <div className={style.logo} >LOGO</div>
+        <div style={{ width: 240, marginLeft: 'auto', marginRight: 'auto', padding:"40px" }}>
+          <Image src="/header-logo.png" alt="Firegex logo" />
+        </div>
         <div className="flex-spacer" />
         <Badge color="green" size="lg" variant="filled">Services: {generalStats.services}</Badge>
         <Badge style={{marginLeft:"10px"}} size="lg" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>

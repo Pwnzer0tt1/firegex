@@ -3,7 +3,10 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: firewall
-        network_mode: "host"
+        build: .
+        #network_mode: "host"
+        ports:
+            - 80:80
         environment:
-            - NGINX_PORT=8080
+            - NGINX_PORT=80
+        

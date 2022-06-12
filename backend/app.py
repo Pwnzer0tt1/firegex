@@ -1,5 +1,5 @@
 import sqlite3, random, string, subprocess
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, abort
 
 
 class SQLite():
@@ -68,7 +68,7 @@ def get_services():
     res = []
     for i in db.query('SELECT * FROM services;'):
         n_regex = db.query('SELECT COUNT (*) FROM regexes WHERE service_id = ?;', (i[1],))[0][0]
-        n_pacchetti = db.query('SELECT SUM(blocked_packets) FROM regexes WHERE service_id = ?;', (i[1],))[0][0]
+        n_packets = db.query('SELECT SUM(blocked_packets) FROM regexes WHERE service_id = ?;', (i[1],))[0][0]
 
         res.append({
             'id': i[1],
@@ -76,7 +76,7 @@ def get_services():
             'public_port': i[3],
             'internal_port': i[2],
             'n_regex': n_regex,
-            'n_pacchetti': n_pacchetti if n_pacchetti else 0,
+            'n_packets': n_packets if n_packets else 0,
             'name': i[4]
         })
 
@@ -90,7 +90,7 @@ def get_service(serv):
     res = {}
     if len(q) != 0:
         n_regex = db.query('SELECT COUNT (*) FROM regexes WHERE service_id = ?;', (serv,))[0][0]
-        n_pacchetti = db.query('SELECT SUM(blocked_packets) FROM regexes WHERE service_id = ?;', (serv,))[0][0]
+        n_packets = db.query('SELECT SUM(blocked_packets) FROM regexes WHERE service_id = ?;', (serv,))[0][0]
 
         print(q[0])
         res = {
@@ -98,10 +98,12 @@ def get_service(serv):
             'status': q[0][0],
             'public_port': q[0][3],
             'internal_port': q[0][2],
-            'n_packets': n_pacchetti if n_pacchetti else 0,
+            'n_packets': n_packets if n_packets else 0,
             'n_regex': n_regex,
             'name': q[0][4]
         }
+    else:
+        return abort(404)
 
     return res
 
@@ -265,5 +267,5 @@ if __name__ == '__main__':
     })
 
     #uwsgi 
-    subprocess.run(["uwsgi","--http","127.0.0.1:8080","--master","--module","app:app"])
+    subprocess.run(["uwsgi","--socket","/tmp/uwsgi.sock","--master","--module","app:app"])
 

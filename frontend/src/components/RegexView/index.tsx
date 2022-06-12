@@ -1,10 +1,8 @@
-import { Center, Grid, SegmentedControl, Text, Title, Box, Badge, Space, ActionIcon } from '@mantine/core';
+import { Grid, Text, Title, Badge, Space, ActionIcon } from '@mantine/core';
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
 import { getHumanReadableRegex } from '../../js/utils';
 import style from "./RegexView.module.scss";
-import { FaListAlt } from "react-icons/fa"
-import { TiCancel } from "react-icons/ti"
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
 import FilterTypeSelector from '../FilterTypeSelector';

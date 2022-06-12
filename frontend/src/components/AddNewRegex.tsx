@@ -1,8 +1,8 @@
-import { Button, Group, NumberInput, Space, TextInput, Notification, Switch, NativeSelect } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
-import { RegexAddForm, ServiceAddForm } from '../js/models';
-import { addregex, addservice, b64encode, validateRegex } from '../js/utils';
+import { RegexAddForm } from '../js/models';
+import { addregex, b64encode, validateRegex } from '../js/utils';
 import { ImCross } from "react-icons/im"
 import FilterTypeSelector from './FilterTypeSelector';
 

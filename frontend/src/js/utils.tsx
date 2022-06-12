@@ -47,7 +47,7 @@ export async function serviceregexlist(service_id:string){
     return await getapi(`service/${service_id}/regexes`) as RegexFilter[];
 }
 
-const unescapedChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$&\'()*+,-./:;<=>?@[\\]^_`{|}~ ";
+const unescapedChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$&'()*+,-./:;<=>?@[\\]^_`{|}~ ";
 
 export function getHumanReadableRegex(regexB64:string){
     const regex = Buffer.from(regexB64, "base64")
