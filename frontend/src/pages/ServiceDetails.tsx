@@ -60,7 +60,7 @@ function ServiceDetails() {
             <Space w="md"/>
         </>}></ServiceRow>
         {regexesList.length === 0? 
-            <><Space h="xl" /> <Title className='center-flex' order={1}>No regex found for this service! Add one clicking the add button above</Title></>:
+            <><Space h="xl" /> <Title className='center-flex' order={3}>No regex found for this service! Add one clicking the add button above</Title></>:
             <Grid>
                 {regexesList.map( (regexInfo) => <Grid.Col key={regexInfo.id} span={6}><RegexView regexInfo={regexInfo}/></Grid.Col>)}
             </Grid>
