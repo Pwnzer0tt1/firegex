@@ -34,5 +34,6 @@ export type RegexFilter = {
     service_id:string,
     regex:string
     is_blacklist:boolean,
-    mode:string // C->S S->C BOTH
+    mode:string //C S B => C->S S->C BOTH
+    n_packets:number
 }

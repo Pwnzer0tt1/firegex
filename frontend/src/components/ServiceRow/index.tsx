@@ -6,7 +6,7 @@ import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
 
 //"status":"stop"/"wait"/"active"/"pause",
-function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
+function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, onClick?:()=>void, additional_buttons?:any }) {
 
     let status_color = "gray";
     switch(service.status){
@@ -32,6 +32,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 </div>
                 <Space w="xl" /><Space w="xl" />
                 <div className="center-flex">
+                    {additional_buttons}
                     <ActionIcon color={service.status === "pause"?"yellow":"red"} size="xl" radius="md" variant="filled" disabled={!["wait","active","pause"].includes(service.status)?true:false}>
                         {service.status === "pause"?<FaStop size="20px" />:<FaPause size="20px" />}
                     </ActionIcon>

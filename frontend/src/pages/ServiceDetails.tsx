@@ -1,6 +1,7 @@
-import { Grid, Space, Title } from '@mantine/core';
+import { ActionIcon, Grid, Space, Title } from '@mantine/core';
 import { showNotification } from '@mantine/notifications';
 import React, { useEffect, useState } from 'react';
+import { BsTrashFill } from 'react-icons/bs';
 import { ImCross } from 'react-icons/im';
 import { useParams } from 'react-router-dom';
 import RegexView from '../components/RegexView';
@@ -26,22 +27,17 @@ function ServiceDetails() {
             id:3546,
             is_blacklist:true,
             mode:"B",
-            regex:"d2VkcmZoaXdlZGZoYnVp",
-            service_id:"ctfe"
+            regex:"LipmbGFnX2NoZWNrLio=",
+            service_id:"ctfe",
+            n_packets:5,
         },
         {
             id:3546,
             is_blacklist:true,
             mode:"B",
             regex:"d2VkcmZoaXdlZGZoYnVp",
-            service_id:"ctfe"
-        },
-        {
-            id:3546,
-            is_blacklist:true,
-            mode:"B",
-            regex:"d2VkcmZoaXdlZGZoYnVp",
-            service_id:"ctfe"
+            service_id:"ctfe",
+            n_packets: 54
         }
     ])
 
@@ -84,7 +80,10 @@ function ServiceDetails() {
     }, []);
     
     return <>
-        <ServiceRow service={serviceInfo}></ServiceRow>
+        <ServiceRow service={serviceInfo} additional_buttons={<>
+            <ActionIcon color="red" onClick={()=>{}} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
+            <Space w="md"/>
+        </>}></ServiceRow>
         {regexesList.length === 0? 
             <><Space h="xl" /> <Title className='center-flex' order={1}>No regex found for this service! Add one clicking the add button above</Title></>:
             <Grid>
