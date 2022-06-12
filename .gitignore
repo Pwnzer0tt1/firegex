@@ -7,10 +7,10 @@
 **/.pnp.js
 
 # testing
-/frontend/coverage
+/firewall/frontend/coverage
 
 # production
-/frontend/build
+/firewall/frontend/build
 
 # misc
 **/.DS_Store
