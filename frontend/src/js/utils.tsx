@@ -1,4 +1,9 @@
-import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter } from "./models";
+import { showNotification } from "@mantine/notifications";
+import { ImCross } from "react-icons/im";
+import { TiTick } from "react-icons/ti"
+import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, notification_time, RegexAddForm } from "./models";
+
+var Buffer = require('buffer').Buffer 
 
 export async function getapi(path:string):Promise<any>{
     return await fetch(`/api/${path}`).then( res => res.json() )
@@ -33,6 +38,11 @@ export async function addservice(data:ServiceAddForm) {
     return status === "ok"?undefined:status
 }
 
+export async function addregex(data:RegexAddForm) {
+    const { status } = await postapi("regexes/add",data) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
 export async function serviceregexlist(service_id:string){
     return await getapi(`service/${service_id}/regexes`) as RegexFilter[];
 }
@@ -40,7 +50,6 @@ export async function serviceregexlist(service_id:string){
 const unescapedChars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!\"#$&\'()*+,-./:;<=>?@[\\]^_`{|}~ ";
 
 export function getHumanReadableRegex(regexB64:string){
-    var Buffer = require('buffer').Buffer 
     const regex = Buffer.from(regexB64, "base64")
     let res = ""
     for (let i=0; i < regex.length; i++){
@@ -52,4 +61,45 @@ export function getHumanReadableRegex(regexB64:string){
         }
     }
     return res
+}
+
+export function errorNotify(title:string, description:string ){
+    showNotification({
+        autoClose: notification_time,
+        title: title,
+        message: description,
+        color: 'red',
+        icon: <ImCross />,
+    });
+}
+
+export function okNotify(title:string, description:string ){
+    showNotification({
+        autoClose: notification_time,
+        title: title,
+        message: description,
+        color: 'teal',
+        icon: <TiTick />,
+    });
+}
+
+export function validateRegex(pattern:string) {
+    var parts = pattern.split('/'),
+        regex = pattern,
+        options = "";
+    if (parts.length > 1) {
+        regex = parts[1];
+        options = parts[2];
+    }
+    try {
+        new RegExp(regex, options);
+        return true;
+    }
+    catch(e) {
+        return false;
+    }
+}
+
+export function b64encode(data:string){
+    return Buffer.from(data).toString('base64')
 }

@@ -1,50 +1,22 @@
 import { Space, Title } from '@mantine/core';
-import { showNotification } from '@mantine/notifications';
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ServiceRow from '../components/ServiceRow';
-import { notification_time, Service, update_freq } from '../js/models';
-import { servicelist } from '../js/utils';
-import { ImCross } from "react-icons/im"
+import { Service, update_freq } from '../js/models';
+import { errorNotify, servicelist } from '../js/utils';
 
 
 function HomePage() {
 
-    const [services, setServices] = useState<Service[]>([
-        {
-            id:"ctfe",
-            internal_port:18080,
-            n_packets: 30,
-            n_regex: 40,
-            name:"CTFe",
-            public_port:80,
-            status:"pause"
-        },
-        {
-            id:"saas",
-            internal_port:18080,
-            n_packets: 30,
-            n_regex: 40,
-            name:"SaaS",
-            public_port:5000,
-            status:"active"
-        }
-    ]);
+    const [services, setServices] = useState<Service[]>([]);
     const navigator = useNavigate()
     
     const updateInfo = () => {
         servicelist().then(res => {
             setServices(res)
         }).catch(
-            err =>{
-                showNotification({
-                    autoClose: notification_time,
-                    title: "Home Page Auto-Update failed!",
-                    message: "[ "+err+" ]",
-                    color: 'red',
-                    icon: <ImCross />,
-                });
-        })
+            err => errorNotify("Home Page Auto-Update failed!", err.toString())
+        )
     }
 
     useEffect(()=>{

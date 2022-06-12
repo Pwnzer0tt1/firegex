@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { ActionIcon, Badge, Modal } from '@mantine/core';
 import style from "./Header.module.scss";
-import { generalstats } from '../../js/utils';
-import { GeneralStats, notification_time, update_freq } from '../../js/models';
+import { errorNotify, generalstats } from '../../js/utils';
+import { GeneralStats, update_freq } from '../../js/models';
 import { BsPlusLg } from "react-icons/bs"
 import { AiFillHome } from "react-icons/ai"
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import AddNewRegex from '../AddNewRegex';
 import AddNewService from '../AddNewService';
-import { showNotification } from '@mantine/notifications';
-import { ImCross } from 'react-icons/im';
+
 
 function Header() {
   
@@ -22,15 +21,8 @@ function Header() {
       generalstats().then(res => {
         setGeneralStats(res)
       }).catch(
-        err =>{
-            showNotification({
-                autoClose: notification_time,
-                title: "General Info Auto-Update failed!",
-                message: "[ "+err+" ]",
-                color: 'red',
-                icon: <ImCross />,
-            });
-      })
+        err => errorNotify("General Info Auto-Update failed!", err.toString())
+      )
   }
 
   useEffect(()=>{

@@ -1,6 +1,6 @@
 
 
-export const update_freq = 5000;
+export const update_freq = 3000;
 export const notification_time = 2000;
 
 export type GeneralStats = {
@@ -36,4 +36,11 @@ export type RegexFilter = {
     is_blacklist:boolean,
     mode:string //C S B => C->S S->C BOTH
     n_packets:number
+}
+
+export type RegexAddForm = {
+    "service_id":string,
+    "regex":string,
+    "is_blacklist":boolean,
+    "mode":string // C->S S->C BOTH
 }
