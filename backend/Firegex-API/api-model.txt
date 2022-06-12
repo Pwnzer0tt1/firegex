@@ -1,0 +1,127 @@
+
+
+
+
+
+/api/general-stats
+
+{
+    "services":1,
+    "closed":1,
+    "regex":1
+}
+
+#Processo di trasformazione del nome del servizio = primary_key
+serv_id = serv_id.strip().replace(" ","-")
+serv_id = "".join([c for c in serv_id if c in (strings.uppercase+strings.lowercase+strings.digits+"-")])
+serv_id = serv_id.lower()
+
+/api/services
+
+[
+    {
+        "id": "serv_id",
+        "name":"text",
+        "status":"text",
+        "public_port":1234,
+        "internal_port":44444,
+        "n_pacchetti":1,
+        "n_regex":1,
+    }
+]
+
+/api/service/<serv>
+{
+    "id":"serv_id",
+    "name":"text",
+    "status":"stop"/"wait"/"active"/"pause",
+    "public_port":1234,
+    "internal_port":44444,
+    "n_packets":1,
+    "n_regex":1,
+}
+
+/api/service/<serv>/stop
+
+{
+    "status":"ok"
+}
+
+/api/service/<serv>/start
+
+{
+    "status":"ok"
+}
+
+/api/service/<serv>/delete
+
+{
+    "status":"ok"
+}
+
+/api/service/<serv>/terminate
+
+{
+    "status":"ok"
+}
+
+/api/service/<serv>/regen-port
+
+{
+    "status":"ok"
+}
+
+/api/service/<serv>/regexes
+
+[
+    {
+        "id": "5787",
+        "service_id": "serv_id",
+        "regex":"base64",
+        "is_blacklist":true,
+        "mode":"C","S","B" // C->S S->C BOTH
+    }
+]
+
+
+/api/regex/<regex_id>
+{
+    "id": 5787
+    "service_id":"serv_id",
+    "regex":"base64"
+    "is_blacklist":true,
+    "mode":"C","S","B" // C->S S->C BOTH
+}
+
+/api/regex/<regex_id>/delete
+{
+    "status":"ok"
+}
+
+
+
+/api/regexes/add POST
+
+client
+{
+    "service_id":"serv_id",
+    "regex":"base64",
+    "is_blacklist":true/false,
+    "mode":"C","S","B" // C->S S->C BOTH
+}
+server
+{
+    "status":"ok"
+}
+
+
+/api/services/add POST
+client
+{
+    "name":"text",
+    "port":5362
+}
+server
+{
+    "status":"ok"
+}
