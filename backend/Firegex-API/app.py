@@ -93,7 +93,7 @@ def get_services():
             'public_port': i[3],
             'internal_port': i[2],
             'n_regex': n_regex,
-            'n_pacchetti': n_pacchetti if n_pacchetti else 0
+            'n_packets': n_pacchetti if n_pacchetti else 0
         })
 
     return jsonify(res)
@@ -192,7 +192,8 @@ def get_service_regexes(serv):
             'service_id': i[2],
             'regex': i[0],
             'is_blacklist': i[3],
-            'mode': i[1]
+            'mode': i[1],
+            'n_packets': i[4]
         })
 
     return jsonify(res)
@@ -209,7 +210,8 @@ def get_regex_id(regex_id):
             'service_id': q[0][2],
             'regex': q[0][0],
             'is_blacklist': q[0][3],
-            'mode': q[0][1]
+            'mode': q[0][1],
+            'n_packets': q[0][4]
         }
 
     return res

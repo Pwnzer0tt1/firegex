@@ -43,7 +43,7 @@
         "status": <service status>,
         "public_port": <public port>,
         "internal_port": <internal port>,
-        "n_pacchetti": <number of rejected packets>,
+        "n_packets": <number of rejected packets>,
         "n_regex": <number of regexes>
     },
     {
@@ -61,7 +61,7 @@
     "status": <service status>,
     "public_port": <public port>,
     "internal_port": <internal port>,
-    "n_pacchetti": <number of rejected packets>,
+    "n_packets": <number of rejected packets>,
     "n_regex": <number of regexes>
 }
 ```
@@ -121,6 +121,7 @@
         "service_id": <service_id>,
         "regex": <base64 encoded regex>,
         "is_blacklist": <true|false>,
+        "n_packets": <number of blocked packets>,
         "mode": <"C"|"S"|"B"> // Client to server, server to client or both
     },
     {
@@ -138,6 +139,7 @@
     "service_id": <service_id>,
     "regex": <base64 encoded regex>,
     "is_blacklist": <true|false>,
+    "n_packets": <number of blocked packets>,
     "mode" <"C"|"S"|"B"> // Client to server, server to client or both
 }
 ```
