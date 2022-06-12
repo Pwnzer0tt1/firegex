@@ -1,7 +1,6 @@
 import sqlite3
 from flask import Flask, jsonify, request
 import random
-from markupsafe import escape
 
 
 class SQLite():
@@ -27,11 +26,11 @@ class SQLite():
     def check_integrity(self, tables = {}) -> None:
         for t in tables:
             self.cur.execute('''
-                SELECT name FROM sqlite_master WHERE type='table' AND name='{}';
-            '''.format(t))
+                SELECT name FROM sqlite_master WHERE type='table' AND name=?;
+            ''', (t,))
 
             if len(self.cur.fetchall()) == 0:
-                self.cur.execute('''CREATE TABLE main.{}({});'''.format(t, ''.join([(c + ' ' + tables[t][c] + ', ') for c in tables[t]])[:-2]))
+                self.cur.execute('''CREATE TABLE main.?(?);''', (t, ''.join([(c + ' ' + tables[t][c] + ', ') for c in tables[t]])[:-2]))
 
     def query(self, query, values = ()):
         self.cur.execute(query, values)
@@ -84,9 +83,9 @@ def get_general_stats():
 @app.route('/api/services')
 def get_services():
     res = []
-    for i in db.query('''SELECT * FROM services;'''):
-        n_regex = db.query('''SELECT COUNT (*) FROM regexes WHERE service_id = '{}';'''.format(i[1]))[0][0]
-        n_pacchetti = db.query('''SELECT SUM(blocked_packets) FROM regexes WHERE service_id = '{}';'''.format(i[1]))[0][0]
+    for i in db.query('SELECT * FROM services;'):
+        n_regex = db.query('SELECT COUNT (*) FROM regexes WHERE service_id = ?;', (i[1],))[0][0]
+        n_pacchetti = db.query('SELECT SUM(blocked_packets) FROM regexes WHERE service_id = ?;', (i[1],))[0][0]
 
         res.append({
             'id': i[1],
@@ -102,14 +101,12 @@ def get_services():
 
 @app.route('/api/service/<serv>')
 def get_service(serv):
-    q = db.query('''
-        SELECT * FROM services WHERE service_id = '{}';
-    '''.format(escape(serv)))
+    q = db.query('SELECT * FROM services WHERE service_id = ?;', (serv,))
 
     res = {}
     if len(q) != 0:
-        n_regex = db.query('''SELECT COUNT (*) FROM regexes WHERE service_id = '{}';'''.format(escape(serv)))[0][0]
-        n_pacchetti = db.query('''SELECT SUM(blocked_packets) FROM regexes WHERE service_id = '{}';'''.format(escape(serv)))[0][0]
+        n_regex = db.query('SELECT COUNT (*) FROM regexes WHERE service_id = ?;', (serv,))[0][0]
+        n_pacchetti = db.query('SELECT SUM(blocked_packets) FROM regexes WHERE service_id = ?;', (serv,))[0][0]
 
         res = {
             'id': q[0][1],
@@ -126,8 +123,8 @@ def get_service(serv):
 @app.route('/api/service/<serv>/stop')
 def get_service_stop(serv):
     db.query('''
-        UPDATE services SET status = 'stop' WHERE service_id = '{}';
-    '''.format(escape(serv)))
+        UPDATE services SET status = 'stop' WHERE service_id = ?;
+    ''', (serv,))
 
     res = {
         'status': 'ok'
@@ -139,8 +136,8 @@ def get_service_stop(serv):
 @app.route('/api/service/<serv>/start')
 def get_service_start(serv):
     db.query('''
-        UPDATE services SET status = 'active' WHERE service_id = '{}';
-    '''.format(escape(serv)))
+        UPDATE services SET status = 'active' WHERE service_id = ?;
+    ''', (serv,))
 
     res = {
         'status': 'ok'
@@ -152,8 +149,8 @@ def get_service_start(serv):
 @app.route('/api/service/<serv>/delete')
 def get_service_delete(serv):
     db.query('''
-        DELETE FROM services WHERE service_id = '{}';
-    '''.format(escape(serv)))
+        DELETE FROM services WHERE service_id = ?;
+    ''', (serv,))
 
     res = {
         'status': 'ok'
@@ -165,8 +162,8 @@ def get_service_delete(serv):
 @app.route('/api/service/<serv>/terminate')
 def get_service_termite(serv):
     db.query('''
-        UPDATE services SET status = 'stop' WHERE service_id = '{}';
-    '''.format(escape(serv)))
+        UPDATE services SET status = 'stop' WHERE service_id = ?;
+    ''', (serv,))
 
     res = {
         'status': 'ok'
@@ -177,9 +174,7 @@ def get_service_termite(serv):
 
 @app.route('/api/service/<serv>/regen-port')
 def get_regen_port(serv):
-    db.query('''
-        UPDATE services SET public_port = {} WHERE service_id = '{}';
-    '''.format(random.randint(30000, 45000), escape(serv)))
+    db.query('UPDATE services SET public_port = ? WHERE service_id = ?;', (random.randint(30000, 45000), serv))
 
     res = {
         'status': 'ok'
@@ -191,7 +186,7 @@ def get_regen_port(serv):
 @app.route('/api/service/<serv>/regexes')
 def get_service_regexes(serv):
     res = []
-    for i in db.query('''SELECT * FROM regexes WHERE service_id = '{}';'''.format(escape(serv))):
+    for i in db.query('SELECT * FROM regexes WHERE service_id = ?;', (serv,)):
         res.append({
             'id': i[5],
             'service_id': i[2],
@@ -205,9 +200,7 @@ def get_service_regexes(serv):
 
 @app.route('/api/regex/<int:regex_id>')
 def get_regex_id(regex_id):
-    q = db.query('''
-        SELECT * FROM regexes WHERE regex_id = {};
-    '''.format(regex_id))
+    q = db.query('SELECT * FROM regexes WHERE regex_id = ?;', (regex_id,))
 
     res = {}
     if len(q) != 0:
@@ -224,9 +217,7 @@ def get_regex_id(regex_id):
 
 @app.route('/api/regex/<int:regex_id>/delete')
 def get_regex_delete(regex_id):
-    db.query('''
-        DELETE FROM regexes WHERE regex_id = {};
-    '''.format(regex_id))
+    db.query('DELETE FROM regexes WHERE regex_id = ?;', (regex_id,))
 
     res = {
         'status': 'ok'
@@ -240,8 +231,8 @@ def post_regexes_add():
     req = request.get_json(force = True)
 
     db.query('''
-        INSERT INTO regexes (regex_id, service_id, regex, is_blacklist, mode) VALUES ({}, '{}', '{}', '{}', '{}');
-    '''.format(random.randint(1, 1 << 32), req['service_id'], req['regex'], req['is_blacklist'], req['mode']))
+        INSERT INTO regexes (regex_id, service_id, regex, is_blacklist, mode) VALUES (?, ?, ?, ?, ?);
+    ''', (random.randint(1, 1 << 32), req['service_id'], req['regex'], req['is_blacklist'], req['mode']))
 
     res = {
         'status': 'ok'
@@ -255,8 +246,8 @@ def post_services_add():
     req = request.get_json(force = True)
 
     db.query('''
-        INSERT INTO services (service_id, internal_port, public_port, status) VALUES ('{}', {}, {}, '{}')
-    '''.format(req['name'], req['port'], random.randint(30000, 45000), 'stopped'))
+        INSERT INTO services (service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?)
+    ''', (req['name'], req['port'], random.randint(30000, 45000), 'stopped'))
 
     res = {
         'status': 'ok'
