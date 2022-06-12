@@ -1,17 +1,17 @@
 import React from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
 import HomePage from './pages/HomePage';
-import Service from './pages/Service';
+import ServiceDetails from './pages/ServiceDetails';
 
 function App() {
-  return <MainLayout>
-    <Routes>
-      <Route index element={<HomePage />} />
-      <Route path=":srv_id" element={<Service />} />
-      <Route path="*" element={<Navigate to="/" />} />
+  return <Routes>
+        <Route element={<MainLayout><Outlet /></MainLayout>}>
+          <Route index element={<HomePage />} />
+          <Route path=":srv_id" element={<ServiceDetails />} />
+          <Route path="*" element={<Navigate to="/" />} />
+        </Route>
     </Routes>
-  </MainLayout>
 }
 
 export default App;

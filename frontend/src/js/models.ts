@@ -1,6 +1,7 @@
 
 
-export const update_freq = 3000;
+export const update_freq = 5000;
+export const notification_time = 2000;
 
 export type GeneralStats = {
     services:number,
@@ -16,4 +17,22 @@ export type Service = {
     internal_port:number,
     n_packets:number,
     n_regex:number,
+}
+
+export type ServiceAddForm = {
+    name:string,
+    port:number
+}
+
+
+export type ServerResponse = {
+    status:string
+}
+
+export type RegexFilter = {
+    id:number,
+    service_id:string,
+    regex:string
+    is_blacklist:boolean,
+    mode:string // C->S S->C BOTH
 }

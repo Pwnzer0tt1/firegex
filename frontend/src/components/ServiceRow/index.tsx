@@ -1,6 +1,6 @@
 import { ActionIcon, Badge, Grid, Space, Title } from '@mantine/core';
 import React from 'react';
-import { FaPause, FaPlay } from 'react-icons/fa';
+import { FaPause, FaPlay, FaStop } from 'react-icons/fa';
 import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
@@ -19,7 +19,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         <Grid className={style.row} style={{width:"100%"}}>
             <Grid.Col span={4}>
                 <div className="center-flex-row">
-                    <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" variant="filled">:{service.public_port}</Badge></div>
+                    <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
                     <Badge color={status_color} size="xl" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
                 </div>
             </Grid.Col>
@@ -32,7 +32,9 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 </div>
                 <Space w="xl" /><Space w="xl" />
                 <div className="center-flex">
-                    <ActionIcon color="red" size="xl" radius="md" variant="filled" disabled={!["wait","active"].includes(service.status)?true:false}><FaPause size="20px" /></ActionIcon>
+                    <ActionIcon color={service.status === "pause"?"yellow":"red"} size="xl" radius="md" variant="filled" disabled={!["wait","active","pause"].includes(service.status)?true:false}>
+                        {service.status === "pause"?<FaStop size="20px" />:<FaPause size="20px" />}
+                    </ActionIcon>
                     <Space w="md"/>
                     <ActionIcon color="teal" size="xl" radius="md" variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}><FaPlay size="20px" /></ActionIcon>
                 </div>

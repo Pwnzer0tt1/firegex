@@ -30,6 +30,18 @@ serv_id = serv_id.lower()
     }
 ]
 
+/api/service/<serv>
+
+{
+    "id":"serv_id",
+    "name":"text",
+    "status":"stop"/"wait"/"active"/"pause",
+    "public_port":1234,
+    "internal_port":44444,
+    "n_packets":1,
+    "n_regex":1,
+}
+
 /api/service/<serv>/stop
 
 {
@@ -63,7 +75,9 @@ serv_id = serv_id.lower()
 /api/service/<serv>/regexes
 
 [
-    "5787":{
+    {
+        "id":5787,
+        "service_id":"serv_id",
         "regex":"base64"
         "is_blacklist":true,
         "mode":"C","S","B" // C->S S->C BOTH
@@ -73,6 +87,7 @@ serv_id = serv_id.lower()
 
 /api/regex/<regex_id>
 {
+    "id":5787,
     "service_id":"serv_id",
     "regex":"base64"
     "is_blacklist":true,
