@@ -12,7 +12,7 @@ import AddNewService from '../AddNewService';
 
 function Header() {
   
-  const [generalStats, setGeneralStats] = useState<GeneralStats>({closed:0, regex:0, services:0});
+  const [generalStats, setGeneralStats] = useState<GeneralStats>({closed:0, regexes:0, services:0});
   const location = useLocation()
 
   const navigator = useNavigate()
@@ -41,7 +41,7 @@ function Header() {
         <div className="flex-spacer" />
         <Badge color="green" size="lg" variant="filled">Services: {generalStats.services}</Badge>
         <Badge style={{marginLeft:"10px"}} size="lg" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>
-        <Badge style={{marginLeft:"10px"}} size="lg" color="violet" variant="filled">Regexes: {generalStats.regex}</Badge>
+        <Badge style={{marginLeft:"10px"}} size="lg" color="violet" variant="filled">Regexes: {generalStats.regexes}</Badge>
         <div style={{marginLeft:"20px"}}></div>
         { location.pathname !== "/"?
             <ActionIcon color="teal" style={{marginRight:"10px"}}

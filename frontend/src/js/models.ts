@@ -6,7 +6,7 @@ export const notification_time = 2000;
 export type GeneralStats = {
     services:number,
     closed:number,
-    regex:number
+    regexes:number
 }
 
 export type Service = {
@@ -23,7 +23,6 @@ export type ServiceAddForm = {
     name:string,
     port:number
 }
-
 
 export type ServerResponse = {
     status:string

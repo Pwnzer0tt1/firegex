@@ -500,7 +500,7 @@ def post_services_add():
 
     db.query('''
         INSERT INTO services (service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?)
-    ''', (req['name'], req['port'], random.randint(30000, 45000), 'stopped'))
+    ''', (req['name'], req['port'], random.randint(30000, 45000), 'stop'))
 
     res = {
         'status': 'ok'
