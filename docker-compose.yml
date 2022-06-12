@@ -1,0 +1,11 @@
+version: '3.9'
+
+services:
+    frontend:
+        restart: unless-stopped
+        build: frontend
+    backend:
+        restart: unless-stopped
+        build: backend
+        ports:
+            - 80:80

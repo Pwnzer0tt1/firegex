@@ -9,8 +9,8 @@ ADD ./requirements.txt /execute/requirements.txt
 RUN pip install --no-cache-dir -r /execute/requirements.txt
 
 COPY . /execute/
-COPY ./nginx.conf /etc/nginx/nginx.conf
-COPY ./supervisord.conf /etc/supervisor/supervisord.conf
+COPY ./config/nginx.conf /etc/nginx/nginx.conf
+COPY ./config/supervisord.conf /etc/supervisor/supervisord.conf
 
 RUN usermod -a -G root nobody
 RUN chown -R nobody:root /execute && \

@@ -30,33 +30,15 @@ class SQLite():
             ''', (t,))
 
             if len(self.cur.fetchall()) == 0:
-                self.cur.execute('''CREATE TABLE main.?(?);''', (t, ''.join([(c + ' ' + tables[t][c] + ', ') for c in tables[t]])[:-2]))
+                self.cur.execute(f'CREATE TABLE main.{t}({"".join([(c + " " + tables[t][c] + ", ") for c in tables[t]])[:-2]});')
 
     def query(self, query, values = ()):
         self.cur.execute(query, values)
         return self.cur.fetchall()
 
-# DB init
+
 db = SQLite('firegex')
 db.connect()
-db.check_integrity({
-    'regexes': {
-        'regex': 'TEXT NOT NULL',
-        'mode': 'CHAR(1)',
-        'service_id': 'TEXT NOT NULL',
-        'is_blacklist': 'CHAR(50) NOT NULL',
-        'blocked_packets': 'INTEGER DEFAULT 0',
-        'regex_id': 'INTEGER NOT NULL'
-    },
-    'services': {
-        'status': 'CHAR(50)',
-        'service_id': 'TEXT NOT NULL',
-        'internal_port': 'INT NOT NULL',
-        'public_port': 'INT NOT NULL'
-    }
-})
-
-
 app = Flask(__name__)
 
 @app.route('/api/general-stats')
@@ -256,3 +238,26 @@ def post_services_add():
     }
 
     return res
+
+if __name__ == "__main__":
+    import subprocess
+    # DB init
+    db.check_integrity({
+        'regexes': {
+            'regex': 'TEXT NOT NULL',
+            'mode': 'CHAR(1)',
+            'service_id': 'TEXT NOT NULL',
+            'is_blacklist': 'CHAR(50) NOT NULL',
+            'blocked_packets': 'INTEGER DEFAULT 0',
+            'regex_id': 'INTEGER NOT NULL'
+        },
+        'services': {
+            'status': 'CHAR(50)',
+            'service_id': 'TEXT NOT NULL',
+            'internal_port': 'INT NOT NULL',
+            'public_port': 'INT NOT NULL'
+        }
+    })
+    #uwsgi 
+    subprocess.run(["uwsgi","--http","127.0.0.1:8080","--master","--module","app:app"])
+
