@@ -32,7 +32,6 @@ COPY ./config/nginx.conf /tmp/nginx.conf
 COPY ./config/start_nginx.sh /tmp/start_nginx.sh
 
 RUN c++ -O3 -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system -lboost_regex
-RUN chmod ug+x /execute/proxy/proxy 
 
 #Copy react app in the main container
 COPY --from=frontend /app/build/ ./frontend/
@@ -40,6 +39,8 @@ COPY --from=frontend /app/build/ ./frontend/
 RUN usermod -a -G root nobody
 RUN chown -R nobody:root /execute && \
   chmod -R 660 /execute && chmod -R u+X /execute
+
+RUN chmod ug+x /execute/proxy/proxy 
 
 ENTRYPOINT ["/usr/bin/supervisord","-c","/etc/supervisor/supervisord.conf"]
 

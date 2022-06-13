@@ -84,7 +84,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                     {additional_buttons}
                     {["pause","wait"].includes(service.status)?
                         <ActionIcon color="yellow" loading={buttonLoading}
-                        onClick={stopService} size="xl" radius="md" variant="filled"
+                        onClick={()=>setStopModal(true)} size="xl" radius="md" variant="filled"
                         disabled={service.status === "stop"}>
                             <FaStop size="20px" />
                         </ActionIcon>:

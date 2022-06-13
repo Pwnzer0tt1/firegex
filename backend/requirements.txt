@@ -3,3 +3,4 @@ uwsgi
 flask-cors
 bcrypt
 kthread
+jsonschema

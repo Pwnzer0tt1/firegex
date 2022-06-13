@@ -1,15 +1,16 @@
-import subprocess, re
+import subprocess, re, os
 
 #c++ -o proxy proxy.cpp
 
 class Filter:
-    def __init__(self, regex, is_blacklist=True, c_to_s=False, s_to_c=False ):
+    def __init__(self, regex, is_blacklist=True, c_to_s=False, s_to_c=False, blocked_packets=0, code=None):
         self.regex = regex
         self.is_blacklist = is_blacklist
         if c_to_s == s_to_c: c_to_s = s_to_c = True # (False, False) == (True, True)
         self.c_to_s = c_to_s
         self.s_to_c = s_to_c
-        self.blocked = 0
+        self.blocked = blocked_packets
+        self.code = code
     
     def compile(self):
         if isinstance(self.regex, str): self.regex = self.regex.encode()
@@ -19,8 +20,6 @@ class Filter:
             yield "C"+self.regex.hex() if self.is_blacklist else "c"+self.regex.hex()
         if self.s_to_c:
             yield "S"+self.regex.hex() if self.is_blacklist else "s"+self.regex.hex()
-
-
 
 class Proxy:
     def __init__(self, internal_port, public_port, filters=None, public_host="0.0.0.0", internal_host="127.0.0.1"):
@@ -35,8 +34,9 @@ class Proxy:
         if self.process is None:
             filter_map = self.compile_filters()
             filters_codes = list(filter_map.keys())
+            proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
             self.process = subprocess.Popen(
-                ["./proxy", str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), *filters_codes],
+                [proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), *filters_codes],
                 stdout=subprocess.PIPE, universal_newlines=True
             )
             for stdout_line in iter(self.process.stdout.readline, ""):
@@ -67,6 +67,9 @@ class Proxy:
     
     def reload(self):
         if self.process: self.restart()
+
+    def isactive(self):
+        return True if self.process else False
 
     def compile_filters(self):
         res = {}

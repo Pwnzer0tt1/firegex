@@ -1,92 +1,17 @@
-import sqlite3, random, string, subprocess, sys, threading, os, bcrypt, secrets, time
+import sqlite3, subprocess, sys, threading, bcrypt, secrets, time
 from flask import Flask, jsonify, request, abort, session
 from functools import wraps
 from flask_cors import CORS
-from kthread import KThread
-
-
-class SQLite():
-    def __init__(self, db_name) -> None:
-        self.conn = None
-        self.cur = None
-        self.db_name = db_name
-        self.lock = threading.Lock()
-
-    def connect(self) -> None:
-        if not os.path.exists("db"): os.mkdir("db")
-        try:
-            self.conn = sqlite3.connect("db/" + self.db_name + '.db', check_same_thread = False)
-        except Exception:
-            with open(self.db_name + '.db', 'x') as f:
-                pass
-            self.conn = sqlite3.connect("db/" + self.db_name + '.db', check_same_thread = False)
-
-    def disconnect(self) -> None:
-        self.conn.close()
-
-    def check_integrity(self, tables = {}) -> None:
-        cur = self.conn.cursor()
-        for t in tables:
-            cur.execute('''
-                SELECT name FROM sqlite_master WHERE type='table' AND name='{}';
-            '''.format(t))
-
-            if len(cur.fetchall()) == 0:
-                cur.execute('''CREATE TABLE main.{}({});'''.format(t, ''.join([(c + ' ' + tables[t][c] + ', ') for c in tables[t]])[:-2]))
-        cur.close()
-    
-    def query(self, query, values = ()):
-        cur = self.conn.cursor()
-        try:
-            with self.lock:
-                cur.execute(query, values)
-                return cur.fetchall()
-        finally:
-            cur.close()
-            self.conn.commit()
-
-def from_name_get_id(name):
-    serv_id = name.strip().replace(" ","-")
-    serv_id = "".join([c for c in serv_id if c in (string.ascii_uppercase + string.ascii_lowercase + string.digits + "-")])
-    return serv_id.lower()
-
-def gen_internal_port():
-    while True:
-        res = random.randint(30000, 45000)
-        if len(db.query('SELECT 1 FROM services WHERE internal_port = ?;', (res,))) == 0:
-            break
-    return res
-
-
-
+from jsonschema import validate
+from utils import SQLite, KeyValueStorage, gen_internal_port, ProxyManager, from_name_get_id, STATUS
 
 # DB init
 db = SQLite('firegex')
 db.connect()
-
-
-class KeyValueStorage:
-    def __init__(self):
-        pass
-
-    def get(self, key):
-        q = db.query('SELECT value FROM keys_values WHERE key = ?', (key,))
-        if len(q) == 0:
-            return None
-        else:
-            return q[0][0]
-
-    def put(self, key, value):
-        if self.get(key) is None:
-            db.query('INSERT INTO keys_values (key, value) VALUES (?, ?);', (key,str(value)))
-        else:
-            db.query('UPDATE keys_values SET value=? WHERE key = ?;', (str(value), key))
-
-
+conf = KeyValueStorage(db)
+firewall = ProxyManager(db)
 
 app = Flask(__name__)
-conf = KeyValueStorage()
-proxy_table = {}
 
 DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
 
@@ -104,36 +29,10 @@ def login_required(f):
         
     return decorated_function
 
-def get_service_data(id):
-    q = db.query('SELECT * FROM services WHERE service_id=?;',(id,))
-    if len(q) == 0: return None
-    srv = q[0]
-    return {
-        'id': srv[1],
-        'status': srv[0],
-        'public_port': srv[3],
-        'internal_port': srv[2]
-    }
-
-def service_manager(id):
-    data = get_service_data(id)
-    if data is None: return
-
-
 
 @app.before_first_request
 def before_first_request():
-    
-    
-    services = [
-        
-    ]
-
-    for srv in services:
-
-
-
-
+    firewall.reload()
     app.config['SECRET_KEY'] = secrets.token_hex(32)
     if DEBUG:
         app.config["STATUS"] = "run"
@@ -153,8 +52,19 @@ def get_status():
 def login():
     if not conf.get("password"): return abort(404)
     req = request.get_json(force = True)
-    if not "password" in req or not isinstance(req["password"],str):
+
+    try:
+        validate(
+            instance=req,
+            schema={
+                "type" : "object",
+                "properties" : {
+                    "password" : {"type" : "string"}
+                },
+            })
+    except Exception:
         return abort(400)
+
     if req["password"] == "":
         return {"status":"Cannot insert an empty password!"}
     time.sleep(.3) # No bruteforce :)
@@ -172,8 +82,20 @@ def logout():
 @login_required
 def change_password():
     req = request.get_json(force = True)
-    if not "password" in req or not isinstance(req["password"],str):
+
+    try:
+        validate(
+            instance=req,
+            schema={
+                "type" : "object",
+                "properties" : {
+                    "password" : {"type" : "string"},
+                    "expire": {"type" : "boolean"},
+                },
+            })
+    except Exception:
         return abort(400)
+
     if req["password"] == "":
         return {"status":"Cannot insert an empty password!"}
     if req["expire"]:
@@ -188,6 +110,19 @@ def change_password():
 def set_password():
     if conf.get("password"): return abort(404)
     req = request.get_json(force = True)
+
+    try:
+        validate(
+            instance=req,
+            schema={
+                "type" : "object",
+                "properties" : {
+                    "password" : {"type" : "string"}
+                },
+            })
+    except Exception:
+        return abort(400)
+
     if not "password" in req or not isinstance(req["password"],str):
         return abort(400)
     if req["password"] == "":
@@ -202,19 +137,10 @@ def set_password():
 @app.route('/api/general-stats')
 @login_required
 def get_general_stats():
-    n_services = db.query('''
-        SELECT COUNT (*) FROM services;
-    ''')[0][0]
-    n_regexes = db.query('''
-        SELECT COUNT (*) FROM regexes;
-    ''')[0][0]
-    n_packets = db.query('''
-        SELECT SUM(blocked_packets) FROM regexes;
-    ''')[0][0]
-
+    n_packets = db.query("SELECT SUM(blocked_packets) FROM regexes;")[0][0]
     return {
-        'services': n_services,
-        'regexes': n_regexes,
+        'services': db.query("SELECT COUNT (*) FROM services;")[0][0],
+        'regexes': db.query("SELECT COUNT (*) FROM regexes;")[0][0],
         'closed': n_packets if n_packets else 0
     }
 
@@ -261,54 +187,36 @@ def get_service(serv):
 @app.route('/api/service/<serv>/stop')
 @login_required
 def get_service_stop(serv):
-    db.query('''
-        UPDATE services SET status = 'stop' WHERE service_id = ?;
-    ''', (serv,))
-
-    return {
-        'status': 'ok'
-    }
+    firewall.change_status(serv,STATUS.STOP)
+    return {'status': 'ok'}
 
 @app.route('/api/service/<serv>/pause')
 @login_required
 def get_service_pause(serv):
-    db.query('''
-        UPDATE services SET status = 'pause' WHERE service_id = ?;
-    ''', (serv,))
-
-    return {
-        'status': 'ok'
-    }
+    firewall.change_status(serv,STATUS.PAUSE)
+    return {'status': 'ok'}
 
 @app.route('/api/service/<serv>/start')
 @login_required
 def get_service_start(serv):
-    db.query('''
-        UPDATE services SET status = 'wait' WHERE service_id = ?;
-    ''', (serv,))
-
-    return {
-        'status': 'ok'
-    }
+    firewall.change_status(serv,STATUS.ACTIVE)
+    return {'status': 'ok'}
 
 @app.route('/api/service/<serv>/delete')
 @login_required
 def get_service_delete(serv):
     db.query('DELETE FROM services WHERE service_id = ?;', (serv,))
     db.query('DELETE FROM regexes WHERE service_id = ?;', (serv,))
-
-    return {
-        'status': 'ok'
-    }
+    firewall.fire_update(serv)
+    return {'status': 'ok'}
 
 
 @app.route('/api/service/<serv>/regen-port')
 @login_required
 def get_regen_port(serv):
-    db.query('UPDATE services SET internal_port = ? WHERE service_id = ?;', (gen_internal_port(), serv))
-    return {
-        'status': 'ok'
-    }
+    db.query('UPDATE services SET internal_port = ? WHERE service_id = ?;', (gen_internal_port(db), serv))
+    firewall.fire_update(serv)
+    return {'status': 'ok'}
 
 
 @app.route('/api/service/<serv>/regexes')
@@ -346,37 +254,64 @@ def get_regex_id(regex_id):
 @app.route('/api/regex/<int:regex_id>/delete')
 @login_required
 def get_regex_delete(regex_id):
-    db.query('DELETE FROM regexes WHERE regex_id = ?;', (regex_id,))
-
-    return {
-        'status': 'ok'
-    }
+    q = db.query('SELECT * FROM regexes WHERE regex_id = ?;', (regex_id,))
+    
+    if len(q) != 0:
+        db.query('DELETE FROM regexes WHERE regex_id = ?;', (regex_id,))
+        firewall.fire_update(q[0][2])
+    
+    return {'status': 'ok'}
 
 
 @app.route('/api/regexes/add', methods = ['POST'])
 @login_required
 def post_regexes_add():
     req = request.get_json(force = True)
-
-    db.query('''
-        INSERT INTO regexes (service_id, regex, is_blacklist, mode) VALUES (?, ?, ?, ?);
-    ''', (req['service_id'], req['regex'], req['is_blacklist'], req['mode']))
-
-    return {
-        'status': 'ok'
-    }
+    try:
+        validate(
+            instance=req,
+            schema={
+                "type" : "object",
+                "properties" : {
+                    "service_id" : {"type" : "string"},
+                    "regex" : {"type" : "string"},
+                    "is_blacklist" : {"type" : "boolean"},
+                    "mode" : {"type" : "string"},
+                },
+            })
+    except Exception:
+        return abort(400)
+    db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode) VALUES (?, ?, ?, ?);", 
+                (req['service_id'], req['regex'], req['is_blacklist'], req['mode']))
+    
+    firewall.fire_update(req['service_id'])
+    return {'status': 'ok'}
 
 
 @app.route('/api/services/add', methods = ['POST'])
 @login_required
 def post_services_add():
     req = request.get_json(force = True)
+
+    try:
+        validate(
+            instance=req,
+            schema={
+                "type" : "object",
+                "properties" : {
+                    "name" : {"type" : "string"},
+                    "port" : {"type" : "number"}
+                },
+            })
+    except Exception:
+        return abort(400)
+
     serv_id = from_name_get_id(req['name'])
 
     try:
-        db.query('''
-            INSERT INTO services (name, service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?, ?)
-        ''', (req['name'], serv_id, gen_internal_port(), req['port'], 'stop'))
+        db.query("INSERT INTO services (name, service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?, ?)",
+                    (req['name'], serv_id, gen_internal_port(db), req['port'], 'stop'))
+        firewall.reload()
     except sqlite3.IntegrityError:
         return {'status': 'Name or/and port of the service has been already assigned to another service'}
     
@@ -413,4 +348,3 @@ if __name__ == '__main__':
         app.run(host="0.0.0.0", port=8080 ,debug=True)
     else:
         subprocess.run(["uwsgi","--socket","./uwsgi.sock","--master","--module","app:app", "--enable-threads"])
-
