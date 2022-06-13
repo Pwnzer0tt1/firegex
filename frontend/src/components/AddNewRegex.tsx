@@ -2,7 +2,7 @@ import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect } f
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { RegexAddForm } from '../js/models';
-import { addregex, b64encode, validateRegex } from '../js/utils';
+import { addregex, b64encode, getHumanReadableRegex, okNotify, validateRegex } from '../js/utils';
 import { ImCross } from "react-icons/im"
 import FilterTypeSelector from './FilterTypeSelector';
 
@@ -58,6 +58,7 @@ function AddNewRegex({ closePopup, service }:{ closePopup:()=>void, service:stri
             if (!res){
                 setSubmitLoading(false)
                 closePopup();
+                okNotify(`Regex ${getHumanReadableRegex(request.regex)} has been added`, `Successfully added ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_id} service`)
             }else{
                 setSubmitLoading(false)
                 setError("Invalid request! [ "+res+" ]")

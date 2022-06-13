@@ -5,12 +5,14 @@ import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, not
 
 var Buffer = require('buffer').Buffer 
 
+const custom_url = ""//"http://127.0.0.1:8080"
+
 export async function getapi(path:string):Promise<any>{
-    return await fetch(`/api/${path}`).then( res => res.json() )
+    return await fetch(`${custom_url}/api/${path}`).then( res => res.json() )
 }
 
 export async function postapi(path:string,data:any):Promise<any>{
-    return await fetch(`/api/${path}`, {
+    return await fetch(`${custom_url}/api/${path}`, {
         method: 'POST',
         cache: 'no-cache',
         headers: {
@@ -33,8 +35,37 @@ export async function serviceinfo(service_id:string){
     return await getapi(`service/${service_id}`) as Service;
 }
 
+export async function deleteregex(regex_id:number){
+    const { status } = await getapi(`regex/${regex_id}/delete`) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
+export async function startservice(service_id:string){
+    const { status } = await getapi(`service/${service_id}/start`) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
+export async function stopservice(service_id:string){
+    const { status } = await getapi(`service/${service_id}/stop`) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+export async function pauseservice(service_id:string){
+    const { status } = await getapi(`service/${service_id}/pause`) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
+export async function regenport(service_id:string){
+    const { status } = await getapi(`service/${service_id}/regen-port`) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
 export async function addservice(data:ServiceAddForm) {
     const { status } = await postapi("services/add",data) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
+export async function deleteservice(service_id:string) {
+    const { status } = await getapi(`service/${service_id}/delete`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 

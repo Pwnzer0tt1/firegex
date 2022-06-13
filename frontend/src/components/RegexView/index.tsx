@@ -1,7 +1,7 @@
 import { Grid, Text, Title, Badge, Space, ActionIcon } from '@mantine/core';
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
-import { getHumanReadableRegex } from '../../js/utils';
+import { deleteregex, errorNotify, getHumanReadableRegex, okNotify } from '../../js/utils';
 import style from "./RegexView.module.scss";
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
@@ -23,6 +23,16 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   }
 
   const [deleteModal, setDeleteModal] = useState(false);
+
+  const deleteRegex = () => {
+    deleteregex(regexInfo.id).then(res => {
+      if(!res){
+        okNotify(`Regex ${regex_expr} deleted successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been deleted!`)
+      }else{
+        errorNotify(`Regex ${regex_expr} deleation failed!`,`Error: ${res}`)
+      }
+    }).catch( err => errorNotify(`Regex ${regex_expr} deleation failed!`,`Error: ${err}`))
+  }
 
   return <div className={style.box}>
         <Grid>
@@ -66,7 +76,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             title='Are you sure to delete this regex?'
             description={`You are going to delete the regex '${regex_expr}', causing the restart of the firewall if it is active.`}
             onClose={()=>setDeleteModal(false)}
-            action={()=>console.log("Delete regex please!")}
+            action={deleteRegex}
             opened={deleteModal}
         />
         

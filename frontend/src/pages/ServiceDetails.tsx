@@ -1,4 +1,4 @@
-import { ActionIcon, Grid, Space, Title } from '@mantine/core';
+import { ActionIcon, Grid, LoadingOverlay, Space, Title } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { BsTrashFill } from 'react-icons/bs';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -6,7 +6,8 @@ import RegexView from '../components/RegexView';
 import ServiceRow from '../components/ServiceRow';
 import YesNoModal from '../components/YesNoModal';
 import { RegexFilter, Service, update_freq } from '../js/models';
-import { errorNotify, serviceinfo, serviceregexlist } from '../js/utils';
+import { deleteservice, errorNotify, okNotify, regenport, serviceinfo, serviceregexlist } from '../js/utils';
+import { BsArrowRepeat } from "react-icons/bs"
 
 function ServiceDetails() {
     const {srv_id} = useParams()
@@ -22,6 +23,7 @@ function ServiceDetails() {
     })
 
     const [regexesList, setRegexesList] = useState<RegexFilter[]>([])
+    const [loader, setLoader] = useState(true);
 
     const navigator = useNavigate()
 
@@ -41,19 +43,46 @@ function ServiceDetails() {
         }).catch(
           err => errorNotify(`Updater for ${srv_id} service failed [Regex list]!`, err.toString())
         )
+        setLoader(false)
     }
 
     useEffect(()=>{
         updateInfo()
         const updater = setInterval(updateInfo, update_freq)
         return () => { clearInterval(updater) }
-    });
+    },[]);
 
     const [deleteModal, setDeleteModal] = useState(false)
+    const [changePortModal, setChangePortModal] = useState(false)
     
-    return <>
+    const deleteService = () => {
+        deleteservice(serviceInfo.id).then(res => {
+            if (!res)
+                okNotify("Service delete complete!",`The service ${serviceInfo.id} has been deleted!`)
+            else
+                errorNotify("An error occurred while deleting a service",`Error: ${res}`)
+        }).catch(err => {
+            errorNotify("An error occurred while deleting a service",`Error: ${err}`)
+        })
+    }
+
+    const changePort = () => {
+        regenport(serviceInfo.id).then(res => {
+            if (!res)
+                okNotify("Service port regeneration completed!",`The service ${serviceInfo.id} has changed the internal port!`)
+            else
+                errorNotify("An error occurred while changing the internal service port",`Error: ${res}`)
+        }).catch(err => {
+            errorNotify("An error occurred while changing the internal service port",`Error: ${err}`)
+        })
+    }
+
+    return <div>
+        <LoadingOverlay visible={loader} />
         <ServiceRow service={serviceInfo} additional_buttons={<>
             <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
+            <Space w="md"/>
+            <ActionIcon color="blue" onClick={()=>setChangePortModal(true)} size="xl" radius="md" variant="filled"><BsArrowRepeat size={28} /></ActionIcon>
             <Space w="md"/>
         </>}></ServiceRow>
         {regexesList.length === 0? 
@@ -66,10 +95,17 @@ function ServiceDetails() {
             title='Are you sure to delete this service?'
             description={`You are going to delete the service '${serviceInfo.id}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service ⚠️!`}
             onClose={()=>setDeleteModal(false)}
-            action={()=>console.log("Delete the service please!")}
+            action={deleteService}
             opened={deleteModal}
         />
-    </>
+        <YesNoModal
+            title='Are you sure to change the proxy internal port?'
+            description={`You are going to change the proxy port '${serviceInfo.internal_port}'. This will cause the shutdown of your service temporarily ⚠️!`}
+            onClose={()=>setChangePortModal(false)}
+            action={changePort}
+            opened={changePortModal}
+        />
+    </div>
 }
 
 export default ServiceDetails;

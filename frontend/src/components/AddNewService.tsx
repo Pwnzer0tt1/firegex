@@ -2,7 +2,7 @@ import { Button, Group, NumberInput, Space, TextInput, Notification } from '@man
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { ServiceAddForm } from '../js/models';
-import { addservice } from '../js/utils';
+import { addservice, okNotify } from '../js/utils';
 import { ImCross } from "react-icons/im"
 
 function AddNewService({ closePopup }:{ closePopup:()=>void }) {
@@ -27,6 +27,7 @@ function AddNewService({ closePopup }:{ closePopup:()=>void }) {
             if (!res){
                 setSubmitLoading(false)
                 closePopup();
+                okNotify(`Service ${values.name} has been added`, `Successfully added ${values.name} with port ${values.port}`)
             }else{
                 setSubmitLoading(false)
                 setError("Invalid request! [ "+res+" ]")

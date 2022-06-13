@@ -9,4 +9,6 @@ services:
             - 80:80
         environment:
             - NGINX_PORT=80
+        volumes:
+            - /execute/db
         

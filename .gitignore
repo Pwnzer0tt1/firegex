@@ -9,6 +9,8 @@
 # testing
 /frontend/coverage
 
+/backend/db/firegex.db
+/backend/db/firegex.db-journal
 # production
 /frontend/build
 

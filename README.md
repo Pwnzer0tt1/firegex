@@ -6,14 +6,9 @@
 ## TODO
 
 1. custom windows docker-compose
-2. fix glich change page with loading screen
-3. Instant refresh after an add or delete
-4. backend checks and errors
-5. frontend requests on buttons
-6. frontend messages on success and some failure
-7. back and frontend password
-8. volume on the database
-9. compile c++ -O3
+2. backend checks and errors
+3. back and frontend password
+4. compile c++ -O3
 
 #
 # Documentation
@@ -24,6 +19,7 @@
 - [Service info](#get-apiserviceserv)
 - [Stop service](#get-apiserviceservstop)
 - [Start service](#get-apiserviceservstart)
+- [Pause service](#get-apiserviceservpause)
 - [Delete service](#get-apiserviceservdelete)
 - [Terminate service](#get-apiserviceservterminate)
 - [Regenerate public port](#get-apiserviceservregen-port)
@@ -106,7 +102,7 @@
 ```
 
 #
-## **GET** **```/api/service/<serv>/terminate```**
+## **GET** **```/api/service/<serv>/pause```**
 ### Server response:
 ```json
 {

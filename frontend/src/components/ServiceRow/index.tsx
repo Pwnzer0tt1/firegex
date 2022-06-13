@@ -5,6 +5,7 @@ import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
 import YesNoModal from '../YesNoModal';
+import { errorNotify, okNotify, pauseservice, startservice, stopservice } from '../../js/utils';
 
 //"status":"stop"/"wait"/"active"/"pause",
 function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, onClick?:()=>void, additional_buttons?:any }) {
@@ -20,26 +21,48 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
     const [stopModal, setStopModal] = useState(false);
     const [buttonLoading, setButtonLoading] = useState(false)
 
-    const stopService = () => {
+    const stopService = async () => {
         setButtonLoading(true)
-        console.log("Stop this service please!")
+        await stopservice(service.id).then(res => {
+            if(!res){
+                okNotify(`Service ${service.id} stopped successfully!`,`The service ${service.name} has been stopped!`)
+            }else{
+                errorNotify(`An error as occurred during the stopping of the service ${service.id}`,`Error: ${res}`)
+            }
+        }).catch(err => {
+            errorNotify(`An error as occurred during the stopping of the service ${service.id}`,`Error: ${err}`)
+        })
         setButtonLoading(false)
     }
 
-    const startService = () => {
+    const startService = async () => {
         setButtonLoading(true)
-        console.log("Start this service please!")
+        await startservice(service.id).then(res => {
+            if(!res){
+                okNotify(`Service ${service.id} started successfully!`,`The service ${service.name} has been started!`)
+            }else{
+                errorNotify(`An error as occurred during the starting of the service ${service.id}`,`Error: ${res}`)
+            }
+        }).catch(err => {
+            errorNotify(`An error as occurred during the starting of the service ${service.id}`,`Error: ${err}`)
+        })
         setButtonLoading(false)
     }
 
-    const pauseService = () => {
-        if (service.status === "pause") return setStopModal(true)
+    const pauseService = async () => {
         setButtonLoading(true)
-        console.log("Pause this service please!")
+        await pauseservice(service.id).then(res => {
+            if(!res){
+                okNotify(`Service ${service.id} paused successfully!`,`The service ${service.name} has been paused (Transparent mode)!`)
+            }else{
+                errorNotify(`An error as occurred during the pausing of the service ${service.id}`,`Error: ${res}`)
+            }
+        }).catch(err => {
+            errorNotify(`An error as occurred during the pausing of the service ${service.id}`,`Error: ${err}`)
+        })
         setButtonLoading(false)
     }
 
-    
 
     return <>
         <Grid className={style.row} style={{width:"100%"}}>
@@ -59,11 +82,19 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                 <Space w="xl" /><Space w="xl" />
                 <div className="center-flex">
                     {additional_buttons}
-                    <ActionIcon color={service.status === "pause"?"yellow":"red"} loading={buttonLoading}
+                    {["pause","wait"].includes(service.status)?
+                        <ActionIcon color="yellow" loading={buttonLoading}
+                        onClick={stopService} size="xl" radius="md" variant="filled"
+                        disabled={service.status === "stop"}>
+                            <FaStop size="20px" />
+                        </ActionIcon>:
+                        <ActionIcon color="red" loading={buttonLoading}
                                 onClick={pauseService} size="xl" radius="md" variant="filled"
-                                disabled={!["wait","active","pause"].includes(service.status)?true:false}>
-                        {service.status === "pause"?<FaStop size="20px" />:<FaPause size="20px" />}
-                    </ActionIcon>
+                                disabled={service.status === "stop"}>
+                            <FaPause size="20px" />
+                        </ActionIcon>
+                    }
+                    
                     <Space w="md"/>
                     <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
                                 variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
