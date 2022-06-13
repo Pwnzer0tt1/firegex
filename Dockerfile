@@ -14,7 +14,7 @@ RUN npm run build
 #Building main conteiner
 FROM python:slim-buster
 
-RUN apt-get update && apt-get -y install curl supervisor gettext-base build-essential libboost-dev nginx
+RUN apt-get update && apt-get -y install curl supervisor gettext-base build-essential libboost-dev nginx libboost-regex-dev libboost-system-dev
 RUN curl -sL https://deb.nodesource.com/setup_16.x | bash
 RUN apt-get install nodejs
 
@@ -30,6 +30,9 @@ COPY ./backend/ /execute/
 COPY ./config/supervisord.conf /etc/supervisor/supervisord.conf
 COPY ./config/nginx.conf /tmp/nginx.conf
 COPY ./config/start_nginx.sh /tmp/start_nginx.sh
+
+RUN c++ -O3 -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system -lboost_regex
+RUN chmod ug+x /execute/proxy/proxy 
 
 #Copy react app in the main container
 COPY --from=frontend /app/build/ ./frontend/

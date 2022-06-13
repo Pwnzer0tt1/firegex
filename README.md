@@ -5,10 +5,8 @@
 
 ## TODO
 
-1. custom windows docker-compose
-2. backend checks and errors
-3. back and frontend password
-4. compile c++ -O3
+1. back and frontend password
+2. compile c++ -O3
 
 #
 # Documentation

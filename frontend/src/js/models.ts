@@ -28,6 +28,20 @@ export type ServerResponse = {
     status:string
 }
 
+export type ServerStatusResponse = {
+    status:string,
+    loggined:boolean
+}
+
+export type PasswordSend = {
+    password:string
+}
+
+export type ChangePassword = {
+    password:string,
+    expire:boolean
+}
+
 export type RegexFilter = {
     id:number,
     service_id:string,

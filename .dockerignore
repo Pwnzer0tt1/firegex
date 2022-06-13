@@ -18,6 +18,8 @@ docker-compose.yml
 /backend/db/firegex.db
 /backend/db/firegex.db-journal
 
+/backend/proxy/proxy
+
 # misc
 **/.DS_Store
 **/.env.local

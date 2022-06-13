@@ -1,5 +1,8 @@
-import sqlite3, random, string, subprocess, sys, threading, os
-from flask import Flask, jsonify, request, abort
+import sqlite3, random, string, subprocess, sys, threading, os, bcrypt, secrets, time
+from flask import Flask, jsonify, request, abort, session
+from functools import wraps
+from flask_cors import CORS
+from kthread import KThread
 
 
 class SQLite():
@@ -54,15 +57,150 @@ def gen_internal_port():
             break
     return res
 
+
+
+
 # DB init
 db = SQLite('firegex')
 db.connect()
 
+
+class KeyValueStorage:
+    def __init__(self):
+        pass
+
+    def get(self, key):
+        q = db.query('SELECT value FROM keys_values WHERE key = ?', (key,))
+        if len(q) == 0:
+            return None
+        else:
+            return q[0][0]
+
+    def put(self, key, value):
+        if self.get(key) is None:
+            db.query('INSERT INTO keys_values (key, value) VALUES (?, ?);', (key,str(value)))
+        else:
+            db.query('UPDATE keys_values SET value=? WHERE key = ?;', (str(value), key))
+
+
+
 app = Flask(__name__)
+conf = KeyValueStorage()
+proxy_table = {}
 
 DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
 
+def is_loggined():
+    if DEBUG: return True
+    return True if session.get("loggined") else False
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if is_loggined() or DEBUG:
+            return f(*args, **kwargs)
+        else:
+            return abort(401)
+        
+    return decorated_function
+
+def get_service_data(id):
+    q = db.query('SELECT * FROM services WHERE service_id=?;',(id,))
+    if len(q) == 0: return None
+    srv = q[0]
+    return {
+        'id': srv[1],
+        'status': srv[0],
+        'public_port': srv[3],
+        'internal_port': srv[2]
+    }
+
+def service_manager(id):
+    data = get_service_data(id)
+    if data is None: return
+
+
+
+@app.before_first_request
+def before_first_request():
+    
+    
+    services = [
+        
+    ]
+
+    for srv in services:
+
+
+
+
+    app.config['SECRET_KEY'] = secrets.token_hex(32)
+    if DEBUG:
+        app.config["STATUS"] = "run"
+    elif conf.get("password") is None:
+        app.config["STATUS"] = "init"
+    else:
+        app.config["STATUS"] = "run"
+
+@app.route("/api/status")
+def get_status():
+    return { 
+        "status":app.config["STATUS"],
+        "loggined": is_loggined()
+    }
+
+@app.route("/api/login", methods = ['POST'])
+def login():
+    if not conf.get("password"): return abort(404)
+    req = request.get_json(force = True)
+    if not "password" in req or not isinstance(req["password"],str):
+        return abort(400)
+    if req["password"] == "":
+        return {"status":"Cannot insert an empty password!"}
+    time.sleep(.3) # No bruteforce :)
+    if bcrypt.checkpw(req["password"].encode(), conf.get("password").encode()):
+        session["loggined"] = True
+        return { "status":"ok" }
+    return {"status":"Wrong password!"}
+
+@app.route("/api/logout")
+def logout():
+    session["loggined"] = False
+    return { "status":"ok" }
+
+@app.route('/api/change-password', methods = ['POST'])
+@login_required
+def change_password():
+    req = request.get_json(force = True)
+    if not "password" in req or not isinstance(req["password"],str):
+        return abort(400)
+    if req["password"] == "":
+        return {"status":"Cannot insert an empty password!"}
+    if req["expire"]:
+        app.config['SECRET_KEY'] = secrets.token_hex(32)
+        session["loggined"] = True
+    hash_psw = bcrypt.hashpw(req["password"].encode(), bcrypt.gensalt())
+    conf.put("password",hash_psw.decode())
+    return {"status":"ok"}
+
+
+@app.route('/api/set-password', methods = ['POST'])
+def set_password():
+    if conf.get("password"): return abort(404)
+    req = request.get_json(force = True)
+    if not "password" in req or not isinstance(req["password"],str):
+        return abort(400)
+    if req["password"] == "":
+        return {"status":"Cannot insert an empty password!"}
+    
+    hash_psw = bcrypt.hashpw(req["password"].encode(), bcrypt.gensalt())
+    conf.put("password",hash_psw.decode())
+    app.config["STATUS"] = "run"
+    session["loggined"] = True
+    return {"status":"ok"}
+
 @app.route('/api/general-stats')
+@login_required
 def get_general_stats():
     n_services = db.query('''
         SELECT COUNT (*) FROM services;
@@ -81,6 +219,7 @@ def get_general_stats():
     }
 
 @app.route('/api/services')
+@login_required
 def get_services():
     res = []
     for i in db.query('SELECT * FROM services;'):
@@ -101,6 +240,7 @@ def get_services():
 
 
 @app.route('/api/service/<serv>')
+@login_required
 def get_service(serv):
     q = db.query('SELECT * FROM services WHERE service_id = ?;', (serv,))
     if len(q) != 0:
@@ -119,6 +259,7 @@ def get_service(serv):
         return abort(404)
 
 @app.route('/api/service/<serv>/stop')
+@login_required
 def get_service_stop(serv):
     db.query('''
         UPDATE services SET status = 'stop' WHERE service_id = ?;
@@ -129,6 +270,7 @@ def get_service_stop(serv):
     }
 
 @app.route('/api/service/<serv>/pause')
+@login_required
 def get_service_pause(serv):
     db.query('''
         UPDATE services SET status = 'pause' WHERE service_id = ?;
@@ -139,6 +281,7 @@ def get_service_pause(serv):
     }
 
 @app.route('/api/service/<serv>/start')
+@login_required
 def get_service_start(serv):
     db.query('''
         UPDATE services SET status = 'wait' WHERE service_id = ?;
@@ -149,6 +292,7 @@ def get_service_start(serv):
     }
 
 @app.route('/api/service/<serv>/delete')
+@login_required
 def get_service_delete(serv):
     db.query('DELETE FROM services WHERE service_id = ?;', (serv,))
     db.query('DELETE FROM regexes WHERE service_id = ?;', (serv,))
@@ -159,6 +303,7 @@ def get_service_delete(serv):
 
 
 @app.route('/api/service/<serv>/regen-port')
+@login_required
 def get_regen_port(serv):
     db.query('UPDATE services SET internal_port = ? WHERE service_id = ?;', (gen_internal_port(), serv))
     return {
@@ -167,6 +312,7 @@ def get_regen_port(serv):
 
 
 @app.route('/api/service/<serv>/regexes')
+@login_required
 def get_service_regexes(serv):
     return jsonify([
         {
@@ -181,6 +327,7 @@ def get_service_regexes(serv):
 
 
 @app.route('/api/regex/<int:regex_id>')
+@login_required
 def get_regex_id(regex_id):
     q = db.query('SELECT * FROM regexes WHERE regex_id = ?;', (regex_id,))
     if len(q) != 0:
@@ -197,6 +344,7 @@ def get_regex_id(regex_id):
 
 
 @app.route('/api/regex/<int:regex_id>/delete')
+@login_required
 def get_regex_delete(regex_id):
     db.query('DELETE FROM regexes WHERE regex_id = ?;', (regex_id,))
 
@@ -206,6 +354,7 @@ def get_regex_delete(regex_id):
 
 
 @app.route('/api/regexes/add', methods = ['POST'])
+@login_required
 def post_regexes_add():
     req = request.get_json(force = True)
 
@@ -219,6 +368,7 @@ def post_regexes_add():
 
 
 @app.route('/api/services/add', methods = ['POST'])
+@login_required
 def post_services_add():
     req = request.get_json(force = True)
     serv_id = from_name_get_id(req['name'])
@@ -233,8 +383,7 @@ def post_services_add():
     return {'status': 'ok'}
 
 if DEBUG:
-    from flask_cors import CORS
-    cors = CORS(app, resources={r"/api/*": {"origins": "*"}})
+    CORS(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True )
 
 if __name__ == '__main__':
     db.check_integrity({
@@ -254,10 +403,14 @@ if __name__ == '__main__':
             'regex_id': 'INTEGER PRIMARY KEY',
             'FOREIGN KEY (service_id)':'REFERENCES services (service_id)'
         },
+        'keys_values': {
+            'key': 'VARCHAR(100) PRIMARY KEY',
+            'value': 'VARCHAR(100) NOT NULL',
+        },
     })
 
     if DEBUG:
         app.run(host="0.0.0.0", port=8080 ,debug=True)
     else:
-        subprocess.run(["uwsgi","--socket","./uwsgi.sock","--master","--module","app:app"])
+        subprocess.run(["uwsgi","--socket","./uwsgi.sock","--master","--module","app:app", "--enable-threads"])
 

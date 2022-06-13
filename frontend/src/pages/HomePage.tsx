@@ -33,7 +33,7 @@ function HomePage() {
         <LoadingOverlay visible={loader} />
         {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.id} onClick={()=>{
             navigator("/"+srv.id)
-        }} />):<><Space h="xl"/> <Title className='center-flex' order={3}>No services found! Add one clicking the button above</Title></>}
+        }} />):<><Space h="xl"/> <Title className='center-flex' order={3}>No services found! Add one clicking the add button above</Title></>}
     </div>
 }
 

@@ -11,6 +11,7 @@
 
 /backend/db/firegex.db
 /backend/db/firegex.db-journal
+/backend/proxy/proxy
 # production
 /frontend/build
 

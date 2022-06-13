@@ -1,27 +1,52 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
-import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, notification_time, RegexAddForm } from "./models";
+import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, notification_time, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword } from "./models";
 
 var Buffer = require('buffer').Buffer 
 
-const custom_url = ""//"http://127.0.0.1:8080"
+const DEBUG = true
+
+const custom_url = DEBUG?"http://127.0.0.1:8080":""
 
 export async function getapi(path:string):Promise<any>{
-    return await fetch(`${custom_url}/api/${path}`).then( res => res.json() )
+    return await new Promise((resolve, reject) => {
+        fetch(`${custom_url}/api/${path}`,{credentials: "same-origin"})
+            .then(res => {
+                if(res.status == 401) window.location.reload()
+                if(!res.ok) reject(res.statusText)
+                res.json().then( res => resolve(res) ).catch( err => reject(err))
+            })
+            .catch(err => {
+                reject(err)
+            })
+    });
 }
 
 export async function postapi(path:string,data:any):Promise<any>{
-    return await fetch(`${custom_url}/api/${path}`, {
-        method: 'POST',
-        cache: 'no-cache',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    }).then(res => res.json());
+    return await new Promise((resolve, reject) => {
+        fetch(`${custom_url}/api/${path}`, {
+            method: 'POST',
+            credentials: "same-origin",
+            cache: 'no-cache',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        }).then(res => {
+            if(res.status == 401) window.location.reload()
+            if(!res.ok) reject(res.statusText)
+            res.json().then( res => resolve(res) ).catch( err => reject(err))
+        })
+        .catch(err => {
+            reject(err)
+        })
+    });
 }
 
+export async function getstatus(){
+    return await getapi(`status`) as ServerStatusResponse;
+}
 
 export async function generalstats(){
     return await getapi("general-stats") as GeneralStats;
@@ -33,6 +58,26 @@ export async function servicelist(){
 
 export async function serviceinfo(service_id:string){
     return await getapi(`service/${service_id}`) as Service;
+}
+
+export async function logout(){
+    const { status } = await getapi(`logout`) as ServerResponse;
+    return status === "ok"?undefined:status 
+}
+
+export async function setpassword(data:PasswordSend) {
+    const { status } = await postapi("set-password",data) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
+export async function changepassword(data:ChangePassword) {
+    const { status } = await postapi("change-password",data) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
+export async function login(data:PasswordSend) {
+    const { status } = await postapi("login",data) as ServerResponse;
+    return status === "ok"?undefined:status
 }
 
 export async function deleteregex(regex_id:number){

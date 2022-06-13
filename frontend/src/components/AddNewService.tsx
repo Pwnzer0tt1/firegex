@@ -41,7 +41,6 @@ function AddNewService({ closePopup }:{ closePopup:()=>void }) {
 
   return <form onSubmit={form.onSubmit(submitRequest)}>
         <TextInput
-            required
             label="Service name"
             placeholder="Challenge 01"
             {...form.getInputProps('name')}
@@ -49,7 +48,6 @@ function AddNewService({ closePopup }:{ closePopup:()=>void }) {
         <Space h="md" />
 
         <NumberInput
-            required
             placeholder="8080"
             min={1}
             max={65535}

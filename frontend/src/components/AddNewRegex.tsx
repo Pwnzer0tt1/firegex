@@ -73,7 +73,6 @@ function AddNewRegex({ closePopup, service }:{ closePopup:()=>void, service:stri
 
   return <form onSubmit={form.onSubmit(submitRequest)}>
         <TextInput
-            required
             label="Regex"
             placeholder="[A-Z0-9]{31}="
             {...form.getInputProps('regex')}
@@ -93,14 +92,12 @@ function AddNewRegex({ closePopup, service }:{ closePopup:()=>void, service:stri
             data={['C -> S', 'S -> C', 'C <-> S']}
             label="Choose the source of the packets to filter"
             variant="filled"
-            required
             {...form.getInputProps('mode')}
         />
         <Space h="md" />
         <FilterTypeSelector
             size="md"
             color="gray"
-            required
             {...form.getInputProps('type')}
         />
         <Group position="right" mt="md">
