@@ -141,7 +141,7 @@
     "regex": <base64 encoded regex>,
     "is_blacklist": <true|false>,
     "n_packets": <number of blocked packets>,
-    "mode" <"C"|"S"|"B"> // Client to server, server to client or both
+    "mode": <"C"|"S"|"B"> // Client to server, server to client or both
 }
 ```
 
