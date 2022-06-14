@@ -76,13 +76,14 @@ class ProxyManager:
         self.lock = threading.Lock()
 
     def __clear_proxy_table(self):
-        for key in self.proxy_table.keys():
-            if not self.proxy_table[key]["thread"].is_alive():
-                del self.proxy_table[key]
+        with self.lock:
+            for key in list(self.proxy_table.keys()):
+                if not self.proxy_table[key]["thread"].is_alive():
+                    del self.proxy_table[key]
 
     def reload(self):
-        with self.lock:
-            self.__clear_proxy_table()
+        self.__clear_proxy_table()
+        with self.lock: 
             for srv_id in self.db.query('SELECT service_id, status FROM services;'):
                 srv_id, n_status = srv_id
                 if srv_id in self.proxy_table:

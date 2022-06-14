@@ -1,4 +1,4 @@
-import sqlite3, subprocess, sys, threading, bcrypt, secrets, time
+import sqlite3, subprocess, sys, threading, bcrypt, secrets, time, re
 from flask import Flask, jsonify, request, abort, session
 from functools import wraps
 from flask_cors import CORS
@@ -278,7 +278,9 @@ def post_regexes_add():
                     "is_blacklist" : {"type" : "boolean"},
                     "mode" : {"type" : "string"},
                 },
-            })
+        })
+        if not re.match("^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)?$",req["regex"]):
+            return abort(400)
     except Exception:
         return abort(400)
     db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode) VALUES (?, ?, ?, ?);", 

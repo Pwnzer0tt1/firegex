@@ -69,7 +69,7 @@ function App() {
     
 
     return <div className='center-flex-row' style={{padding:"100px"}}>
-      <Title order={3} align="center">Choose the password for access to the firewall 🔒</Title>
+      <Title order={3} align="center">Setup: Choose the password for access to the firewall 🔒</Title>
       <Space h="xl" />
       <form onSubmit={form.onSubmit(submitRequest)} style={{width:"80%"}}>
           <TextInput
@@ -104,7 +104,7 @@ function App() {
     return <div className='center-flex-row' style={{padding:"100px"}}>
       <Title order={2} align="center">Welcome to Firegex 🔥</Title>
       <Space h="xl" />
-      <Title order={2} align="center">Before you use the firewall, insert a password 🔒</Title>
+      <Title order={2} align="center">Before you use the firewall, insert the password 🔒</Title>
       <Space h="xl" />
       <form onSubmit={form.onSubmit(submitRequest)} style={{width:"80%"}}>
           <TextInput

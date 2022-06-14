@@ -3,11 +3,6 @@
 # Firegex-API Documentation
 ### This is a short description of the API
 
-## TODO
-
-1. back and frontend password
-2. compile c++ -O3
-
 #
 # Documentation
 ## Index

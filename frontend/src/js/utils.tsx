@@ -5,7 +5,7 @@ import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, not
 
 var Buffer = require('buffer').Buffer 
 
-const DEBUG = true
+const DEBUG = false
 
 const custom_url = DEBUG?"http://127.0.0.1:8080":""
 
