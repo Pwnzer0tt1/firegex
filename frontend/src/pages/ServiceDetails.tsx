@@ -84,11 +84,11 @@ function ServiceDetails() {
     return <div>
         <LoadingOverlay visible={loader} />
         <ServiceRow service={serviceInfo} additional_buttons={<>
-            <Tooltip label="Delete service" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="red">           
+            <Tooltip label="Delete service" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="red">           
                 <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
             </Tooltip>
             <Space w="md"/>
-            <Tooltip label="Change proxy port" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">           
+            <Tooltip label="Change proxy port" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">           
                 <ActionIcon color="blue" onClick={()=>setChangePortModal(true)} size="xl" radius="md" variant="filled"><BsArrowRepeat size={28} /></ActionIcon>
             </Tooltip>
             <Space w="md"/>
@@ -99,7 +99,7 @@ function ServiceDetails() {
                 <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" button</Title>
                 <Space h="xl" /> <Space h="xl" />
                 <div className='center-flex'>
-                    <Tooltip label="Add a new regex" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
+                    <Tooltip label="Add a new regex" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
                     </Tooltip>
                 </div>

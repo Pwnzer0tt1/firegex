@@ -77,7 +77,7 @@ function Header() {
   const closeModal = () => {setOpen(false);}
 
   return <div id="header-page" className={style.header}>
-        <FloatingTooltip label="Home" transition="pop" transitionDuration={200} openDelay={1000} transitionTimingFunction="ease" color="dark" position="right" >
+        <FloatingTooltip zIndex={0} label="Home" transition="pop" transitionDuration={200} openDelay={1000} transitionTimingFunction="ease" color="dark" position="right" >
           <div style={{ width: 240, marginLeft: 'auto', marginRight: 'auto', padding:"40px", cursor: 'pointer' }}>
             <Image src="/header-logo.png" alt="Firegex logo" onClick={()=>navigator("/")}/>
           </div>
@@ -115,7 +115,7 @@ function Header() {
         </Menu>
         <div style={{marginLeft:"20px"}}></div>
         { location.pathname !== "/"?
-          <Tooltip label="Home" position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="teal">
+          <Tooltip zIndex={0} label="Home" position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="teal">
             <ActionIcon color="teal" style={{marginRight:"10px"}}
               size="xl" radius="md" variant="filled"
               onClick={()=>navigator("/")}>
@@ -124,10 +124,10 @@ function Header() {
           </Tooltip>
         :null}
         { srv_id?
-          <Tooltip label="Add a new regex" position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
+          <Tooltip label="Add a new regex" zIndex={0} position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
             <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
           </Tooltip>
-        : <Tooltip label="Add a new service" position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
+        : <Tooltip label="Add a new service" zIndex={0} position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
             <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
           </Tooltip>
       }

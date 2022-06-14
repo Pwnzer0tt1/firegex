@@ -108,14 +108,14 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                     {additional_buttons}
                     {["pause","wait"].includes(service.status)?
                         
-                        <Tooltip label="Stop service" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="orange">
+                        <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="orange">
                             <ActionIcon color="yellow" loading={buttonLoading}
                             onClick={()=>setStopModal(true)} size="xl" radius="md" variant="filled"
                             disabled={service.status === "stop"}>
                                 <FaStop size="20px" />
                             </ActionIcon>
                         </Tooltip>:
-                        <Tooltip label="Pause service" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="red">
+                        <Tooltip label="Pause service" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="red">
                             <ActionIcon color="red" loading={buttonLoading}
                                     onClick={pauseService} size="xl" radius="md" variant="filled"
                                     disabled={service.status === "stop"}>
@@ -125,7 +125,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                     }
                     
                     <Space w="md"/>
-                    <Tooltip label="Start service" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="teal">
+                    <Tooltip label="Start service" transition="pop" zIndex={0} transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="teal">
                         <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
                                     variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
                             <FaPlay size="20px" />
