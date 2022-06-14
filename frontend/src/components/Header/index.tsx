@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActionIcon, Badge, Button, Divider, Group, Image, Menu, Modal, Notification, Space, Switch, TextInput, Tooltip, FloatingTooltip } from '@mantine/core';
+import { ActionIcon, Badge, Button, Divider, Group, Image, Menu, Modal, Notification, Space, Switch, TextInput, Tooltip, FloatingTooltip, MediaQuery } from '@mantine/core';
 import style from "./Header.module.scss";
 import { changepassword, errorNotify, generalstats, logout, okNotify } from '../../js/utils';
 import { ChangePassword, GeneralStats, update_freq } from '../../js/models';
@@ -77,15 +77,35 @@ function Header() {
   const closeModal = () => {setOpen(false);}
 
   return <div id="header-page" className={style.header}>
-        <FloatingTooltip label="Home" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="dark" position="right" >
+        <FloatingTooltip label="Home" transition="pop" transitionDuration={200} openDelay={1000} transitionTimingFunction="ease" color="dark" position="right" >
           <div style={{ width: 240, marginLeft: 'auto', marginRight: 'auto', padding:"40px", cursor: 'pointer' }}>
             <Image src="/header-logo.png" alt="Firegex logo" onClick={()=>navigator("/")}/>
           </div>
         </FloatingTooltip>
         <div className="flex-spacer" />
-        <Badge color="green" size="lg" variant="filled">Services: {generalStats.services}</Badge>
-        <Badge style={{marginLeft:"10px"}} size="lg" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>
-        <Badge style={{marginLeft:"10px"}} size="lg" color="violet" variant="filled">Regexes: {generalStats.regexes}</Badge>
+        
+        <MediaQuery largerThan="md" styles={{ display: 'none' }}>
+          <div>
+            <Badge color="green" size="lg" variant="filled">Services: {generalStats.services}</Badge>
+              <Space h="xs" />
+            <Badge size="lg" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>
+              <Space h="xs" />
+            <Badge size="lg" color="violet" variant="filled">Regexes: {generalStats.regexes}</Badge>
+          </div>
+        </MediaQuery>  
+
+        <MediaQuery smallerThan="md" styles={{ display: 'none' }}><div>
+          <div className="center-flex">
+          <Badge color="green" size="lg" variant="filled">Services: {generalStats.services}</Badge>
+            <Space w="xs" />
+          <Badge size="lg" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>
+            <Space w="xs" />
+          <Badge size="lg" color="violet" variant="filled">Regexes: {generalStats.regexes}</Badge>
+          </div>
+        </div></MediaQuery>  
+
+        
+      
         <div style={{marginLeft:"20px"}}></div>
         <Menu>
           <Menu.Label>Firewall Access</Menu.Label>
@@ -95,7 +115,7 @@ function Header() {
         </Menu>
         <div style={{marginLeft:"20px"}}></div>
         { location.pathname !== "/"?
-          <Tooltip label="Home" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="teal">
+          <Tooltip label="Home" position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="teal">
             <ActionIcon color="teal" style={{marginRight:"10px"}}
               size="xl" radius="md" variant="filled"
               onClick={()=>navigator("/")}>
@@ -103,22 +123,18 @@ function Header() {
             </ActionIcon>
           </Tooltip>
         :null}
-        { location.pathname !== "/"?
-          <Tooltip label="Add a new regex" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">
+        { srv_id?
+          <Tooltip label="Add a new regex" position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
             <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
           </Tooltip>
-        : <Tooltip label="Add a new service" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">
+        : <Tooltip label="Add a new service" position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
             <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
           </Tooltip>
       }
         
         {srv_id?
-          <Modal size="xl" title="Add a new regex filter" opened={open} onClose={closeModal} closeOnClickOutside={false} centered>
-            <AddNewRegex closePopup={closeModal} service={srv_id} />
-          </Modal>:
-          <Modal size="xl" title="Add a new service" opened={open} onClose={closeModal} closeOnClickOutside={false} centered>
-            <AddNewService closePopup={closeModal} />
-          </Modal>
+            <AddNewRegex opened={open} onClose={closeModal} service={srv_id} />:
+            <AddNewService opened={open} onClose={closeModal} />
         }
         <Modal size="xl" title="Change Firewall Password" opened={changePasswordModal} onClose={()=>setChangePasswordModal(false)} closeOnClickOutside={false} centered>
 

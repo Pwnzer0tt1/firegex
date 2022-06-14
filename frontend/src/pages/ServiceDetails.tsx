@@ -84,47 +84,32 @@ function ServiceDetails() {
     return <div>
         <LoadingOverlay visible={loader} />
         <ServiceRow service={serviceInfo} additional_buttons={<>
-            <Tooltip label="Delete service" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="red">           
+            <Tooltip label="Delete service" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="red">           
                 <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
             </Tooltip>
             <Space w="md"/>
-            <Tooltip label="Change proxy port" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">           
+            <Tooltip label="Change proxy port" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">           
                 <ActionIcon color="blue" onClick={()=>setChangePortModal(true)} size="xl" radius="md" variant="filled"><BsArrowRepeat size={28} /></ActionIcon>
             </Tooltip>
             <Space w="md"/>
-        </>} add_new_regex={<>
-            <Tooltip label="Add a new regex" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">
-                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
-            </Tooltip>
         </>}></ServiceRow>
         
-        {regexesList.length === 0? 
-            <><Space h="xl" /> <Title className='center-flex' order={3}>No regex found for this service! Add one by clicking the "+" button</Title>
-            <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> 
-            <div style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                }}>
-                <Tooltip label="Add a new regex" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">
-                    <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
-                </Tooltip>
-            </div>
-            
-            </>
-            
-            :
+        {regexesList.length === 0?<>
+                <Space h="xl" />
+                <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" button</Title>
+                <Space h="xl" /> <Space h="xl" />
+                <div className='center-flex'>
+                    <Tooltip label="Add a new regex" transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
+                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+                    </Tooltip>
+                </div>
+            </>:
             <Grid>
-                {regexesList.map( (regexInfo) => <Grid.Col key={regexInfo.id} span={6}><RegexView regexInfo={regexInfo}/></Grid.Col>)}
+                {regexesList.map( (regexInfo) => <Grid.Col key={regexInfo.id} lg={6} xs={12}><RegexView regexInfo={regexInfo}/></Grid.Col>)}
             </Grid>
         }
 
-        {srv_id?
-          <Modal size="xl" title="Add a new regex filter" opened={open} onClose={closeModal} closeOnClickOutside={false} centered>
-            <AddNewRegex closePopup={closeModal} service={srv_id} />
-          </Modal>:
-          null
-        }
+        {srv_id?<AddNewRegex opened={open} onClose={closeModal} service={srv_id} />:null}
 
         <YesNoModal
             title='Are you sure to delete this service?'

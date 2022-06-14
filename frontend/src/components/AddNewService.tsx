@@ -1,11 +1,11 @@
-import { Button, Group, NumberInput, Space, TextInput, Notification } from '@mantine/core';
+import { Button, Group, NumberInput, Space, TextInput, Notification, Modal } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { ServiceAddForm } from '../js/models';
 import { addservice, okNotify } from '../js/utils';
 import { ImCross } from "react-icons/im"
 
-function AddNewService({ closePopup }:{ closePopup:()=>void }) {
+function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void }) {
 
     const form = useForm({
         initialValues: {
@@ -18,6 +18,11 @@ function AddNewService({ closePopup }:{ closePopup:()=>void }) {
         }
     })
 
+    const close = () =>{
+        onClose()
+        form.reset()
+    }
+
     const [submitLoading, setSubmitLoading] = useState(false)
     const [error, setError] = useState<string|null>(null)
 
@@ -26,7 +31,7 @@ function AddNewService({ closePopup }:{ closePopup:()=>void }) {
         addservice(values).then( res => {
             if (!res){
                 setSubmitLoading(false)
-                closePopup();
+                close();
                 okNotify(`Service ${values.name} has been added`, `Successfully added ${values.name} with port ${values.port}`)
             }else{
                 setSubmitLoading(false)
@@ -39,37 +44,39 @@ function AddNewService({ closePopup }:{ closePopup:()=>void }) {
     }    
 
 
-  return <form onSubmit={form.onSubmit(submitRequest)}>
-        <TextInput
-            label="Service name"
-            placeholder="Challenge 01"
-            {...form.getInputProps('name')}
-        />
-        <Space h="md" />
+  return <Modal size="xl" title="Add a new service" opened={opened} onClose={close} closeOnClickOutside={false} centered>
+    <form onSubmit={form.onSubmit(submitRequest)}>
+            <TextInput
+                label="Service name"
+                placeholder="Challenge 01"
+                {...form.getInputProps('name')}
+            />
+            <Space h="md" />
 
-        <NumberInput
-            placeholder="8080"
-            min={1}
-            max={65535}
-            label="Service port"
-            {...form.getInputProps('port')}
-        />
+            <NumberInput
+                placeholder="8080"
+                min={1}
+                max={65535}
+                label="Service port"
+                {...form.getInputProps('port')}
+            />
 
 
-        <Space h="md" />
+            <Space h="md" />
 
-        <Group position="right" mt="md">
-            <Button loading={submitLoading} type="submit">Add Service</Button>
-        </Group>
+            <Group position="right" mt="md">
+                <Button loading={submitLoading} type="submit">Add Service</Button>
+            </Group>
 
-        <Space h="md" />
-        
-        {error?<>
-        <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
-            Error: {error}
-        </Notification><Space h="md" /></>:null}
-        
-    </form>
+            <Space h="md" />
+            
+            {error?<>
+            <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
+                Error: {error}
+            </Notification><Space h="md" /></>:null}
+            
+        </form>
+    </Modal>
 
 }
 

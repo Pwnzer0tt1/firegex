@@ -160,15 +160,9 @@ export function okNotify(title:string, description:string ){
 }
 
 export function validateRegex(pattern:string) {
-    var parts = pattern.split('/'),
-        regex = pattern,
-        options = "";
-    if (parts.length > 1) {
-        regex = parts[1];
-        options = parts[2];
-    }
+    return true; // TO TEST
     try {
-        new RegExp(regex, options);
+        new RegExp(pattern);
         return true;
     }
     catch(e) {

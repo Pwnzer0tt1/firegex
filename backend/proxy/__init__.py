@@ -74,9 +74,11 @@ class Proxy:
     def compile_filters(self):
         res = {}
         for filter_obj in self.filters:
-            raw_filters = filter_obj.compile()
-            for filter in raw_filters:
-                res[filter] = filter_obj
+            try:
+                raw_filters = filter_obj.compile()
+                for filter in raw_filters:
+                    res[filter] = filter_obj
+            except Exception: pass
         return res
 
     def add_filter(self, filter):

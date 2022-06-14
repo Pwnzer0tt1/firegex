@@ -1,4 +1,4 @@
-import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Tooltip } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Tooltip, Modal } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { RegexAddForm } from '../js/models';
@@ -15,7 +15,7 @@ type RegexAddInfo = {
     percentage_encoding:boolean
 }
 
-function AddNewRegex({ closePopup, service }:{ closePopup:()=>void, service:string }) { 
+function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>void, service:string }) { 
 
     const form = useForm({
         initialValues: {
@@ -31,6 +31,11 @@ function AddNewRegex({ closePopup, service }:{ closePopup:()=>void, service:stri
             mode: (value) => ['C -> S', 'S -> C', 'C <-> S'].includes(value)
         }
     })
+
+    const close = () =>{
+        onClose()
+        form.reset()
+    }
 
     const [submitLoading, setSubmitLoading] = useState(false)
     const [error, setError] = useState<string|null>(null)
@@ -57,7 +62,7 @@ function AddNewRegex({ closePopup, service }:{ closePopup:()=>void, service:stri
         addregex(request).then( res => {
             if (!res){
                 setSubmitLoading(false)
-                closePopup();
+                close();
                 okNotify(`Regex ${getHumanReadableRegex(request.regex)} has been added`, `Successfully added ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_id} service`)
             }else{
                 setSubmitLoading(false)
@@ -71,50 +76,52 @@ function AddNewRegex({ closePopup, service }:{ closePopup:()=>void, service:stri
     }    
 
 
-  return <form onSubmit={form.onSubmit(submitRequest)}>
-        <TextInput
-            label="Regex"
-            placeholder="[A-Z0-9]{31}="
-            {...form.getInputProps('regex')}
-        />
-        <Space h="md" />
-        <Tooltip label="To represent binary data use URL encoding. Example: %01" transition="slide-left" transitionDuration={300} transitionTimingFunction="ease"  
-                color="gray" wrapLines width={220} withArrow position='right'>      
-            <Switch
-                label="Use percentage encoding for binary values"
-                {...form.getInputProps('percentage_encoding', { type: 'checkbox' })}
+  return <Modal size="xl" title="Add a new regex filter" opened={opened} onClose={close} closeOnClickOutside={false} centered>
+    <form onSubmit={form.onSubmit(submitRequest)}>
+            <TextInput
+                label="Regex"
+                placeholder="[A-Z0-9]{31}="
+                {...form.getInputProps('regex')}
             />
-        </Tooltip>
-        <Space h="md" />
-        <Switch
-            label="Match exactly the regex"
-            {...form.getInputProps('regex_exact', { type: 'checkbox' })}
-        />
-        <Space h="md" />
-        <NativeSelect
-            data={['C -> S', 'S -> C', 'C <-> S']}
-            label="Choose the source of the packets to filter"
-            variant="filled"
-            {...form.getInputProps('mode')}
-        />
-        <Space h="md" />
-        <FilterTypeSelector
-            size="md"
-            color="gray"
-            {...form.getInputProps('type')}
-        />
-        <Group position="right" mt="md">
-            <Button loading={submitLoading} type="submit">Add Filter</Button>
-        </Group>
+            <Space h="md" />
+            <Tooltip label="To represent binary data use URL encoding. Example: %01" transition="slide-left" openDelay={600} transitionDuration={250} transitionTimingFunction="ease"  
+                    color="gray" wrapLines width={220} withArrow position='right'>      
+                <Switch
+                    label="Use percentage encoding for binary values"
+                    {...form.getInputProps('percentage_encoding', { type: 'checkbox' })}
+                />
+            </Tooltip>
+            <Space h="md" />
+            <Switch
+                label="Match exactly the regex"
+                {...form.getInputProps('regex_exact', { type: 'checkbox' })}
+            />
+            <Space h="md" />
+            <NativeSelect
+                data={['C -> S', 'S -> C', 'C <-> S']}
+                label="Choose the source of the packets to filter"
+                variant="filled"
+                {...form.getInputProps('mode')}
+            />
+            <Space h="md" />
+            <FilterTypeSelector
+                size="md"
+                color="gray"
+                {...form.getInputProps('type')}
+            />
+            <Group position="right" mt="md">
+                <Button loading={submitLoading} type="submit">Add Filter</Button>
+            </Group>
 
-        <Space h="md" />
-        
-        {error?<>
-        <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
-            Error: {error}
-        </Notification><Space h="md" /></>:null}
-        
-    </form>
+            <Space h="md" />
+            
+            {error?<>
+            <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
+                Error: {error}
+            </Notification><Space h="md" /></>:null}
+            
+        </form>
+    </Modal>
 
 }
 
