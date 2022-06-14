@@ -45,9 +45,9 @@ function App() {
     return <LoadingOverlay visible/>
   }else if (reqError){
     return <div className='center-flex-row' style={{padding:"100px"}}>
-      <Title order={1} align="center">Errore nel caricamento del firewall! 🔥</Title>
+      <Title order={1} align="center">Error launching Firegex! 🔥</Title>
       <Space h="md" />
-      <Title order={4} align="center">Errore nella comunicazione con il backend</Title>
+      <Title order={4} align="center">Error communicating with backend</Title>
       <Space h="md" />
       Errore: {reqError}
       <Space h="xl" />
@@ -132,9 +132,9 @@ function App() {
           </Routes>
   }else{
     return <div className='center-flex-row' style={{padding:"100px"}}>
-      <Title order={1} align="center">Errore nel caricamento del firewall! 🔥</Title>
+      <Title order={1} align="center">Error launching Firegex! 🔥</Title>
       <Space h="md" />
-      <Title order={4} align="center">Errore nella comunicazione con il backend</Title>
+      <Title order={4} align="center">Error communicating with backend</Title>
     </div>
   }
 }

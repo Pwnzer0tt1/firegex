@@ -17,7 +17,7 @@ class SQLite():
         try:
             self.conn = sqlite3.connect("db/" + self.db_name + '.db', check_same_thread = False)
         except Exception:
-            with open(self.db_name + '.db', 'x') as f:
+            with open("db/" + self.db_name + '.db', 'x') as f:
                 pass
             self.conn = sqlite3.connect("db/" + self.db_name + '.db', check_same_thread = False)
 
