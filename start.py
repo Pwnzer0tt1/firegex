@@ -1,3 +1,5 @@
+#! /bin/python3
+
 import argparse, sys, platform
 
 parser = argparse.ArgumentParser()
