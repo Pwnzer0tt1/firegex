@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActionIcon, Badge, Button, Divider, Group, Image, Menu, Modal, Notification, Space, Switch, TextInput } from '@mantine/core';
+import { ActionIcon, Badge, Button, Divider, Group, Image, Menu, Modal, Notification, Space, Switch, TextInput, Tooltip, FloatingTooltip } from '@mantine/core';
 import style from "./Header.module.scss";
 import { changepassword, errorNotify, generalstats, logout, okNotify } from '../../js/utils';
 import { ChangePassword, GeneralStats, update_freq } from '../../js/models';
@@ -72,19 +72,16 @@ function Header() {
     setLoadingBtn(false)
   }
 
-
-
   const {srv_id} = useParams()
-
-  
-
   const [open, setOpen] = useState(false);
   const closeModal = () => {setOpen(false);}
 
   return <div id="header-page" className={style.header}>
-        <div style={{ width: 240, marginLeft: 'auto', marginRight: 'auto', padding:"40px" }}>
-          <Image src="/header-logo.png" alt="Firegex logo" />
-        </div>
+        <FloatingTooltip label="Home" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="dark" position="right" >
+          <div style={{ width: 240, marginLeft: 'auto', marginRight: 'auto', padding:"40px", cursor: 'pointer' }}>
+            <Image src="/header-logo.png" alt="Firegex logo" onClick={()=>navigator("/")}/>
+          </div>
+        </FloatingTooltip>
         <div className="flex-spacer" />
         <Badge color="green" size="lg" variant="filled">Services: {generalStats.services}</Badge>
         <Badge style={{marginLeft:"10px"}} size="lg" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>
@@ -98,13 +95,23 @@ function Header() {
         </Menu>
         <div style={{marginLeft:"20px"}}></div>
         { location.pathname !== "/"?
+          <Tooltip label="Home" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="teal">
             <ActionIcon color="teal" style={{marginRight:"10px"}}
               size="xl" radius="md" variant="filled"
               onClick={()=>navigator("/")}>
               <AiFillHome size="25px" />
             </ActionIcon>
+          </Tooltip>
         :null}
-        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+        { location.pathname !== "/"?
+          <Tooltip label="Add a new regex" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">
+            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+          </Tooltip>
+        : <Tooltip label="Add a new service" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">
+            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+          </Tooltip>
+      }
+        
         {srv_id?
           <Modal size="xl" title="Add a new regex filter" opened={open} onClose={closeModal} closeOnClickOutside={false} centered>
             <AddNewRegex closePopup={closeModal} service={srv_id} />

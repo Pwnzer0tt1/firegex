@@ -1,4 +1,4 @@
-import { Grid, Text, Title, Badge, Space, ActionIcon } from '@mantine/core';
+import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
 import { deleteregex, errorNotify, getHumanReadableRegex, okNotify } from '../../js/utils';
@@ -43,8 +43,10 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             <Text className={style.regex_text}> {regex_expr}</Text>
           </Grid.Col>
           <Grid.Col span={2}>
-            <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
-          </Grid.Col>
+            <Tooltip label="Delete regex" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="red">
+              <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
+            </Tooltip>
+            </Grid.Col>
           <Grid.Col span={2} />
           <Grid.Col className='center-flex-row' span={4}>
             <Space h="xs" />

@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Grid, Space, Title } from '@mantine/core';
+import { ActionIcon, Badge, Grid, Space, Title, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { FaPause, FaPlay, FaStop } from 'react-icons/fa';
 import { Service } from '../../js/models';
@@ -8,7 +8,7 @@ import YesNoModal from '../YesNoModal';
 import { errorNotify, okNotify, pauseservice, startservice, stopservice } from '../../js/utils';
 
 //"status":"stop"/"wait"/"active"/"pause",
-function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, onClick?:()=>void, additional_buttons?:any }) {
+function ServiceRow({ service, onClick, additional_buttons, add_new_regex }:{ service:Service, onClick?:()=>void, additional_buttons?:any, add_new_regex?:any }) {
 
     let status_color = "gray";
     switch(service.status){
@@ -73,6 +73,9 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                 </div>
             </Grid.Col>
             <Grid.Col className="center-flex" span={8}>
+                <div className="center-flex">
+                    {add_new_regex}
+                </div>
                 <div className='flex-spacer'></div>
                 <div className="center-flex-row">
                     <Badge style={{marginBottom:"20px"}} color={status_color} radius="sm" size="xl" variant="filled">Status: <u>{service.status}</u></Badge>
@@ -83,23 +86,30 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                 <div className="center-flex">
                     {additional_buttons}
                     {["pause","wait"].includes(service.status)?
-                        <ActionIcon color="yellow" loading={buttonLoading}
-                        onClick={()=>setStopModal(true)} size="xl" radius="md" variant="filled"
-                        disabled={service.status === "stop"}>
-                            <FaStop size="20px" />
-                        </ActionIcon>:
-                        <ActionIcon color="red" loading={buttonLoading}
-                                onClick={pauseService} size="xl" radius="md" variant="filled"
-                                disabled={service.status === "stop"}>
-                            <FaPause size="20px" />
-                        </ActionIcon>
+                        
+                        <Tooltip label="Stop service" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="orange">
+                            <ActionIcon color="yellow" loading={buttonLoading}
+                            onClick={()=>setStopModal(true)} size="xl" radius="md" variant="filled"
+                            disabled={service.status === "stop"}>
+                                <FaStop size="20px" />
+                            </ActionIcon>
+                        </Tooltip>:
+                        <Tooltip label="Pause service" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="red">
+                            <ActionIcon color="red" loading={buttonLoading}
+                                    onClick={pauseService} size="xl" radius="md" variant="filled"
+                                    disabled={service.status === "stop"}>
+                                <FaPause size="20px" />
+                            </ActionIcon>
+                        </Tooltip>
                     }
                     
                     <Space w="md"/>
-                    <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
-                                variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
-                        <FaPlay size="20px" />
-                    </ActionIcon>
+                    <Tooltip label="Start service" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="teal">
+                        <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
+                                    variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
+                            <FaPlay size="20px" />
+                        </ActionIcon>
+                    </Tooltip>
                 </div>
                 <Space w="xl" /><Space w="xl" />
                 {onClick?<MdOutlineArrowForwardIos onClick={onClick} style={{cursor:"pointer"}} size="45px" />:null}
@@ -107,8 +117,8 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
             </Grid.Col>
         </Grid>
         <YesNoModal
-            title='Are you sure to stop this service!'
-            description={`You are going to delete the service '${service.id}', causing the stopping of the firewall. This will cause the shutdown of your service ⚠️!`}
+            title='Are you sure to stop this service?'
+            description={`You are going to delete the service '${service.id}', causing the firewall to stop. This will cause the shutdown of your service ⚠️!`}
             onClose={()=>setStopModal(false)}
             action={stopService}
             opened={stopModal}

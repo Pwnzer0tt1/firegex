@@ -1,9 +1,11 @@
-import { ActionIcon, Grid, LoadingOverlay, Space, Title } from '@mantine/core';
+import { ActionIcon, Grid, LoadingOverlay, Modal, Space, Title, Tooltip } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { BsTrashFill } from 'react-icons/bs';
 import { useNavigate, useParams } from 'react-router-dom';
 import RegexView from '../components/RegexView';
 import ServiceRow from '../components/ServiceRow';
+import AddNewRegex from '../components/AddNewRegex';
+import { BsPlusLg } from "react-icons/bs";
 import YesNoModal from '../components/YesNoModal';
 import { RegexFilter, Service, update_freq } from '../js/models';
 import { deleteservice, errorNotify, okNotify, regenport, serviceinfo, serviceregexlist } from '../js/utils';
@@ -24,6 +26,8 @@ function ServiceDetails() {
 
     const [regexesList, setRegexesList] = useState<RegexFilter[]>([])
     const [loader, setLoader] = useState(true);
+    const [open, setOpen] = useState(false);
+    const closeModal = () => {setOpen(false);}
 
     const navigator = useNavigate()
 
@@ -80,17 +84,48 @@ function ServiceDetails() {
     return <div>
         <LoadingOverlay visible={loader} />
         <ServiceRow service={serviceInfo} additional_buttons={<>
-            <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
+            <Tooltip label="Delete service" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="red">           
+                <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
+            </Tooltip>
             <Space w="md"/>
-            <ActionIcon color="blue" onClick={()=>setChangePortModal(true)} size="xl" radius="md" variant="filled"><BsArrowRepeat size={28} /></ActionIcon>
+            <Tooltip label="Change proxy port" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">           
+                <ActionIcon color="blue" onClick={()=>setChangePortModal(true)} size="xl" radius="md" variant="filled"><BsArrowRepeat size={28} /></ActionIcon>
+            </Tooltip>
             <Space w="md"/>
+        </>} add_new_regex={<>
+            <Tooltip label="Add a new regex" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">
+                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+            </Tooltip>
         </>}></ServiceRow>
+        
         {regexesList.length === 0? 
-            <><Space h="xl" /> <Title className='center-flex' order={3}>No regex found for this service! Add one clicking the add button above</Title></>:
+            <><Space h="xl" /> <Title className='center-flex' order={3}>No regex found for this service! Add one by clicking the "+" button</Title>
+            <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> 
+            <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                }}>
+                <Tooltip label="Add a new regex" transition="skew-down" transitionDuration={300} transitionTimingFunction="ease" color="blue">
+                    <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+                </Tooltip>
+            </div>
+            
+            </>
+            
+            :
             <Grid>
                 {regexesList.map( (regexInfo) => <Grid.Col key={regexInfo.id} span={6}><RegexView regexInfo={regexInfo}/></Grid.Col>)}
             </Grid>
         }
+
+        {srv_id?
+          <Modal size="xl" title="Add a new regex filter" opened={open} onClose={closeModal} closeOnClickOutside={false} centered>
+            <AddNewRegex closePopup={closeModal} service={srv_id} />
+          </Modal>:
+          null
+        }
+
         <YesNoModal
             title='Are you sure to delete this service?'
             description={`You are going to delete the service '${serviceInfo.id}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service ⚠️!`}

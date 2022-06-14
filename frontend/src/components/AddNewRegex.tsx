@@ -1,4 +1,4 @@
-import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Tooltip } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { RegexAddForm } from '../js/models';
@@ -78,13 +78,16 @@ function AddNewRegex({ closePopup, service }:{ closePopup:()=>void, service:stri
             {...form.getInputProps('regex')}
         />
         <Space h="md" />
-        <Switch
-            label="Use percentage encoding for binary values"
-            {...form.getInputProps('percentage_encoding', { type: 'checkbox' })}
-        />
+        <Tooltip label="To represent binary data use URL encoding. Example: %01" transition="slide-left" transitionDuration={300} transitionTimingFunction="ease"  
+                color="gray" wrapLines width={220} withArrow position='right'>      
+            <Switch
+                label="Use percentage encoding for binary values"
+                {...form.getInputProps('percentage_encoding', { type: 'checkbox' })}
+            />
+        </Tooltip>
         <Space h="md" />
         <Switch
-            label="Match the exactly the regex"
+            label="Match exactly the regex"
             {...form.getInputProps('regex_exact', { type: 'checkbox' })}
         />
         <Space h="md" />
