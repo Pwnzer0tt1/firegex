@@ -4,8 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { ImCross } from 'react-icons/im';
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
-import { PasswordSend, ServerStatusResponse, update_freq } from './js/models';
-import { getstatus, login, setpassword } from './js/utils';
+import { PasswordSend, ServerStatusResponse } from './js/models';
+import { fireUpdateRequest, getstatus, login, setpassword } from './js/utils';
 import HomePage from './pages/HomePage';
 import ServiceDetails from './pages/ServiceDetails';
 
@@ -25,11 +25,16 @@ function App() {
       }).catch(err=>{
         setReqError(err.toString())
         setLoading(false)
-        setTimeout(getStatus, update_freq)
+        setTimeout(getStatus, 500)
       })
   }
 
   useEffect(getStatus,[])
+
+  useEffect(()=>{
+      const updater = setInterval(fireUpdateRequest,2000)
+      return () => clearInterval(updater)     
+  },[])
 
   const form = useForm({
     initialValues: {
@@ -39,7 +44,6 @@ function App() {
       password: (value) => value !== ""
     }
   })
-
 
   if (loading){
     return <LoadingOverlay visible/>

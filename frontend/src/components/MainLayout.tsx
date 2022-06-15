@@ -6,7 +6,7 @@ import Header from './Header';
 function MainLayout({ children }:{ children:any }) {
   return <>
       
-            <Header />
+            <Header/>
             <Space h="xl" />
             <Container size="xl" style={{minHeight:"57.5vh"}}>
                 {children}

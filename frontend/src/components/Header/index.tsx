@@ -1,17 +1,16 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { ActionIcon, Badge, Button, Divider, Group, Image, Menu, Modal, Notification, Space, Switch, TextInput, Tooltip, FloatingTooltip, MediaQuery } from '@mantine/core';
 import style from "./Header.module.scss";
-import { changepassword, errorNotify, generalstats, logout, okNotify } from '../../js/utils';
-import { ChangePassword, GeneralStats, update_freq } from '../../js/models';
+import { changepassword, errorNotify, eventUpdateName, generalstats, logout, okNotify } from '../../js/utils';
+import { ChangePassword, GeneralStats } from '../../js/models';
 import { BsPlusLg } from "react-icons/bs"
 import { AiFillHome } from "react-icons/ai"
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import AddNewRegex from '../AddNewRegex';
 import AddNewService from '../AddNewService';
-import { MdSettings } from 'react-icons/md';
 import { FaLock } from 'react-icons/fa';
 import { ImCross, ImExit } from 'react-icons/im';
-import { useForm } from '@mantine/hooks';
+import { useForm, useWindowEvent } from '@mantine/hooks';
 
 
 function Header() {
@@ -29,11 +28,7 @@ function Header() {
     )
   }
 
-  useEffect(()=>{
-      updateInfo()
-      const updater = setInterval(updateInfo, update_freq)
-      return () => { clearInterval(updater) }
-  }, []);
+  useWindowEvent(eventUpdateName, updateInfo)
   
   const logout_action = () => {
     logout().then(r => {
@@ -74,7 +69,7 @@ function Header() {
 
   const {srv_id} = useParams()
   const [open, setOpen] = useState(false);
-  const closeModal = () => {setOpen(false);updateInfo();}
+  const closeModal = () => {setOpen(false);}
 
   return <div id="header-page" className={style.header}>
         <FloatingTooltip zIndex={0} label="Home" transition="pop" transitionDuration={200} openDelay={1000} transitionTimingFunction="ease" color="dark" position="right" >

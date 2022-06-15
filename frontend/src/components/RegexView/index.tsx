@@ -1,7 +1,7 @@
 import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
-import { deleteregex, errorNotify, getHumanReadableRegex, okNotify } from '../../js/utils';
+import { deleteregex, errorNotify, fireUpdateRequest, getHumanReadableRegex, okNotify } from '../../js/utils';
 import style from "./RegexView.module.scss";
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
@@ -28,6 +28,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
     deleteregex(regexInfo.id).then(res => {
       if(!res){
         okNotify(`Regex ${regex_expr} deleted successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been deleted!`)
+        fireUpdateRequest()
       }else{
         errorNotify(`Regex ${regex_expr} deleation failed!`,`Error: ${res}`)
       }

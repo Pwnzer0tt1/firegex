@@ -1,11 +1,12 @@
-import { ActionIcon, LoadingOverlay, Modal, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import { useNavigate } from 'react-router-dom';
 import ServiceRow from '../components/ServiceRow';
-import { Service, update_freq } from '../js/models';
-import { errorNotify, servicelist } from '../js/utils';
+import { Service } from '../js/models';
+import { errorNotify, eventUpdateName, fireUpdateRequest, servicelist } from '../js/utils';
 import AddNewService from '../components/AddNewService';
+import { useWindowEvent } from '@mantine/hooks';
 
 
 function HomePage() {
@@ -24,13 +25,10 @@ function HomePage() {
         setLoader(false)
     }
 
-    useEffect(()=>{
-        updateInfo()
-        const updater = setInterval(updateInfo, update_freq)
-        return () => { clearInterval(updater) }
-    }, []);
+    useWindowEvent(eventUpdateName, updateInfo)
+    useEffect(fireUpdateRequest,[])
 
-    const closeModal = () => {setOpen(false);updateInfo();}
+    const closeModal = () => {setOpen(false);}
 
     return <div id="service-list" className="center-flex-row">
         <LoadingOverlay visible={loader} />

@@ -1,9 +1,11 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
-import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, notification_time, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword } from "./models";
+import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword } from "./models";
 
 var Buffer = require('buffer').Buffer 
+
+export const eventUpdateName = "update-info"
 
 const custom_url = (!process.env.NODE_ENV || process.env.NODE_ENV === 'development')?"http://127.0.0.1:8080":""
 
@@ -40,6 +42,10 @@ export async function postapi(path:string,data:any):Promise<any>{
             reject(err)
         })
     });
+}
+
+export function fireUpdateRequest(){
+    window.dispatchEvent(new Event(eventUpdateName))
 }
 
 export async function getstatus(){
@@ -139,7 +145,7 @@ export function getHumanReadableRegex(regexB64:string){
 
 export function errorNotify(title:string, description:string ){
     showNotification({
-        autoClose: notification_time,
+        autoClose: 2000,
         title: title,
         message: description,
         color: 'red',
@@ -149,7 +155,7 @@ export function errorNotify(title:string, description:string ){
 
 export function okNotify(title:string, description:string ){
     showNotification({
-        autoClose: notification_time,
+        autoClose: 2000,
         title: title,
         message: description,
         color: 'teal',

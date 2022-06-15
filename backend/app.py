@@ -333,18 +333,18 @@ if DEBUG:
 if __name__ == '__main__':
     db.check_integrity({
         'services': {
-            'status': 'VARCHAR(100)',
+            'status': 'VARCHAR(100) NOT NULL',
             'service_id': 'VARCHAR(100) PRIMARY KEY',
-            'internal_port': 'INT NOT NULL UNIQUE',
-            'public_port': 'INT NOT NULL UNIQUE',
+            'internal_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
+            'public_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
             'name': 'VARCHAR(100) NOT NULL'
         },
         'regexes': {
             'regex': 'TEXT NOT NULL',
-            'mode': 'VARCHAR(1)',
+            'mode': 'VARCHAR(1) NOT NULL',
             'service_id': 'VARCHAR(100) NOT NULL',
             'is_blacklist': 'VARCHAR(1) NOT NULL',
-            'blocked_packets': 'INTEGER NOT NULL DEFAULT 0',
+            'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
             'regex_id': 'INTEGER PRIMARY KEY',
             'FOREIGN KEY (service_id)':'REFERENCES services (service_id)'
         },

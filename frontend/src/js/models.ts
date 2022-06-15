@@ -1,8 +1,3 @@
-
-
-export const update_freq = 2000;
-export const notification_time = 1500;
-
 export type GeneralStats = {
     services:number,
     closed:number,

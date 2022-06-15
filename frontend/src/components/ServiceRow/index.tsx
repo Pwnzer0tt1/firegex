@@ -5,7 +5,7 @@ import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
 import YesNoModal from '../YesNoModal';
-import { errorNotify, okNotify, pauseservice, startservice, stopservice, servicelist } from '../../js/utils';
+import { errorNotify, fireUpdateRequest, okNotify, pauseservice, startservice, stopservice } from '../../js/utils';
 
 //"status":"stop"/"wait"/"active"/"pause",
 function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, onClick?:()=>void, additional_buttons?:any }) {
@@ -18,18 +18,6 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         case "pause": status_color = "cyan"; break;
     }
 
-    
-    const [services, setServices] = useState<Service[]>([]);
-    const [loader, setLoader] = useState(true);
-    const updateInfo = async () => {
-        await servicelist().then(res => {
-            setServices(res)    
-        }).catch(err => {
-            errorNotify("Home Page Auto-Update failed!", err.toString())
-        })
-        setLoader(false)
-    }
-
     const [stopModal, setStopModal] = useState(false);
     const [buttonLoading, setButtonLoading] = useState(false)
 
@@ -38,7 +26,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         await stopservice(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} stopped successfully!`,`The service ${service.name} has been stopped!`)
-                updateInfo();
+                fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the stopping of the service ${service.id}`,`Error: ${res}`)
             }
@@ -53,7 +41,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         await startservice(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} started successfully!`,`The service ${service.name} has been started!`)
-                updateInfo();
+                fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the starting of the service ${service.id}`,`Error: ${res}`)
             }
@@ -68,7 +56,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         await pauseservice(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} paused successfully!`,`The service ${service.name} has been paused (Transparent mode)!`)
-                updateInfo();
+                fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the pausing of the service ${service.id}`,`Error: ${res}`)
             }
@@ -162,7 +150,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         <YesNoModal
             title='Are you sure to stop this service?'
             description={`You are going to delete the service '${service.id}', causing the firewall to stop. This will cause the shutdown of your service ⚠️!`}
-            onClose={()=>{setStopModal(false);updateInfo();}}
+            onClose={()=>{setStopModal(false);}}
             action={stopService}
             opened={stopModal}
         />

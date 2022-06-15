@@ -1,4 +1,4 @@
-import { ActionIcon, Grid, LoadingOverlay, Modal, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { BsTrashFill } from 'react-icons/bs';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -7,9 +7,10 @@ import ServiceRow from '../components/ServiceRow';
 import AddNewRegex from '../components/AddNewRegex';
 import { BsPlusLg } from "react-icons/bs";
 import YesNoModal from '../components/YesNoModal';
-import { RegexFilter, Service, update_freq } from '../js/models';
-import { deleteservice, errorNotify, okNotify, regenport, serviceinfo, serviceregexlist } from '../js/utils';
+import { RegexFilter, Service } from '../js/models';
+import { deleteservice, errorNotify, eventUpdateName, fireUpdateRequest, okNotify, regenport, serviceinfo, serviceregexlist } from '../js/utils';
 import { BsArrowRepeat } from "react-icons/bs"
+import { useWindowEvent } from '@mantine/hooks';
 
 function ServiceDetails() {
     const {srv_id} = useParams()
@@ -23,6 +24,11 @@ function ServiceDetails() {
         public_port:0,
         status:"🤔"
     })
+
+    const [regexesList, setRegexesList] = useState<RegexFilter[]>([])
+    const [loader, setLoader] = useState(true);
+    const [open, setOpen] = useState(false);
+    const closeModal = () => {setOpen(false);updateInfo();}
 
     const updateInfo = async () => {
         if (!srv_id) return
@@ -43,19 +49,10 @@ function ServiceDetails() {
         setLoader(false)
     }
 
-    const [regexesList, setRegexesList] = useState<RegexFilter[]>([])
-    const [loader, setLoader] = useState(true);
-    const [open, setOpen] = useState(false);
-    const closeModal = () => {setOpen(false);updateInfo();}
+    useWindowEvent(eventUpdateName, updateInfo)
+    useEffect(fireUpdateRequest,[])
 
     const navigator = useNavigate()
-
-    
-    useEffect(()=>{
-        updateInfo()
-        const updater = setInterval(updateInfo, update_freq)
-        return () => { clearInterval(updater) }
-    },[]);
 
     const [deleteModal, setDeleteModal] = useState(false)
     const [changePortModal, setChangePortModal] = useState(false)
@@ -109,7 +106,7 @@ function ServiceDetails() {
                 </div>
             </>:
             <Grid>
-                {regexesList.map( (regexInfo) => <Grid.Col key={regexInfo.id} lg={6} xs={12}><RegexView regexInfo={regexInfo}/></Grid.Col>)}
+                {regexesList.map( (regexInfo) => <Grid.Col key={regexInfo.id} lg={6} xs={12}><RegexView regexInfo={regexInfo} /></Grid.Col>)}
             </Grid>
         }
 
