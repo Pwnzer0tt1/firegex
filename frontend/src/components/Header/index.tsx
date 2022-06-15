@@ -21,12 +21,12 @@ function Header() {
 
   const navigator = useNavigate()
 
-    const updateInfo = () => {
-      generalstats().then(res => {
-        setGeneralStats(res)
-      }).catch(
-        err => errorNotify("General Info Auto-Update failed!", err.toString())
-      )
+  const updateInfo = () => {
+    generalstats().then(res => {
+      setGeneralStats(res)
+    }).catch(
+      err => errorNotify("General Info Auto-Update failed!", err.toString())
+    )
   }
 
   useEffect(()=>{

@@ -62,26 +62,27 @@ function ServiceDetails() {
     
     const deleteService = () => {
         deleteservice(serviceInfo.id).then(res => {
-            if (!res)
+            if (!res){
                 okNotify("Service delete complete!",`The service ${serviceInfo.id} has been deleted!`)
-            else
+                updateInfo();
+            }else
                 errorNotify("An error occurred while deleting a service",`Error: ${res}`)
         }).catch(err => {
             errorNotify("An error occurred while deleting a service",`Error: ${err}`)
         })
-        updateInfo();
+        
     }
 
     const changePort = () => {
         regenport(serviceInfo.id).then(res => {
-            if (!res)
+            if (!res){
                 okNotify("Service port regeneration completed!",`The service ${serviceInfo.id} has changed the internal port!`)
-            else
+                updateInfo();
+            }else
                 errorNotify("An error occurred while changing the internal service port",`Error: ${res}`)
         }).catch(err => {
             errorNotify("An error occurred while changing the internal service port",`Error: ${err}`)
         })
-        updateInfo();
     }
 
     return <div>

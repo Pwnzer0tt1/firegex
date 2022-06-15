@@ -38,6 +38,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         await stopservice(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} stopped successfully!`,`The service ${service.name} has been stopped!`)
+                updateInfo();
             }else{
                 errorNotify(`An error as occurred during the stopping of the service ${service.id}`,`Error: ${res}`)
             }
@@ -45,7 +46,6 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
             errorNotify(`An error as occurred during the stopping of the service ${service.id}`,`Error: ${err}`)
         })
         setButtonLoading(false);
-        updateInfo();
     }
 
     const startService = async () => {
@@ -53,6 +53,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         await startservice(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} started successfully!`,`The service ${service.name} has been started!`)
+                updateInfo();
             }else{
                 errorNotify(`An error as occurred during the starting of the service ${service.id}`,`Error: ${res}`)
             }
@@ -60,7 +61,6 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
             errorNotify(`An error as occurred during the starting of the service ${service.id}`,`Error: ${err}`)
         })
         setButtonLoading(false)
-        updateInfo();
     }
 
     const pauseService = async () => {
@@ -68,6 +68,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         await pauseservice(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} paused successfully!`,`The service ${service.name} has been paused (Transparent mode)!`)
+                updateInfo();
             }else{
                 errorNotify(`An error as occurred during the pausing of the service ${service.id}`,`Error: ${res}`)
             }
@@ -75,7 +76,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
             errorNotify(`An error as occurred during the pausing of the service ${service.id}`,`Error: ${err}`)
         })
         setButtonLoading(false)
-        updateInfo();
+        
     }
 
     return <>
