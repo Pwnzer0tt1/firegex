@@ -2,7 +2,7 @@ import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, To
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { RegexAddForm } from '../js/models';
-import { addregex, b64encode, getHumanReadableRegex, okNotify, validateRegex } from '../js/utils';
+import { addregex, b64encode, getHumanReadableRegex, okNotify } from '../js/utils';
 import { ImCross } from "react-icons/im"
 import FilterTypeSelector from './FilterTypeSelector';
 
@@ -26,7 +26,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             percentage_encoding:false
         },
         validationRules:{
-            regex: (value) => value !== "" && validateRegex(value),
+            regex: (value) => value !== "",
             type: (value) => ["blacklist","whitelist"].includes(value),
             mode: (value) => ['C -> S', 'S -> C', 'C <-> S'].includes(value)
         }
@@ -35,6 +35,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
     const close = () =>{
         onClose()
         form.reset()
+        setError(null)
     }
 
     const [submitLoading, setSubmitLoading] = useState(false)
@@ -64,9 +65,12 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                 setSubmitLoading(false)
                 close();
                 okNotify(`Regex ${getHumanReadableRegex(request.regex)} has been added`, `Successfully added ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_id} service`)
+            }else if (res.toLowerCase() === "invalid regex"){
+                setSubmitLoading(false)
+                form.setFieldError("regex", "Invalid Regex")
             }else{
                 setSubmitLoading(false)
-                setError("Invalid request! [ "+res+" ]")
+                setError("Error: [ "+res+" ]")
             }
         }).catch( err => {
             setSubmitLoading(false)
@@ -84,7 +88,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                 {...form.getInputProps('regex')}
             />
             <Space h="md" />
-            <Tooltip label="To represent binary data use URL encoding. Example: %01" transition="slide-left" openDelay={600} transitionDuration={250} transitionTimingFunction="ease"  
+            <Tooltip label="To represent binary data use URL encoding. Example: %01" transition="slide-left" openDelay={1500} transitionDuration={250} transitionTimingFunction="ease"  
                     color="gray" wrapLines width={220} withArrow position='right'>      
                 <Switch
                     label="Use percentage encoding for binary values"

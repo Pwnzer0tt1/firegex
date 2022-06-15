@@ -1,3 +1,4 @@
+from base64 import b64decode
 import sqlite3, subprocess, sys, threading, bcrypt, secrets, time, re
 from flask import Flask, jsonify, request, abort, session
 from functools import wraps
@@ -262,7 +263,6 @@ def get_regex_delete(regex_id):
     
     return {'status': 'ok'}
 
-
 @app.route('/api/regexes/add', methods = ['POST'])
 @login_required
 def post_regexes_add():
@@ -283,9 +283,17 @@ def post_regexes_add():
             return abort(400)
     except Exception:
         return abort(400)
-    db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode) VALUES (?, ?, ?, ?);", 
+
+    try:
+        re.compile(b64decode(req["regex"]))
+    except Exception:
+        return {"status":"Invalid regex"}
+    try:
+        db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode) VALUES (?, ?, ?, ?);", 
                 (req['service_id'], req['regex'], req['is_blacklist'], req['mode']))
-    
+    except sqlite3.IntegrityError:
+        return {'status': 'An identical regex already exists'}
+
     firewall.fire_update(req['service_id'])
     return {'status': 'ok'}
 
@@ -345,6 +353,7 @@ if __name__ == '__main__':
             'value': 'VARCHAR(100) NOT NULL',
         },
     })
+    db.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode);")
 
     if DEBUG:
         app.run(host="0.0.0.0", port=8080 ,debug=True)

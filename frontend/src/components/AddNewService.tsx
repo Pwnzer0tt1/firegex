@@ -21,6 +21,7 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
     const close = () =>{
         onClose()
         form.reset()
+        setError(null)
     }
 
     const [submitLoading, setSubmitLoading] = useState(false)

@@ -1,6 +1,6 @@
 from asyncore import file_dispatcher
 from proxy import Filter, Proxy
-import random, string, os, threading, sqlite3, time
+import random, string, os, threading, sqlite3, time, atexit
 from kthread import KThread
 from base64 import b64decode
 
@@ -68,18 +68,26 @@ class STATUS:
     STOP = "stop"
     PAUSE = "pause"
     ACTIVE = "active"
-
+ 
 class ProxyManager:
     def __init__(self, db:SQLite):
         self.db = db
         self.proxy_table = {}
         self.lock = threading.Lock()
+        atexit.register(self.clear)
 
     def __clear_proxy_table(self):
         with self.lock:
             for key in list(self.proxy_table.keys()):
                 if not self.proxy_table[key]["thread"].is_alive():
                     del self.proxy_table[key]
+
+    def clear(self):
+        with self.lock:
+            for key in list(self.proxy_table.keys()):
+                if self.proxy_table[key]["thread"].is_alive():
+                    self.proxy_table[key]["thread"].kill()
+                del self.proxy_table[key]
 
     def reload(self):
         self.__clear_proxy_table()

@@ -159,17 +159,6 @@ export function okNotify(title:string, description:string ){
     });
 }
 
-export function validateRegex(pattern:string) {
-    return true; // TO TEST
-    try {
-        new RegExp(pattern);
-        return true;
-    }
-    catch(e) {
-        return false;
-    }
-}
-
 export function b64encode(data:string){
     return Buffer.from(data).toString('base64')
 }
