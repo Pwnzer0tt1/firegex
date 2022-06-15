@@ -14,7 +14,6 @@ function HomePage() {
     const [loader, setLoader] = useState(true);
     const navigator = useNavigate()
     const [open, setOpen] = useState(false);
-    const closeModal = () => {setOpen(false);}
     
     const updateInfo = async () => {
         await servicelist().then(res => {
@@ -31,8 +30,8 @@ function HomePage() {
         return () => { clearInterval(updater) }
     }, []);
 
+    const closeModal = () => {setOpen(false);updateInfo();}
 
-    
     return <div id="service-list" className="center-flex-row">
         <LoadingOverlay visible={loader} />
         {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.id} onClick={()=>{

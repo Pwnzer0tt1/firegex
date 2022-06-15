@@ -5,7 +5,7 @@ import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
 import YesNoModal from '../YesNoModal';
-import { errorNotify, okNotify, pauseservice, startservice, stopservice } from '../../js/utils';
+import { errorNotify, okNotify, pauseservice, startservice, stopservice, servicelist } from '../../js/utils';
 
 //"status":"stop"/"wait"/"active"/"pause",
 function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, onClick?:()=>void, additional_buttons?:any }) {
@@ -16,6 +16,18 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         case "wait": status_color = "yellow"; break;
         case "active": status_color = "teal"; break;
         case "pause": status_color = "cyan"; break;
+    }
+
+    
+    const [services, setServices] = useState<Service[]>([]);
+    const [loader, setLoader] = useState(true);
+    const updateInfo = async () => {
+        await servicelist().then(res => {
+            setServices(res)    
+        }).catch(err => {
+            errorNotify("Home Page Auto-Update failed!", err.toString())
+        })
+        setLoader(false)
     }
 
     const [stopModal, setStopModal] = useState(false);
@@ -32,7 +44,8 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         }).catch(err => {
             errorNotify(`An error as occurred during the stopping of the service ${service.id}`,`Error: ${err}`)
         })
-        setButtonLoading(false)
+        setButtonLoading(false);
+        updateInfo();
     }
 
     const startService = async () => {
@@ -47,6 +60,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
             errorNotify(`An error as occurred during the starting of the service ${service.id}`,`Error: ${err}`)
         })
         setButtonLoading(false)
+        updateInfo();
     }
 
     const pauseService = async () => {
@@ -61,6 +75,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
             errorNotify(`An error as occurred during the pausing of the service ${service.id}`,`Error: ${err}`)
         })
         setButtonLoading(false)
+        updateInfo();
     }
 
     return <>
@@ -146,7 +161,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         <YesNoModal
             title='Are you sure to stop this service?'
             description={`You are going to delete the service '${service.id}', causing the firewall to stop. This will cause the shutdown of your service ⚠️!`}
-            onClose={()=>setStopModal(false)}
+            onClose={()=>{setStopModal(false);updateInfo();}}
             action={stopService}
             opened={stopModal}
         />

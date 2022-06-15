@@ -74,7 +74,7 @@ function Header() {
 
   const {srv_id} = useParams()
   const [open, setOpen] = useState(false);
-  const closeModal = () => {setOpen(false);}
+  const closeModal = () => {setOpen(false);updateInfo();}
 
   return <div id="header-page" className={style.header}>
         <FloatingTooltip zIndex={0} label="Home" transition="pop" transitionDuration={200} openDelay={1000} transitionTimingFunction="ease" color="dark" position="right" >

@@ -24,13 +24,6 @@ function ServiceDetails() {
         status:"🤔"
     })
 
-    const [regexesList, setRegexesList] = useState<RegexFilter[]>([])
-    const [loader, setLoader] = useState(true);
-    const [open, setOpen] = useState(false);
-    const closeModal = () => {setOpen(false);}
-
-    const navigator = useNavigate()
-
     const updateInfo = async () => {
         if (!srv_id) return
         let error = false;
@@ -50,6 +43,14 @@ function ServiceDetails() {
         setLoader(false)
     }
 
+    const [regexesList, setRegexesList] = useState<RegexFilter[]>([])
+    const [loader, setLoader] = useState(true);
+    const [open, setOpen] = useState(false);
+    const closeModal = () => {setOpen(false);updateInfo();}
+
+    const navigator = useNavigate()
+
+    
     useEffect(()=>{
         updateInfo()
         const updater = setInterval(updateInfo, update_freq)
@@ -68,6 +69,7 @@ function ServiceDetails() {
         }).catch(err => {
             errorNotify("An error occurred while deleting a service",`Error: ${err}`)
         })
+        updateInfo();
     }
 
     const changePort = () => {
@@ -79,6 +81,7 @@ function ServiceDetails() {
         }).catch(err => {
             errorNotify("An error occurred while changing the internal service port",`Error: ${err}`)
         })
+        updateInfo();
     }
 
     return <div>
@@ -114,7 +117,7 @@ function ServiceDetails() {
         <YesNoModal
             title='Are you sure to delete this service?'
             description={`You are going to delete the service '${serviceInfo.id}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service ⚠️!`}
-            onClose={()=>setDeleteModal(false)}
+            onClose={()=>setDeleteModal(false) }
             action={deleteService}
             opened={deleteModal}
         />
