@@ -96,7 +96,7 @@ function ServiceDetails() {
         
         {regexesList.length === 0?<>
                 <Space h="xl" />
-                <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" button</Title>
+                <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" />
                 <div className='center-flex'>
                     <Tooltip label="Add a new regex" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">

@@ -37,7 +37,7 @@ function HomePage() {
         <LoadingOverlay visible={loader} />
         {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.id} onClick={()=>{
             navigator("/"+srv.id)
-        }} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" button above</Title>
+        }} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
             <Space h="xl" /> <Space h="xl" /> 
             <div className='center-flex'>
                 <Tooltip label="Add a new service" transition="pop" transitionDuration={200} openDelay={500} zIndex={0} transitionTimingFunction="ease" color="blue">

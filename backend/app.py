@@ -14,7 +14,7 @@ firewall = ProxyManager(db)
 
 app = Flask(__name__)
 
-DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
+DEBUG = not (len(sys.argv) > 1 and sys.argv[1] == "UWSGI")
 
 def is_loggined():
     if DEBUG: return True
@@ -354,8 +354,7 @@ if __name__ == '__main__':
         },
     })
     db.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode);")
-
-    if DEBUG:
+    if DEBUG: 
         app.run(host="0.0.0.0", port=8080 ,debug=True)
     else:
         subprocess.run(["uwsgi","--socket","./uwsgi.sock","--master","--module","app:app", "--enable-threads"])

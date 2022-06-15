@@ -5,15 +5,13 @@ import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, not
 
 var Buffer = require('buffer').Buffer 
 
-const DEBUG = false
-
-const custom_url = DEBUG?"http://127.0.0.1:8080":""
+const custom_url = (!process.env.NODE_ENV || process.env.NODE_ENV === 'development')?"http://127.0.0.1:8080":""
 
 export async function getapi(path:string):Promise<any>{
     return await new Promise((resolve, reject) => {
         fetch(`${custom_url}/api/${path}`,{credentials: "same-origin"})
             .then(res => {
-                if(res.status == 401) window.location.reload()
+                if(res.status === 401) window.location.reload()
                 if(!res.ok) reject(res.statusText)
                 res.json().then( res => resolve(res) ).catch( err => reject(err))
             })
@@ -34,7 +32,7 @@ export async function postapi(path:string,data:any):Promise<any>{
             },
             body: JSON.stringify(data)
         }).then(res => {
-            if(res.status == 401) window.location.reload()
+            if(res.status === 401) window.location.reload()
             if(!res.ok) reject(res.statusText)
             res.json().then( res => resolve(res) ).catch( err => reject(err))
         })
