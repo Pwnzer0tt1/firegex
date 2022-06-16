@@ -52,6 +52,8 @@ function Header() {
   const [loadingBtn, setLoadingBtn] = useState(false)
   const [error, setError] = useState<null|string>(null)
   const [changePasswordModal, setChangePasswordModal] = useState(false);
+  const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
+  const [tooltipHomeOpened, setTooltipHomeOpened] = useState(false);
 
   const submitRequest = async (values:ChangePassword) => {
     setLoadingBtn(true)
@@ -110,20 +112,29 @@ function Header() {
         </Menu>
         <div style={{marginLeft:"20px"}}></div>
         { location.pathname !== "/"?
-          <Tooltip zIndex={0} label="Home" position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="teal">
+          <Tooltip zIndex={0} label="Home" position='bottom' transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="teal" opened={tooltipHomeOpened} tooltipId="tooltip-home-id">
             <ActionIcon color="teal" style={{marginRight:"10px"}}
               size="xl" radius="md" variant="filled"
-              onClick={()=>navigator("/")}>
+              onClick={()=>navigator("/")}
+              aria-describedby="tooltip-home-id"
+              onFocus={() => setTooltipHomeOpened(false)} onBlur={() => setTooltipHomeOpened(false)}
+              onMouseEnter={() => setTooltipHomeOpened(true)} onMouseLeave={() => setTooltipHomeOpened(false)}>
               <AiFillHome size="25px" />
             </ActionIcon>
           </Tooltip>
         :null}
         { srv_id?
-          <Tooltip label="Add a new regex" zIndex={0} position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
-            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+          <Tooltip label="Add a new regex" zIndex={0} position='bottom' transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="blue" opened={tooltipAddOpened} tooltipId="tooltip-add-id">
+            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
+             aria-describedby="tooltip-add-id"
+             onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
+             onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
           </Tooltip>
-        : <Tooltip label="Add a new service" zIndex={0} position='left' transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
-            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+        : <Tooltip label="Add a new service" zIndex={0} position='bottom' transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="blue" opened={tooltipAddOpened} tooltipId="tooltip-add-id">
+            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
+             aria-describedby="tooltip-add-id"
+             onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
+             onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
           </Tooltip>
       }
         

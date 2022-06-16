@@ -23,6 +23,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   }
 
   const [deleteModal, setDeleteModal] = useState(false);
+  const [tooltipOpened, setTooltipOpened] = useState(false);
 
   const deleteRegex = () => {
     deleteregex(regexInfo.id).then(res => {
@@ -44,8 +45,12 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             <Text className={style.regex_text}> {regex_expr}</Text>
           </Grid.Col>
           <Grid.Col span={2}>
-            <Tooltip label="Delete regex" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="red">
-              <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
+            <Tooltip label="Delete regex" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red" opened={tooltipOpened} tooltipId="tooltip-id">
+              <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"
+               aria-describedby="tooltip-id"
+               onFocus={() => setTooltipOpened(false)} onBlur={() => setTooltipOpened(false)}
+               onMouseEnter={() => setTooltipOpened(true)} onMouseLeave={() => setTooltipOpened(false)}
+              ><BsTrashFill size={22} /></ActionIcon>
             </Tooltip>
             </Grid.Col>
           <Grid.Col span={2} />

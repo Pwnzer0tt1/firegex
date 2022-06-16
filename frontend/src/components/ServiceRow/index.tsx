@@ -20,6 +20,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
 
     const [stopModal, setStopModal] = useState(false);
     const [buttonLoading, setButtonLoading] = useState(false)
+    const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
 
     const stopService = async () => {
         setButtonLoading(true)
@@ -112,14 +113,17 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                     {additional_buttons}
                     {["pause","wait"].includes(service.status)?
                         
-                        <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="orange">
+                        <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="orange" opened={tooltipStopOpened} tooltipId="tooltip-stop-id">
                             <ActionIcon color="yellow" loading={buttonLoading}
                             onClick={()=>setStopModal(true)} size="xl" radius="md" variant="filled"
-                            disabled={service.status === "stop"}>
+                            disabled={service.status === "stop"}
+                            aria-describedby="tooltip-stop-id"
+                            onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
+                            onMouseEnter={() => setTooltipStopOpened(true)} onMouseLeave={() => setTooltipStopOpened(false)}>
                                 <FaStop size="20px" />
                             </ActionIcon>
                         </Tooltip>:
-                        <Tooltip label="Pause service" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="red">
+                        <Tooltip label="Pause service" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red">
                             <ActionIcon color="red" loading={buttonLoading}
                                     onClick={pauseService} size="xl" radius="md" variant="filled"
                                     disabled={service.status === "stop"}>
@@ -129,7 +133,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                     }
                     
                     <Space w="md"/>
-                    <Tooltip label="Start service" transition="pop" zIndex={0} transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="teal">
+                    <Tooltip label="Start service" transition="pop" zIndex={0} transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="teal">
                         <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
                                     variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
                             <FaPlay size="20px" />
@@ -149,7 +153,7 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         </Grid>
         <YesNoModal
             title='Are you sure to stop this service?'
-            description={`You are going to delete the service '${service.id}', causing the firewall to stop. This will cause the shutdown of your service ⚠️!`}
+            description={`You are going to delete the service '${service.id}', causing the firewall to stop. This will cause the shutdown of your service! ⚠️`}
             onClose={()=>{setStopModal(false);}}
             action={stopService}
             opened={stopModal}

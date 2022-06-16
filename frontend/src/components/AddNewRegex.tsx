@@ -89,8 +89,8 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                 {...form.getInputProps('regex')}
             />
             <Space h="md" />
-            <Tooltip label="To represent binary data use URL encoding. Example: %01" transition="slide-left" openDelay={1500} transitionDuration={250} transitionTimingFunction="ease"  
-                    color="gray" wrapLines width={220} withArrow position='right'>      
+            <Tooltip label="To represent binary data use URL encoding. Example: %01" transition="slide-right" openDelay={500} transitionDuration={500} transitionTimingFunction="ease"  
+                    color="gray" wrapLines width={220} withArrow position='right' gutter={20}>      
                 <Switch
                     label="Use percentage encoding for binary values"
                     {...form.getInputProps('percentage_encoding', { type: 'checkbox' })}

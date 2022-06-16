@@ -56,6 +56,9 @@ function ServiceDetails() {
 
     const [deleteModal, setDeleteModal] = useState(false)
     const [changePortModal, setChangePortModal] = useState(false)
+    const [tooltipDeleteOpened, setTooltipDeleteOpened] = useState(false);
+    const [tooltipChangeOpened, setTooltipChangeOpened] = useState(false);
+    const [tooltipAddRegexOpened, setTooltipAddRegexOpened] = useState(false);
     
     const deleteService = () => {
         deleteservice(serviceInfo.id).then(res => {
@@ -85,12 +88,20 @@ function ServiceDetails() {
     return <div>
         <LoadingOverlay visible={loader} />
         <ServiceRow service={serviceInfo} additional_buttons={<>
-            <Tooltip label="Delete service" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="red">           
-                <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"><BsTrashFill size={22} /></ActionIcon>
+            <Tooltip label="Delete service" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red" opened={tooltipDeleteOpened} tooltipId="tooltip-delete-id">           
+                <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"
+                 aria-describedby="tooltip-delete-id"
+                 onFocus={() => setTooltipDeleteOpened(false)} onBlur={() => setTooltipDeleteOpened(false)}
+                 onMouseEnter={() => setTooltipDeleteOpened(true)} onMouseLeave={() => setTooltipDeleteOpened(false)}
+                 ><BsTrashFill size={22} /></ActionIcon>
             </Tooltip>
             <Space w="md"/>
-            <Tooltip label="Change proxy port" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">           
-                <ActionIcon color="blue" onClick={()=>setChangePortModal(true)} size="xl" radius="md" variant="filled"><BsArrowRepeat size={28} /></ActionIcon>
+            <Tooltip label="Change proxy port" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="blue" opened={tooltipChangeOpened} tooltipId="tooltip-change-id">           
+                <ActionIcon color="blue" onClick={()=>setChangePortModal(true)} size="xl" radius="md" variant="filled"
+                aria-describedby="tooltip-change-id"
+                onFocus={() => setTooltipChangeOpened(false)} onBlur={() => setTooltipChangeOpened(false)}
+                onMouseEnter={() => setTooltipChangeOpened(true)} onMouseLeave={() => setTooltipChangeOpened(false)}
+                ><BsArrowRepeat size={28} /></ActionIcon>
             </Tooltip>
             <Space w="md"/>
         </>}></ServiceRow>
@@ -98,10 +109,13 @@ function ServiceDetails() {
         {regexesList.length === 0?<>
                 <Space h="xl" />
                 <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
-                <Space h="xl" /> <Space h="xl" />
+                <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" />
                 <div className='center-flex'>
-                    <Tooltip label="Add a new regex" zIndex={0} transition="pop" transitionDuration={200} openDelay={500} transitionTimingFunction="ease" color="blue">
-                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
+                    <Tooltip label="Add a new regex" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="blue" opened={tooltipAddRegexOpened} tooltipId="tooltip-AddRegex-id">
+                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
+                         aria-describedby="tooltip-AddRegex-id"
+                         onFocus={() => setTooltipAddRegexOpened(false)} onBlur={() => setTooltipAddRegexOpened(false)}
+                         onMouseEnter={() => setTooltipAddRegexOpened(true)} onMouseLeave={() => setTooltipAddRegexOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
                     </Tooltip>
                 </div>
             </>:
@@ -114,14 +128,14 @@ function ServiceDetails() {
 
         <YesNoModal
             title='Are you sure to delete this service?'
-            description={`You are going to delete the service '${serviceInfo.id}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service ⚠️!`}
+            description={`You are going to delete the service '${serviceInfo.id}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}
             onClose={()=>setDeleteModal(false) }
             action={deleteService}
             opened={deleteModal}
         />
         <YesNoModal
             title='Are you sure to change the proxy internal port?'
-            description={`You are going to change the proxy port '${serviceInfo.internal_port}'. This will cause the shutdown of your service temporarily ⚠️!`}
+            description={`You are going to change the proxy port '${serviceInfo.internal_port}'. This will cause the shutdown of your service temporarily! ⚠️`}
             onClose={()=>setChangePortModal(false)}
             action={changePort}
             opened={changePortModal}
