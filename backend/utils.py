@@ -1,9 +1,10 @@
 from asyncore import file_dispatcher
 from proxy import Filter, Proxy
-import random, string, os, threading, sqlite3, time, atexit
+import random, string, os, threading, sqlite3, time, atexit, socket
 from kthread import KThread
 from base64 import b64decode
 
+LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
 
 class SQLite():
     def __init__(self, db_name) -> None:
@@ -217,7 +218,8 @@ class ProxyManager:
                     proxy = Proxy(
                         internal_port=data['internal_port'],
                         public_port=data['public_port'],
-                        filters=[]
+                        filters=[],
+                        internal_host=LOCALHOST_IP,
                     )
                     previous_status = next_status[0] = STATUS.PAUSE
                     self.__update_status_db(id, STATUS.WAIT)
@@ -237,7 +239,8 @@ class ProxyManager:
                     proxy = Proxy(
                         internal_port=data['internal_port'],
                         public_port=data['public_port'],
-                        filters=list(filters.values())
+                        filters=list(filters.values()),
+                        internal_host=LOCALHOST_IP,
                     )
                     previous_status = next_status[0] = STATUS.ACTIVE
                     self.__update_status_db(id, STATUS.WAIT)
@@ -251,7 +254,6 @@ class ProxyManager:
 
 
 def check_port_is_open(port):
-    import socket
     try:
         sock = socket.socket()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)

@@ -39,7 +39,10 @@ services:
             - {args.port}:{args.port}
         environment:
             - NGINX_PORT={args.port}
+            - LOCALHOST_IP=host.docker.internal
         volumes:
             - /execute/db
+        extra_hosts:
+            - host.docker.internal:host-gateway
 """)
         print("Done! You can start firegex with docker-compose up -d --build")
