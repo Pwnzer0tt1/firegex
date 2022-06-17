@@ -11,7 +11,7 @@ type RegexAddInfo = {
     regex:string,
     type:string,
     mode:string,
-    is_case_sensitive:boolean,
+    is_case_insensitive:boolean,
     regex_exact:boolean,
     percentage_encoding:boolean
 }
@@ -23,7 +23,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             regex:"",
             type:"blacklist",
             mode:"C <-> S",
-            is_case_sensitive:true,
+            is_case_insensitive:false,
             regex_exact:false,
             percentage_encoding:false
         },
@@ -57,7 +57,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
 
         const request:RegexAddForm = {
             is_blacklist:values.type !== "whitelist",
-            is_case_sensitive: values.is_case_sensitive,
+            is_case_sensitive: !values.is_case_insensitive,
             service_id: service,
             mode: filter_mode?filter_mode:"B",
             regex: b64encode(final_regex)
@@ -101,8 +101,8 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             </Tooltip>
             <Space h="md" />
             <Switch
-                label="Case sensitive"
-                {...form.getInputProps('is_case_sensitive', { type: 'checkbox' })}
+                label="Case insensitive"
+                {...form.getInputProps('is_case_insensitive', { type: 'checkbox' })}
             />
             <Space h="md" />
             <Switch

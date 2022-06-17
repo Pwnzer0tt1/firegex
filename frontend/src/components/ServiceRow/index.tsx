@@ -123,10 +123,10 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                                 <FaStop size="20px" />
                             </ActionIcon>
                         </Tooltip>:
-                        <Tooltip label="Pause service" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red">
-                            <ActionIcon color="red" loading={buttonLoading}
+                        <Tooltip label={service.status === "stop"?"Start in pause mode":"Pause service"} zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color={service.status === "stop"?"cyan":"red"}>
+                            <ActionIcon color={service.status === "stop"?"cyan":"red"} loading={buttonLoading}
                                     onClick={pauseService} size="xl" radius="md" variant="filled"
-                                    disabled={service.status === "stop"}>
+                                    /*disabled={service.status === "stop"}*/>
                                 <FaPause size="20px" />
                             </ActionIcon>
                         </Tooltip>
