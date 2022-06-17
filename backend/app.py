@@ -12,9 +12,15 @@ db.connect()
 conf = KeyValueStorage(db)
 firewall = ProxyManager(db)
 
+try:
+    import uwsgi
+    IN_UWSGI = True
+except ImportError:
+    IN_UWSGI = False
+
 app = Flask(__name__)
 
-DEBUG = not (len(sys.argv) > 1 and sys.argv[1] == "UWSGI")
+DEBUG = not ((len(sys.argv) > 1 and sys.argv[1] == "UWSGI") or IN_UWSGI)
 
 def is_loggined():
     if DEBUG: return True
@@ -44,10 +50,17 @@ def before_first_request():
 
 @app.route("/api/status")
 def get_status():
-    return { 
-        "status":app.config["STATUS"],
-        "loggined": is_loggined()
-    }
+    if DEBUG:
+        return { 
+            "status":app.config["STATUS"],
+            "loggined": is_loggined(),
+            "debug":True
+        }
+    else:
+        return { 
+            "status":app.config["STATUS"],
+            "loggined": is_loggined()
+        }
 
 @app.route("/api/login", methods = ['POST'])
 def login():
