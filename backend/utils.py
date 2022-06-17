@@ -115,6 +115,7 @@ class ProxyManager:
             'id': row[5],
             'regex': row[0],
             'is_blacklist': True if row[3] == "1" else False,
+            'is_case_sensitive' : True if row[6] == "1" else False,
             'mode': row[1],
             'n_packets': row[4],
         } for row in self.db.query('SELECT * FROM regexes WHERE service_id = ?;', (id,))]
@@ -203,6 +204,7 @@ class ProxyManager:
                     restart_required = True
                     filter_info = [ele for ele in data['filters'] if ele["id"] == f][0]
                     filters[f] = Filter(
+                        is_case_sensitive=filter_info["is_case_sensitive"],
                         c_to_s=filter_info["mode"] in ["C","B"],
                         s_to_c=filter_info["mode"] in ["S","B"],
                         is_blacklist=filter_info["is_blacklist"],

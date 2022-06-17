@@ -122,6 +122,7 @@
         "service_id": <service_id>,
         "regex": <base64 encoded regex>,
         "is_blacklist": <true|false>,
+        "is_case_sensitive": <true|false>,
         "n_packets": <number of blocked packets>,
         "mode": <"C"|"S"|"B"> // Client to server, server to client or both
     },
@@ -140,6 +141,7 @@
     "service_id": <service_id>,
     "regex": <base64 encoded regex>,
     "is_blacklist": <true|false>,
+    "is_case_sensitive": <true|false>,
     "n_packets": <number of blocked packets>,
     "mode": <"C"|"S"|"B"> // Client to server, server to client or both
 }
@@ -162,6 +164,7 @@
     "service_id": <service_id>,
     "regex": <base64 encoded regex>,
     "is_blacklist": <true|false>,
+    "is_case_sensitive": <true|false>,
     "mode": <"C"|"S"|"B"> // Client to server, server to client or both
 }
 ```

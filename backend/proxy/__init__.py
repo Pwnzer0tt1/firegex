@@ -3,8 +3,9 @@ import subprocess, re, os
 #c++ -o proxy proxy.cpp
 
 class Filter:
-    def __init__(self, regex, is_blacklist=True, c_to_s=False, s_to_c=False, blocked_packets=0, code=None):
+    def __init__(self, regex, is_case_sensitive=True, is_blacklist=True, c_to_s=False, s_to_c=False, blocked_packets=0, code=None):
         self.regex = regex
+        self.is_case_sensitive = is_case_sensitive
         self.is_blacklist = is_blacklist
         if c_to_s == s_to_c: c_to_s = s_to_c = True # (False, False) == (True, True)
         self.c_to_s = c_to_s
@@ -16,10 +17,11 @@ class Filter:
         if isinstance(self.regex, str): self.regex = self.regex.encode()
         if not isinstance(self.regex, bytes): raise Exception("Invalid Regex Paramether")
         re.compile(self.regex) # raise re.error if is invalid!
+        case_sensitive = "1" if self.is_case_sensitive else "0"
         if self.c_to_s:
-            yield "C"+self.regex.hex() if self.is_blacklist else "c"+self.regex.hex()
+            yield case_sensitive + "C" + self.regex.hex() if self.is_blacklist else case_sensitive + "c"+ self.regex.hex()
         if self.s_to_c:
-            yield "S"+self.regex.hex() if self.is_blacklist else "s"+self.regex.hex()
+            yield case_sensitive + "S" + self.regex.hex() if self.is_blacklist else case_sensitive + "s"+ self.regex.hex()
 
 class Proxy:
     def __init__(self, internal_port, public_port, filters=None, public_host="0.0.0.0", internal_host="127.0.0.1"):

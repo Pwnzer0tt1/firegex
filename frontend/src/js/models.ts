@@ -42,6 +42,7 @@ export type RegexFilter = {
     service_id:string,
     regex:string
     is_blacklist:boolean,
+    is_case_sensitive:boolean,
     mode:string //C S B => C->S S->C BOTH
     n_packets:number
 }
@@ -49,6 +50,7 @@ export type RegexFilter = {
 export type RegexAddForm = {
     service_id:string,
     regex:string,
+    is_case_sensitive:boolean,
     is_blacklist:boolean,
     mode:string // C->S S->C BOTH
 }

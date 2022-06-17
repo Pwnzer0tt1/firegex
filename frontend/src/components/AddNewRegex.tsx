@@ -11,6 +11,7 @@ type RegexAddInfo = {
     regex:string,
     type:string,
     mode:string,
+    is_case_sensitive:boolean,
     regex_exact:boolean,
     percentage_encoding:boolean
 }
@@ -22,6 +23,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             regex:"",
             type:"blacklist",
             mode:"C <-> S",
+            is_case_sensitive:true,
             regex_exact:false,
             percentage_encoding:false
         },
@@ -55,6 +57,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
 
         const request:RegexAddForm = {
             is_blacklist:values.type !== "whitelist",
+            is_case_sensitive: values.is_case_sensitive,
             service_id: service,
             mode: filter_mode?filter_mode:"B",
             regex: b64encode(final_regex)
@@ -65,7 +68,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                 setSubmitLoading(false)
                 close();
                 fireUpdateRequest();
-                okNotify(`Regex ${getHumanReadableRegex(request.regex)} has been added`, `Successfully added ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_id} service`)
+                okNotify(`Regex ${getHumanReadableRegex(request.regex)} has been added`, `Successfully added  ${request.is_case_sensitive?"case sensitive":"case insensitive"} ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_id} service`)
             }else if (res.toLowerCase() === "invalid regex"){
                 setSubmitLoading(false)
                 form.setFieldError("regex", "Invalid Regex")
@@ -96,6 +99,11 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                     {...form.getInputProps('percentage_encoding', { type: 'checkbox' })}
                 />
             </Tooltip>
+            <Space h="md" />
+            <Switch
+                label="Case sensitive"
+                {...form.getInputProps('is_case_sensitive', { type: 'checkbox' })}
+            />
             <Space h="md" />
             <Switch
                 label="Match exactly the regex"

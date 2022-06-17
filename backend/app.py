@@ -242,6 +242,7 @@ def get_service_regexes(serv):
             'service_id': row[2],
             'regex': row[0],
             'is_blacklist': True if row[3] == "1" else False,
+            'is_case_sensitive' : True if row[6] == "1" else False,
             'mode': row[1],
             'n_packets': row[4],
         } for row in db.query('SELECT * FROM regexes WHERE service_id = ?;', (serv,))
@@ -258,6 +259,7 @@ def get_regex_id(regex_id):
             'service_id': q[0][2],
             'regex': q[0][0],
             'is_blacklist': True if q[0][3] == "1" else False,
+            'is_case_sensitive' : True if q[0][7] == "1" else False,
             'mode': q[0][1],
             'n_packets': q[0][4],
         }
@@ -290,6 +292,7 @@ def post_regexes_add():
                     "regex" : {"type" : "string"},
                     "is_blacklist" : {"type" : "boolean"},
                     "mode" : {"type" : "string"},
+                    "is_case_sensitive" : {"type" : "boolean"}
                 },
         })
         if not re.match("^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)?$",req["regex"]):
@@ -302,8 +305,8 @@ def post_regexes_add():
     except Exception:
         return {"status":"Invalid regex"}
     try:
-        db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode) VALUES (?, ?, ?, ?);", 
-                (req['service_id'], req['regex'], req['is_blacklist'], req['mode']))
+        db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode, is_case_sensitive ) VALUES (?, ?, ?, ?, ?);", 
+                (req['service_id'], req['regex'], req['is_blacklist'], req['mode'], req['is_case_sensitive']))
     except sqlite3.IntegrityError:
         return {'status': 'An identical regex already exists'}
 
@@ -359,14 +362,15 @@ if __name__ == '__main__':
             'is_blacklist': 'VARCHAR(1) NOT NULL',
             'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
             'regex_id': 'INTEGER PRIMARY KEY',
-            'FOREIGN KEY (service_id)':'REFERENCES services (service_id)'
+            'is_case_sensitive' : 'VARCHAR(1) NOT NULL',
+            'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
         },
         'keys_values': {
             'key': 'VARCHAR(100) PRIMARY KEY',
             'value': 'VARCHAR(100) NOT NULL',
         },
     })
-    db.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode);")
+    db.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);")
     if DEBUG: 
         app.run(host="0.0.0.0", port=8080 ,debug=True)
     else:

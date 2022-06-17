@@ -74,6 +74,8 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             <div className='center-flex-row'>
               <Badge size="md" color={exact_regex?"grape":"pink"} variant="filled">Match: {exact_regex?"EXACT":"FIND"}</Badge>
               <Space h="xs" />
+              <Badge size="md" color={regexInfo.is_case_sensitive?"red":"green"} variant="filled">Case: {regexInfo.is_case_sensitive?"SENSIIVE":"INSENSITIVE"}</Badge>
+              <Space h="xs" />
               <Badge size="md" color="yellow" variant="filled">Packets filtered: {regexInfo.n_packets}</Badge>
               <Space h="xs" />
               <Badge size="md" color="blue" variant="filled">Mode: {mode_string}</Badge>

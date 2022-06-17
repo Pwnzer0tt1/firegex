@@ -308,20 +308,26 @@ namespace tcp_proxy
    };
 }
 
-void push_regex(char* arg, vector<pair<string,boost::regex>> &v){
-   size_t expr_len = (strlen(arg)-1)/2;
+void push_regex(char* arg, bool case_sensitive, vector<pair<string,boost::regex>> &v){
+   size_t expr_len = (strlen(arg)-2)/2;
    char expr[expr_len];
-   unhexlify(arg+1, arg+strlen(arg)-1, expr);
-   boost::regex regex(reinterpret_cast<char*>(expr),
+   unhexlify(arg+2, arg+strlen(arg)-1, expr);
+   if (case_sensitive){
+      boost::regex regex(reinterpret_cast<char*>(expr),
       reinterpret_cast<char*>(expr) + expr_len);
-   v.push_back(make_pair(string(arg), regex));
+      v.push_back(make_pair(string(arg), regex));
+   } else {
+      boost::regex regex(reinterpret_cast<char*>(expr),
+      reinterpret_cast<char*>(expr) + expr_len, boost::regex::icase);
+      v.push_back(make_pair(string(arg), regex));
+   }
 }
 
 int main(int argc, char* argv[])
 {
    if (argc < 5)
    {
-      std::cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> C..... S....." << std::endl;
+      std::cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> 0C..... 1S....." << std::endl;
       return 1;
    }
 
@@ -330,22 +336,26 @@ int main(int argc, char* argv[])
    const std::string local_host      = argv[1];
    const std::string forward_host    = argv[3];
    for (int i=5;i<argc;i++){
-      if (strlen(argv[i]) >= 1){
-         switch(argv[i][0]){
+      if (strlen(argv[i]) >= 2){
+         bool case_sensitive = true;
+         if(argv[i][0] == '0'){
+            case_sensitive = false;
+         }
+         switch(argv[i][1]){
             case 'C': { // Client to server Blacklist
-               push_regex(argv[i], regex_c_s_b);
+               push_regex(argv[i], case_sensitive, regex_c_s_b);
                break;
             }
             case 'c': { // Client to server Whitelist
-               push_regex(argv[i], regex_c_s_w);
+               push_regex(argv[i], case_sensitive, regex_c_s_w);
                break;
             }
             case 'S': { // Server to client Blacklist
-               push_regex(argv[i], regex_s_c_b);
+               push_regex(argv[i], case_sensitive, regex_s_c_b);
                break;
             }
             case 's': { // Server to client Whitelist
-               push_regex(argv[i], regex_s_c_w);
+               push_regex(argv[i], case_sensitive, regex_s_c_w);
                break;
             }
          }
