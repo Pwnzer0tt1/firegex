@@ -1,4 +1,5 @@
 from asyncore import file_dispatcher
+from imp import reload
 from proxy import Filter, Proxy
 import random, string, os, threading, sqlite3, time, atexit, socket
 from kthread import KThread
@@ -148,14 +149,12 @@ class ProxyManager:
         self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", (status, id))
 
     def __proxy_starter(self, id, proxy:Proxy, next_status, saved_status):
-        def stats_updater(filter:Filter):
-            self.db.query("UPDATE regexes SET blocked_packets = ? WHERE regex_id = ?;", (filter.blocked, filter.code))
         def func():
             while True:
                 if check_port_is_open(proxy.public_port):
                     self.__update_status_db(id, next_status)
                     if saved_status[0] == "wait": saved_status[0] = next_status
-                    proxy_status = proxy.start(callback=stats_updater)
+                    proxy_status = proxy.start(in_pause=(next_status==STATUS.PAUSE))
                     if proxy_status == 1:
                         self.__update_status_db(id, STATUS.STOP)
                     return
@@ -170,10 +169,13 @@ class ProxyManager:
     
         proxy = None
         thr_starter:KThread = None
-        previous_status = "stop"
+        previous_status = STATUS.STOP
         filters = {}
 
         while True:
+            restart_required = False
+            reload_required = False
+            
             data = self.get_service_data(id)
 
             #Close thread
@@ -181,14 +183,7 @@ class ProxyManager:
                 if proxy and proxy.isactive():
                     proxy.stop()
                 return
-
-            restart_required = False
-
-            #Port checks
-            if proxy and (proxy.internal_port != data['internal_port'] or proxy.public_port != data['public_port']):
-                restart_required = True
-
-
+               
             #Filter check
             old_filters = set(filters.keys())
             new_filters = set([f["id"] for f in data["filters"]])
@@ -196,12 +191,12 @@ class ProxyManager:
             #remove old filters
             for f in old_filters:
                 if not f in new_filters:
-                    restart_required = False
+                    reload_required = True
                     del filters[f]
             
             for f in new_filters:
                 if not f in old_filters:
-                    restart_required = False
+                    reload_required = True
                     filter_info = [ele for ele in data['filters'] if ele["id"] == f][0]
                     filters[f] = Filter(
                         is_case_sensitive=filter_info["is_case_sensitive"],
@@ -212,21 +207,43 @@ class ProxyManager:
                         blocked_packets=filter_info["n_packets"],
                         code=f
                     )
+            
+
+            def stats_updater(filter:Filter):
+                print("Callback received",filter.blocked, filter.code)
+                self.db.query("UPDATE regexes SET blocked_packets = ? WHERE regex_id = ?;", (filter.blocked, filter.code))
+
+            if not proxy:
+                proxy = Proxy(
+                    internal_port=data['internal_port'],
+                    public_port=data['public_port'],
+                    filters=list(filters.values()),
+                    internal_host=LOCALHOST_IP,
+                    callback_blocked_update=stats_updater
+                )
+            
+            #Port checks
+            if proxy.internal_port != data['internal_port'] or proxy.public_port != data['public_port']:
+                proxy.internal_port = data['internal_port']
+                proxy.public_port = data['public_port']
+                restart_required = True
+            
+            #Update filters
+            if reload_required:
+                proxy.filters = list(filters.values())
 
             #proxy status managment
-            if previous_status != next_status[0] or restart_required:
-                if (previous_status, next_status[0]) in [(STATUS.ACTIVE, STATUS.PAUSE), (STATUS.STOP, STATUS.PAUSE), (STATUS.PAUSE, STATUS.PAUSE)]:
-                    if proxy: proxy.stop()
-                    proxy = Proxy(
-                        internal_port=data['internal_port'],
-                        public_port=data['public_port'],
-                        filters=[],
-                        internal_host=LOCALHOST_IP,
-                    )
-                    previous_status = next_status[0] = STATUS.PAUSE
-                    self.__update_status_db(id, STATUS.WAIT)
-                    thr_starter = self.__proxy_starter(id, proxy, STATUS.PAUSE, [previous_status])
-                    restart_required = False
+            if previous_status != next_status[0]:
+                # ACTIVE -> PAUSE or PAUSE -> ACTIVE
+                if (previous_status, next_status[0]) in [(STATUS.ACTIVE, STATUS.PAUSE), (STATUS.PAUSE, STATUS.ACTIVE)]:
+                    if restart_required:
+                        proxy.restart(in_pause=next_status[0])
+                    else:
+                        if next_status[0] == STATUS.ACTIVE: proxy.reload()
+                        else: proxy.pause()
+                    previous_status = next_status[0]
+                    self.__update_status_db(id, next_status[0])
+                    reload_required = restart_required = False
 
                 # ACTIVE -> STOP
                 elif (previous_status,next_status[0]) in [(STATUS.ACTIVE, STATUS.STOP), (STATUS.WAIT, STATUS.STOP), (STATUS.PAUSE, STATUS.STOP)]: #Stop proxy
@@ -234,26 +251,23 @@ class ProxyManager:
                     proxy.stop()
                     previous_status = next_status[0] = STATUS.STOP
                     self.__update_status_db(id, STATUS.STOP)
-                    restart_required = False
-                
-                elif (previous_status, next_status[0]) in [(STATUS.PAUSE, STATUS.ACTIVE), (STATUS.STOP, STATUS.ACTIVE), (STATUS.ACTIVE, STATUS.ACTIVE)]:    
-                    if proxy: proxy.stop()
-                    proxy = Proxy(
-                        internal_port=data['internal_port'],
-                        public_port=data['public_port'],
-                        filters=list(filters.values()),
-                        internal_host=LOCALHOST_IP,
-                    )
-                    previous_status = next_status[0] = STATUS.ACTIVE
+                    reload_required = restart_required = False
+
+                # STOP -> ACTIVE or STOP -> PAUSE
+                elif (previous_status, next_status[0]) in [(STATUS.STOP, STATUS.ACTIVE), (STATUS.STOP, STATUS.PAUSE)]:    
+                    previous_status = next_status[0] 
                     self.__update_status_db(id, STATUS.WAIT)
-                    thr_starter = self.__proxy_starter(id, proxy, STATUS.ACTIVE, [previous_status])
-                    restart_required = False
+                    thr_starter = self.__proxy_starter(id, proxy, next_status[0], [previous_status])
+                    reload_required = restart_required = False
                 else:
                     self.__update_status_db(id, previous_status)
             
+            if restart_required: proxy.restart()
+            elif reload_required: proxy.reload()
+
             signal.wait()
             signal.clear()
-
+        
 
 def check_port_is_open(port):
     try:

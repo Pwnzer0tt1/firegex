@@ -318,12 +318,16 @@ void push_regex(char* arg, bool case_sensitive, vector<pair<string,boost::regex>
    if (case_sensitive){
       boost::regex regex(reinterpret_cast<char*>(expr),
       reinterpret_cast<char*>(expr) + expr_len);
+      #ifdef DEBUG
       cout << "Added case sensitive regex " << expr << endl;
+      #endif
       v.push_back(make_pair(string(arg), regex));
    } else {
       boost::regex regex(reinterpret_cast<char*>(expr),
       reinterpret_cast<char*>(expr) + expr_len, boost::regex::icase);
+      #ifdef DEBUG
       cout << "Added case insensitive regex " << expr << endl;
+      #endif
       v.push_back(make_pair(string(arg), regex));
    }
 }
