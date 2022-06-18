@@ -11,7 +11,7 @@
 
 /backend/db/firegex.db
 /backend/db/firegex.db-journal
-/backend/proxy/proxy
+/backend/proxy/proxy.so
 docker-compose.yml
 # production
 /frontend/build
