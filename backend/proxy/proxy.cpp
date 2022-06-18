@@ -2,6 +2,8 @@
 #include <cstddef>
 #include <iostream>
 #include <string>
+#include <csignal>
+#include <fstream>
 
 #include <boost/regex.hpp>
 #include <boost/shared_ptr.hpp>
@@ -36,6 +38,7 @@ unhexlify(InputIterator first, InputIterator last, OutputIterator ascii) {
 }
 
 vector<pair<string,boost::regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+const char* config_file;
 
 bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,boost::regex>> const &blacklist, vector<pair<string,boost::regex>> const &whitelist){
    #ifdef DEBUG
@@ -315,19 +318,74 @@ void push_regex(char* arg, bool case_sensitive, vector<pair<string,boost::regex>
    if (case_sensitive){
       boost::regex regex(reinterpret_cast<char*>(expr),
       reinterpret_cast<char*>(expr) + expr_len);
+      cout << "Added case sensitive regex " << expr << endl;
       v.push_back(make_pair(string(arg), regex));
    } else {
       boost::regex regex(reinterpret_cast<char*>(expr),
       reinterpret_cast<char*>(expr) + expr_len, boost::regex::icase);
+      cout << "Added case insensitive regex " << expr << endl;
       v.push_back(make_pair(string(arg), regex));
+   }
+}
+
+
+void update_regex(){
+   fstream fd;
+   fd.open(config_file,ios::in); 
+   if (!fd.is_open()){
+	   std::cerr << "Error: config file couln't be opened" << std::endl;
+      exit(1);
+	}
+
+   regex_s_c_w.clear();
+   regex_c_s_w.clear();
+   regex_s_c_b.clear();
+   regex_c_s_b.clear();
+
+   string line;
+   while(getline(fd, line)){
+		char tp[line.length() +1];
+		strcpy(tp, line.c_str());
+      if (strlen(tp) >= 2){
+         bool case_sensitive = true;
+         if(tp[0] == '0'){
+            case_sensitive = false;
+         }
+         switch(tp[1]){
+            case 'C': { // Client to server Blacklist
+               push_regex(tp, case_sensitive, regex_c_s_b);
+               break;
+            }
+            case 'c': { // Client to server Whitelist
+               push_regex(tp, case_sensitive, regex_c_s_w);
+               break;
+            }
+            case 'S': { // Server to client Blacklist
+               push_regex(tp, case_sensitive, regex_s_c_b);
+               break;
+            }
+            case 's': { // Server to client Whitelist
+               push_regex(tp, case_sensitive, regex_s_c_w);
+               break;
+            }
+         }
+      }
+   }
+}
+
+void signal_handler(int signal_num)
+{
+   if (signal_num == SIGUSR1){
+      cout << "Updating configurtation" << endl;
+      update_regex();
    }
 }
 
 int main(int argc, char* argv[])
 {
-   if (argc < 5)
+   if (argc < 6)
    {
-      std::cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> 0C..... 1S....." << std::endl;
+      std::cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> <config_file>" << std::endl;
       return 1;
    }
 
@@ -335,32 +393,12 @@ int main(int argc, char* argv[])
    const unsigned short forward_port = static_cast<unsigned short>(::atoi(argv[4]));
    const std::string local_host      = argv[1];
    const std::string forward_host    = argv[3];
-   for (int i=5;i<argc;i++){
-      if (strlen(argv[i]) >= 2){
-         bool case_sensitive = true;
-         if(argv[i][0] == '0'){
-            case_sensitive = false;
-         }
-         switch(argv[i][1]){
-            case 'C': { // Client to server Blacklist
-               push_regex(argv[i], case_sensitive, regex_c_s_b);
-               break;
-            }
-            case 'c': { // Client to server Whitelist
-               push_regex(argv[i], case_sensitive, regex_c_s_w);
-               break;
-            }
-            case 'S': { // Server to client Blacklist
-               push_regex(argv[i], case_sensitive, regex_s_c_b);
-               break;
-            }
-            case 's': { // Server to client Whitelist
-               push_regex(argv[i], case_sensitive, regex_s_c_w);
-               break;
-            }
-         }
-      }
-   }
+   
+
+   signal(SIGUSR1, signal_handler);\
+
+   config_file = argv[5];
+   update_regex();
 
    boost::asio::io_service ios;
 

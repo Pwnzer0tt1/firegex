@@ -1,3 +1,4 @@
+from signal import SIGUSR1
 import subprocess, re, os
 
 #c++ -o proxy proxy.cpp
@@ -37,8 +38,13 @@ class Proxy:
             filter_map = self.compile_filters()
             filters_codes = list(filter_map.keys())
             proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
+            config_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./config_file")
+            with open(config_file_path,'w') as config_file:
+                for line in filters_codes:
+                    config_file.write(line + '\n')
+            
             self.process = subprocess.Popen(
-                [proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), *filters_codes],
+                [proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), config_file_path],
                 stdout=subprocess.PIPE, universal_newlines=True
             )
             for stdout_line in iter(self.process.stdout.readline, ""):
@@ -68,7 +74,14 @@ class Proxy:
         return status
     
     def reload(self):
-        if self.process: self.restart()
+        if self.process: 
+            filter_map = self.compile_filters()
+            filters_codes = list(filter_map.keys())
+            config_file_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./config_file")
+            with open(config_file_path,'w') as config_file:
+                for line in filters_codes:
+                    config_file.write(line + '\n')
+            self.process.send_signal(SIGUSR1)
 
     def isactive(self):
         return True if self.process else False

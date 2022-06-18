@@ -196,12 +196,12 @@ class ProxyManager:
             #remove old filters
             for f in old_filters:
                 if not f in new_filters:
-                    restart_required = True
+                    restart_required = False
                     del filters[f]
             
             for f in new_filters:
                 if not f in old_filters:
-                    restart_required = True
+                    restart_required = False
                     filter_info = [ele for ele in data['filters'] if ele["id"] == f][0]
                     filters[f] = Filter(
                         is_case_sensitive=filter_info["is_case_sensitive"],
