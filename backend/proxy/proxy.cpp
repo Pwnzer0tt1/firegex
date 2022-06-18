@@ -18,6 +18,8 @@
 
 using namespace std;
 
+boost::asio::io_service *ios_loop = nullptr;
+
 int to_int(int c) {
   if (not isxdigit(c)) return -1; // error: non-hexadecimal digit found
   if (isdigit(c)) return c - '0';
@@ -380,8 +382,15 @@ void update_regex(){
 void signal_handler(int signal_num)
 {
    if (signal_num == SIGUSR1){
+      #ifdef DEBUG
       cout << "Updating configurtation" << endl;
+      #endif
       update_regex();
+   }else if(signal_num == SIGTERM){
+      if (ios_loop != nullptr) ios_loop->stop();
+      exit(0);
+   }else if (signal_num == SIGSEGV){
+      exit(0);
    }
 }
 
@@ -398,13 +407,16 @@ int main(int argc, char* argv[])
    const std::string local_host      = argv[1];
    const std::string forward_host    = argv[3];
    
-
-   signal(SIGUSR1, signal_handler);\
+   update_regex();
+   signal(SIGUSR1, signal_handler);
+   signal(SIGTERM, signal_handler);
+   signal(SIGSEGV, signal_handler);
 
    config_file = argv[5];
-   update_regex();
+   
 
    boost::asio::io_service ios;
+   ios_loop = &ios;
 
    try
    {

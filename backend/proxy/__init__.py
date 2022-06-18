@@ -46,26 +46,28 @@ class Proxy:
             filter_map = self.compile_filters()
             filters_codes = list(filter_map.keys()) if not in_pause else []
             proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
-            self.__write_config(filters_codes)
-            
-            self.process = subprocess.Popen(
-                [proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), self.config_file_path],
-                stdout=subprocess.PIPE, universal_newlines=True
-            )
-            for stdout_line in iter(self.process.stdout.readline, ""):
-                if stdout_line.startswith("BLOCKED"):
-                    regex_id = stdout_line.split()[1]
-                    filter_map[regex_id].blocked+=1
-                    if self.callback_blocked_update: self.callback_blocked_update(filter_map[regex_id])
-            self.process.stdout.close()
-            return self.process.wait()
+            try:
+                self.__write_config(filters_codes)
+                
+                self.process = subprocess.Popen(
+                    [proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), self.config_file_path],
+                    stdout=subprocess.PIPE, universal_newlines=True
+                )
+                for stdout_line in iter(self.process.stdout.readline, ""):
+                    if stdout_line.startswith("BLOCKED"):
+                        regex_id = stdout_line.split()[1]
+                        filter_map[regex_id].blocked+=1
+                        if self.callback_blocked_update: self.callback_blocked_update(filter_map[regex_id])
+                self.process.stdout.close()
+                return self.process.wait()
+            finally:
+                self.__delete_config()
     
     def stop(self):
         if self.process:
             self.process.terminate()
             try:
                 self.process.wait(timeout=3)
-                return True
             except Exception:
                 self.process.kill()
                 return False
@@ -82,6 +84,10 @@ class Proxy:
         with open(self.config_file_path,'w') as config_file:
             for line in filters_codes:
                 config_file.write(line + '\n')
+    
+    def __delete_config(self):
+        if os.path.exists(self.config_file_path):
+            os.remove(self.config_file_path)
 
     def reload(self):
         if self.isactive():
