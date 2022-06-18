@@ -1,5 +1,6 @@
 from asyncore import file_dispatcher
 from imp import reload
+from pstats import Stats
 from proxy import Filter, Proxy
 import random, string, os, threading, sqlite3, time, atexit, socket
 from kthread import KThread
@@ -261,8 +262,9 @@ class ProxyManager:
                 else:
                     self.__update_status_db(id, previous_status)
             
-            if restart_required: proxy.restart()
-            elif reload_required: proxy.reload()
+            if previous_status != STATUS.STOP:
+                if restart_required: proxy.restart(in_pause=(previous_status == STATUS.PAUSE))
+                elif reload_required and previous_status != STATUS.PAUSE: proxy.reload()
 
             signal.wait()
             signal.clear()

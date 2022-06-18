@@ -1,7 +1,7 @@
 from signal import SIGUSR1
 from secrets import token_urlsafe
 import subprocess, re, os
-
+from threading import Lock
 
 #c++ -o proxy proxy.cpp
 
@@ -28,6 +28,8 @@ class Filter:
 
 class Proxy:
     def __init__(self, internal_port, public_port, callback_blocked_update=None, filters=None, public_host="0.0.0.0", internal_host="127.0.0.1"):
+        self.filter_map = {}
+        self.filter_map_lock = Lock()
         self.public_host = public_host
         self.public_port = public_port
         self.internal_host = internal_host
@@ -43,8 +45,8 @@ class Proxy:
     
     def start(self, in_pause=False):
         if self.process is None:
-            filter_map = self.compile_filters()
-            filters_codes = list(filter_map.keys()) if not in_pause else []
+            self.filter_map = self.compile_filters()
+            filters_codes = list(self.filter_map.keys()) if not in_pause else []
             proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
             try:
                 self.__write_config(filters_codes)
@@ -56,8 +58,9 @@ class Proxy:
                 for stdout_line in iter(self.process.stdout.readline, ""):
                     if stdout_line.startswith("BLOCKED"):
                         regex_id = stdout_line.split()[1]
-                        filter_map[regex_id].blocked+=1
-                        if self.callback_blocked_update: self.callback_blocked_update(filter_map[regex_id])
+                        with self.filter_map_lock:
+                            self.filter_map[regex_id].blocked+=1
+                            if self.callback_blocked_update: self.callback_blocked_update(self.filter_map[regex_id])
                 self.process.stdout.close()
                 return self.process.wait()
             finally:
@@ -91,10 +94,11 @@ class Proxy:
 
     def reload(self):
         if self.isactive():
-            filter_map = self.compile_filters()
-            filters_codes = list(filter_map.keys())
-            self.__write_config(filters_codes)
-            self.trigger_reload_config()
+            with self.filter_map_lock:
+                self.filter_map = self.compile_filters()
+                filters_codes = list(self.filter_map.keys())
+                self.__write_config(filters_codes)
+                self.trigger_reload_config()
 
     def isactive(self):
         return True if self.process else False

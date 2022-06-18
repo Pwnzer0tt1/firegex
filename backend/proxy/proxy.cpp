@@ -407,12 +407,14 @@ int main(int argc, char* argv[])
    const std::string local_host      = argv[1];
    const std::string forward_host    = argv[3];
    
+   config_file = argv[5];
+
    update_regex();
    signal(SIGUSR1, signal_handler);
    signal(SIGTERM, signal_handler);
    signal(SIGSEGV, signal_handler);
 
-   config_file = argv[5];
+   
    
 
    boost::asio::io_service ios;
