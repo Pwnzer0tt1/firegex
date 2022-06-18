@@ -155,7 +155,7 @@ class ProxyManager:
                     self.__update_status_db(id, next_status)
                     if saved_status[0] == "wait": saved_status[0] = next_status
                     proxy_status = proxy.start(in_pause=(next_status==STATUS.PAUSE))
-                    if proxy_status != 0:
+                    if proxy_status == 1:
                         self.__update_status_db(id, STATUS.STOP)
                     return
                 else:
@@ -210,6 +210,7 @@ class ProxyManager:
             
 
             def stats_updater(filter:Filter):
+                print("Callback received",filter.blocked, filter.code)
                 self.db.query("UPDATE regexes SET blocked_packets = ? WHERE regex_id = ?;", (filter.blocked, filter.code))
 
             if not proxy:

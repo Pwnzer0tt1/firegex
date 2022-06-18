@@ -1,8 +1,7 @@
-from signal import SIGUSR1, SIGUSR2
+from signal import SIGUSR1
 from secrets import token_urlsafe
-from kthread import KThread
-import re, os
-from ctypes import CDLL, POINTER, c_char_p, c_int, c_ushort, CFUNCTYPE, c_void_p, byref
+import subprocess, re, os
+
 
 #c++ -o proxy proxy.cpp
 
@@ -41,45 +40,37 @@ class Proxy:
             config_file_path = os.path.join("/tmp/" + token_urlsafe(16))
             if not os.path.exists(config_file_path):
                 self.config_file_path = config_file_path
-        self.lib = CDLL(os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy.so"))
-        self.lib.start_proxy.restype = c_int
-        #char* local_host_p, unsigned short local_port, char* forward_host_p,  unsigned short forward_port, char* config_file_p, void (*incrementCallback_p)(const char *)
-        self.lib.start_proxy.argtypes = [c_char_p, c_ushort, c_char_p, c_ushort, c_char_p, POINTER(c_int), c_void_p]
-
     
     def start(self, in_pause=False):
         if self.process is None:
-            self.filter_map = self.compile_filters()
-            filters_codes = list(self.filter_map.keys()) if not in_pause else []
+            filter_map = self.compile_filters()
+            filters_codes = list(filter_map.keys()) if not in_pause else []
+            proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
             self.__write_config(filters_codes)
             
-            @CFUNCTYPE(None, c_char_p)
-            def callback_wrap(regex):
-                filter = self.filter_map[regex.decode()]
-                filter.blocked+=1
-                print(self.filter_map)
-                if self.callback_blocked_update:
-                    self.callback_blocked_update(self.filter_map[regex.decode()])
-            
-            status_code = c_int(1)
-            self.process = KThread(
-                target=self.lib.start_proxy, 
-                args=(self.public_host.encode(), self.public_port,
-                    self.internal_host.encode(), self.internal_port,
-                    self.config_file_path.encode(),
-                    byref(status_code), callback_wrap
-                ),
+            self.process = subprocess.Popen(
+                [proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), self.config_file_path],
+                stdout=subprocess.PIPE, universal_newlines=True
             )
-            self.process.start()
-            self.process.join()
-            self.__delete_config()
-            return status_code.value
+            for stdout_line in iter(self.process.stdout.readline, ""):
+                if stdout_line.startswith("BLOCKED"):
+                    regex_id = stdout_line.split()[1]
+                    filter_map[regex_id].blocked+=1
+                    if self.callback_blocked_update: self.callback_blocked_update(filter_map[regex_id])
+            self.process.stdout.close()
+            return self.process.wait()
     
     def stop(self):
         if self.process:
-            if self.process.is_alive():
-                os.kill(self.process.native_id,SIGUSR2)
-        self.process = None
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=3)
+                return True
+            except Exception:
+                self.process.kill()
+                return False
+            finally:
+                self.process = None
         return True
 
     def restart(self, in_pause=False):
@@ -91,10 +82,7 @@ class Proxy:
         with open(self.config_file_path,'w') as config_file:
             for line in filters_codes:
                 config_file.write(line + '\n')
-    
-    def __delete_config(self):
-        os.remove(self.config_file_path)
-    
+
     def reload(self):
         if self.isactive():
             filter_map = self.compile_filters()
@@ -103,12 +91,11 @@ class Proxy:
             self.trigger_reload_config()
 
     def isactive(self):
-        if self.process and not self.process.is_alive():
-            self.process = None
-        return not self.process is None
+        return True if self.process else False
 
     def trigger_reload_config(self):
-        os.kill(self.process.native_id, SIGUSR1)
+        self.process.send_signal(SIGUSR1)
+
 
     def pause(self):
         if self.isactive():

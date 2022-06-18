@@ -4,7 +4,6 @@
 #include <string>
 #include <csignal>
 #include <fstream>
-#include <unistd.h>
 
 #include <boost/regex.hpp>
 #include <boost/shared_ptr.hpp>
@@ -12,13 +11,12 @@
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
-#include <map>
 
 #include <cctype> // is*
 
-using namespace std;
+//#define DEBUG
 
-#define DEBUG
+using namespace std;
 
 int to_int(int c) {
   if (not isxdigit(c)) return -1; // error: non-hexadecimal digit found
@@ -39,94 +37,8 @@ unhexlify(InputIterator first, InputIterator last, OutputIterator ascii) {
   return 0;
 }
 
-namespace tcp_proxy{
-   class acceptor;
-};
-
-
-struct regex_filter_table{
-   vector<pair<string,boost::regex>>
-      regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
-};
-struct regex_proxy{
-   string config_file;
-   tcp_proxy::acceptor *acceptor;
-   int* status_code;
-   regex_filter_table filter_tab;
-   void (*incrementCallback)(const char *) = nullptr;
-};
-map<pid_t, regex_proxy*> proxy_map;
-
-auto firewall(){
-   return proxy_map[gettid()];
-}
-
-void push_regex(char* arg, bool case_sensitive, vector<pair<string,boost::regex>> &v){
-   size_t expr_len = (strlen(arg)-2)/2;
-   char expr[expr_len];
-   unhexlify(arg+2, arg+strlen(arg)-1, expr);
-   if (case_sensitive){
-      boost::regex regex(reinterpret_cast<char*>(expr),
-      reinterpret_cast<char*>(expr) + expr_len);
-      #ifdef DEBUG
-      cout << "Added case sensitive regex " << expr << endl;
-      #endif
-      v.push_back(make_pair(string(arg), regex));
-   } else {
-      boost::regex regex(reinterpret_cast<char*>(expr),
-      reinterpret_cast<char*>(expr) + expr_len, boost::regex::icase);
-      #ifdef DEBUG
-      cout << "Added case insensitive regex " << expr << endl;
-      #endif
-      v.push_back(make_pair(string(arg), regex));
-   }
-}
-
-void update_regex(){
-   fstream fd;
-   fd.open(firewall()->config_file,ios::in); 
-   if (!fd.is_open()){
-      std::cerr << "Error: config file couln't be opened" << std::endl;
-      *(firewall()->status_code) = 2;
-      return;
-   }
-
-   firewall()->filter_tab.regex_s_c_w.clear();
-   firewall()->filter_tab.regex_c_s_w.clear();
-   firewall()->filter_tab.regex_s_c_b.clear();
-   firewall()->filter_tab.regex_c_s_b.clear();
-
-   string line;
-   while(getline(fd, line)){
-      char tp[line.length() +1];
-      strcpy(tp, line.c_str());
-
-      if (strlen(tp) >= 2){
-         bool case_sensitive = true;
-         if(tp[0] == '0'){
-            case_sensitive = false;
-         }
-         switch(tp[1]){
-            case 'C': { // Client to server Blacklist
-               push_regex(tp, case_sensitive, firewall()->filter_tab.regex_c_s_b);
-               break;
-            }
-            case 'c': { // Client to server Whitelist
-               push_regex(tp, case_sensitive, firewall()->filter_tab.regex_c_s_w);
-               break;
-            }
-            case 'S': { // Server to client Blacklist
-               push_regex(tp, case_sensitive, firewall()->filter_tab.regex_s_c_b);
-               break;
-            }
-            case 's': { // Server to client Whitelist
-               push_regex(tp, case_sensitive, firewall()->filter_tab.regex_s_c_w);
-               break;
-            }
-         }
-      }
-   }
-}
+vector<pair<string,boost::regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+const char* config_file;
 
 bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,boost::regex>> const &blacklist, vector<pair<string,boost::regex>> const &whitelist){
    #ifdef DEBUG
@@ -140,7 +52,7 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
       boost::cmatch what;
       if (boost::regex_match(reinterpret_cast<const char*>(data),
             reinterpret_cast<const char*>(data) + bytes_transferred, what, ele.second)){
-         if (firewall()->incrementCallback != nullptr) firewall()->incrementCallback(ele.first.c_str());
+         cout << "BLOCKED " << ele.first << endl;
          return false;
       }
    }
@@ -148,7 +60,7 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
       boost::cmatch what;
       if (!boost::regex_match(reinterpret_cast<const char*>(data),
             reinterpret_cast<const char*>(data) + bytes_transferred, what, ele.second)){
-         if (firewall()->incrementCallback != nullptr) firewall()->incrementCallback(ele.first.c_str());
+         cout << "BLOCKED " << ele.first << endl;
          return false;
       }
    }
@@ -162,10 +74,13 @@ namespace tcp_proxy
 {
    namespace ip = boost::asio::ip;
 
-   typedef ip::tcp::socket socket_type;
    class bridge : public boost::enable_shared_from_this<bridge>
    {
    public:
+
+      typedef ip::tcp::socket socket_type;
+      typedef boost::shared_ptr<bridge> ptr_type;
+
       bridge(boost::asio::io_service& ios)
       : downstream_socket_(ios),
         upstream_socket_  (ios)
@@ -173,11 +88,13 @@ namespace tcp_proxy
 
       socket_type& downstream_socket()
       {
+         // Client socket
          return downstream_socket_;
       }
 
       socket_type& upstream_socket()
       {
+         // Remote server socket
          return upstream_socket_;
       }
 
@@ -217,6 +134,8 @@ namespace tcp_proxy
             close();
       }
 
+   private:
+
       /*
          Section A: Remote Server --> Proxy --> Client
          Process data recieved from remote sever then send to client.
@@ -228,7 +147,7 @@ namespace tcp_proxy
       {
          if (!error)
          {
-            if (filter_data(upstream_data_, bytes_transferred, firewall()->filter_tab.regex_s_c_b, firewall()->filter_tab.regex_s_c_w)){
+            if (filter_data(upstream_data_, bytes_transferred, regex_s_c_b, regex_s_c_w)){
                async_write(downstream_socket_,
                   boost::asio::buffer(upstream_data_,bytes_transferred),
                   boost::bind(&bridge::handle_downstream_write,
@@ -271,7 +190,7 @@ namespace tcp_proxy
       {
          if (!error)
          {
-            if (filter_data(downstream_data_, bytes_transferred, firewall()->filter_tab.regex_c_s_b, firewall()->filter_tab.regex_c_s_w)){
+            if (filter_data(downstream_data_, bytes_transferred, regex_c_s_b, regex_c_s_w)){
                async_write(upstream_socket_,
                   boost::asio::buffer(downstream_data_,bytes_transferred),
                   boost::bind(&bridge::handle_upstream_write,
@@ -323,155 +242,187 @@ namespace tcp_proxy
       enum { max_data_length = 8192 }; //8KB
       unsigned char downstream_data_[max_data_length];
       unsigned char upstream_data_  [max_data_length];
+
       boost::mutex mutex_;
 
-      };
-
-   class acceptor
-   {
    public:
 
-      acceptor(boost::asio::io_service& io_service,
-               const std::string& local_host, unsigned short local_port,
-               const std::string& upstream_host, unsigned short upstream_port)
-      : io_service_(io_service),
-         localhost_address(boost::asio::ip::address_v4::from_string(local_host)),
-         acceptor_(io_service_,ip::tcp::endpoint(localhost_address,local_port)),
-         upstream_port_(upstream_port),
-         upstream_host_(upstream_host)
+      class acceptor
       {
+      public:
 
-         boost::asio::socket_base::reuse_address option(true);
-         acceptor_.set_option(option);
-      }
+         acceptor(boost::asio::io_service& io_service,
+                  const std::string& local_host, unsigned short local_port,
+                  const std::string& upstream_host, unsigned short upstream_port)
+         : io_service_(io_service),
+           localhost_address(boost::asio::ip::address_v4::from_string(local_host)),
+           acceptor_(io_service_,ip::tcp::endpoint(localhost_address,local_port)),
+           upstream_port_(upstream_port),
+           upstream_host_(upstream_host)
+         {}
 
-      bool accept_connections()
-      {
-         try
+         bool accept_connections()
          {
-            session_ = boost::shared_ptr<bridge>(new bridge(io_service_));
-
-            acceptor_.async_accept(session_->downstream_socket(),
-                  boost::bind(&acceptor::handle_accept,
-                        this,
-                        boost::asio::placeholders::error));
-            
-         }
-         catch(std::exception& e)
-         {
-            std::cerr << "acceptor exception: " << e.what() << std::endl;
-            return false;
-         }
-
-         return true;
-      }
-
-      void close(){
-         cout << "acceptor 1: " << endl;
-         acceptor_.close();
-         cout << "acceptor 2: " << endl;
-         acceptor_.cancel();
-         cout << "acceptor 3: " << endl;
-         session_->close();
-         cout << "acceptor 4: " << endl;
-      }
-
-   private:
-
-      void handle_accept(const boost::system::error_code& error)
-      {
-         if (!error)
-         {
-            session_->start(upstream_host_,upstream_port_);
-
-            if (!accept_connections())
+            try
             {
-               std::cerr << "Failure during call to accept." << std::endl;
+               session_ = boost::shared_ptr<bridge>(new bridge(io_service_));
+
+               acceptor_.async_accept(session_->downstream_socket(),
+                    boost::bind(&acceptor::handle_accept,
+                         this,
+                         boost::asio::placeholders::error));
+            }
+            catch(std::exception& e)
+            {
+               std::cerr << "acceptor exception: " << e.what() << std::endl;
+               return false;
+            }
+
+            return true;
+         }
+
+      private:
+
+         void handle_accept(const boost::system::error_code& error)
+         {
+            if (!error)
+            {
+               session_->start(upstream_host_,upstream_port_);
+
+               if (!accept_connections())
+               {
+                  std::cerr << "Failure during call to accept." << std::endl;
+               }
+            }
+            else
+            {
+               std::cerr << "Error: " << error.message() << std::endl;
             }
          }
-         else
-         {
-            std::cerr << "Error: " << error.message() << std::endl;
-         }
-      }
 
-      boost::asio::io_service& io_service_;
-      ip::address_v4 localhost_address;
-      ip::tcp::acceptor acceptor_;
-      boost::shared_ptr<bridge> session_;
-      unsigned short upstream_port_;
-      std::string upstream_host_;
+         boost::asio::io_service& io_service_;
+         ip::address_v4 localhost_address;
+         ip::tcp::acceptor acceptor_;
+         ptr_type session_;
+         unsigned short upstream_port_;
+         std::string upstream_host_;
+      };
+
    };
-
-
 }
 
-static void signal_handler(int signal_num){
-   if (signal_num == SIGUSR1){
+void push_regex(char* arg, bool case_sensitive, vector<pair<string,boost::regex>> &v){
+   size_t expr_len = (strlen(arg)-2)/2;
+   char expr[expr_len];
+   unhexlify(arg+2, arg+strlen(arg)-1, expr);
+   if (case_sensitive){
+      boost::regex regex(reinterpret_cast<char*>(expr),
+      reinterpret_cast<char*>(expr) + expr_len);
       #ifdef DEBUG
-      cout << "Updating configurtation: " << gettid() << endl;
+      cout << "Added case sensitive regex " << expr << endl;
       #endif
-      update_regex();
-   }else if(signal_num == SIGUSR2){
+      v.push_back(make_pair(string(arg), regex));
+   } else {
+      boost::regex regex(reinterpret_cast<char*>(expr),
+      reinterpret_cast<char*>(expr) + expr_len, boost::regex::icase);
       #ifdef DEBUG
-      cout << "Killed: " << gettid() << endl;
+      cout << "Added case insensitive regex " << expr << endl;
       #endif
-      *(firewall()->status_code) = 0;
-      #ifdef DEBUG
-      cout << "Exiting PT1: " << gettid() << endl;
-      #endif
-      proxy_map.erase(gettid());
-      #ifdef DEBUG
-      cout << "Exiting PT2: " << gettid() << endl;
-      #endif
-      //firewall()->acceptor->close();
-      #ifdef DEBUG
-      cout << "Exiting PT3: " << gettid() << endl;
-      #endif
+      v.push_back(make_pair(string(arg), regex));
    }
 }
 
-extern "C" void start_proxy(
-   char* local_host,unsigned short local_port,
-   char* forward_host, unsigned short forward_port,
-   char* config_file, int* status_code, void (*incrementCallback)(const char *)
-){
-   #ifdef DEBUG
-   cout << "Starting: " << gettid() << endl;
-   #endif
-   regex_proxy tmp;
-   proxy_map[gettid()] = &tmp;
-   tmp.config_file = config_file;
-   tmp.status_code = status_code;
-   tmp.incrementCallback = incrementCallback;
+
+void update_regex(){
+   fstream fd;
+   fd.open(config_file,ios::in); 
+   if (!fd.is_open()){
+	   std::cerr << "Error: config file couln't be opened" << std::endl;
+      exit(1);
+	}
+
+   regex_s_c_w.clear();
+   regex_c_s_w.clear();
+   regex_s_c_b.clear();
+   regex_c_s_b.clear();
+
+   string line;
+   while(getline(fd, line)){
+		char tp[line.length() +1];
+		strcpy(tp, line.c_str());
+      if (strlen(tp) >= 2){
+         bool case_sensitive = true;
+         if(tp[0] == '0'){
+            case_sensitive = false;
+         }
+         switch(tp[1]){
+            case 'C': { // Client to server Blacklist
+               push_regex(tp, case_sensitive, regex_c_s_b);
+               break;
+            }
+            case 'c': { // Client to server Whitelist
+               push_regex(tp, case_sensitive, regex_c_s_w);
+               break;
+            }
+            case 'S': { // Server to client Blacklist
+               push_regex(tp, case_sensitive, regex_s_c_b);
+               break;
+            }
+            case 's': { // Server to client Whitelist
+               push_regex(tp, case_sensitive, regex_s_c_w);
+               break;
+            }
+         }
+      }
+   }
+}
+
+void signal_handler(int signal_num)
+{
+   if (signal_num == SIGUSR1){
+      cout << "Updating configurtation" << endl;
+      update_regex();
+   }
+}
+
+int main(int argc, char* argv[])
+{
+   if (argc < 6)
+   {
+      std::cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> <config_file>" << std::endl;
+      return 1;
+   }
+
+   const unsigned short local_port   = static_cast<unsigned short>(::atoi(argv[2]));
+   const unsigned short forward_port = static_cast<unsigned short>(::atoi(argv[4]));
+   const std::string local_host      = argv[1];
+   const std::string forward_host    = argv[3];
+   
+
+   signal(SIGUSR1, signal_handler);\
+
+   config_file = argv[5];
    update_regex();
+
    boost::asio::io_service ios;
-   signal(SIGUSR1, signal_handler);
-   signal(SIGUSR2, signal_handler);
+
    try
    {
-      tcp_proxy::acceptor acceptor(ios,
-                                          local_host, local_port,
-                                          forward_host, forward_port);
-      firewall()->acceptor = &acceptor;
+      tcp_proxy::bridge::acceptor acceptor(ios,
+                                           local_host, local_port,
+                                           forward_host, forward_port);
+
       acceptor.accept_connections();
+
       ios.run();
    }
    catch(std::exception& e)
    {
       std::cerr << "Error: " << e.what() << std::endl;
-      *(firewall()->status_code) = 1;
-      proxy_map.erase(gettid());
-      return;
+      return 1;
    }
 
-   #ifdef DEBUG
-   cout << "Exiting: " << gettid() << endl;
-   #endif
-   *(firewall()->status_code) = 0;
-   proxy_map.erase(gettid());
-
-
+   return 0;
 }
 
 /*
