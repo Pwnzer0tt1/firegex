@@ -38,7 +38,7 @@ unhexlify(InputIterator first, InputIterator last, OutputIterator ascii) {
 }
 
 vector<pair<string,boost::regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
-const char* config_file;
+string config_file;
 
 bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,boost::regex>> const &blacklist, vector<pair<string,boost::regex>> const &whitelist){
    #ifdef DEBUG
@@ -350,6 +350,7 @@ void update_regex(){
    while(getline(fd, line)){
 		char tp[line.length() +1];
 		strcpy(tp, line.c_str());
+
       if (strlen(tp) >= 2){
          bool case_sensitive = true;
          if(tp[0] == '0'){
@@ -380,29 +381,22 @@ void update_regex(){
 void signal_handler(int signal_num)
 {
    if (signal_num == SIGUSR1){
+      #ifdef DEBUG
       cout << "Updating configurtation" << endl;
+      #endif
       update_regex();
    }
 }
 
-int main(int argc, char* argv[])
+extern "C" int start_proxy(char* local_host_p, unsigned short local_port, char* forward_host_p,  unsigned short forward_port, char* config_file_p, int pid)
 {
-   if (argc < 6)
-   {
-      std::cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> <config_file>" << std::endl;
-      return 1;
-   }
-
-   const unsigned short local_port   = static_cast<unsigned short>(::atoi(argv[2]));
-   const unsigned short forward_port = static_cast<unsigned short>(::atoi(argv[4]));
-   const std::string local_host      = argv[1];
-   const std::string forward_host    = argv[3];
+   const std::string local_host      = local_host_p;
+   const std::string forward_host    = forward_host_p;
    
+   config_file = config_file_p;
 
-   signal(SIGUSR1, signal_handler);\
-
-   config_file = argv[5];
    update_regex();
+   signal(SIGUSR1, signal_handler);
 
    boost::asio::io_service ios;
 
