@@ -1,6 +1,3 @@
-from asyncore import file_dispatcher
-from imp import reload
-from pstats import Stats
 from proxy import Filter, Proxy
 import random, string, os, threading, sqlite3, time, atexit, socket
 from kthread import KThread

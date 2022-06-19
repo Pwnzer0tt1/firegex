@@ -1,4 +1,4 @@
-import { Button, Group, Loader, LoadingOverlay, Notification, Space, TextInput, Title } from '@mantine/core';
+import { Button, Group, Loader, LoadingOverlay, Notification, Space, PasswordInput, Title } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useEffect, useState } from 'react';
 import { ImCross } from 'react-icons/im';
@@ -76,7 +76,7 @@ function App() {
       <Title order={3} align="center">Setup: Choose the password for access to the firewall 🔒</Title>
       <Space h="xl" />
       <form onSubmit={form.onSubmit(submitRequest)} style={{width:"80%"}}>
-          <TextInput
+          <PasswordInput
               label="Password"
               placeholder="$3cr3t"
               {...form.getInputProps('password')}
@@ -111,7 +111,7 @@ function App() {
       <Title order={2} align="center">Before you use the firewall, insert the password 🔒</Title>
       <Space h="xl" />
       <form onSubmit={form.onSubmit(submitRequest)} style={{width:"80%"}}>
-          <TextInput
+          <PasswordInput
               label="Password"
               placeholder="$3cr3t"
               {...form.getInputProps('password')}
