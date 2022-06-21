@@ -14,7 +14,7 @@
 
 #include <cctype> // is*
 
-#define DEBUG
+//#define DEBUG
 
 using namespace std;
 
