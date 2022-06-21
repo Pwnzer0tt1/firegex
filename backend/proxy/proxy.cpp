@@ -52,19 +52,31 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
    #endif
    for (pair<string,boost::regex> ele:blacklist){
       boost::cmatch what;
-      if (boost::regex_match(reinterpret_cast<const char*>(data),
-            reinterpret_cast<const char*>(data) + bytes_transferred, what, ele.second)){
-         cout << "BLOCKED " << ele.first << endl;
-         return false;
+      try{
+         if (boost::regex_match(reinterpret_cast<const char*>(data),
+               reinterpret_cast<const char*>(data) + bytes_transferred, what, ele.second)){
+            cout << "BLOCKED " << ele.first << endl;
+            return false;
+         }
+      } catch(...){
+         #ifdef DEBUG
+         cout << "Error while matching regex: " << ele.first << endl;
+         #endif
       }
    }
    for (pair<string,boost::regex> ele:whitelist){
       boost::cmatch what;
-      if (!boost::regex_match(reinterpret_cast<const char*>(data),
-            reinterpret_cast<const char*>(data) + bytes_transferred, what, ele.second)){
-         cout << "BLOCKED " << ele.first << endl;
-         return false;
-      }
+      try{
+         if (!boost::regex_match(reinterpret_cast<const char*>(data),
+               reinterpret_cast<const char*>(data) + bytes_transferred, what, ele.second)){
+            cout << "BLOCKED " << ele.first << endl;
+            return false;
+         }
+      } catch(...){
+         #ifdef DEBUG
+         cout << "Error while matching regex: " << ele.first << endl;
+         #endif
+      }      
    }
    #ifdef DEBUG
    cout << "Packet Accepted!" << endl;
@@ -317,20 +329,24 @@ void push_regex(char* arg, bool case_sensitive, vector<pair<string,boost::regex>
    size_t expr_len = (strlen(arg)-2)/2;
    char expr[expr_len];
    unhexlify(arg+2, arg+strlen(arg)-1, expr);
-   if (case_sensitive){
-      boost::regex regex(reinterpret_cast<char*>(expr),
-      reinterpret_cast<char*>(expr) + expr_len);
-      #ifdef DEBUG
-      cout << "Added case sensitive regex " << expr << endl;
-      #endif
-      v.push_back(make_pair(string(arg), regex));
-   } else {
-      boost::regex regex(reinterpret_cast<char*>(expr),
-      reinterpret_cast<char*>(expr) + expr_len, boost::regex::icase);
-      #ifdef DEBUG
-      cout << "Added case insensitive regex " << expr << endl;
-      #endif
-      v.push_back(make_pair(string(arg), regex));
+   try{
+      if (case_sensitive){
+         boost::regex regex(reinterpret_cast<char*>(expr),
+         reinterpret_cast<char*>(expr) + expr_len);
+         #ifdef DEBUG
+         cout << "Added case sensitive regex " << expr << endl;
+         #endif
+         v.push_back(make_pair(string(arg), regex));
+      } else {
+         boost::regex regex(reinterpret_cast<char*>(expr),
+         reinterpret_cast<char*>(expr) + expr_len, boost::regex::icase);
+         #ifdef DEBUG
+         cout << "Added case insensitive regex " << expr << endl;
+         #endif
+         v.push_back(make_pair(string(arg), regex));
+      }
+   } catch(...){
+      std::cerr << "Regex " << expr << " was not compiled successfully" << std::endl;
    }
 }
 
