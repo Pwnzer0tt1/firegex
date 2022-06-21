@@ -53,7 +53,7 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
    for (pair<string,regex> ele:blacklist){
       cmatch what;
       try{
-         regex_search(reinterpret_cast<const char*>(data), what, ele.second);
+         regex_search(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data)+bytes_transferred, what, ele.second);
          if(what.size() > 0){
             cout << "BLOCKED " << ele.first << endl;
             return false;
@@ -65,7 +65,7 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
    for (pair<string,regex> ele:whitelist){
       cmatch what;
       try{
-         regex_search(reinterpret_cast<const char*>(data), what, ele.second);
+         regex_search(reinterpret_cast<const char*>(data),reinterpret_cast<const char*>(data)+bytes_transferred, what, ele.second);
          if(what.size() < 0){
             cout << "BLOCKED " << ele.first << endl;
             return false;
