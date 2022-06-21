@@ -13,7 +13,7 @@ docker-compose.yml
 /frontend/coverage
 
 # production
-/frontend/build
+#/frontend/build
 
 /backend/db/firegex.db
 /backend/db/firegex.db-journal

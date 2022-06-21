@@ -1,16 +1,3 @@
-
-#Frontend build
-FROM node:lts-alpine AS frontend
-RUN apk add --update npm
-RUN mkdir /app
-WORKDIR /app
-ENV PATH /app/node_modules/.bin:$PATH
-ADD ./frontend/package.json .
-ADD ./frontend/package-lock.json .
-RUN npm ci --silent
-COPY ./frontend/ .
-RUN npm run build
-
 #Building main conteiner
 FROM python:slim-buster
 
@@ -31,9 +18,7 @@ RUN c++ -O3 -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system -lboost_regex
 COPY ./config/supervisord.conf /etc/supervisor/supervisord.conf
 COPY ./config/nginx.conf /tmp/nginx.conf
 COPY ./config/start_nginx.sh /tmp/start_nginx.sh
-
-#Copy react app in the main container
-COPY --from=frontend /app/build/ ./frontend/
+COPY ./frontend/build/ ./frontend/
 
 RUN usermod -a -G root nobody
 RUN chown -R nobody:root /execute && \

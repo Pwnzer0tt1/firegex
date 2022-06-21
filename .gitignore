@@ -14,7 +14,7 @@
 /backend/proxy/proxy
 docker-compose.yml
 # production
-/frontend/build
+#/frontend/build
 
 # misc
 **/.DS_Store
