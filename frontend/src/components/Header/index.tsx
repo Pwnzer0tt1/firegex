@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActionIcon, Badge, Button, Divider, Group, Image, Menu, Modal, Notification, Space, Switch, TextInput, Tooltip, FloatingTooltip, MediaQuery, PasswordInput } from '@mantine/core';
+import { ActionIcon, Badge, Button, Divider, Group, Image, Menu, Modal, Notification, Space, Switch, Tooltip, FloatingTooltip, MediaQuery, PasswordInput } from '@mantine/core';
 import style from "./Header.module.scss";
 import { changepassword, errorNotify, eventUpdateName, generalstats, logout, okNotify } from '../../js/utils';
 import { ChangePassword, GeneralStats } from '../../js/models';

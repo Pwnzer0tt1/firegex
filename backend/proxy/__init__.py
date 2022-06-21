@@ -44,7 +44,7 @@ class Proxy:
                 self.config_file_path = config_file_path
     
     def start(self, in_pause=False):
-        if self.process is None:
+        if not self.isactive():
             self.filter_map = self.compile_filters()
             filters_codes = list(self.filter_map.keys()) if not in_pause else []
             proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
@@ -66,8 +66,9 @@ class Proxy:
             finally:
                 self.__delete_config()
     
+
     def stop(self):
-        if self.process:
+        if self.isactive():
             self.process.terminate()
             try:
                 self.process.wait(timeout=3)
@@ -101,6 +102,8 @@ class Proxy:
                 self.trigger_reload_config()
 
     def isactive(self):
+        if self.process and not self.process.poll() is None:
+            self.process = None
         return True if self.process else False
 
     def trigger_reload_config(self):
