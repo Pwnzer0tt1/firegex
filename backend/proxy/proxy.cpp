@@ -5,7 +5,7 @@
 #include <csignal>
 #include <fstream>
 
-#include <boost/regex.hpp>
+#include <regex>
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/bind.hpp>
@@ -14,7 +14,7 @@
 
 #include <cctype> // is*
 
-//#define DEBUG
+#define DEBUG
 
 using namespace std;
 
@@ -39,10 +39,10 @@ unhexlify(InputIterator first, InputIterator last, OutputIterator ascii) {
   return 0;
 }
 
-vector<pair<string,boost::regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+vector<pair<string,std::regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
 const char* config_file;
 
-bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,boost::regex>> const &blacklist, vector<pair<string,boost::regex>> const &whitelist){
+bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,std::regex>> const &blacklist, vector<pair<string,std::regex>> const &whitelist){
    #ifdef DEBUG
    cout << "---------------- Packet ----------------" << endl;
    for(int i=0;i<bytes_transferred;i++){
@@ -50,31 +50,31 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
    }
    cout << "\n" << "---------------- End Packet ----------------" << endl;
    #endif
-   for (pair<string,boost::regex> ele:blacklist){
-      boost::cmatch what;
+   for (pair<string,std::regex> ele:blacklist){
+      std::cmatch what;
       try{
-         if (boost::regex_match(reinterpret_cast<const char*>(data),
-               reinterpret_cast<const char*>(data) + bytes_transferred, what, ele.second)){
+         std::regex_search(reinterpret_cast<const char*>(data), what, ele.second);
+         if(what.size() > 0){
             cout << "BLOCKED " << ele.first << endl;
             return false;
          }
       } catch(...){
          #ifdef DEBUG
-         cout << "Error while matching regex: " << ele.first << endl;
+         cerr << "Error while matching regex: " << ele.first << endl;
          #endif
       }
    }
-   for (pair<string,boost::regex> ele:whitelist){
-      boost::cmatch what;
+   for (pair<string,std::regex> ele:whitelist){
+      std::cmatch what;
       try{
-         if (!boost::regex_match(reinterpret_cast<const char*>(data),
-               reinterpret_cast<const char*>(data) + bytes_transferred, what, ele.second)){
+         std::regex_search(reinterpret_cast<const char*>(data), what, ele.second);
+         if(what.size() < 0){
             cout << "BLOCKED " << ele.first << endl;
             return false;
          }
       } catch(...){
          #ifdef DEBUG
-         cout << "Error while matching regex: " << ele.first << endl;
+         cerr << "Error while matching regex: " << ele.first << endl;
          #endif
       }      
    }
@@ -325,23 +325,22 @@ namespace tcp_proxy
    };
 }
 
-void push_regex(char* arg, bool case_sensitive, vector<pair<string,boost::regex>> &v){
+void push_regex(char* arg, bool case_sensitive, vector<pair<string,std::regex>> &v){
    size_t expr_len = (strlen(arg)-2)/2;
    char expr[expr_len];
    unhexlify(arg+2, arg+strlen(arg)-1, expr);
+   string expr_str(expr, expr_len);
    try{
       if (case_sensitive){
-         boost::regex regex(reinterpret_cast<char*>(expr),
-         reinterpret_cast<char*>(expr) + expr_len);
+         std::regex regex(expr_str);
          #ifdef DEBUG
-         cout << "Added case sensitive regex " << expr << endl;
+         cout << "Added case sensitive regex " << expr_str << endl;
          #endif
          v.push_back(make_pair(string(arg), regex));
       } else {
-         boost::regex regex(reinterpret_cast<char*>(expr),
-         reinterpret_cast<char*>(expr) + expr_len, boost::regex::icase);
+         std::regex regex(expr_str,std::regex_constants::icase);
          #ifdef DEBUG
-         cout << "Added case insensitive regex " << expr << endl;
+         cout << "Added case insensitive regex " << expr_str << endl;
          #endif
          v.push_back(make_pair(string(arg), regex));
       }
