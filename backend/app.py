@@ -295,11 +295,8 @@ def post_regexes_add():
                     "is_case_sensitive" : {"type" : "boolean"}
                 },
         })
-        if not re.match("^([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{3}=|[A-Za-z0-9+/]{2}==)?$",req["regex"]):
-            return abort(400)
     except Exception:
         return abort(400)
-
     try:
         re.compile(b64decode(req["regex"]))
     except Exception:

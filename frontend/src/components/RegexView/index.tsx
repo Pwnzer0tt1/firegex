@@ -15,12 +15,6 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
                       regexInfo.mode === "B"? "S <-> C": "🤔"
 
   let regex_expr = getHumanReadableRegex(regexInfo.regex);
-  let exact_regex = true;
-
-  if (regex_expr.length>=4 && regex_expr.startsWith(".*") && regex_expr.endsWith(".*")){
-    regex_expr = regex_expr.substring(2,regex_expr.length-2)
-    exact_regex = false;
-  }
 
   const [deleteModal, setDeleteModal] = useState(false);
   const [tooltipOpened, setTooltipOpened] = useState(false);
@@ -72,9 +66,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
           <Grid.Col style={{width:"100%"}} span={6}>
             <Space h="xs" />
             <div className='center-flex-row'>
-              <Badge size="md" color={exact_regex?"grape":"pink"} variant="filled">Match: {exact_regex?"EXACT":"FIND"}</Badge>
-              <Space h="xs" />
-              <Badge size="md" color={regexInfo.is_case_sensitive?"red":"green"} variant="filled">Case: {regexInfo.is_case_sensitive?"SENSIIVE":"INSENSITIVE"}</Badge>
+              <Badge size="md" color={regexInfo.is_case_sensitive?"grape":"pink"} variant="filled">Case: {regexInfo.is_case_sensitive?"SENSIIVE":"INSENSITIVE"}</Badge>
               <Space h="xs" />
               <Badge size="md" color="yellow" variant="filled">Packets filtered: {regexInfo.n_packets}</Badge>
               <Space h="xs" />

@@ -39,10 +39,10 @@ unhexlify(InputIterator first, InputIterator last, OutputIterator ascii) {
   return 0;
 }
 
-vector<pair<string,std::regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+vector<pair<string,regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
 const char* config_file;
 
-bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,std::regex>> const &blacklist, vector<pair<string,std::regex>> const &whitelist){
+bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> const &blacklist, vector<pair<string,regex>> const &whitelist){
    #ifdef DEBUG
    cout << "---------------- Packet ----------------" << endl;
    for(int i=0;i<bytes_transferred;i++){
@@ -50,32 +50,28 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
    }
    cout << "\n" << "---------------- End Packet ----------------" << endl;
    #endif
-   for (pair<string,std::regex> ele:blacklist){
-      std::cmatch what;
+   for (pair<string,regex> ele:blacklist){
+      cmatch what;
       try{
-         std::regex_search(reinterpret_cast<const char*>(data), what, ele.second);
+         regex_search(reinterpret_cast<const char*>(data), what, ele.second);
          if(what.size() > 0){
             cout << "BLOCKED " << ele.first << endl;
             return false;
          }
       } catch(...){
-         #ifdef DEBUG
          cerr << "Error while matching regex: " << ele.first << endl;
-         #endif
       }
    }
-   for (pair<string,std::regex> ele:whitelist){
-      std::cmatch what;
+   for (pair<string,regex> ele:whitelist){
+      cmatch what;
       try{
-         std::regex_search(reinterpret_cast<const char*>(data), what, ele.second);
+         regex_search(reinterpret_cast<const char*>(data), what, ele.second);
          if(what.size() < 0){
             cout << "BLOCKED " << ele.first << endl;
             return false;
          }
       } catch(...){
-         #ifdef DEBUG
          cerr << "Error while matching regex: " << ele.first << endl;
-         #endif
       }      
    }
    #ifdef DEBUG
@@ -112,7 +108,7 @@ namespace tcp_proxy
          return upstream_socket_;
       }
 
-      void start(const std::string& upstream_host, unsigned short upstream_port)
+      void start(const string& upstream_host, unsigned short upstream_port)
       {
          // Attempt connection to remote server (upstream side)
          upstream_socket_.async_connect(
@@ -266,8 +262,8 @@ namespace tcp_proxy
       public:
 
          acceptor(boost::asio::io_service& io_service,
-                  const std::string& local_host, unsigned short local_port,
-                  const std::string& upstream_host, unsigned short upstream_port)
+                  const string& local_host, unsigned short local_port,
+                  const string& upstream_host, unsigned short upstream_port)
          : io_service_(io_service),
            localhost_address(boost::asio::ip::address_v4::from_string(local_host)),
            acceptor_(io_service_,ip::tcp::endpoint(localhost_address,local_port)),
@@ -286,9 +282,9 @@ namespace tcp_proxy
                          this,
                          boost::asio::placeholders::error));
             }
-            catch(std::exception& e)
+            catch(exception& e)
             {
-               std::cerr << "acceptor exception: " << e.what() << std::endl;
+               cerr << "acceptor exception: " << e.what() << endl;
                return false;
             }
 
@@ -305,12 +301,12 @@ namespace tcp_proxy
 
                if (!accept_connections())
                {
-                  std::cerr << "Failure during call to accept." << std::endl;
+                  cerr << "Failure during call to accept." << endl;
                }
             }
             else
             {
-               std::cerr << "Error: " << error.message() << std::endl;
+               cerr << "Error: " << error.message() << endl;
             }
          }
 
@@ -319,33 +315,33 @@ namespace tcp_proxy
          ip::tcp::acceptor acceptor_;
          ptr_type session_;
          unsigned short upstream_port_;
-         std::string upstream_host_;
+         string upstream_host_;
       };
 
    };
 }
 
-void push_regex(char* arg, bool case_sensitive, vector<pair<string,std::regex>> &v){
+void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
    size_t expr_len = (strlen(arg)-2)/2;
    char expr[expr_len];
    unhexlify(arg+2, arg+strlen(arg)-1, expr);
    string expr_str(expr, expr_len);
    try{
       if (case_sensitive){
-         std::regex regex(expr_str);
+         regex regex(expr_str);
          #ifdef DEBUG
          cout << "Added case sensitive regex " << expr_str << endl;
          #endif
          v.push_back(make_pair(string(arg), regex));
       } else {
-         std::regex regex(expr_str,std::regex_constants::icase);
+         regex regex(expr_str,regex_constants::icase);
          #ifdef DEBUG
          cout << "Added case insensitive regex " << expr_str << endl;
          #endif
          v.push_back(make_pair(string(arg), regex));
       }
    } catch(...){
-      std::cerr << "Regex " << expr << " was not compiled successfully" << std::endl;
+      cerr << "Regex " << expr << " was not compiled successfully" << endl;
    }
 }
 
@@ -354,7 +350,7 @@ void update_regex(){
    fstream fd;
    fd.open(config_file,ios::in); 
    if (!fd.is_open()){
-	   std::cerr << "Error: config file couln't be opened" << std::endl;
+	   cerr << "Error: config file couln't be opened" << endl;
       exit(1);
 	}
 
@@ -413,14 +409,14 @@ int main(int argc, char* argv[])
 {
    if (argc < 6)
    {
-      std::cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> <config_file>" << std::endl;
+      cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> <config_file>" << endl;
       return 1;
    }
 
    const unsigned short local_port   = static_cast<unsigned short>(::atoi(argv[2]));
    const unsigned short forward_port = static_cast<unsigned short>(::atoi(argv[4]));
-   const std::string local_host      = argv[1];
-   const std::string forward_host    = argv[3];
+   const string local_host      = argv[1];
+   const string forward_host    = argv[3];
    
    config_file = argv[5];
 
@@ -445,9 +441,9 @@ int main(int argc, char* argv[])
 
       ios.run();
    }
-   catch(std::exception& e)
+   catch(exception& e)
    {
-      std::cerr << "Error: " << e.what() << std::endl;
+      cerr << "Error: " << e.what() << endl;
       return 1;
    }
 

@@ -137,7 +137,36 @@ export function getHumanReadableRegex(regexB64:string){
         if (unescapedChars.includes(byte)){
             res+=byte
         }else{
-            res+="%"+regex[i].toString(16)
+            let hex_data = regex[i].toString(16)
+            if (hex_data.length === 1) hex_data = "0"+hex_data
+            res+="%"+hex_data
+        }
+    }
+    return res
+}
+
+const hexChars = "0123456789abcdefABCDEF"
+
+export function getBinaryRegex(regexPercentageEncoded:string):number[]{
+    const regex = Buffer.from(regexPercentageEncoded)
+    let res = []
+    for (let i=0; i < regex.length; i++){
+        const byte = String.fromCharCode(regex[i]);
+        if ("%" === byte){
+            if(i+2 < regex.length){
+                const byte_1 = String.fromCharCode(regex[i+1]);
+                const byte_2 = String.fromCharCode(regex[i+2]);
+                if(hexChars.includes(byte_1) && hexChars.includes(byte_2)){
+                    res.push(parseInt(byte_1+byte_2,16))
+                    i += 2
+                }else{
+                    res.push(regex[i])
+                }
+            }else{
+                res.push(regex[i])
+            }
+        }else{
+            res.push(regex[i])
         }
     }
     return res
@@ -163,6 +192,6 @@ export function okNotify(title:string, description:string ){
     });
 }
 
-export function b64encode(data:string){
+export function b64encode(data:number[]|string){
     return Buffer.from(data).toString('base64')
 }

@@ -2,7 +2,7 @@ import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, To
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { RegexAddForm } from '../js/models';
-import { addregex, b64encode, fireUpdateRequest, getHumanReadableRegex, okNotify } from '../js/utils';
+import { addregex, b64encode, fireUpdateRequest, getBinaryRegex, getHumanReadableRegex, okNotify } from '../js/utils';
 import { ImCross } from "react-icons/im"
 import FilterTypeSelector from './FilterTypeSelector';
 
@@ -12,7 +12,6 @@ type RegexAddInfo = {
     type:string,
     mode:string,
     is_case_insensitive:boolean,
-    regex_exact:boolean,
     percentage_encoding:boolean
 }
 
@@ -24,7 +23,6 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             type:"blacklist",
             mode:"C <-> S",
             is_case_insensitive:false,
-            regex_exact:false,
             percentage_encoding:false
         },
         validationRules:{
@@ -47,12 +45,9 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
         setSubmitLoading(true)
         const filter_mode = ({'C -> S':'C', 'S -> C':'S', 'C <-> S':'B'}[values.mode])
 
-        let final_regex = values.regex
+        let final_regex:string|number[] = values.regex
         if (values.percentage_encoding){
-            final_regex = decodeURIComponent(final_regex)
-        }
-        if(!values.regex_exact){
-            final_regex = ".*"+final_regex+".*"
+            final_regex = getBinaryRegex(final_regex)
         }
 
         const request:RegexAddForm = {
@@ -103,11 +98,6 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             <Switch
                 label="Case insensitive"
                 {...form.getInputProps('is_case_insensitive', { type: 'checkbox' })}
-            />
-            <Space h="md" />
-            <Switch
-                label="Match exactly the regex"
-                {...form.getInputProps('regex_exact', { type: 'checkbox' })}
             />
             <Space h="md" />
             <NativeSelect
