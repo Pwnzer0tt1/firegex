@@ -1,7 +1,7 @@
 #Building main conteiner
 FROM python:slim-buster
 
-RUN apt-get update && apt-get -y install curl supervisor gettext-base build-essential libboost-dev nginx libboost-regex-dev libboost-system-dev
+RUN apt-get update && apt-get -y install curl supervisor gettext-base build-essential libboost-dev nginx libboost-system-dev
 RUN curl -sL https://deb.nodesource.com/setup_16.x | bash
 RUN apt-get install nodejs
 
