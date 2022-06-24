@@ -64,7 +64,7 @@ def get_status():
 
 @app.route("/api/login", methods = ['POST'])
 def login():
-    if not conf.get("password"): return abort(404)
+    if app.config["STATUS"] != "run": return abort(404)
     req = request.get_json(force = True)
 
     try:
@@ -95,6 +95,7 @@ def logout():
 @app.route('/api/change-password', methods = ['POST'])
 @login_required
 def change_password():
+    if app.config["STATUS"] != "run": return abort(404)
     req = request.get_json(force = True)
 
     try:
@@ -122,9 +123,8 @@ def change_password():
 
 @app.route('/api/set-password', methods = ['POST'])
 def set_password():
-    if conf.get("password"): return abort(404)
+    if app.config["STATUS"] != "init": return abort(404)
     req = request.get_json(force = True)
-
     try:
         validate(
             instance=req,

@@ -20,6 +20,8 @@ docker-compose.yml
 
 /backend/proxy/proxy
 
+/docs/**
+
 # misc
 **/.DS_Store
 **/.env.local
