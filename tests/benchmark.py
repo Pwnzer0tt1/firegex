@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, socket,secrets, base64, iperf3
+import argparse, socket,secrets, base64, iperf3, csv
 from time import sleep
 from requests import Session
 from multiprocessing  import Process
@@ -28,6 +28,7 @@ parser.add_argument("--service_name", "-n", type=str , required=False, help='Nam
 parser.add_argument("--password", "-p", type=str, required=True, help='Firegex password')
 parser.add_argument("--num_of_regexes", "-r", type=int, required=True, help='Number of regexes to benchmark with')
 parser.add_argument("--duration", "-d", type=int, required=False, help='Duration of the Benchmark in seconds', default=5)
+parser.add_argument("--output_file", "-o", type=str, required=False, help='Output results csv file', default="benchmark.csv")
 
 args = parser.parse_args()
 sep()
@@ -74,7 +75,7 @@ def getReading(port):
     client.server_hostname = '127.0.0.1'
     client.port = port
     client.protocol = 'tcp'
-    return client.run().json['end']['sum_received']['bits_per_second']/8e+6 
+    return round(client.run().json['end']['sum_received']['bits_per_second']/8e+6 , 3)
 
 server = Process(target=startServer)
 server.start()
@@ -83,7 +84,7 @@ sleep(1)
 
 #Get baseline reading 
 puts(f"Baseline without proxy: ", color=colors.blue, end='')
-print(f"{getReading(internal_port)}MB/s")
+print(f"{getReading(internal_port)} MB/s")
 
 #Start firewall
 req = s.get(f"{args.address}api/service/{service_id}/start")
@@ -97,7 +98,7 @@ sleep(1)
 results = []
 puts(f"Performance with no regexes: ", color=colors.yellow , end='')
 results.append(getReading(args.service_port))
-print(f"{results[0]}MB/s")
+print(f"{results[0]} MB/s")
 
 #Add all the regexs
 for i in range(1,args.num_of_regexes+1):
@@ -107,10 +108,14 @@ for i in range(1,args.num_of_regexes+1):
     assert req.json()["status"] == "ok", f"Test Failed: Couldn't add regex {req.text}"
     puts(f"Performance with {i} regex(s): ", color=colors.red, end='')
     results.append(getReading(args.service_port))
-    print(f"{results[i]}MB/s")
+    print(f"{results[i]} MB/s")
 
-print("Results:")
-print(results)
+with open(args.output_file,'w') as f:
+    writer = csv.writer(f)
+    for i,result in enumerate(results):
+        writer.writerow([i,result])
+
+puts(f"Sucessfully written results to {args.output_file} ✔", color=colors.magenta)
 
 #Delete the Service 
 req = s.get(f"{args.address}api/service/{service_id}/delete")
