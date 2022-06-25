@@ -5,6 +5,7 @@
 #include <csignal>
 #include <fstream>
 #include <regex>
+#include <mutex>
 
 #include <boost/thread.hpp>
 #include <boost/shared_ptr.hpp>
@@ -13,7 +14,7 @@
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
 
-//#define DEBUG
+#define DEBUG
 
 using namespace std;
 
@@ -38,18 +39,21 @@ unhexlify(InputIterator first, InputIterator last, OutputIterator ascii) {
   return 0;
 }
 
-vector<pair<string,regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+vector<pair<string,regex>> *regex_s_c_w, *regex_c_s_w, *regex_s_c_b, *regex_c_s_b;
 const char* config_file;
+mutex mtx;
 
-bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> const &blacklist, vector<pair<string,regex>> const &whitelist){
-   #ifdef DEBUG
+bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> *const blacklist, vector<pair<string,regex>> *const whitelist){
+   #ifdef DEBUG_PACKET
    cout << "---------------- Packet ----------------" << endl;
    for(int i=0;i<bytes_transferred;i++){
       cout << data[i];
    }
    cout << "\n" << "---------------- End Packet ----------------" << endl;
    #endif
-   for (pair<string,regex> ele:blacklist){
+   vector<pair<string,regex>> *bp = blacklist; 
+   for (pair<string,regex> ele:*bp){
+      cout << "TRYING" << ele.first << endl;
       cmatch what;
       try{
          regex_search(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data)+bytes_transferred, what, ele.second);
@@ -61,7 +65,8 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
          cerr << "Error while matching regex: " << ele.first << endl;
       }
    }
-   for (pair<string,regex> ele:whitelist){
+   vector<pair<string,regex>> *wp = whitelist;
+   for (pair<string,regex> ele:*wp){
       cmatch what;
       try{
          regex_search(reinterpret_cast<const char*>(data),reinterpret_cast<const char*>(data)+bytes_transferred, what, ele.second);
@@ -320,7 +325,8 @@ namespace tcp_proxy
    };
 }
 
-void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
+void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> *v){
+   std::unique_lock<std::mutex> lck(mtx);
    size_t expr_len = (strlen(arg)-2)/2;
    char expr[expr_len];
    unhexlify(arg+2, arg+strlen(arg)-1, expr);
@@ -331,13 +337,13 @@ void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
          #ifdef DEBUG
          cout << "Added case sensitive regex " << expr_str << endl;
          #endif
-         v.push_back(make_pair(string(arg), regex));
+         v->push_back(make_pair(string(arg), regex));
       } else {
          regex regex(expr_str,regex_constants::icase);
          #ifdef DEBUG
          cout << "Added case insensitive regex " << expr_str << endl;
          #endif
-         v.push_back(make_pair(string(arg), regex));
+         v->push_back(make_pair(string(arg), regex));
       }
    } catch(...){
       cerr << "Regex " << expr << " was not compiled successfully" << endl;
@@ -352,11 +358,16 @@ void update_regex(){
 	   cerr << "Error: config file couln't be opened" << endl;
       exit(1);
 	}
-
-   regex_s_c_w.clear();
-   regex_c_s_w.clear();
-   regex_s_c_b.clear();
-   regex_c_s_b.clear();
+   /*
+   regex_s_c_w.reset(new vector<pair<string,regex>>);
+   regex_c_s_w.reset(new vector<pair<string,regex>>);
+   regex_s_c_b.reset(new vector<pair<string,regex>>);
+   regex_c_s_b.reset(new vector<pair<string,regex>>);
+   */
+   regex_s_c_w = new vector<pair<string,regex>>;
+   regex_c_s_w = new vector<pair<string,regex>>;
+   regex_s_c_b = new vector<pair<string,regex>>;
+   regex_c_s_b = new vector<pair<string,regex>>;
 
    string line;
    while(getline(fd, line)){

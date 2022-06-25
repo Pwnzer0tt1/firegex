@@ -33,7 +33,7 @@ parser.add_argument("--num_of_streams", "-s", type=int, required=False, help='Ou
 
 args = parser.parse_args()
 sep()
-puts(f"Benchmarking with {args.num_of_regexes} will start on ", color=colors.cyan, end="")
+puts(f"Benchmarking with {args.num_of_regexes} regexes will start on ", color=colors.cyan, end="")
 puts(f"{args.address}", color=colors.yellow)
 
 s = Session()
@@ -77,9 +77,7 @@ def getReading(port):
     client.port = port
     client.protocol = 'tcp'
     client.num_streams = args.num_of_streams
-    run = client.run()
-    print(run)
-    return round(run.json['end']['sum_received']['bits_per_second']/8e+6 , 3)
+    return round(client.run().json['end']['sum_received']['bits_per_second']/8e+6 , 3)
 
 server = Process(target=startServer)
 server.start()
