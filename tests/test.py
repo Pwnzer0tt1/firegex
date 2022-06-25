@@ -40,7 +40,7 @@ puts(f"Sucessfully logged in ✔", color=colors.green)
 #Create new Service
 req = s.post(f"{args.address}api/services/add" , json={"name":args.service_name,"port":args.service_port})
 assert req.json()["status"] == "ok", f"Test Failed: Couldn't create service {req.text} ✔"
-puts(f"Sucessfully created service {args.service_name} on with public port {args.service_port} ✔", color=colors.green)
+puts(f"Sucessfully created service {args.service_name} with public port {args.service_port} ✔", color=colors.green)
 
 #Find the Service
 req = s.get(f"{args.address}api/services")

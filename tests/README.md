@@ -14,7 +14,7 @@ Output of the tests:
 
     Testing will start on http://127.0.0.1:5000/
     Sucessfully logged in ✔
-    Sucessfully created service Test Service on with public port 1337 ✔
+    Sucessfully created service Test Service with public port 1337 ✔
     Sucessfully received the internal port 38222 ✔
     Sucessfully started service with id test-service ✔
     Successfully tested first proxy with no regex ✔
