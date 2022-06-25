@@ -152,8 +152,7 @@ class ProxyManager:
                 if check_port_is_open(proxy.public_port):
                     self.__update_status_db(id, next_status)
                     if saved_status[0] == "wait": saved_status[0] = next_status
-                    proxy_status = proxy.start(in_pause=(next_status==STATUS.PAUSE))
-                    saved_status[0] = STATUS.STOP
+                    proxy.start(in_pause=(next_status==STATUS.PAUSE))
                     self.__update_status_db(id, STATUS.STOP)
                     return
                 else:
@@ -181,7 +180,11 @@ class ProxyManager:
                 if proxy and proxy.isactive():
                     proxy.stop()
                 return
-               
+            
+            if data["status"] == STATUS.STOP:
+                previous_status = STATUS.STOP
+                if thr_starter and thr_starter.is_alive(): thr_starter.kill()
+            
             #Filter check
             old_filters = set(filters.keys())
             new_filters = set([f["id"] for f in data["filters"]])
