@@ -1,7 +1,7 @@
 #Building main conteiner
 FROM python:slim-buster
 
-RUN apt-get update && apt-get -y install curl supervisor gettext-base build-essential libboost-dev nginx libboost-system-dev
+RUN apt-get update && apt-get -y install curl supervisor gettext-base build-essential libboost-dev nginx libboost-system-dev libboost-thread-dev
 RUN curl -sL https://deb.nodesource.com/setup_16.x | bash
 RUN apt-get install nodejs
 
@@ -14,7 +14,7 @@ ADD ./backend/requirements.txt /execute/requirements.txt
 RUN pip install --no-cache-dir -r /execute/requirements.txt
 
 COPY ./backend/ /execute/
-RUN c++ -O3 -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system 
+RUN c++ -O3 -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system -lboost_thread
 COPY ./config/supervisord.conf /etc/supervisor/supervisord.conf
 COPY ./config/nginx.conf /tmp/nginx.conf
 COPY ./config/start_nginx.sh /tmp/start_nginx.sh

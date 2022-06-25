@@ -29,6 +29,7 @@ parser.add_argument("--password", "-p", type=str, required=True, help='Firegex p
 parser.add_argument("--num_of_regexes", "-r", type=int, required=True, help='Number of regexes to benchmark with')
 parser.add_argument("--duration", "-d", type=int, required=False, help='Duration of the Benchmark in seconds', default=5)
 parser.add_argument("--output_file", "-o", type=str, required=False, help='Output results csv file', default="benchmark.csv")
+parser.add_argument("--num_of_streams", "-s", type=int, required=False, help='Output results csv file', default=1)
 
 args = parser.parse_args()
 sep()
@@ -75,7 +76,10 @@ def getReading(port):
     client.server_hostname = '127.0.0.1'
     client.port = port
     client.protocol = 'tcp'
-    return round(client.run().json['end']['sum_received']['bits_per_second']/8e+6 , 3)
+    client.num_streams = args.num_of_streams
+    run = client.run()
+    print(run)
+    return round(run.json['end']['sum_received']['bits_per_second']/8e+6 , 3)
 
 server = Process(target=startServer)
 server.start()

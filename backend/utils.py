@@ -153,9 +153,8 @@ class ProxyManager:
                     self.__update_status_db(id, next_status)
                     if saved_status[0] == "wait": saved_status[0] = next_status
                     proxy_status = proxy.start(in_pause=(next_status==STATUS.PAUSE))
-                    if proxy_status != 0:
-                        saved_status[0] = STATUS.STOP
-                        self.__update_status_db(id, STATUS.STOP)
+                    saved_status[0] = STATUS.STOP
+                    self.__update_status_db(id, STATUS.STOP)
                     return
                 else:
                     time.sleep(.5)

@@ -4,15 +4,14 @@
 #include <string>
 #include <csignal>
 #include <fstream>
-
 #include <regex>
+
+#include <boost/thread.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
-
-#include <cctype> // is*
 
 //#define DEBUG
 
@@ -439,7 +438,11 @@ int main(int argc, char* argv[])
 
       acceptor.accept_connections();
 
-      ios.run();
+      boost::thread_group tg;
+      for (unsigned i = 0; i < thread::hardware_concurrency(); ++i)
+         tg.create_thread(boost::bind(&boost::asio::io_service::run, &ios));
+
+      tg.join_all();
    }
    catch(exception& e)
    {
