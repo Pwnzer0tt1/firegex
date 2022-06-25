@@ -21,7 +21,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
         initialValues: {
             regex:"",
             type:"blacklist",
-            mode:"C <-> S",
+            mode:"C -> S",
             is_case_insensitive:false,
             percentage_encoding:false
         },

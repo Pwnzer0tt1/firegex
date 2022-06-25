@@ -14,7 +14,8 @@
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
 
-#define DEBUG
+//#define DEBUG
+//#define DEBUG_PACKET
 
 using namespace std;
 
@@ -38,12 +39,15 @@ unhexlify(InputIterator first, InputIterator last, OutputIterator ascii) {
   }
   return 0;
 }
+struct regex_rules{
+   vector<pair<string,regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+};
+shared_ptr<regex_rules> regex_config;
 
-vector<pair<string,regex>> *regex_s_c_w, *regex_c_s_w, *regex_s_c_b, *regex_c_s_b;
 const char* config_file;
 mutex mtx;
 
-bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> *const blacklist, vector<pair<string,regex>> *const whitelist){
+bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> const &blacklist, vector<pair<string,regex>> const &whitelist){
    #ifdef DEBUG_PACKET
    cout << "---------------- Packet ----------------" << endl;
    for(int i=0;i<bytes_transferred;i++){
@@ -51,13 +55,9 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
    }
    cout << "\n" << "---------------- End Packet ----------------" << endl;
    #endif
-   vector<pair<string,regex>> *bp = blacklist; 
-   for (pair<string,regex> ele:*bp){
-      cout << "TRYING" << ele.first << endl;
-      cmatch what;
+   for (pair<string,regex> ele:blacklist){
       try{
-         regex_search(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data)+bytes_transferred, what, ele.second);
-         if(what.size() > 0){
+         if(regex_search(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data)+bytes_transferred, ele.second)){
             cout << "BLOCKED " << ele.first << endl;
             return false;
          }
@@ -65,12 +65,9 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
          cerr << "Error while matching regex: " << ele.first << endl;
       }
    }
-   vector<pair<string,regex>> *wp = whitelist;
-   for (pair<string,regex> ele:*wp){
-      cmatch what;
+   for (pair<string,regex> ele:whitelist){
       try{
-         regex_search(reinterpret_cast<const char*>(data),reinterpret_cast<const char*>(data)+bytes_transferred, what, ele.second);
-         if(what.size() < 0){
+         if(!regex_search(reinterpret_cast<const char*>(data),reinterpret_cast<const char*>(data)+bytes_transferred, ele.second)){
             cout << "BLOCKED " << ele.first << endl;
             return false;
          }
@@ -161,7 +158,8 @@ namespace tcp_proxy
       {
          if (!error)
          {
-            if (filter_data(upstream_data_, bytes_transferred, regex_s_c_b, regex_s_c_w)){
+            shared_ptr<regex_rules> regex_old_config = regex_config;
+            if (filter_data(upstream_data_, bytes_transferred, regex_old_config->regex_s_c_b, regex_old_config->regex_s_c_w)){
                async_write(downstream_socket_,
                   boost::asio::buffer(upstream_data_,bytes_transferred),
                   boost::bind(&bridge::handle_downstream_write,
@@ -204,7 +202,8 @@ namespace tcp_proxy
       {
          if (!error)
          {
-            if (filter_data(downstream_data_, bytes_transferred, regex_c_s_b, regex_c_s_w)){
+            shared_ptr<regex_rules> regex_old_config = regex_config;
+            if (filter_data(downstream_data_, bytes_transferred, regex_old_config->regex_c_s_b, regex_old_config->regex_c_s_w)){
                async_write(upstream_socket_,
                   boost::asio::buffer(downstream_data_,bytes_transferred),
                   boost::bind(&bridge::handle_upstream_write,
@@ -325,7 +324,7 @@ namespace tcp_proxy
    };
 }
 
-void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> *v){
+void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
    std::unique_lock<std::mutex> lck(mtx);
    size_t expr_len = (strlen(arg)-2)/2;
    char expr[expr_len];
@@ -337,13 +336,13 @@ void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> *v){
          #ifdef DEBUG
          cout << "Added case sensitive regex " << expr_str << endl;
          #endif
-         v->push_back(make_pair(string(arg), regex));
+         v.push_back(make_pair(string(arg), regex));
       } else {
          regex regex(expr_str,regex_constants::icase);
          #ifdef DEBUG
          cout << "Added case insensitive regex " << expr_str << endl;
          #endif
-         v->push_back(make_pair(string(arg), regex));
+         v.push_back(make_pair(string(arg), regex));
       }
    } catch(...){
       cerr << "Regex " << expr << " was not compiled successfully" << endl;
@@ -358,16 +357,8 @@ void update_regex(){
 	   cerr << "Error: config file couln't be opened" << endl;
       exit(1);
 	}
-   /*
-   regex_s_c_w.reset(new vector<pair<string,regex>>);
-   regex_c_s_w.reset(new vector<pair<string,regex>>);
-   regex_s_c_b.reset(new vector<pair<string,regex>>);
-   regex_c_s_b.reset(new vector<pair<string,regex>>);
-   */
-   regex_s_c_w = new vector<pair<string,regex>>;
-   regex_c_s_w = new vector<pair<string,regex>>;
-   regex_s_c_b = new vector<pair<string,regex>>;
-   regex_c_s_b = new vector<pair<string,regex>>;
+
+   regex_rules *regex_new_config = new regex_rules();
 
    string line;
    while(getline(fd, line)){
@@ -380,24 +371,26 @@ void update_regex(){
          }
          switch(tp[1]){
             case 'C': { // Client to server Blacklist
-               push_regex(tp, case_sensitive, regex_c_s_b);
+               push_regex(tp, case_sensitive, regex_new_config->regex_c_s_b);
                break;
             }
             case 'c': { // Client to server Whitelist
-               push_regex(tp, case_sensitive, regex_c_s_w);
+               push_regex(tp, case_sensitive, regex_new_config->regex_c_s_w);
                break;
             }
             case 'S': { // Server to client Blacklist
-               push_regex(tp, case_sensitive, regex_s_c_b);
+               push_regex(tp, case_sensitive, regex_new_config->regex_s_c_b);
                break;
             }
             case 's': { // Server to client Whitelist
-               push_regex(tp, case_sensitive, regex_s_c_w);
+               push_regex(tp, case_sensitive, regex_new_config->regex_s_c_w);
                break;
             }
          }
       }
    }
+
+   regex_config.reset(regex_new_config);
 }
 
 void signal_handler(int signal_num)

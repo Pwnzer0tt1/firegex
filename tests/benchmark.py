@@ -30,6 +30,7 @@ parser.add_argument("--num_of_regexes", "-r", type=int, required=True, help='Num
 parser.add_argument("--duration", "-d", type=int, required=False, help='Duration of the Benchmark in seconds', default=5)
 parser.add_argument("--output_file", "-o", type=str, required=False, help='Output results csv file', default="benchmark.csv")
 parser.add_argument("--num_of_streams", "-s", type=int, required=False, help='Output results csv file', default=1)
+parser.add_argument("--new_istance", "-i", action="store_true", help='Create a new service', default=False)
 
 args = parser.parse_args()
 sep()
@@ -42,10 +43,11 @@ req = s.post(f"{args.address}api/login", json={"password":args.password})
 assert req.json()["status"] == "ok", f"Benchmark Failed: Unknown response or wrong passowrd {req.text}"
 puts(f"Sucessfully logged in ✔", color=colors.green)
 
-#Create new Service
-req = s.post(f"{args.address}api/services/add" , json={"name":args.service_name,"port":args.service_port})
-assert req.json()["status"] == "ok", f"Benchmark Failed: Couldn't create service {req.text} ✔"
-puts(f"Sucessfully created service {args.service_name} with public port {args.service_port} ✔", color=colors.green)
+if args.new_istance:
+    #Create new Service
+    req = s.post(f"{args.address}api/services/add" , json={"name":args.service_name,"port":args.service_port})
+    assert req.json()["status"] == "ok", f"Benchmark Failed: Couldn't create service {req.text} ✔"
+    puts(f"Sucessfully created service {args.service_name} with public port {args.service_port} ✔", color=colors.green)
 
 #Find the Service
 req = s.get(f"{args.address}api/services")
@@ -119,9 +121,10 @@ with open(args.output_file,'w') as f:
 
 puts(f"Sucessfully written results to {args.output_file} ✔", color=colors.magenta)
 
-#Delete the Service 
-req = s.get(f"{args.address}api/service/{service_id}/delete")
-assert req.json()["status"] == "ok", f"Benchmark Failed: Couldn't delete service {req.text}"
-puts(f"Sucessfully delete service with id {service_id} ✔", color=colors.green)
+if args.new_istance:
+    #Delete the Service 
+    req = s.get(f"{args.address}api/service/{service_id}/delete")
+    assert req.json()["status"] == "ok", f"Benchmark Failed: Couldn't delete service {req.text}"
+    puts(f"Sucessfully delete service with id {service_id} ✔", color=colors.green)
 
 server.terminate()
