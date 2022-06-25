@@ -25,7 +25,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--address", "-a", type=str , required=False, help='Address of firegex backend', default="http://127.0.0.1:5000/")
 parser.add_argument("--service_port", "-P", type=int , required=False, help='Port of the test service', default=1337)
 parser.add_argument("--service_name", "-n", type=str , required=False, help='Name of the test service', default="Test Service")
-parser.add_argument("--password", "-p", type=str, required=True, help='Firegex passowrd')
+parser.add_argument("--password", "-p", type=str, required=True, help='Firegex password')
 args = parser.parse_args()
 sep()
 puts(f"Testing will start on ", color=colors.cyan, end="")
@@ -97,6 +97,7 @@ secret = bytes(secrets.token_hex(16).encode())
 regex = base64.b64encode(secret).decode()
 req = s.post(f"{args.address}api/regexes/add", 
             json={"is_blacklist":True,"is_case_sensitive":True,"service_id":service_id,"mode":"B","regex":regex})
+assert req.json()["status"] == "ok", f"Test Failed: Couldn't add regex {req.text}"
 puts(f"Sucessfully added regex to service with id {service_id} ✔", color=colors.green)
 
 #Test the regex
