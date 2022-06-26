@@ -17,7 +17,7 @@
 //#define MULTI_THREAD
 //#define DEBUG
 //#define DEBUG_PACKET
-
+//#define THREAD_NUM
 using namespace std;
 
 boost::asio::io_service *ios_loop = nullptr;
@@ -459,7 +459,11 @@ int main(int argc, char* argv[])
       acceptor.accept_connections();
       #ifdef MULTI_THREAD
       boost::thread_group tg;
+      #ifdef THREAD_NUM
+      for (unsigned i = 0; i < THREAD_NUM; ++i)
+      #else
       for (unsigned i = 0; i < thread::hardware_concurrency(); ++i)
+      #endif
          tg.create_thread(boost::bind(&boost::asio::io_service::run, &ios));
 
       tg.join_all();
