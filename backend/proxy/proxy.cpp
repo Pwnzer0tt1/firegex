@@ -1,3 +1,7 @@
+/* Copyright (c) 2007 Arash Partow (http://www.partow.net)
+   URL: http://www.partow.net/programming/tcpproxy/index.html
+   Modified and adapted by Pwnzer0tt1
+*/
 #include <cstdlib>
 #include <cstddef>
 #include <iostream>
@@ -14,10 +18,6 @@
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
 
-//#define MULTI_THREAD
-//#define DEBUG
-//#define DEBUG_PACKET
-//#define THREAD_NUM
 using namespace std;
 
 boost::asio::io_service *ios_loop = nullptr;
@@ -149,7 +149,8 @@ namespace tcp_proxy
 
       bridge(boost::asio::io_service& ios)
       : downstream_socket_(ios),
-        upstream_socket_  (ios)
+        upstream_socket_  (ios),
+        thread_safety(ios)
       {}
 
       socket_type& downstream_socket()
@@ -171,9 +172,11 @@ namespace tcp_proxy
               ip::tcp::endpoint(
                    boost::asio::ip::address::from_string(upstream_host),
                    upstream_port),
-               boost::bind(&bridge::handle_upstream_connect,
+               boost::asio::bind_executor(thread_safety,
+               boost::bind(
+                  &bridge::handle_upstream_connect,
                     shared_from_this(),
-                    boost::asio::placeholders::error));
+                    boost::asio::placeholders::error)));
       }
 
       void handle_upstream_connect(const boost::system::error_code& error)
@@ -181,20 +184,23 @@ namespace tcp_proxy
          if (!error)
          {
             // Setup async read from remote server (upstream)
+
             upstream_socket_.async_read_some(
                  boost::asio::buffer(upstream_data_,max_data_length),
-                 boost::bind(&bridge::handle_upstream_read,
-                      shared_from_this(),
-                      boost::asio::placeholders::error,
-                      boost::asio::placeholders::bytes_transferred));
+                 boost::asio::bind_executor(thread_safety,
+                     boost::bind(&bridge::handle_upstream_read,
+                     shared_from_this(),
+                     boost::asio::placeholders::error,
+                     boost::asio::placeholders::bytes_transferred)));
 
             // Setup async read from client (downstream)
             downstream_socket_.async_read_some(
                  boost::asio::buffer(downstream_data_,max_data_length),
-                 boost::bind(&bridge::handle_downstream_read,
-                      shared_from_this(),
-                      boost::asio::placeholders::error,
-                      boost::asio::placeholders::bytes_transferred));
+                 boost::asio::bind_executor(thread_safety,
+                     boost::bind(&bridge::handle_downstream_read,
+                     shared_from_this(),
+                     boost::asio::placeholders::error,
+                     boost::asio::placeholders::bytes_transferred)));
          }
          else
             close();
@@ -217,9 +223,10 @@ namespace tcp_proxy
             if (filter_data(upstream_data_, bytes_transferred, regex_old_config->regex_s_c_b, regex_old_config->regex_s_c_w)){
                async_write(downstream_socket_,
                   boost::asio::buffer(upstream_data_,bytes_transferred),
-                  boost::bind(&bridge::handle_downstream_write,
+                  boost::asio::bind_executor(thread_safety,
+                        boost::bind(&bridge::handle_downstream_write,
                         shared_from_this(),
-                        boost::asio::placeholders::error));
+                        boost::asio::placeholders::error)));
             }else{
                close();
             }
@@ -236,10 +243,11 @@ namespace tcp_proxy
 
             upstream_socket_.async_read_some(
                  boost::asio::buffer(upstream_data_,max_data_length),
-                 boost::bind(&bridge::handle_upstream_read,
-                      shared_from_this(),
-                      boost::asio::placeholders::error,
-                      boost::asio::placeholders::bytes_transferred));
+                 boost::asio::bind_executor(thread_safety,
+                     boost::bind(&bridge::handle_upstream_read,
+                     shared_from_this(),
+                     boost::asio::placeholders::error,
+                     boost::asio::placeholders::bytes_transferred)));
          }
          else
             close();
@@ -262,9 +270,10 @@ namespace tcp_proxy
             if (filter_data(downstream_data_, bytes_transferred, regex_old_config->regex_c_s_b, regex_old_config->regex_c_s_w)){
                async_write(upstream_socket_,
                   boost::asio::buffer(downstream_data_,bytes_transferred),
-                  boost::bind(&bridge::handle_upstream_write,
+                  boost::asio::bind_executor(thread_safety,
+                        boost::bind(&bridge::handle_upstream_write,
                         shared_from_this(),
-                        boost::asio::placeholders::error));
+                        boost::asio::placeholders::error)));
             }else{
                close();
             }
@@ -280,10 +289,11 @@ namespace tcp_proxy
          {
             downstream_socket_.async_read_some(
                  boost::asio::buffer(downstream_data_,max_data_length),
-                 boost::bind(&bridge::handle_downstream_read,
-                      shared_from_this(),
-                      boost::asio::placeholders::error,
-                      boost::asio::placeholders::bytes_transferred));
+                 boost::asio::bind_executor(thread_safety,
+                     boost::bind(&bridge::handle_downstream_read,
+                     shared_from_this(),
+                     boost::asio::placeholders::error,
+                     boost::asio::placeholders::bytes_transferred)));
          }
          else
             close();
@@ -311,7 +321,7 @@ namespace tcp_proxy
       enum { max_data_length = 8192 }; //8KB
       unsigned char downstream_data_[max_data_length];
       unsigned char upstream_data_  [max_data_length];
-
+      boost::asio::io_service::strand thread_safety;
       boost::mutex mutex_;
    public:
 
@@ -336,9 +346,10 @@ namespace tcp_proxy
                session_ = boost::shared_ptr<bridge>(new bridge(io_service_));
 
                acceptor_.async_accept(session_->downstream_socket(),
+                    boost::asio::bind_executor(session_->thread_safety,
                     boost::bind(&acceptor::handle_accept,
                          this,
-                         boost::asio::placeholders::error));
+                         boost::asio::placeholders::error)));
             }
             catch(exception& e)
             {
@@ -461,8 +472,3 @@ int main(int argc, char* argv[])
 
    return 0;
 }
-
-/*
- * [Note] On posix systems the tcp proxy server build command is as follows:
- * c++ -pedantic -ansi -Wall -Werror -O3 -o tcpproxy_server tcpproxy_server.cpp -L/usr/lib -lstdc++ -lpthread -lboost_thread -lboost_system
- */

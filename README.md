@@ -51,3 +51,6 @@ This means that firegex is projected to avoid any possibility to have the servic
 6. If a regex makes trouble, you can delete it (this have an instant effect on the proxy), or put the service in pause (call also Transparent mode), this will deactivate all the filters from the proxy, but still continue to publish the service on the right port
 7. Every status change (except if you decide to stop the proxy) that you made to the service, and so to the proxy is instantaneous and done with 0 down time. The proxy is **never** restarted, it's configuration changes during runtime
     
+# Credits 
+- Copyright (c) 2007 Arash Partow (http://www.partow.net) for the base of our proxy implementation
+- Pwnzer0tt1

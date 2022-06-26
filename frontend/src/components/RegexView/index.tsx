@@ -76,7 +76,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
         </Grid>
         <YesNoModal
             title='Are you sure to delete this regex?'
-            description={`You are going to delete the regex '${regex_expr}', causing the restart of the firewall if it is active.`}
+            description={`You are going to delete the regex '${regex_expr}'.`}
             onClose={()=>setDeleteModal(false)}
             action={deleteRegex}
             opened={deleteModal}
