@@ -37,8 +37,56 @@ bool unhexlify(string const &hex, string &newString) {
       return false;
    }
 }
+
+typedef vector<pair<string,regex>> regex_rule_vector;
 struct regex_rules{
-   vector<pair<string,regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+   regex_rule_vector regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+
+   regex_rule_vector* getByCode(char code){
+      switch(code){
+         case 'C': // Client to server Blacklist
+            return &regex_c_s_b;  break;
+         case 'c': // Client to server Whitelist
+            return &regex_c_s_w;  break;
+         case 'S': // Server to client Blacklist
+            return &regex_s_c_b;  break;
+         case 's': // Server to client Whitelist
+            return &regex_s_c_w;  break;
+      }
+      throw invalid_argument( "Expected 'C' 'c' 'S' or 's'" );
+   }
+
+   void add(const char* arg){
+      
+      //Integrity checks
+      size_t arg_len = strlen(arg);
+      if (arg_len < 2 || arg_len%2 != 0) return;
+      if (arg[0] != '0' && arg[0] != '1') return;
+      if (arg[1] != 'C' && arg[1] != 'c' && arg[1] != 'S' && arg[1] != 's') return;
+      string hex(arg+2), expr;
+      if (!unhexlify(hex, expr)) return;
+
+      try{
+         
+         //Push regex
+         if (arg[0] == '1'){
+            regex regex(expr);
+            #ifdef DEBUG
+            cerr << "Added case sensitive regex " << expr_str << endl;
+            #endif
+            getByCode(arg[1])->push_back(make_pair(string(arg), regex));
+         } else {
+            regex regex(expr,regex_constants::icase);
+            #ifdef DEBUG
+            cerr << "Added case insensitive regex " << expr_str << endl;
+            #endif
+            getByCode(arg[1])->push_back(make_pair(string(arg), regex));
+         }
+      } catch(...){
+         cerr << "Regex " << arg << " was not compiled successfully" << endl;
+      }
+   }
+
 };
 shared_ptr<regex_rules> regex_config;
 
@@ -331,33 +379,6 @@ namespace tcp_proxy
    };
 }
 
-void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
-   size_t expr_len = (strlen(arg)-2)/2;
-   string hex(arg+2);
-   string expr;
-   if (!unhexlify(hex, expr)){
-      cerr << "Regex " << arg << " was not unhexlified successfully" << endl;
-      return;
-   }
-   try{
-      if (case_sensitive){
-         regex regex(expr);
-         #ifdef DEBUG
-         cerr << "Added case sensitive regex " << expr_str << endl;
-         #endif
-         v.push_back(make_pair(string(arg), regex));
-      } else {
-         regex regex(expr,regex_constants::icase);
-         #ifdef DEBUG
-         cerr << "Added case insensitive regex " << expr_str << endl;
-         #endif
-         v.push_back(make_pair(string(arg), regex));
-      }
-   } catch(...){
-      cerr << "Regex " << expr << " was not compiled successfully" << endl;
-   }
-}
-
 
 void update_regex(){
    std::unique_lock<std::mutex> lck(update_mutex);
@@ -367,39 +388,9 @@ void update_regex(){
 	   cerr << "Error: config file couln't be opened" << endl;
       exit(1);
 	}
-
    regex_rules *regex_new_config = new regex_rules();
-
    string line;
-   while(getline(fd, line)){
-		char tp[line.length() +1];
-		strcpy(tp, line.c_str());
-      if (strlen(tp) >= 2){
-         bool case_sensitive = true;
-         if(tp[0] == '0'){
-            case_sensitive = false;
-         }
-         switch(tp[1]){
-            case 'C': { // Client to server Blacklist
-               push_regex(tp, case_sensitive, regex_new_config->regex_c_s_b);
-               break;
-            }
-            case 'c': { // Client to server Whitelist
-               push_regex(tp, case_sensitive, regex_new_config->regex_c_s_w);
-               break;
-            }
-            case 'S': { // Server to client Blacklist
-               push_regex(tp, case_sensitive, regex_new_config->regex_s_c_b);
-               break;
-            }
-            case 's': { // Server to client Whitelist
-               push_regex(tp, case_sensitive, regex_new_config->regex_s_c_w);
-               break;
-            }
-         }
-      }
-   }
-
+   while(getline(fd, line)) regex_new_config->add(line.c_str());
    regex_config.reset(regex_new_config);
 }
 
