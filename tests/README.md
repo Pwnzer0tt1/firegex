@@ -54,5 +54,12 @@ It uses iperf3 to benchmark the throughput in MB/s of the server, both with prox
 You will find a new benchmark.csv file containg the results.
 
 # Firegex Performance Results
-The test was performed on AMD Ryzen 7 3700X (16 thread) @ 3.600GHz, RAM Speed: 3200 MT/s (Dual Channel), kernel: 5.18.5-arch1-1
+
+The test was performed on:
+- AMD Ryzen 7 3700X (16 thread) @ 3.600GHz
+- RAM Speed: 3200 MT/s (Dual Channel)
+- Kernel: 5.18.5-arch1-1
+
+Command: `python3 benchmark.py -r 100 -d 1 -s 50`
+
 ![Firegex Benchmark](/docs/FiregexBenchmark.png)
