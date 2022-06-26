@@ -52,4 +52,7 @@ Benchmarks let you evaluate the performance of the proxy. You can run one by typ
 It uses iperf3 to benchmark the throughput in MB/s of the server, both with proxy, without proxy, and for each new added regex. It will automatically add a new random regex untill it has reached NUM_OF_REGEX specified in the arguments. 
 
 You will find a new benchmark.csv file containg the results.
+
+# Firegex Performance Results
+The test was performed on AMD Ryzen 7 3700X (16 thread) @ 3.600GHz, RAM Speed: 3200 MT/s (Dual Channel), kernel: 5.18.5-arch1-1
 ![Firegex Benchmark](/docs/FiregexBenchmark.png)
