@@ -22,7 +22,7 @@ def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
 
 def sep(): puts("-----------------------------------", is_bold=True)
 parser = argparse.ArgumentParser()
-parser.add_argument("--address", "-a", type=str , required=False, help='Address of firegex backend', default="http://127.0.0.1:5000/")
+parser.add_argument("--address", "-a", type=str , required=False, help='Address of firegex backend', default="http://127.0.0.1:4444/")
 parser.add_argument("--service_port", "-P", type=int , required=False, help='Port of the Benchmark service', default=1337)
 parser.add_argument("--service_name", "-n", type=str , required=False, help='Name of the Benchmark service', default="Benchmark Service")
 parser.add_argument("--password", "-p", type=str, required=True, help='Firegex password')

@@ -10,7 +10,7 @@
 #include <boost/thread.hpp>
 #include <boost/shared_ptr.hpp>
 #include <boost/enable_shared_from_this.hpp>
-#include <boost/bind.hpp>
+#include <boost/bind/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
 
@@ -45,15 +45,15 @@ struct regex_rules{
 shared_ptr<regex_rules> regex_config;
 
 const char* config_file;
-mutex mtx;
+mutex update_mutex;
 
 bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> const &blacklist, vector<pair<string,regex>> const &whitelist){
    #ifdef DEBUG_PACKET
-   cout << "---------------- Packet ----------------" << endl;
+   cerr << "---------------- Packet ----------------" << endl;
    for(int i=0;i<bytes_transferred;i++){
-      cout << data[i];
+      cerr << data[i];
    }
-   cout << "\n" << "---------------- End Packet ----------------" << endl;
+   cerr << "\n" << "---------------- End Packet ----------------" << endl;
    #endif
    for (pair<string,regex> ele:blacklist){
       try{
@@ -76,7 +76,7 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
       }      
    }
    #ifdef DEBUG
-   cout << "Packet Accepted!" << endl;
+   cerr << "Packet Accepted!" << endl;
    #endif
    return true;
 }
@@ -325,7 +325,6 @@ namespace tcp_proxy
 }
 
 void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
-   std::unique_lock<std::mutex> lck(mtx);
    size_t expr_len = (strlen(arg)-2)/2;
    char expr[expr_len];
    unhexlify(arg+2, arg+strlen(arg)-1, expr);
@@ -334,13 +333,13 @@ void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
       if (case_sensitive){
          regex regex(expr_str);
          #ifdef DEBUG
-         cout << "Added case sensitive regex " << expr_str << endl;
+         cerr << "Added case sensitive regex " << expr_str << endl;
          #endif
          v.push_back(make_pair(string(arg), regex));
       } else {
          regex regex(expr_str,regex_constants::icase);
          #ifdef DEBUG
-         cout << "Added case insensitive regex " << expr_str << endl;
+         cerr << "Added case insensitive regex " << expr_str << endl;
          #endif
          v.push_back(make_pair(string(arg), regex));
       }
@@ -351,6 +350,7 @@ void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
 
 
 void update_regex(){
+   std::unique_lock<std::mutex> lck(update_mutex);
    fstream fd;
    fd.open(config_file,ios::in); 
    if (!fd.is_open()){
@@ -397,13 +397,19 @@ void signal_handler(int signal_num)
 {
    if (signal_num == SIGUSR1){
       #ifdef DEBUG
-      cout << "Updating configurtation" << endl;
+      cerr << "Updating configurtation" << endl;
       #endif
       update_regex();
    }else if(signal_num == SIGTERM){
       if (ios_loop != nullptr) ios_loop->stop();
+      #ifdef DEBUG
+      cerr << "Close Requested" << endl;
+      #endif
       exit(0);
    }else if (signal_num == SIGSEGV){
+      #ifdef DEBUG
+      cerr << "Forced Close" << endl;
+      #endif
       exit(0);
    }
 }

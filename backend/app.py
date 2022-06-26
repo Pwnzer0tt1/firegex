@@ -64,6 +64,7 @@ def get_status():
 
 @app.route("/api/login", methods = ['POST'])
 def login():
+    if DEBUG: return { "status":"ok" }
     if app.config["STATUS"] != "run": return abort(404)
     req = request.get_json(force = True)
 
@@ -89,12 +90,14 @@ def login():
 
 @app.route("/api/logout")
 def logout():
+    if DEBUG: return { "status":"ok" }
     session["loggined"] = False
     return { "status":"ok" }
 
 @app.route('/api/change-password', methods = ['POST'])
 @login_required
 def change_password():
+    if DEBUG: return { "status":"ok" }
     if app.config["STATUS"] != "run": return abort(404)
     req = request.get_json(force = True)
 
@@ -123,6 +126,7 @@ def change_password():
 
 @app.route('/api/set-password', methods = ['POST'])
 def set_password():
+    if DEBUG: return { "status":"ok" }
     if app.config["STATUS"] != "init": return abort(404)
     req = request.get_json(force = True)
     try:
