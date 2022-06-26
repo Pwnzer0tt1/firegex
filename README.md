@@ -53,4 +53,4 @@ This means that firegex is projected to avoid any possibility to have the servic
     
 # Credits 
 - Copyright (c) 2007 Arash Partow (http://www.partow.net) for the base of our proxy implementation
-- Pwnzer0tt1
+- Copyright (c) 2022 Pwnzer0tt1
