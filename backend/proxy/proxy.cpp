@@ -14,6 +14,7 @@
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
 
+//#define MULTI_THREAD
 //#define DEBUG
 //#define DEBUG_PACKET
 
@@ -21,23 +22,20 @@ using namespace std;
 
 boost::asio::io_service *ios_loop = nullptr;
 
-int to_int(int c) {
-  if (not isxdigit(c)) return -1; // error: non-hexadecimal digit found
-  if (isdigit(c)) return c - '0';
-  if (isupper(c)) c = tolower(c);
-  return c - 'a' + 10;
-}
-
-template<class InputIterator, class OutputIterator> int
-unhexlify(InputIterator first, InputIterator last, OutputIterator ascii) {
-  while (first != last) {
-    int top = to_int(*first++);
-    int bot = to_int(*first++);
-    if (top == -1 or bot == -1)
-      return -1; // error
-    *ascii++ = (top << 4) + bot;
-  }
-  return 0;
+bool unhexlify(string const &hex, string &newString) {
+   try{
+      int len = hex.length();
+      for(int i=0; i< len; i+=2)
+      {
+         std::string byte = hex.substr(i,2);
+         char chr = (char) (int)strtol(byte.c_str(), NULL, 16);
+         newString.push_back(chr);
+      }
+      return true;
+   }
+   catch (...){
+      return false;
+   }
 }
 struct regex_rules{
    vector<pair<string,regex>> regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
@@ -46,6 +44,9 @@ shared_ptr<regex_rules> regex_config;
 
 const char* config_file;
 mutex update_mutex;
+#ifdef MULTI_THREAD
+mutex stdout_mutex;
+#endif 
 
 bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> const &blacklist, vector<pair<string,regex>> const &whitelist){
    #ifdef DEBUG_PACKET
@@ -58,6 +59,9 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
    for (pair<string,regex> ele:blacklist){
       try{
          if(regex_search(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data)+bytes_transferred, ele.second)){
+            #ifdef MULTI_THREAD
+            std::unique_lock<std::mutex> lck(stdout_mutex);
+            #endif
             cout << "BLOCKED " << ele.first << endl;
             return false;
          }
@@ -68,6 +72,9 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
    for (pair<string,regex> ele:whitelist){
       try{
          if(!regex_search(reinterpret_cast<const char*>(data),reinterpret_cast<const char*>(data)+bytes_transferred, ele.second)){
+            #ifdef MULTI_THREAD
+            std::unique_lock<std::mutex> lck(stdout_mutex);
+            #endif
             cout << "BLOCKED " << ele.first << endl;
             return false;
          }
@@ -178,6 +185,7 @@ namespace tcp_proxy
       {
          if (!error)
          {
+
             upstream_socket_.async_read_some(
                  boost::asio::buffer(upstream_data_,max_data_length),
                  boost::bind(&bridge::handle_upstream_read,
@@ -257,7 +265,6 @@ namespace tcp_proxy
       unsigned char upstream_data_  [max_data_length];
 
       boost::mutex mutex_;
-
    public:
 
       class acceptor
@@ -326,18 +333,21 @@ namespace tcp_proxy
 
 void push_regex(char* arg, bool case_sensitive, vector<pair<string,regex>> &v){
    size_t expr_len = (strlen(arg)-2)/2;
-   char expr[expr_len];
-   unhexlify(arg+2, arg+strlen(arg)-1, expr);
-   string expr_str(expr, expr_len);
+   string hex(arg+2);
+   string expr;
+   if (!unhexlify(hex, expr)){
+      cerr << "Regex " << arg << " was not unhexlified successfully" << endl;
+      return;
+   }
    try{
       if (case_sensitive){
-         regex regex(expr_str);
+         regex regex(expr);
          #ifdef DEBUG
          cerr << "Added case sensitive regex " << expr_str << endl;
          #endif
          v.push_back(make_pair(string(arg), regex));
       } else {
-         regex regex(expr_str,regex_constants::icase);
+         regex regex(expr,regex_constants::icase);
          #ifdef DEBUG
          cerr << "Added case insensitive regex " << expr_str << endl;
          #endif
@@ -447,12 +457,15 @@ int main(int argc, char* argv[])
                                            forward_host, forward_port);
 
       acceptor.accept_connections();
-
+      #ifdef MULTI_THREAD
       boost::thread_group tg;
       for (unsigned i = 0; i < thread::hardware_concurrency(); ++i)
          tg.create_thread(boost::bind(&boost::asio::io_service::run, &ios));
 
       tg.join_all();
+      #else
+      ios.run();
+      #endif
    }
    catch(exception& e)
    {

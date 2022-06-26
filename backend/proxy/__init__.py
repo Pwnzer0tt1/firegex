@@ -52,7 +52,7 @@ class Proxy:
                 self.__write_config(filters_codes)
                 
                 self.process = subprocess.Popen(
-                    [proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), self.config_file_path],
+                    [ proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), self.config_file_path],
                     stdout=subprocess.PIPE, universal_newlines=True
                 )
                 for stdout_line in iter(self.process.stdout.readline, ""):

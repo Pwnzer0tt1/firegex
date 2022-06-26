@@ -22,6 +22,7 @@ def sep(): puts("-----------------------------------", is_bold=True)
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
 parser.add_argument('--no-autostart', "-n", required=False, action="store_true", help='Auto-execute "docker-compose up -d --build"', default=False)
+parser.add_argument('--single-thread', "-s", required=False, action="store_true", help='Disable multi-threaded proxy"', default=False)
 args = parser.parse_args()
 sep()
 puts(f"Firegex", color=colors.yellow, end="")
@@ -39,7 +40,10 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: .
+        build: 
+            context: .
+            args:
+                - GCC_PARAMS={"-D MULTI_THREAD" if not args.single_thread else ""}
         network_mode: "host"
         environment:
             - NGINX_PORT={args.port}
@@ -57,7 +61,10 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: .
+        build: 
+            context: .
+            args:
+                - GCC_PARAMS={"-D MULTI_THREAD" if not args.single_thread else ""}
         ports:
             - {args.port}:{args.port}
         environment:
