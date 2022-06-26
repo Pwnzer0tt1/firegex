@@ -416,11 +416,6 @@ void signal_handler(int signal_num)
       cerr << "Close Requested" << endl;
       #endif
       exit(0);
-   }else if (signal_num == SIGSEGV){
-      #ifdef DEBUG
-      cerr << "Forced Close" << endl;
-      #endif
-      exit(0);
    }
 }
 
@@ -442,10 +437,6 @@ int main(int argc, char* argv[])
    update_regex();
    signal(SIGUSR1, signal_handler);
    signal(SIGTERM, signal_handler);
-   signal(SIGSEGV, signal_handler);
-
-   
-   
 
    boost::asio::io_service ios;
    ios_loop = &ios;
