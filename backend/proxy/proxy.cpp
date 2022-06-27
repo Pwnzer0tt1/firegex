@@ -73,13 +73,13 @@ struct regex_rules{
          if (arg[0] == '1'){
             regex regex(expr);
             #ifdef DEBUG
-            cerr << "Added case sensitive regex " << expr_str << endl;
+            cerr << "Added case sensitive regex " << expr << endl;
             #endif
             getByCode(arg[1])->push_back(make_pair(string(arg), regex));
          } else {
             regex regex(expr,regex_constants::icase);
             #ifdef DEBUG
-            cerr << "Added case insensitive regex " << expr_str << endl;
+            cerr << "Added case insensitive regex " << expr << endl;
             #endif
             getByCode(arg[1])->push_back(make_pair(string(arg), regex));
          }
@@ -91,7 +91,6 @@ struct regex_rules{
 };
 shared_ptr<regex_rules> regex_config;
 
-const char* config_file;
 mutex update_mutex;
 #ifdef MULTI_THREAD
 mutex stdout_mutex;
@@ -393,25 +392,23 @@ namespace tcp_proxy
 
 
 void update_regex(){
+   #ifdef DEBUG
+   cerr << "Updating configuration" << endl;
+   #endif
    std::unique_lock<std::mutex> lck(update_mutex);
-   fstream fd;
-   fd.open(config_file,ios::in); 
-   if (!fd.is_open()){
-	   cerr << "Error: config file couln't be opened" << endl;
-      exit(1);
-	}
    regex_rules *regex_new_config = new regex_rules();
-   string line;
-   while(getline(fd, line)) regex_new_config->add(line.c_str());
+   string data;
+   while(true){
+	   cin >> data;
+	   if (data == "END") break;
+	   regex_new_config->add(data.c_str());
+   }
    regex_config.reset(regex_new_config);
 }
 
 void signal_handler(int signal_num)
 {
    if (signal_num == SIGUSR1){
-      #ifdef DEBUG
-      cerr << "Updating configurtation" << endl;
-      #endif
       update_regex();
    }else if(signal_num == SIGTERM){
       if (ios_loop != nullptr) ios_loop->stop();
@@ -424,9 +421,9 @@ void signal_handler(int signal_num)
 
 int main(int argc, char* argv[])
 {
-   if (argc < 6)
+   if (argc < 5)
    {
-      cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> <config_file>" << endl;
+      cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port>" << endl;
       return 1;
    }
 
@@ -434,16 +431,19 @@ int main(int argc, char* argv[])
    const unsigned short forward_port = static_cast<unsigned short>(::atoi(argv[4]));
    const string local_host      = argv[1];
    const string forward_host    = argv[3];
-   
-   config_file = argv[5];
 
    update_regex();
-   signal(SIGUSR1, signal_handler);
-   signal(SIGTERM, signal_handler);
 
+   signal(SIGUSR1, signal_handler);
+   
    boost::asio::io_service ios;
    ios_loop = &ios;
-
+   
+   signal(SIGTERM, signal_handler);
+   
+   #ifdef DEBUG
+   cerr << "Starting Proxy" << endl;
+   #endif
    try
    {
       tcp_proxy::bridge::acceptor acceptor(ios,
@@ -470,6 +470,9 @@ int main(int argc, char* argv[])
       cerr << "Error: " << e.what() << endl;
       return 1;
    }
+   #ifdef DEBUG
+   cerr << "Proxy stopped!" << endl;
+   #endif
 
    return 0;
 }
