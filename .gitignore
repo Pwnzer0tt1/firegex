@@ -13,11 +13,6 @@
 /backend/db/firegex.db-journal
 /backend/proxy/proxy
 docker-compose.yml
-# production
-#/frontend/build
-
-#test results
-/tests/benchmark.csv
 
 # misc
 **/.DS_Store
