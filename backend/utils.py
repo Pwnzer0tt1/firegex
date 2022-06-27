@@ -76,7 +76,7 @@ class ProxyManager:
         self.lock = threading.Lock()
         atexit.register(self.clear)
 
-    def __clear_proxy_table(self):
+    def __clean_proxy_table(self):
         with self.lock:
             for key in list(self.proxy_table.keys()):
                 if not self.proxy_table[key]["thread"].is_alive():
@@ -90,21 +90,25 @@ class ProxyManager:
                 del self.proxy_table[key]
 
     def reload(self):
-        self.__clear_proxy_table()
+        self.__clean_proxy_table()
         with self.lock: 
             for srv_id in self.db.query('SELECT service_id, status FROM services;'):
                 srv_id, n_status = srv_id
                 if srv_id in self.proxy_table:
                     continue
                 update_signal = threading.Event()
+                callback_signal = threading.Event()
                 req_status = [n_status]
-                thread = KThread(target=self.service_manager, args=(srv_id, req_status, update_signal))
+                thread = KThread(target=self.service_manager, args=(srv_id, req_status, update_signal, callback_signal))
                 self.proxy_table[srv_id] = {
                     "thread":thread,
                     "event":update_signal,
+                    "callback":callback_signal,
                     "next_status":req_status
                 }
                 thread.start()
+                callback_signal.wait()
+                callback_signal.clear()
 
     def get_service_data(self, id):
         q = self.db.query('SELECT * FROM services WHERE service_id=?;',(id,))
@@ -132,6 +136,8 @@ class ProxyManager:
                 if self.proxy_table[id]["thread"].is_alive():
                     self.proxy_table[id]["next_status"][0] = to
                     self.proxy_table[id]["event"].set()
+                    self.proxy_table[id]["callback"].wait()
+                    self.proxy_table[id]["callback"].clear()
                 else:
                     del self.proxy_table[id]
     
@@ -140,18 +146,19 @@ class ProxyManager:
             if id in self.proxy_table:
                 if self.proxy_table[id]["thread"].is_alive():
                     self.proxy_table[id]["event"].set()
+                    self.proxy_table[id]["callback"].wait()
+                    self.proxy_table[id]["callback"].clear()
                 else:
                     del self.proxy_table[id]
     
     def __update_status_db(self, id, status):
         self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", (status, id))
 
-    def __proxy_starter(self, id, proxy:Proxy, next_status, saved_status):
+    def __proxy_starter(self, id, proxy:Proxy, next_status):
         def func():
             while True:
                 if check_port_is_open(proxy.public_port):
                     self.__update_status_db(id, next_status)
-                    if saved_status[0] == "wait": saved_status[0] = next_status
                     proxy.start(in_pause=(next_status==STATUS.PAUSE))
                     self.__update_status_db(id, STATUS.STOP)
                     return
@@ -162,11 +169,10 @@ class ProxyManager:
         thread.start()
         return thread
 
-    def service_manager(self, id, next_status, signal:threading.Event):
+    def service_manager(self, id, next_status, signal:threading.Event, callback):
     
         proxy = None
         thr_starter:KThread = None
-        previous_status = STATUS.STOP
         filters = {}
 
         while True:
@@ -179,10 +185,10 @@ class ProxyManager:
             if data is None:
                 if proxy and proxy.isactive():
                     proxy.stop()
+                callback.set()
                 return
             
             if data["status"] == STATUS.STOP:
-                previous_status = STATUS.STOP
                 if thr_starter and thr_starter.is_alive(): thr_starter.kill()
             
             #Filter check
@@ -231,41 +237,38 @@ class ProxyManager:
             #Update filters
             if reload_required:
                 proxy.filters = list(filters.values())
-
+            
             #proxy status managment
-            if previous_status != next_status[0]:
+            if data["status"] != next_status[0]:
                 # ACTIVE -> PAUSE or PAUSE -> ACTIVE
-                if (previous_status, next_status[0]) in [(STATUS.ACTIVE, STATUS.PAUSE), (STATUS.PAUSE, STATUS.ACTIVE)]:
+                if (data["status"], next_status[0]) in [(STATUS.ACTIVE, STATUS.PAUSE), (STATUS.PAUSE, STATUS.ACTIVE)]:
                     if restart_required:
                         proxy.restart(in_pause=next_status[0])
                     else:
                         if next_status[0] == STATUS.ACTIVE: proxy.reload()
                         else: proxy.pause()
-                    previous_status = next_status[0]
                     self.__update_status_db(id, next_status[0])
                     reload_required = restart_required = False
 
                 # ACTIVE -> STOP
-                elif (previous_status,next_status[0]) in [(STATUS.ACTIVE, STATUS.STOP), (STATUS.WAIT, STATUS.STOP), (STATUS.PAUSE, STATUS.STOP)]: #Stop proxy
+                elif (data["status"],next_status[0]) in [(STATUS.ACTIVE, STATUS.STOP), (STATUS.WAIT, STATUS.STOP), (STATUS.PAUSE, STATUS.STOP)]: #Stop proxy
                     if thr_starter and thr_starter.is_alive(): thr_starter.kill()
                     proxy.stop()
-                    previous_status = next_status[0] = STATUS.STOP
+                    next_status[0] = STATUS.STOP
                     self.__update_status_db(id, STATUS.STOP)
                     reload_required = restart_required = False
 
                 # STOP -> ACTIVE or STOP -> PAUSE
-                elif (previous_status, next_status[0]) in [(STATUS.STOP, STATUS.ACTIVE), (STATUS.STOP, STATUS.PAUSE)]:    
-                    previous_status = next_status[0] 
+                elif (data["status"], next_status[0]) in [(STATUS.STOP, STATUS.ACTIVE), (STATUS.STOP, STATUS.PAUSE)]:
                     self.__update_status_db(id, STATUS.WAIT)
-                    thr_starter = self.__proxy_starter(id, proxy, next_status[0], [previous_status])
+                    thr_starter = self.__proxy_starter(id, proxy, next_status[0])
                     reload_required = restart_required = False
-                else:
-                    self.__update_status_db(id, previous_status)
             
-            if previous_status != STATUS.STOP:
-                if restart_required: proxy.restart(in_pause=(previous_status == STATUS.PAUSE))
-                elif reload_required and previous_status != STATUS.PAUSE: proxy.reload()
+            if data["status"] != STATUS.STOP:
+                if restart_required: proxy.restart(in_pause=(data["status"] == STATUS.PAUSE))
+                elif reload_required and data["status"] != STATUS.PAUSE: proxy.reload()
 
+            callback.set()
             signal.wait()
             signal.clear()
         
