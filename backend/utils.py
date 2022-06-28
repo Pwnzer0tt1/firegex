@@ -30,15 +30,10 @@ class SQLite():
     def disconnect(self) -> None:
         self.conn.close()
 
-    def check_integrity(self, tables = {}) -> None:
+    def create_schema(self, tables = {}) -> None:
         cur = self.conn.cursor()
         for t in tables:
-            cur.execute('''
-                SELECT name FROM sqlite_master WHERE type='table' AND name='{}';
-            '''.format(t))
-
-            if len(cur.fetchall()) == 0:
-                cur.execute('''CREATE TABLE main.{}({});'''.format(t, ''.join([(c + ' ' + tables[t][c] + ', ') for c in tables[t]])[:-2]))
+            cur.execute('''CREATE TABLE IF NOT EXISTS main.{}({});'''.format(t, ''.join([(c + ' ' + tables[t][c] + ', ') for c in tables[t]])[:-2]))
         cur.close()
     
     def query(self, query, *values):

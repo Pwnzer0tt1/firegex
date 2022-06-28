@@ -23,8 +23,7 @@ APP_STATUS = "init"
 REACT_BUILD_DIR = "../frontend/build/" if not ON_DOCKER else "../frontend/"
 REACT_HTML_PATH = os.path.join(REACT_BUILD_DIR,"index.html")
 
-if not conf.get("password") is None:
-    APP_STATUS = "run"
+
 
 def is_loggined(request: Request):
     return request.session.get("token", "") == SESSION_TOKEN
@@ -294,7 +293,7 @@ async def catch_all(request: Request, full_path:str):
 
 
 if __name__ == '__main__':
-    db.check_integrity({
+    db.create_schema({
         'services': {
             'status': 'VARCHAR(100) NOT NULL',
             'service_id': 'VARCHAR(100) PRIMARY KEY',
@@ -307,7 +306,7 @@ if __name__ == '__main__':
             'mode': 'VARCHAR(1) NOT NULL',
             'service_id': 'VARCHAR(100) NOT NULL',
             'is_blacklist': 'BOOLEAN NOT NULL CHECK (is_blacklist IN (0, 1))',
-            'blocked_packets': 'INTEGER UNSIGNED NOT NULL async defAULT 0',
+            'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
             'regex_id': 'INTEGER PRIMARY KEY',
             'is_case_sensitive' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1))',
             'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
@@ -318,6 +317,9 @@ if __name__ == '__main__':
         },
     })
     db.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);")
+    
+    if not conf.get("password") is None:
+        APP_STATUS = "run"
     
     firewall.reload()
     # os.environ {PORT = Backend Port (Main Port), F_PORT = Frontend Port}
