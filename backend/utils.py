@@ -182,14 +182,17 @@ class ServiceManager:
     
     def __proxy_starter(self,to):
         async def func():
-            while True:
-                if check_port_is_open(self.proxy.public_port):
-                    self._set_status(to)
-                    await self.proxy.start(in_pause=(to==STATUS.PAUSE))
-                    self._set_status(STATUS.STOP)
-                    return
-                else:
-                    await asyncio.sleep(.5)
+            try:
+                while True:
+                    if check_port_is_open(self.proxy.public_port):
+                        self._set_status(to)
+                        await self.proxy.start(in_pause=(to==STATUS.PAUSE))
+                        self._set_status(STATUS.STOP)
+                        return
+                    else:
+                        await asyncio.sleep(.5)
+            except Exception: 
+                await self.proxy.stop()
         self.starter = asyncio.create_task(func())
 
 class ProxyManager:

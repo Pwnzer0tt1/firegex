@@ -1,6 +1,4 @@
-import subprocess, re, os, asyncio
-
-#c++ -o proxy proxy.cpp
+import re, os, asyncio
 
 class Filter:
     def __init__(self, regex, is_case_sensitive=True, is_blacklist=True, c_to_s=False, s_to_c=False, blocked_packets=0, code=None):

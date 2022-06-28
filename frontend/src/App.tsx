@@ -98,7 +98,7 @@ function App() {
           if(!res){
             setSystemStatus({...systemStatus, loggined:true})
           }else{
-            setError(res)
+            setError("Login failed")
           }
         }).catch( err => setError(err.toString()))
         setLoadingBtn(false)

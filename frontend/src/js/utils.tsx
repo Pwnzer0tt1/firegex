@@ -1,7 +1,7 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
-import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword } from "./models";
+import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword, LoginResponse, ServerResponseToken } from "./models";
 
 var Buffer = require('buffer').Buffer 
 
@@ -9,9 +9,12 @@ export const eventUpdateName = "update-info"
 
 
 export async function getapi(path:string):Promise<any>{
+
     return await new Promise((resolve, reject) => {
-        fetch(`/api/${path}`,{credentials: "same-origin"})
-            .then(res => {
+        fetch(`/api/${path}`,{
+            credentials: "same-origin",
+            headers: { "Authorization" : "Bearer " + window.localStorage.getItem("access_token")}
+        }).then(res => {
                 if(res.status === 401) window.location.reload()
                 if(!res.ok) reject(res.statusText)
                 res.json().then( res => resolve(res) ).catch( err => reject(err))
@@ -22,7 +25,30 @@ export async function getapi(path:string):Promise<any>{
     });
 }
 
-export async function postapi(path:string,data:any):Promise<any>{
+export async function postapi(path:string,data:any,is_form:boolean=false):Promise<any>{
+    return await new Promise((resolve, reject) => {
+        fetch(`/api/${path}`, {
+            method: 'POST',
+            credentials: "same-origin",
+            cache: 'no-cache',
+            headers: {
+              'Content-Type': is_form ? 'application/x-www-form-urlencoded' : 'application/json',
+              "Authorization" : "Bearer " + window.localStorage.getItem("access_token")
+            },
+            body: is_form ? data : JSON.stringify(data) 
+        }).then(res => {
+            if(res.status === 401) window.location.reload() 
+            if(res.status === 406) resolve({status:"Wrong Password"})
+            if(!res.ok) reject(res.statusText)
+            res.json().then( res => resolve(res) ).catch( err => reject(err))
+        })
+        .catch(err => {
+            reject(err)
+        })
+    });
+}
+
+export async function postform(path:string,data:any):Promise<any>{
     return await new Promise((resolve, reject) => {
         fetch(`/api/${path}`, {
             method: 'POST',
@@ -64,23 +90,29 @@ export async function serviceinfo(service_id:string){
 }
 
 export async function logout(){
-    const { status } = await getapi(`logout`) as ServerResponse;
-    return status === "ok"?undefined:status 
+    window.localStorage.removeItem("access_token")
 }
 
 export async function setpassword(data:PasswordSend) {
-    const { status } = await postapi("set-password",data) as ServerResponse;
+    const { status, access_token } = await postapi("set-password",data) as ServerResponseToken;
+    if (access_token)
+        window.localStorage.setItem("access_token", access_token);
     return status === "ok"?undefined:status
 }
 
 export async function changepassword(data:ChangePassword) {
-    const { status } = await postapi("change-password",data) as ServerResponse;
-    return status === "ok"?undefined:status
+    const { status, access_token } = await postapi("change-password",data) as ServerResponseToken;
+    console.log(access_token)
+    if (access_token)
+        window.localStorage.setItem("access_token", access_token);
+        return status === "ok"?undefined:status
 }
 
 export async function login(data:PasswordSend) {
-    const { status } = await postapi("login",data) as ServerResponse;
-    return status === "ok"?undefined:status
+    const from = "username=login&password=" + encodeURI(data.password);
+    const { status, access_token } = await postapi("login",from,true) as LoginResponse;
+    window.localStorage.setItem("access_token", access_token);
+    return status;
 }
 
 export async function deleteregex(regex_id:number){

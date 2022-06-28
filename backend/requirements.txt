@@ -1,5 +1,5 @@
 fastapi[all]
 httpx
 uvicorn[standard]
-bcrypt
-kthread
+passlib[bcrypt]
+python-jose[cryptography]
