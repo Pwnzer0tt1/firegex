@@ -12,16 +12,49 @@ DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
 # DB init
 if not os.path.exists("db"): os.mkdir("db")
 db = SQLite('db/firegex.db')
-db.connect()
 conf = KeyValueStorage(db)
 firewall = ProxyManager(db)
 
 app = FastAPI(debug=DEBUG)
 
 @app.on_event("shutdown")
-def shutdown_event():
-    firewall.close()
+async def shutdown_event():
+    await firewall.close()
     db.disconnect()
+
+@app.on_event("startup")
+async def startup_event():
+    global APP_STATUS
+    db.connect()
+    db.create_schema({
+        'services': {
+            'status': 'VARCHAR(100) NOT NULL',
+            'service_id': 'VARCHAR(100) PRIMARY KEY',
+            'internal_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
+            'public_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
+            'name': 'VARCHAR(100) NOT NULL'
+        },
+        'regexes': {
+            'regex': 'TEXT NOT NULL',
+            'mode': 'VARCHAR(1) NOT NULL',
+            'service_id': 'VARCHAR(100) NOT NULL',
+            'is_blacklist': 'BOOLEAN NOT NULL CHECK (is_blacklist IN (0, 1))',
+            'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
+            'regex_id': 'INTEGER PRIMARY KEY',
+            'is_case_sensitive' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1))',
+            'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
+        },
+        'keys_values': {
+            'key': 'VARCHAR(100) PRIMARY KEY',
+            'value': 'VARCHAR(100) NOT NULL',
+        },
+    })
+    db.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);")
+    
+    if not conf.get("password") is None:
+        APP_STATUS = "run"
+    
+    await firewall.reload()
 
 app.add_middleware(SessionMiddleware, secret_key=os.urandom(32))
 SESSION_TOKEN = secrets.token_hex(8)
@@ -151,19 +184,19 @@ async def get_service(request: Request, service_id: str):
 @app.get('/api/service/{service_id}/stop')
 async def get_service_stop(request: Request, service_id: str):
     login_check(request)
-    firewall.change_status(service_id,STATUS.STOP)
+    await firewall.get(service_id).next(STATUS.STOP)
     return {'status': 'ok'}
 
 @app.get('/api/service/{service_id}/pause')
 async def get_service_pause(request: Request, service_id: str):
     login_check(request)
-    firewall.change_status(service_id,STATUS.PAUSE)
+    await firewall.get(service_id).next(STATUS.PAUSE)
     return {'status': 'ok'}
 
 @app.get('/api/service/{service_id}/start')
 async def get_service_start(request: Request, service_id: str):
     login_check(request)
-    firewall.change_status(service_id,STATUS.ACTIVE)
+    await firewall.get(service_id).next(STATUS.ACTIVE)
     return {'status': 'ok'}
 
 @app.get('/api/service/{service_id}/delete')
@@ -171,7 +204,7 @@ async def get_service_delete(request: Request, service_id: str):
     login_check(request)
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     db.query('DELETE FROM regexes WHERE service_id = ?;', service_id)
-    firewall.fire_update(service_id)
+    await firewall.remove(service_id)
     return {'status': 'ok'}
 
 
@@ -179,7 +212,7 @@ async def get_service_delete(request: Request, service_id: str):
 async def get_regen_port(request: Request, service_id: str):
     login_check(request)
     db.query('UPDATE services SET internal_port = ? WHERE service_id = ?;', gen_internal_port(db), service_id)
-    firewall.fire_update(service_id)
+    await firewall.get(service_id).update_port()
     return {'status': 'ok'}
 
 
@@ -212,7 +245,7 @@ async def get_regex_delete(request: Request, regex_id: int):
     
     if len(res) != 0:
         db.query('DELETE FROM regexes WHERE regex_id = ?;', regex_id)
-        firewall.fire_update(res[0]["service_id"])
+        await firewall.get(res[0]["service_id"]).update_filters()
     
     return {'status': 'ok'}
 
@@ -236,7 +269,7 @@ async def post_regexes_add(request: Request, form: RegexAddForm):
     except sqlite3.IntegrityError:
         return {'status': 'An identical regex already exists'}
 
-    firewall.fire_update(form.service_id)
+    await firewall.get(form.service_id).update_filters()
     return {'status': 'ok'}
 
 class ServiceAddForm(BaseModel):
@@ -250,7 +283,7 @@ async def post_services_add(request: Request, form: ServiceAddForm):
     try:
         db.query("INSERT INTO services (name, service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?, ?)",
                     form.name, serv_id, gen_internal_port(db), form.port, 'stop')
-        firewall.reload()
+        await firewall.reload()
     except sqlite3.IntegrityError:
         return {'status': 'Name or/and port of the service has been already assigned to another service'}
     
@@ -300,40 +333,11 @@ async def catch_all(request: Request, full_path:str):
 
 
 if __name__ == '__main__':
-    db.create_schema({
-        'services': {
-            'status': 'VARCHAR(100) NOT NULL',
-            'service_id': 'VARCHAR(100) PRIMARY KEY',
-            'internal_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
-            'public_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
-            'name': 'VARCHAR(100) NOT NULL'
-        },
-        'regexes': {
-            'regex': 'TEXT NOT NULL',
-            'mode': 'VARCHAR(1) NOT NULL',
-            'service_id': 'VARCHAR(100) NOT NULL',
-            'is_blacklist': 'BOOLEAN NOT NULL CHECK (is_blacklist IN (0, 1))',
-            'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
-            'regex_id': 'INTEGER PRIMARY KEY',
-            'is_case_sensitive' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1))',
-            'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
-        },
-        'keys_values': {
-            'key': 'VARCHAR(100) PRIMARY KEY',
-            'value': 'VARCHAR(100) NOT NULL',
-        },
-    })
-    db.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);")
-    
-    if not conf.get("password") is None:
-        APP_STATUS = "run"
-    
-    firewall.reload()
     # os.environ {PORT = Backend Port (Main Port), F_PORT = Frontend Port}
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT","4444")),
         reload=DEBUG,
-        access_log=DEBUG,
+        access_log=DEBUG
     )
