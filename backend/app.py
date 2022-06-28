@@ -17,6 +17,11 @@ firewall = ProxyManager(db)
 
 app = FastAPI(debug=DEBUG)
 
+@app.on_event("shutdown")
+def shutdown_event():
+    firewall.close()
+    db.disconnect()
+
 app.add_middleware(SessionMiddleware, secret_key=os.urandom(32))
 SESSION_TOKEN = secrets.token_hex(8)
 APP_STATUS = "init"
@@ -117,7 +122,7 @@ async def get_services(request: Request):
             s.public_port public_port,
             s.internal_port internal_port,
             s.name name,
-            COUNT(*) n_regex,
+            COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r ON r.service_id = s.service_id
         GROUP BY s.service_id;
@@ -133,7 +138,7 @@ async def get_service(request: Request, service_id: str):
             s.public_port public_port,
             s.internal_port internal_port,
             s.name name,
-            COUNT(*) n_regex,
+            COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r ON r.service_id = s.service_id WHERE s.service_id = ?
         GROUP BY s.service_id;

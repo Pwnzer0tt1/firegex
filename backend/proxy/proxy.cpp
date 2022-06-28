@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <iostream>
 #include <string>
-#include <csignal>
 #include <regex>
 #include <mutex>
 
@@ -19,8 +18,6 @@
 #include <boost/thread/mutex.hpp>
 
 using namespace std;
-
-boost::asio::io_service *ios_loop = nullptr;
 
 bool unhexlify(string const &hex, string &newString) {
    try{
@@ -146,7 +143,7 @@ namespace tcp_proxy
       typedef ip::tcp::socket socket_type;
       typedef boost::shared_ptr<bridge> ptr_type;
 
-      bridge(boost::asio::io_service& ios)
+      bridge(boost::asio::io_context& ios)
       : downstream_socket_(ios),
         upstream_socket_  (ios),
         thread_safety(ios)
@@ -320,7 +317,7 @@ namespace tcp_proxy
       enum { max_data_length = 8192 }; //8KB
       unsigned char downstream_data_[max_data_length];
       unsigned char upstream_data_  [max_data_length];
-      boost::asio::io_service::strand thread_safety;
+      boost::asio::io_context::strand thread_safety;
       boost::mutex mutex_;
    public:
 
@@ -328,12 +325,12 @@ namespace tcp_proxy
       {
       public:
 
-         acceptor(boost::asio::io_service& io_service,
+         acceptor(boost::asio::io_context& io_context,
                   const string& local_host, unsigned short local_port,
                   const string& upstream_host, unsigned short upstream_port)
-         : io_service_(io_service),
+         : io_context_(io_context),
            localhost_address(boost::asio::ip::address_v4::from_string(local_host)),
-           acceptor_(io_service_,ip::tcp::endpoint(localhost_address,local_port)),
+           acceptor_(io_context_,ip::tcp::endpoint(localhost_address,local_port)),
            upstream_port_(upstream_port),
            upstream_host_(upstream_host)
          {}
@@ -342,7 +339,7 @@ namespace tcp_proxy
          {
             try
             {
-               session_ = boost::shared_ptr<bridge>(new bridge(io_service_));
+               session_ = boost::shared_ptr<bridge>(new bridge(io_context_));
 
                acceptor_.async_accept(session_->downstream_socket(),
                     boost::asio::bind_executor(session_->thread_safety,
@@ -378,7 +375,7 @@ namespace tcp_proxy
             }
          }
 
-         boost::asio::io_service& io_service_;
+         boost::asio::io_context& io_context_;
          ip::address_v4 localhost_address;
          ip::tcp::acceptor acceptor_;
          ptr_type session_;
@@ -389,34 +386,63 @@ namespace tcp_proxy
    };
 }
 
-
-void update_regex(){
-   #ifdef DEBUG
-   cerr << "Updating configuration" << endl;
-   #endif
-   std::unique_lock<std::mutex> lck(update_mutex);
-   regex_rules *regex_new_config = new regex_rules();
-   string data;
-   while(true){
-	   cin >> data;
-	   if (data == "END") break;
-	   regex_new_config->add(data.c_str());
-   }
-   regex_config.reset(regex_new_config);
-}
-
-void signal_handler(int signal_num)
-{
-   if (signal_num == SIGUSR1){
-      update_regex();
-   }else if(signal_num == SIGTERM){
-      if (ios_loop != nullptr) ios_loop->stop();
+void update_config (boost::asio::streambuf &input_buffer){
       #ifdef DEBUG
-      cerr << "Close Requested" << endl;
+      cerr << "Updating configuration" << endl;
       #endif
-      exit(0);
-   }
+      std::istream config_stream(&input_buffer);
+      std::unique_lock<std::mutex> lck(update_mutex);
+      regex_rules *regex_new_config = new regex_rules();
+      string data;
+      while(!config_stream.eof()){
+         config_stream >> data;
+         regex_new_config->add(data.c_str());
+      }
+      regex_config.reset(regex_new_config);
 }
+
+class async_updater
+{
+public:
+  async_updater(boost::asio::io_context& io_context) : input_(io_context, ::dup(STDIN_FILENO)), thread_safety(io_context)
+  {
+   
+      boost::asio::async_read_until(input_, input_buffer_, '\n',
+          boost::asio::bind_executor(thread_safety,
+          boost::bind(&async_updater::on_update, this,
+            boost::asio::placeholders::error,
+            boost::asio::placeholders::bytes_transferred)));
+  }
+
+  void on_update(const boost::system::error_code& error, std::size_t length)
+  {
+    if (!error)
+    {
+      update_config(input_buffer_);
+      boost::asio::async_read_until(input_, input_buffer_, '\n',
+         boost::asio::bind_executor(thread_safety,
+          boost::bind(&async_updater::on_update, this,
+            boost::asio::placeholders::error,
+            boost::asio::placeholders::bytes_transferred)));
+    }
+    else
+    {
+      close();
+    }
+  }
+
+  void close()
+  {
+    input_.close();
+  }
+
+private:
+  boost::asio::posix::stream_descriptor input_;
+  boost::asio::io_context::strand thread_safety;
+  boost::asio::streambuf input_buffer_;
+};
+
+
 
 int main(int argc, char* argv[])
 {
@@ -431,14 +457,14 @@ int main(int argc, char* argv[])
    const string local_host      = argv[1];
    const string forward_host    = argv[3];
 
-   update_regex();
+   boost::asio::io_context ios;
 
-   signal(SIGUSR1, signal_handler);
-   
-   boost::asio::io_service ios;
-   ios_loop = &ios;
-   
-   signal(SIGTERM, signal_handler);
+   boost::asio::streambuf buf;
+   boost::asio::posix::stream_descriptor cin_in(ios, ::dup(STDIN_FILENO));
+   boost::asio::read_until(cin_in, buf,'\n');
+   update_config(buf);
+
+   async_updater updater(ios);
    
    #ifdef DEBUG
    cerr << "Starting Proxy" << endl;
@@ -457,7 +483,7 @@ int main(int argc, char* argv[])
       #else
       for (unsigned i = 0; i < thread::hardware_concurrency(); ++i)
       #endif
-         tg.create_thread(boost::bind(&boost::asio::io_service::run, &ios));
+         tg.create_thread(boost::bind(&boost::asio::io_context::run, &ios));
 
       tg.join_all();
       #else

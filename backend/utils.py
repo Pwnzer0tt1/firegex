@@ -28,7 +28,8 @@ class SQLite():
         self.conn.row_factory = dict_factory
 
     def disconnect(self) -> None:
-        self.conn.close()
+        with self.lock:
+            self.conn.close()
 
     def create_schema(self, tables = {}) -> None:
         cur = self.conn.cursor()
@@ -75,7 +76,7 @@ class ProxyManager:
         self.db = db
         self.proxy_table = {}
         self.lock = threading.Lock()
-        atexit.register(self.clear)
+        atexit.register(self.close)
 
     def __clean_proxy_table(self):
         with self.lock:
@@ -83,7 +84,7 @@ class ProxyManager:
                 if not self.proxy_table[key]["thread"].is_alive():
                     del self.proxy_table[key]
 
-    def clear(self):
+    def close(self):
         with self.lock:
             for key in list(self.proxy_table.keys()):
                 if self.proxy_table[key]["thread"].is_alive():

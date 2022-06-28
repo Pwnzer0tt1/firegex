@@ -1,5 +1,3 @@
-from signal import SIGUSR1
-from secrets import token_urlsafe
 import subprocess, re, os
 from threading import Lock
 
@@ -31,6 +29,7 @@ class Proxy:
         self.filter_map = {}
         self.filter_map_lock = Lock()
         self.update_config_lock = Lock()
+        self.status_change = Lock()
         self.public_host = public_host
         self.public_port = public_port
         self.internal_host = internal_host
@@ -40,16 +39,20 @@ class Proxy:
         self.callback_blocked_update = callback_blocked_update
     
     def start(self, in_pause=False):
+        self.status_change.acquire()
         if not self.isactive():
-            self.filter_map = self.compile_filters()
-            filters_codes = list(self.filter_map.keys()) if not in_pause else []
-            proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
+            try:
+                self.filter_map = self.compile_filters()
+                filters_codes = list(self.filter_map.keys()) if not in_pause else []
+                proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
 
-            self.process = subprocess.Popen(
-                [ proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port)],
-                stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True
-            )
-            self.update_config(filters_codes, sendsignal=False)
+                self.process = subprocess.Popen(
+                    [ proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port)],
+                    stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True
+                )
+                self.update_config(filters_codes)
+            finally:
+                self.status_change.release()
 
             for stdout_line in iter(self.process.stdout.readline, ""):
                 if stdout_line.startswith("BLOCKED"):
@@ -59,33 +62,33 @@ class Proxy:
                         if self.callback_blocked_update: self.callback_blocked_update(self.filter_map[regex_id])
             self.process.stdout.close()
             return self.process.wait()
+        else:
+            self.status_change.release()
+                 
 
     def stop(self):
-        if self.isactive():
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=3)
-            except Exception:
-                self.process.kill()
-                return False
-            finally:
-                self.process = None
-        return True
+        with self.status_change:
+            if self.isactive():
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=3)
+                except Exception:
+                    self.process.kill()
+                    return False
+                finally:
+                    self.process = None
+            return True
 
     def restart(self, in_pause=False):
         status = self.stop()
         self.start(in_pause=in_pause)
         return status
     
-    def update_config(self, filters_codes, sendsignal=True):
+    def update_config(self, filters_codes):
         with self.update_config_lock:
             if (self.isactive()):
-                self.process.stdin.write(" ".join(filters_codes))
-                self.process.stdin.write(" END ")
+                self.process.stdin.write(" ".join(filters_codes)+"\n")
                 self.process.stdin.flush()
-            if sendsignal:
-                self.process.send_signal(SIGUSR1)
-
 
     def reload(self):
         if self.isactive():
