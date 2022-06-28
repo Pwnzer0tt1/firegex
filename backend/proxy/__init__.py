@@ -69,7 +69,6 @@ class Proxy:
         async with self.status_change:
             if self.isactive():
                 self.process.kill()
-                self.process = None
                 return False
             return True
 
@@ -92,9 +91,7 @@ class Proxy:
                 await self.update_config(filters_codes)
 
     def isactive(self):
-        if self.process and not self.process.returncode is None:
-            self.process = None
-        return True if self.process else False
+        return self.process and self.process.returncode is None
 
     async def pause(self):
         if self.isactive():

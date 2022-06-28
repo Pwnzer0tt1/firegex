@@ -46,6 +46,33 @@ class SQLite():
             cur.close()
             try: self.conn.commit()
             except Exception: pass
+    
+    def init(self):
+        self.connect()
+        self.create_schema({
+            'services': {
+                'status': 'VARCHAR(100) NOT NULL',
+                'service_id': 'VARCHAR(100) PRIMARY KEY',
+                'internal_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
+                'public_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
+                'name': 'VARCHAR(100) NOT NULL'
+            },
+            'regexes': {
+                'regex': 'TEXT NOT NULL',
+                'mode': 'VARCHAR(1) NOT NULL',
+                'service_id': 'VARCHAR(100) NOT NULL',
+                'is_blacklist': 'BOOLEAN NOT NULL CHECK (is_blacklist IN (0, 1))',
+                'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
+                'regex_id': 'INTEGER PRIMARY KEY',
+                'is_case_sensitive' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1))',
+                'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
+            },
+            'keys_values': {
+                'key': 'VARCHAR(100) PRIMARY KEY',
+                'value': 'VARCHAR(100) NOT NULL',
+            },
+        })
+        self.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);")
 
 class KeyValueStorage:
     def __init__(self, db):
@@ -70,8 +97,7 @@ class STATUS:
     PAUSE = "pause"
     ACTIVE = "active"
 
-class ServiceNotFoundException(Exception):
-    pass
+class ServiceNotFoundException(Exception): pass
 
 class ServiceManager:
     def __init__(self, id, db):
@@ -83,7 +109,8 @@ class ServiceManager:
         )
         self.status = STATUS.STOP
         self.filters = {}
-        self._proxy_update()
+        self._update_port_from_db()
+        self._update_filters_from_db()
         self.lock = asyncio.Lock()
         self.starter = None
     
@@ -97,11 +124,7 @@ class ServiceManager:
         if len(res) == 0: raise ServiceNotFoundException()
         self.proxy.internal_port = res[0]["internal_port"]
         self.proxy.public_port = res[0]["public_port"]
-
-    def _proxy_update(self):
-        self._update_port_from_db()
-        self._update_filters_from_db()
-
+        
     def _update_filters_from_db(self):
         res = self.db.query("""
             SELECT 
@@ -133,8 +156,8 @@ class ServiceManager:
                 )
         self.proxy.filters = list(self.filters.values())
     
-    def __update_status_db(self, id, status):
-        self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", status, id)
+    def __update_status_db(self, status):
+        self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", status, self.id)
 
     async def next(self,to):
         async with self.lock: 
@@ -171,7 +194,7 @@ class ServiceManager:
 
     def _set_status(self,status):
         self.status = status
-        self.__update_status_db(self.id,status)
+        self.__update_status_db(status)
 
 
     async def update_filters(self):
@@ -222,7 +245,10 @@ class ProxyManager:
                 await self.proxy_table[srv_id].next(req_status)
 
     def get(self,id):
-        return self.proxy_table[id]
+        if id in self.proxy_table:
+            return self.proxy_table[id]
+        else:
+            raise ServiceNotFoundException()
 
 def check_port_is_open(port):
     try:

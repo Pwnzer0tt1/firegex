@@ -48,27 +48,6 @@ export async function postapi(path:string,data:any,is_form:boolean=false):Promis
     });
 }
 
-export async function postform(path:string,data:any):Promise<any>{
-    return await new Promise((resolve, reject) => {
-        fetch(`/api/${path}`, {
-            method: 'POST',
-            credentials: "same-origin",
-            cache: 'no-cache',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(data)
-        }).then(res => {
-            if(res.status === 401) window.location.reload()
-            if(!res.ok) reject(res.statusText)
-            res.json().then( res => resolve(res) ).catch( err => reject(err))
-        })
-        .catch(err => {
-            reject(err)
-        })
-    });
-}
-
 export function fireUpdateRequest(){
     window.dispatchEvent(new Event(eventUpdateName))
 }
