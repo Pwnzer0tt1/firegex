@@ -17,9 +17,15 @@ class SQLite():
         try:
             self.conn = sqlite3.connect("db/" + self.db_name + '.db', check_same_thread = False)
         except Exception:
-            with open("db/" + self.db_name + '.db', 'x') as f:
+            with open("db/" + self.db_name + '.db', 'x'):
                 pass
             self.conn = sqlite3.connect("db/" + self.db_name + '.db', check_same_thread = False)
+        def dict_factory(cursor, row):
+            d = {}
+            for idx, col in enumerate(cursor.description):
+                d[col[0]] = row[idx]
+            return d
+        self.conn.row_factory = dict_factory
 
     def disconnect(self) -> None:
         self.conn.close()
@@ -35,7 +41,7 @@ class SQLite():
                 cur.execute('''CREATE TABLE main.{}({});'''.format(t, ''.join([(c + ' ' + tables[t][c] + ', ') for c in tables[t]])[:-2]))
         cur.close()
     
-    def query(self, query, values = ()):
+    def query(self, query, *values):
         cur = self.conn.cursor()
         try:
             with self.lock:
@@ -51,17 +57,17 @@ class KeyValueStorage:
         self.db = db
 
     def get(self, key):
-        q = self.db.query('SELECT value FROM keys_values WHERE key = ?', (key,))
+        q = self.db.query('SELECT value FROM keys_values WHERE key = ?', key)
         if len(q) == 0:
             return None
         else:
-            return q[0][0]
+            return q[0]["value"]
 
     def put(self, key, value):
         if self.get(key) is None:
-            self.db.query('INSERT INTO keys_values (key, value) VALUES (?, ?);', (key,str(value)))
+            self.db.query('INSERT INTO keys_values (key, value) VALUES (?, ?);', key, str(value))
         else:
-            self.db.query('UPDATE keys_values SET value=? WHERE key = ?;', (str(value), key))
+            self.db.query('UPDATE keys_values SET value=? WHERE key = ?;', str(value), key)
 
 class STATUS:
     WAIT = "wait"
@@ -92,8 +98,8 @@ class ProxyManager:
     def reload(self):
         self.__clean_proxy_table()
         with self.lock: 
-            for srv_id in self.db.query('SELECT service_id, status FROM services;'):
-                srv_id, n_status = srv_id
+            for srv in self.db.query('SELECT service_id, status FROM services;'):
+                srv_id, n_status = srv["service_id"], srv["status"]
                 if srv_id in self.proxy_table:
                     continue
                 update_signal = threading.Event()
@@ -111,24 +117,23 @@ class ProxyManager:
                 callback_signal.clear()
 
     def get_service_data(self, id):
-        q = self.db.query('SELECT * FROM services WHERE service_id=?;',(id,))
-        if len(q) == 0: return None
-        srv = q[0]
-        filters = [{
-            'id': row[5],
-            'regex': row[0],
-            'is_blacklist': True if row[3] == "1" else False,
-            'is_case_sensitive' : True if row[6] == "1" else False,
-            'mode': row[1],
-            'n_packets': row[4],
-        } for row in self.db.query('SELECT * FROM regexes WHERE service_id = ?;', (id,))]
-        return {
-            'id': srv[1],
-            'status': srv[0],
-            'public_port': srv[3],
-            'internal_port': srv[2],
-            'filters':filters
-        }
+        res = self.db.query("""
+            SELECT 
+                service_id `id`,
+                status,
+                public_port,
+                internal_port
+            FROM services WHERE service_id = ?;
+        """, id)
+        if len(res) == 0: return None
+        else: res = res[0]
+        res["filters"] = self.db.query("""
+            SELECT 
+                regex, mode, regex_id `id`, is_blacklist,
+                blocked_packets n_packets, is_case_sensitive
+            FROM regexes WHERE service_id = ?;
+        """, id)
+        return res
 
     def change_status(self, id, to):
         with self.lock:
@@ -152,7 +157,7 @@ class ProxyManager:
                     del self.proxy_table[id]
     
     def __update_status_db(self, id, status):
-        self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", (status, id))
+        self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", status, id)
 
     def __proxy_starter(self, id, proxy:Proxy, next_status):
         def func():
@@ -217,7 +222,7 @@ class ProxyManager:
             
 
             def stats_updater(filter:Filter):
-                self.db.query("UPDATE regexes SET blocked_packets = ? WHERE regex_id = ?;", (filter.blocked, filter.code))
+                self.db.query("UPDATE regexes SET blocked_packets = ? WHERE regex_id = ?;", filter.blocked, filter.code)
 
             if not proxy:
                 proxy = Proxy(
@@ -291,7 +296,7 @@ def from_name_get_id(name):
 def gen_internal_port(db):
     while True:
         res = random.randint(30000, 45000)
-        if len(db.query('SELECT 1 FROM services WHERE internal_port = ?;', (res,))) == 0:
+        if len(db.query('SELECT 1 FROM services WHERE internal_port = ?;', res)) == 0:
             break
     return res
 

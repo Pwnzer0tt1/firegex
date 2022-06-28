@@ -1,6 +1,5 @@
-Flask
-uwsgi
-flask-cors
+fastapi[all]
+httpx
+uvicorn[standard]
 bcrypt
 kthread
-jsonschema

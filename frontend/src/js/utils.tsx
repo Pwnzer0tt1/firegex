@@ -7,11 +7,10 @@ var Buffer = require('buffer').Buffer
 
 export const eventUpdateName = "update-info"
 
-const custom_url = (!process.env.NODE_ENV || process.env.NODE_ENV === 'development')?"http://127.0.0.1:8080":""
 
 export async function getapi(path:string):Promise<any>{
     return await new Promise((resolve, reject) => {
-        fetch(`${custom_url}/api/${path}`,{credentials: "same-origin"})
+        fetch(`/api/${path}`,{credentials: "same-origin"})
             .then(res => {
                 if(res.status === 401) window.location.reload()
                 if(!res.ok) reject(res.statusText)
@@ -25,7 +24,7 @@ export async function getapi(path:string):Promise<any>{
 
 export async function postapi(path:string,data:any):Promise<any>{
     return await new Promise((resolve, reject) => {
-        fetch(`${custom_url}/api/${path}`, {
+        fetch(`/api/${path}`, {
             method: 'POST',
             credentials: "same-origin",
             cache: 'no-cache',

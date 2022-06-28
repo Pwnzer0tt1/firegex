@@ -50,7 +50,7 @@ services:
                 - GCC_PARAMS={gcc_params}
         network_mode: "host"
         environment:
-            - NGINX_PORT={args.port}
+            - PORT={args.port}
         volumes:
             - /execute/db
 """)
@@ -72,7 +72,7 @@ services:
         ports:
             - {args.port}:{args.port}
         environment:
-            - NGINX_PORT={args.port}
+            - PORT={args.port}
             - LOCALHOST_IP=host.docker.internal
         volumes:
             - /execute/db
