@@ -10,7 +10,8 @@ ON_DOCKER = len(sys.argv) > 1 and sys.argv[1] == "DOCKER"
 DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
 
 # DB init
-db = SQLite('firegex')
+if not os.path.exists("db"): os.mkdir("db")
+db = SQLite('db/firegex.db')
 db.connect()
 conf = KeyValueStorage(db)
 firewall = ProxyManager(db)
@@ -25,12 +26,13 @@ def shutdown_event():
 app.add_middleware(SessionMiddleware, secret_key=os.urandom(32))
 SESSION_TOKEN = secrets.token_hex(8)
 APP_STATUS = "init"
-REACT_BUILD_DIR = "../frontend/build/" if not ON_DOCKER else "../frontend/"
+REACT_BUILD_DIR = "../frontend/build/" if not ON_DOCKER else "frontend/"
 REACT_HTML_PATH = os.path.join(REACT_BUILD_DIR,"index.html")
 
 
 
 def is_loggined(request: Request):
+    global SESSION_TOKEN
     return request.session.get("token", "") == SESSION_TOKEN
 
 def login_check(request: Request):
@@ -54,7 +56,7 @@ class PasswordChangeForm(BaseModel):
 
 @app.post("/api/login")
 async def login_api(request: Request, form: PasswordForm):
-    global APP_STATUS
+    global APP_STATUS, SESSION_TOKEN
     if APP_STATUS != "run": raise HTTPException(status_code=400)
 
     if form.password == "":
@@ -75,7 +77,7 @@ async def logout(request: Request):
 @app.post('/api/change-password')
 async def change_password(request: Request, form: PasswordChangeForm):
     login_check(request)
-    global APP_STATUS
+    global APP_STATUS, SESSION_TOKEN
     if APP_STATUS != "run": raise HTTPException(status_code=400)
 
     if form.password == "":
@@ -91,7 +93,7 @@ async def change_password(request: Request, form: PasswordChangeForm):
 
 @app.post('/api/set-password')
 async def set_password(request: Request, form: PasswordForm):
-    global APP_STATUS
+    global APP_STATUS, SESSION_TOKEN
     if APP_STATUS != "init": raise HTTPException(status_code=400)
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}

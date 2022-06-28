@@ -1,13 +1,16 @@
 from requests import Session
 
-class ProxyAPI:
-    def __init__(self,address,password):
+class FiregexAPI:
+    def __init__(self,address):
         self.s = Session()
         self.address = address
-        self.password = password
     
-    def connect(self):
-        req = self.s.post(f"{self.address}api/login", json={"password":self.password})
+    def login(self,password):
+        req = self.s.post(f"{self.address}api/login", json={"password":password})
+        return req.json()["status"] == "ok"
+
+    def logout(self):
+        req = self.s.get(f"{self.address}api/logout")
         return req.json()["status"] == "ok"
 
     def create_service(self,service_name,service_port):
@@ -16,16 +19,14 @@ class ProxyAPI:
     
     def get_service_details(self,service_name):
         req = self.s.get(f"{self.address}api/services")
-        internal_port = service_id = None
+        service = None
         try:
             for service in req.json():
                 if service["name"] == service_name:
-                    service_id = service["id"]
-                    internal_port = service["internal_port"]
-                    break
+                    return service
         except Exception:
             pass
-        return service_id,internal_port
+        return service
 
     def get_service_status(self,service_id):
         req = self.s.get(f"{self.address}api/service/{service_id}")
@@ -34,7 +35,20 @@ class ProxyAPI:
     def get_service_regexes(self,service_id):
         req = self.s.get(f"{self.address}api/service/{service_id}/regexes")
         return req.json()
-        
+    
+    def get_regex(self,regex_id):
+        req = self.s.get(f"{self.address}api/regex/{regex_id}")
+        return req.json()
+
+    def add_regex(self,service_id,regex,is_blacklist = True, is_case_sensitive = True, mode = "B"):
+        req = self.s.post(f"{self.address}api/regexes/add", 
+            json={"is_blacklist":is_blacklist,"is_case_sensitive":is_case_sensitive,"service_id":service_id,"mode":mode,"regex":regex})
+        return req.json()["status"] == "ok"
+    
+    def delete_regex(self,regex_id):
+        req = self.s.get(f"{self.address}api/regex/{regex_id}/delete")
+        return req.json()["status"] == "ok"
+
     def start(self,service_id):
         req = self.s.get(f"{self.address}api/service/{service_id}/start")
         return req.json()["status"] == "ok"
@@ -49,10 +63,5 @@ class ProxyAPI:
     
     def delete(self,service_id):
         req = self.s.get(f"{self.address}api/service/{service_id}/delete")
-        return req.json()["status"] == "ok"
-    
-    def add_regex(self,service_id,regex,is_blacklist = True, is_case_sensitive = True, mode = "B"):
-        req = self.s.post(f"{self.address}api/regexes/add", 
-            json={"is_blacklist":is_blacklist,"is_case_sensitive":is_case_sensitive,"service_id":service_id,"mode":mode,"regex":regex})
         return req.json()["status"] == "ok"
     

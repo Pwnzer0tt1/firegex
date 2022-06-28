@@ -6,12 +6,15 @@ RUN apt-get update && apt-get -y install build-essential libboost-system-dev lib
 RUN mkdir /execute
 WORKDIR /execute
 
-COPY ./backend/ /execute/
+ADD ./backend/requirements.txt /execute/requirements.txt
 RUN pip install --no-cache-dir -r /execute/requirements.txt
 
 ARG GCC_PARAMS
-RUN c++ -O3 $GCC_PARAMS -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system -lboost_thread
+RUN mkdir proxy
+ADD ./backend/proxy/proxy.cpp /execute/proxy/proxy.cpp
+RUN c++ -O3 -march=native $GCC_PARAMS -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system -lboost_thread
 
+COPY ./backend/ /execute/
 COPY ./frontend/build/ ./frontend/
 
 RUN usermod -a -G root nobody

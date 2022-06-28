@@ -13,13 +13,12 @@ class SQLite():
         self.lock = threading.Lock()
 
     def connect(self) -> None:
-        if not os.path.exists("db"): os.mkdir("db")
         try:
-            self.conn = sqlite3.connect("db/" + self.db_name + '.db', check_same_thread = False)
+            self.conn = sqlite3.connect(self.db_name, check_same_thread = False)
         except Exception:
-            with open("db/" + self.db_name + '.db', 'x'):
+            with open(self.db_name, 'x'):
                 pass
-            self.conn = sqlite3.connect("db/" + self.db_name + '.db', check_same_thread = False)
+            self.conn = sqlite3.connect(self.db_name, check_same_thread = False)
         def dict_factory(cursor, row):
             d = {}
             for idx, col in enumerate(cursor.description):
