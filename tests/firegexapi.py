@@ -1,13 +1,34 @@
 from requests import Session
 
+class BearerSession():
+    def __init__(self):
+        self.s = Session()
+        self.headers = {}
+
+    def post(self, endpoint, json={}, data=""):
+        headers = self.headers
+        if data:
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        return self.s.post(endpoint, json=json, data=data, headers=headers)
+
+    def get(self, endpoint, json={}):
+        return self.s.get(endpoint, json=json, headers=self.headers)
+    
+    def setToken(self,token):
+         self.headers = {"Authorization": f"Bearer {token}"}
+
 class FiregexAPI:
     def __init__(self,address):
-        self.s = Session()
+        self.s = BearerSession()
         self.address = address
     
     def login(self,password):
-        req = self.s.post(f"{self.address}api/login", json={"password":password})
-        return req.json()["status"] == "ok"
+        req = self.s.post(f"{self.address}api/login", data=f"username=login&password={password}")
+        try : 
+            self.s.setToken(req.json()["access_token"])
+            return True
+        except Exception:
+            return False
 
     def logout(self):
         req = self.s.get(f"{self.address}api/logout")

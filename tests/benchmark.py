@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import argparse, socket,secrets, base64, iperf3, csv
 from time import sleep
-from requests import Session
+from firegexapi import FiregexAPI
 from multiprocessing  import Process
 
 pref = "\033["
@@ -37,31 +37,28 @@ sep()
 puts(f"Benchmarking with {args.num_of_regexes} regexes will start on ", color=colors.cyan, end="")
 puts(f"{args.address}", color=colors.yellow)
 
-s = Session()
+firegex = FiregexAPI(args.address)
+
 #Connect to Firegex
-req = s.post(f"{args.address}api/login", json={"password":args.password})
-assert req.json()["status"] == "ok", f"Benchmark Failed: Unknown response or wrong passowrd {req.text}"
-puts(f"Sucessfully logged in ✔", color=colors.green)
+if (firegex.login(args.password)): puts(f"Sucessfully logged in ✔", color=colors.green)
+else: puts(f"Benchmark Failed: Unknown response or wrong passowrd ✗", color=colors.red); exit(1)
+
 
 if args.new_istance:
     #Create new Service
-    req = s.post(f"{args.address}api/services/add" , json={"name":args.service_name,"port":args.service_port})
-    assert req.json()["status"] == "ok", f"Benchmark Failed: Couldn't create service {req.text} ✔"
-    puts(f"Sucessfully created service {args.service_name} with public port {args.service_port} ✔", color=colors.green)
+    if (firegex.create_service(args.service_name,args.service_port)):
+     puts(f"Sucessfully created service {args.service_name} with public port {args.service_port} ✔", color=colors.green)
+     service_created = True
+    else: puts(f"Benchmark Failed: Couldn't create service ✗", color=colors.red); exit(1)
 
 #Find the Service
-req = s.get(f"{args.address}api/services")
-internal_port = service_id = None
-try:
-    for service in req.json():
-        if service["name"] == args.service_name:
-            service_id = service["id"]
-            internal_port = service["internal_port"]
-            puts(f"Sucessfully received the internal port {internal_port} ✔", color=colors.green)
-            break
-except Exception:
-    puts(f"Benchmark Failed: Coulnd't get the service internal port {req.text}", color=colors.red)
-    exit(1)
+service = firegex.get_service_details(args.service_name)
+if (service):
+    internal_port= service["internal_port"]
+    service_id = service["id"]
+    puts(f"Sucessfully received the internal port {internal_port} ✔", color=colors.green)
+else: puts(f"Benchmark Failed: Coulnd't get the service internal port ✗", color=colors.red); exit_test(1)
+
 
 #Start iperf3
 def startServer():
@@ -91,9 +88,8 @@ puts(f"Baseline without proxy: ", color=colors.blue, end='')
 print(f"{getReading(internal_port)} MB/s")
 
 #Start firewall
-req = s.get(f"{args.address}api/service/{service_id}/start")
-assert req.json()["status"] == "ok", f"Benchmark Failed: Couldn't start the service {req.text}"
-puts(f"Sucessfully started service with id {service_id} ✔", color=colors.green)
+if(firegex.start(service_id)): puts(f"Sucessfully started service with id {service_id} ✔", color=colors.green)
+else: puts(f"Benchmark Failed: Coulnd't start the service ✗", color=colors.red); exit_test(1)
 
 #Hacky solution - wait a bit for the server to start
 sleep(1)
@@ -107,9 +103,7 @@ print(f"{results[0]} MB/s")
 #Add all the regexs
 for i in range(1,args.num_of_regexes+1):
     regex = base64.b64encode(bytes(secrets.token_hex(16).encode())).decode()
-    req = s.post(f"{args.address}api/regexes/add", 
-                json={"is_blacklist":True,"is_case_sensitive":True,"service_id":service_id,"mode":"B","regex":regex})
-    assert req.json()["status"] == "ok", f"Test Failed: Couldn't add regex {req.text}"
+    if(not firegex.add_regex(service_id,regex)): puts(f"Benchmark Failed: Coulnd't add the regex ✗", color=colors.red); exit_test(1)
     puts(f"Performance with {i} regex(s): ", color=colors.red, end='')
     results.append(getReading(args.service_port))
     print(f"{results[i]} MB/s")
@@ -123,8 +117,9 @@ puts(f"Sucessfully written results to {args.output_file} ✔", color=colors.mage
 
 if args.new_istance:
     #Delete the Service 
-    req = s.get(f"{args.address}api/service/{service_id}/delete")
-    assert req.json()["status"] == "ok", f"Benchmark Failed: Couldn't delete service {req.text}"
-    puts(f"Sucessfully delete service with id {service_id} ✔", color=colors.green)
+    if(firegex.delete(service_id)):
+        puts(f"Sucessfully delete service with id {service_id} ✔", color=colors.green)
+    else:
+        puts(f"Test Failed: Couldn't delete service ✗", color=colors.red); exit(1)
 
 server.terminate()
