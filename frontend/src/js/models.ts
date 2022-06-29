@@ -22,6 +22,10 @@ export type ServiceAddForm = {
 export type ServerResponse = {
     status:string
 }
+export type ServerResponseWithID = {
+    status:string,
+    id:string
+}
 
 export type ServerResponseToken = {
     status:string,

@@ -1,3 +1,4 @@
+import secrets
 import threading
 from proxy import Filter, Proxy
 import random, string, os, sqlite3, socket, asyncio
@@ -260,10 +261,12 @@ def check_port_is_open(port):
     except Exception:
         return False
 
-def from_name_get_id(name):
-    serv_id = name.strip().replace(" ","-")
-    serv_id = "".join([c for c in serv_id if c in (string.ascii_uppercase + string.ascii_lowercase + string.digits + "-")])
-    return serv_id.lower()
+def gen_service_id(db):
+    while True:
+        res = secrets.token_hex(8)
+        if len(db.query('SELECT 1 FROM services WHERE service_id = ?;', res)) == 0:
+            break
+    return res
 
 def gen_internal_port(db):
     while True:

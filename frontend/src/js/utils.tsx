@@ -1,7 +1,7 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
-import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword, LoginResponse, ServerResponseToken } from "./models";
+import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword, LoginResponse, ServerResponseToken, ServerResponseWithID } from "./models";
 
 var Buffer = require('buffer').Buffer 
 
@@ -119,8 +119,7 @@ export async function regenport(service_id:string){
 }
 
 export async function addservice(data:ServiceAddForm) {
-    const { status } = await postapi("services/add",data) as ServerResponse;
-    return status === "ok"?undefined:status
+    return await postapi("services/add",data) as ServerResponseWithID;
 }
 
 export async function deleteservice(service_id:string) {

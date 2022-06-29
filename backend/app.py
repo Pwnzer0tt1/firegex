@@ -3,7 +3,7 @@ import sqlite3, uvicorn, sys, secrets, re, os, asyncio, httpx, urllib, websocket
 from fastapi import FastAPI, HTTPException, WebSocket, Depends
 from pydantic import BaseModel, BaseSettings
 from fastapi.responses import FileResponse, StreamingResponse
-from utils import SQLite, KeyValueStorage, gen_internal_port, ProxyManager, from_name_get_id, STATUS
+from utils import *
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
     REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
+    VERSION = "2.0.0"
 
 
 settings = Settings()
@@ -73,7 +74,8 @@ async def is_loggined(auth: bool = Depends(check_login)):
 async def get_status(auth: bool = Depends(check_login)):
     return { 
         "status": APP_STATUS(),
-        "loggined": auth
+        "loggined": auth,
+        "version": settings.VERSION
     }
 
 class PasswordForm(BaseModel):
@@ -247,7 +249,7 @@ class ServiceAddForm(BaseModel):
 
 @app.post('/api/services/add')
 async def post_services_add(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
-    serv_id = from_name_get_id(form.name)
+    serv_id = gen_service_id(db)
     try:
         db.query("INSERT INTO services (name, service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?, ?)",
                     form.name, serv_id, gen_internal_port(db), form.port, 'stop')
@@ -255,7 +257,7 @@ async def post_services_add(form: ServiceAddForm, auth: bool = Depends(is_loggin
     except sqlite3.IntegrityError:
         return {'status': 'Name or/and port of the service has been already assigned to another service'}
     
-    return {'status': 'ok'}
+    return {'status': 'ok', "id": serv_id }
 
 async def frontend_debug_proxy(path):
     httpc = httpx.AsyncClient()
