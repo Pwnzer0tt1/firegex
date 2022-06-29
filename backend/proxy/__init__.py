@@ -58,7 +58,7 @@ class Proxy:
                         regex_id = stdout_line.split()[1]
                         async with self.filter_map_lock:
                             self.filter_map[regex_id].blocked+=1
-                            if self.callback_blocked_update: await self.callback_blocked_update(self.filter_map[regex_id])
+                            if self.callback_blocked_update: self.callback_blocked_update(self.filter_map[regex_id])
             except Exception:
                 return await self.process.wait()
         else:

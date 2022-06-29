@@ -215,7 +215,8 @@ class ServiceManager:
                         return
                     else:
                         await asyncio.sleep(.5)
-            except Exception: 
+            except asyncio.CancelledError:
+                self._set_status(STATUS.STOP)
                 await self.proxy.stop()
         self.starter = asyncio.create_task(func())
 
