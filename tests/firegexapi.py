@@ -16,6 +16,9 @@ class BearerSession():
     
     def setToken(self,token):
          self.headers = {"Authorization": f"Bearer {token}"}
+    
+    def unsetToken(self):
+        self.headers = {}
 
 class FiregexAPI:
     def __init__(self,address):
@@ -31,8 +34,16 @@ class FiregexAPI:
             return False
 
     def logout(self):
-        req = self.s.get(f"{self.address}api/logout")
-        return req.json()["status"] == "ok"
+        self.s.unsetToken()
+        return True
+
+    def change_password(self,password,expire):
+        req = self.s.post(f"{self.address}api/change-password", json={"password":password, "expire":expire})
+        try: 
+            self.s.setToken(req.json()["access_token"])
+            return True
+        except Exception:
+            return False
 
     def create_service(self,service_name,service_port):
         req = self.s.post(f"{self.address}api/services/add" , json={"name":service_name,"port":service_port})

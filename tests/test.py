@@ -40,6 +40,14 @@ service_created = False
 if (firegex.login(args.password)): puts(f"Sucessfully logged in ✔", color=colors.green)
 else: puts(f"Test Failed: Unknown response or wrong passowrd ✗", color=colors.red); exit(1)
 
+#Change password
+new_password = secrets.token_hex(10)
+if (firegex.change_password(new_password,True)): puts(f"Sucessfully changed password to {new_password} ✔", color=colors.green)
+else: puts(f"Test Failed: Coundl't change the password ✗", color=colors.red); exit(1)
+#Changed it back
+if (firegex.change_password(args.password,True)): puts(f"Sucessfully restored the password ✔", color=colors.green)
+else: puts(f"Test Failed: Coundl't change the password ✗", color=colors.red); exit(1)
+
 
 #Create new Service
 if (firegex.create_service(args.service_name,args.service_port)):
