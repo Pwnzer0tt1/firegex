@@ -197,7 +197,7 @@ class ChangePortForm(BaseModel):
     internalPort: Union[int, None]
 
 @app.post('/api/service/{service_id}/change-ports')
-async def get_regen_port(service_id: str, change_port:ChangePortForm, auth: bool = Depends(is_loggined)):
+async def change_port(service_id: str, change_port:ChangePortForm, auth: bool = Depends(is_loggined)):
     if change_port.port is None and change_port.internalPort is None:
         return {'status': 'Invalid Request!'}
     try:
