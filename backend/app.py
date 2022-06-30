@@ -321,6 +321,7 @@ async def catch_all(full_path:str):
 
 if __name__ == '__main__':
     # os.environ {PORT = Backend Port (Main Port), F_PORT = Frontend Port}
+    os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
         host="0.0.0.0",
