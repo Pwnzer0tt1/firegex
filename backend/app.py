@@ -206,6 +206,8 @@ async def change_port(service_id: str, change_port:ChangePortForm, auth: bool = 
         if not change_port.port is None:
             sql_inj+=" public_port = ? "
             query.append(change_port.port)
+        if not change_port.port is None and not change_port.internalPort is None:
+            sql_inj += ","
         if not change_port.internalPort is None:
             sql_inj+=" internal_port = ? "
             query.append(change_port.internalPort)
