@@ -1,5 +1,6 @@
 from base64 import b64decode
 import sqlite3, uvicorn, sys, secrets, re, os, asyncio, httpx, urllib, websockets
+from typing import Union
 from fastapi import FastAPI, HTTPException, WebSocket, Depends
 from pydantic import BaseModel, BaseSettings
 from fastapi.responses import FileResponse, StreamingResponse
@@ -22,7 +23,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
     REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
-    VERSION = "2.0.0"
+    VERSION = "1.3.0"
 
 
 settings = Settings()
@@ -36,7 +37,6 @@ def JWT_SECRET(): return conf.get("secret")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    
     db.disconnect()
     await firewall.close()
 
@@ -192,6 +192,31 @@ async def get_regen_port(service_id: str, auth: bool = Depends(is_loggined)):
     await firewall.get(service_id).update_port()
     return {'status': 'ok'}
 
+class ChangePortForm(BaseModel):
+    port: Union[int, None]
+    internalPort: Union[int, None]
+
+@app.post('/api/service/{service_id}/change-ports')
+async def get_regen_port(service_id: str, change_port:ChangePortForm, auth: bool = Depends(is_loggined)):
+    if change_port.port is None and change_port.internalPort is None:
+        return {'status': 'Invalid Request!'}
+    try:
+        sql_inj = ""
+        query = []
+        if not change_port.port is None:
+            sql_inj+=" public_port = ? "
+            query.append(change_port.port)
+        if not change_port.internalPort is None:
+            sql_inj+=" internal_port = ? "
+            query.append(change_port.internalPort)
+        query.append(service_id)
+        db.query(f'UPDATE services SET {sql_inj} WHERE service_id = ?;', *query)
+    except sqlite3.IntegrityError:
+        return {'status': 'Name or/and port of the service has been already assigned to another service'}
+    await firewall.get(service_id).update_port()
+    return {'status': 'ok'}
+
+
 
 @app.get('/api/service/{service_id}/regexes')
 async def get_service_regexes(service_id: str, auth: bool = Depends(is_loggined)):
@@ -263,17 +288,19 @@ async def post_regexes_add(form: RegexAddForm, auth: bool = Depends(is_loggined)
 class ServiceAddForm(BaseModel):
     name: str
     port: int
+    internalPort: Union[int, None]
 
 @app.post('/api/services/add')
 async def post_services_add(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
     serv_id = gen_service_id(db)
     try:
+        internal_port = form.internalPort if form.internalPort else gen_internal_port(db)
         db.query("INSERT INTO services (name, service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?, ?)",
-                    form.name, serv_id, gen_internal_port(db), form.port, 'stop')
-        await firewall.reload()
+                    form.name, serv_id, internal_port, form.port, 'stop')
     except sqlite3.IntegrityError:
-        return {'status': 'Name or/and port of the service has been already assigned to another service'}
-    
+        return {'status': 'Name or/and ports of the service has been already assigned to another service'}
+    await firewall.reload()
+
     return {'status': 'ok', "id": serv_id }
 
 async def frontend_debug_proxy(path):

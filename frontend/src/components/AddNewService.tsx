@@ -7,7 +7,9 @@ import { ImCross } from "react-icons/im"
 type ServiceAddForm = {
     name:string,
     port:number,
-    autostart: boolean
+    autostart: boolean,
+    chosenInternalPort: boolean,
+    internalPort: number
 }
 
 function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void }) {
@@ -36,9 +38,9 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
     const [submitLoading, setSubmitLoading] = useState(false)
     const [error, setError] = useState<string|null>(null)
  
-    const submitRequest = ({ name, port, autostart }:ServiceAddForm) =>{
+    const submitRequest = ({ name, port, autostart, chosenInternalPort, internalPort }:ServiceAddForm) =>{
         setSubmitLoading(true)
-        addservice({ name, port }).then( res => {
+        addservice(chosenInternalPort?{ internalPort, name, port }:{ name, port }).then( res => {
             if (res.status === "ok"){
                 setSubmitLoading(false)
                 close();

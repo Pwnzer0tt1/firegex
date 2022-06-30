@@ -16,7 +16,8 @@ export type Service = {
 
 export type ServiceAddForm = {
     name:string,
-    port:number
+    port:number,
+    internalPort?:number
 }
 
 export type ServerResponse = {
@@ -25,6 +26,11 @@ export type ServerResponse = {
 export type ServerResponseWithID = {
     status:string,
     id:string
+}
+
+export type ChangePort = {
+    port?: number,
+    internalPort?: number
 }
 
 export type ServerResponseToken = {

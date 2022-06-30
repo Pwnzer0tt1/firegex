@@ -9,6 +9,7 @@ import { deleteservice, errorNotify, fireUpdateRequest, okNotify, pauseservice, 
 import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
 import { TbNumbers } from 'react-icons/tb';
 import { BiRename } from 'react-icons/bi'
+import ChangeInternalPort from './ChangeInternalPort';
 
 //"status":"stop"/"wait"/"active"/"pause",
 function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
@@ -26,6 +27,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
     const [changePortModal, setChangePortModal] = useState(false)
+    const [chooseInternalPortModal, setChooseInternalPortModal] = useState(false)
 
     const stopService = async () => {
         setButtonLoading(true)
@@ -149,7 +151,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                         <Divider />
                         <Menu.Label><b>Internal proxy port</b></Menu.Label>
                         <Menu.Item icon={<BsArrowRepeat size={18} />} onClick={()=>setChangePortModal(true)}>Regen port</Menu.Item>
-                        <Menu.Item icon={<TbNumbers size={18} />} onClick={()=>{}}>Choose port</Menu.Item>
+                        <Menu.Item icon={<TbNumbers size={18} />} onClick={()=>setChooseInternalPortModal(true)}>Choose port</Menu.Item>
                         <Divider />
                         <Menu.Label><b>Delete service</b></Menu.Label>
                         <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
@@ -217,6 +219,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
             action={changePort}
             opened={changePortModal}
         />
+        <ChangeInternalPort service={service} onClose={()=> setChooseInternalPortModal(false)} opened={chooseInternalPortModal} />
     </>
 }
 

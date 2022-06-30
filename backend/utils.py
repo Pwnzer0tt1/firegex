@@ -54,7 +54,7 @@ class SQLite():
             'services': {
                 'status': 'VARCHAR(100) NOT NULL',
                 'service_id': 'VARCHAR(100) PRIMARY KEY',
-                'internal_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
+                'internal_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536)',
                 'public_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
                 'name': 'VARCHAR(100) NOT NULL'
             },
