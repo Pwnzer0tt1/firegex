@@ -66,6 +66,7 @@ class SQLite():
                 'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
                 'regex_id': 'INTEGER PRIMARY KEY',
                 'is_case_sensitive' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1))',
+                'active' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1)) DEFAULT 1',
                 'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
             },
             'keys_values': {
@@ -109,6 +110,7 @@ class ServiceManager:
             callback_blocked_update=self._stats_updater
         )
         self.status = STATUS.STOP
+        self.wanted_status = STATUS.STOP
         self.filters = {}
         self._update_port_from_db()
         self._update_filters_from_db()
@@ -131,7 +133,7 @@ class ServiceManager:
             SELECT 
                 regex, mode, regex_id `id`, is_blacklist,
                 blocked_packets n_packets, is_case_sensitive
-            FROM regexes WHERE service_id = ?;
+            FROM regexes WHERE service_id = ? AND active=1;
         """, self.id)
 
         #Filter check
@@ -161,27 +163,31 @@ class ServiceManager:
         self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", status, self.id)
 
     async def next(self,to):
-        async with self.lock: 
-            if self.status != to:
-                # ACTIVE -> PAUSE or PAUSE -> ACTIVE
-                if (self.status, to) in [(STATUS.ACTIVE, STATUS.PAUSE)]:
-                    await self.proxy.pause()
-                    self._set_status(to)
+        async with self.lock:
+            return await self._next(to)
+    
+    async def _next(self, to):
+        if self.status != to:
+            # ACTIVE -> PAUSE or PAUSE -> ACTIVE
+            if (self.status, to) in [(STATUS.ACTIVE, STATUS.PAUSE)]:
+                await self.proxy.pause()
+                self._set_status(to)
 
-                elif (self.status, to) in [(STATUS.PAUSE, STATUS.ACTIVE)]:
-                    await self.proxy.reload()
-                    self._set_status(to)
+            elif (self.status, to) in [(STATUS.PAUSE, STATUS.ACTIVE)]:
+                await self.proxy.reload()
+                self._set_status(to)
 
-                # ACTIVE -> STOP
-                elif (self.status,to) in [(STATUS.ACTIVE, STATUS.STOP), (STATUS.WAIT, STATUS.STOP), (STATUS.PAUSE, STATUS.STOP)]: #Stop proxy
-                    if self.starter: self.starter.cancel()
-                    await self.proxy.stop()
-                    self._set_status(to)
+            # ACTIVE -> STOP
+            elif (self.status,to) in [(STATUS.ACTIVE, STATUS.STOP), (STATUS.WAIT, STATUS.STOP), (STATUS.PAUSE, STATUS.STOP)]: #Stop proxy
+                if self.starter: self.starter.cancel()
+                await self.proxy.stop()
+                self._set_status(to)
 
-                # STOP -> ACTIVE or STOP -> PAUSE
-                elif (self.status, to) in [(STATUS.STOP, STATUS.ACTIVE), (STATUS.STOP, STATUS.PAUSE)]:
-                    self._set_status(STATUS.WAIT)
-                    self.__proxy_starter(to)
+            # STOP -> ACTIVE or STOP -> PAUSE
+            elif (self.status, to) in [(STATUS.STOP, STATUS.ACTIVE), (STATUS.STOP, STATUS.PAUSE)]:
+                self.wanted_status = to
+                self._set_status(STATUS.WAIT)
+                self.__proxy_starter(to)
 
 
     def _stats_updater(self,filter:Filter):
@@ -191,7 +197,9 @@ class ServiceManager:
         async with self.lock:
             self._update_port_from_db()
             if self.status in [STATUS.PAUSE, STATUS.ACTIVE]:
-                await self.proxy.restart(in_pause=(self.status == STATUS.PAUSE))
+                next_status = self.status if self.status != STATUS.WAIT else self.wanted_status
+                await self._next(STATUS.STOP)
+                await self._next(next_status)
 
     def _set_status(self,status):
         self.status = status
@@ -233,7 +241,7 @@ class ProxyManager:
     async def remove(self,id):
         async with self.lock: 
             if id in self.proxy_table:
-                await self.proxy_table[id].proxy.stop()
+                await self.proxy_table[id].next(STATUS.STOP)
                 del self.proxy_table[id]
     
     async def reload(self):

@@ -1,11 +1,12 @@
 import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
-import { deleteregex, errorNotify, fireUpdateRequest, getHumanReadableRegex, okNotify } from '../../js/utils';
+import { activateregex, deactivateregex, deleteregex, errorNotify, fireUpdateRequest, getHumanReadableRegex, okNotify } from '../../js/utils';
 import style from "./RegexView.module.scss";
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
 import FilterTypeSelector from '../FilterTypeSelector';
+import { FaPause, FaPlay } from 'react-icons/fa';
 
 
 function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
@@ -17,7 +18,8 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   let regex_expr = getHumanReadableRegex(regexInfo.regex);
 
   const [deleteModal, setDeleteModal] = useState(false);
-  const [tooltipOpened, setTooltipOpened] = useState(false);
+  const [deleteTooltipOpened, setDeleteTooltipOpened] = useState(false);
+  const [statusTooltipOpened, setStatusTooltipOpened] = useState(false);
 
   const deleteRegex = () => {
     deleteregex(regexInfo.id).then(res => {
@@ -30,6 +32,19 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
     }).catch( err => errorNotify(`Regex ${regex_expr} deleation failed!`,`Error: ${err}`))
   }
 
+  const changeRegexStatus = () => {
+    
+    (regexInfo.active?deactivateregex:activateregex)(regexInfo.id).then(res => {
+      if(!res){
+        okNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivated":"activated"} successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been ${regexInfo.active?"deactivated":"activated"}!`)
+        fireUpdateRequest()
+      }else{
+        errorNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivation":"activation"} failed!`,`Error: ${res}`)
+      }
+    }).catch( err => errorNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivation":"activation"} failed!`,`Error: ${err}`))
+    
+  }
+
   return <div className={style.box}>
         <Grid>
           <Grid.Col span={2}>
@@ -38,14 +53,22 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
           <Grid.Col span={8}>
             <Text className={style.regex_text}> {regex_expr}</Text>
           </Grid.Col>
-          <Grid.Col span={2}>
-            <Tooltip label="Delete regex" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red" opened={tooltipOpened} tooltipId="tooltip-id">
+          <Grid.Col span={2} className='center-flex'>
+            <Space w="xs" />
+            <Tooltip label={regexInfo.active?"Deactivate":"Activate"} zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color={regexInfo.active?"orange":"teal"} opened={statusTooltipOpened}>
+              <ActionIcon color={regexInfo.active?"orange":"teal"} onClick={changeRegexStatus} size="xl" radius="md" variant="filled"
+               onFocus={() => setStatusTooltipOpened(false)} onBlur={() => setStatusTooltipOpened(false)}
+               onMouseEnter={() => setStatusTooltipOpened(true)} onMouseLeave={() => setStatusTooltipOpened(false)}
+              >{regexInfo.active?<FaPause size="20px" />:<FaPlay size="20px" />}</ActionIcon>
+            </Tooltip>
+            <Space w="xs" />
+            <Tooltip label="Delete regex" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red" opened={deleteTooltipOpened} >
               <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"
-               aria-describedby="tooltip-id"
-               onFocus={() => setTooltipOpened(false)} onBlur={() => setTooltipOpened(false)}
-               onMouseEnter={() => setTooltipOpened(true)} onMouseLeave={() => setTooltipOpened(false)}
+               onFocus={() => setDeleteTooltipOpened(false)} onBlur={() => setDeleteTooltipOpened(false)}
+               onMouseEnter={() => setDeleteTooltipOpened(true)} onMouseLeave={() => setDeleteTooltipOpened(false)}
               ><BsTrashFill size={22} /></ActionIcon>
             </Tooltip>
+
             </Grid.Col>
           <Grid.Col span={2} />
           <Grid.Col className='center-flex-row' span={4}>
@@ -58,9 +81,12 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             />
             <Space h="md" />
             <div className='center-flex'>
-              <Badge size="md" color="green" variant="filled">Service: {regexInfo.service_id}</Badge>
+              <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_id}</Badge>
+              <Space w="xs" />
+              <Badge size="md" color={regexInfo.active?"lime":"red"} variant="filled">{regexInfo.active?"ACTIVE":"DISABLED"}</Badge>
               <Space w="xs" />
               <Badge size="md" color="gray" variant="filled">ID: {regexInfo.id}</Badge>
+              
             </div>
           </Grid.Col>
           <Grid.Col style={{width:"100%"}} span={6}>

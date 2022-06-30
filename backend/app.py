@@ -36,8 +36,9 @@ def JWT_SECRET(): return conf.get("secret")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    await firewall.close()
+    
     db.disconnect()
+    await firewall.close()
 
 @app.on_event("startup")
 async def startup_event():
@@ -197,7 +198,7 @@ async def get_service_regexes(service_id: str, auth: bool = Depends(is_loggined)
     return db.query("""
         SELECT 
             regex, mode, regex_id `id`, service_id, is_blacklist,
-            blocked_packets n_packets, is_case_sensitive
+            blocked_packets n_packets, is_case_sensitive, active
         FROM regexes WHERE service_id = ?;
     """, service_id)
 
@@ -206,7 +207,7 @@ async def get_regex_id(regex_id: int, auth: bool = Depends(is_loggined)):
     res = db.query("""
         SELECT 
             regex, mode, regex_id `id`, service_id, is_blacklist,
-            blocked_packets n_packets, is_case_sensitive
+            blocked_packets n_packets, is_case_sensitive, active
         FROM regexes WHERE `id` = ?;
     """, regex_id)
     if len(res) == 0: raise HTTPException(status_code=400, detail="This regex does not exists!")
@@ -219,6 +220,22 @@ async def get_regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
         db.query('DELETE FROM regexes WHERE regex_id = ?;', regex_id)
         await firewall.get(res[0]["service_id"]).update_filters()
     
+    return {'status': 'ok'}
+
+@app.get('/api/regex/{regex_id}/enable')
+async def get_regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
+    res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
+    if len(res) != 0:
+        db.query('UPDATE regexes SET active=1 WHERE regex_id = ?;', regex_id)
+        await firewall.get(res[0]["service_id"]).update_filters()
+    return {'status': 'ok'}
+
+@app.get('/api/regex/{regex_id}/disable')
+async def get_regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
+    res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
+    if len(res) != 0:
+        db.query('UPDATE regexes SET active=0 WHERE regex_id = ?;', regex_id)
+        await firewall.get(res[0]["service_id"]).update_filters()
     return {'status': 'ok'}
 
 class RegexAddForm(BaseModel):
@@ -261,7 +278,7 @@ async def post_services_add(form: ServiceAddForm, auth: bool = Depends(is_loggin
 
 async def frontend_debug_proxy(path):
     httpc = httpx.AsyncClient()
-    req = httpc.build_request("GET",urllib.parse.urljoin(f"http://0.0.0.0:{os.getenv('F_PORT','3000')}", path))
+    req = httpc.build_request("GET",urllib.parse.urljoin(f"http://127.0.0.1:{os.getenv('F_PORT','3000')}", path))
     resp = await httpc.send(req, stream=True)
     return StreamingResponse(resp.aiter_bytes(),status_code=resp.status_code)
 
@@ -287,7 +304,7 @@ if DEBUG:
     @app.websocket("/ws")
     async def websocket_debug_proxy(ws: WebSocket):
         await ws.accept()
-        async with websockets.connect(f"ws://0.0.0.0:{os.getenv('F_PORT','3000')}/ws") as ws_b_client:
+        async with websockets.connect(f"ws://127.0.0.1:{os.getenv('F_PORT','3000')}/ws") as ws_b_client:
             fwd_task = asyncio.create_task(forward_websocket(ws, ws_b_client))
             rev_task = asyncio.create_task(reverse_websocket(ws, ws_b_client))
             await asyncio.gather(fwd_task, rev_task)
@@ -298,7 +315,7 @@ async def catch_all(full_path:str):
         try:
             return await frontend_debug_proxy(full_path)
         except Exception:
-            return {"details":"Frontend not started at "+f"http://0.0.0.0:{os.getenv('F_PORT','3000')}"}
+            return {"details":"Frontend not started at "+f"http://127.0.0.1:{os.getenv('F_PORT','3000')}"}
     else: return await react_deploy(full_path)
 
 

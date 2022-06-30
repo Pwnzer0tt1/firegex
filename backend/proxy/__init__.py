@@ -40,7 +40,7 @@ class Proxy:
         if not self.isactive():
             try:
                 self.filter_map = self.compile_filters()
-                filters_codes = list(self.filter_map.keys()) if not in_pause else []
+                filters_codes = self.get_filter_codes() if not in_pause else []
                 proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
 
                 self.process = await asyncio.create_subprocess_exec(
@@ -57,8 +57,9 @@ class Proxy:
                     if stdout_line.startswith("BLOCKED"):
                         regex_id = stdout_line.split()[1]
                         async with self.filter_map_lock:
-                            self.filter_map[regex_id].blocked+=1
-                            if self.callback_blocked_update: self.callback_blocked_update(self.filter_map[regex_id])
+                            if regex_id in self.filter_map:
+                                self.filter_map[regex_id].blocked+=1
+                                if self.callback_blocked_update: self.callback_blocked_update(self.filter_map[regex_id])
             except Exception:
                 return await self.process.wait()
         else:
@@ -87,8 +88,13 @@ class Proxy:
         if self.isactive():
             async with self.filter_map_lock:
                 self.filter_map = self.compile_filters()
-                filters_codes = list(self.filter_map.keys())
+                filters_codes = self.get_filter_codes()
                 await self.update_config(filters_codes)
+    
+    def get_filter_codes(self):
+        filters_codes = list(self.filter_map.keys())
+        filters_codes.sort(key=lambda a: self.filter_map[a].blocked, reverse=True)
+        return filters_codes
 
     def isactive(self):
         return self.process and self.process.returncode is None

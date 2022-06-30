@@ -99,6 +99,16 @@ export async function deleteregex(regex_id:number){
     return status === "ok"?undefined:status
 }
 
+export async function activateregex(regex_id:number){
+    const { status } = await getapi(`regex/${regex_id}/enable`) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
+export async function deactivateregex(regex_id:number){
+    const { status } = await getapi(`regex/${regex_id}/disable`) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
 export async function startservice(service_id:string){
     const { status } = await getapi(`service/${service_id}/start`) as ServerResponse;
     return status === "ok"?undefined:status
@@ -126,6 +136,7 @@ export async function deleteservice(service_id:string) {
     const { status } = await getapi(`service/${service_id}/delete`) as ServerResponse;
     return status === "ok"?undefined:status
 }
+
 
 export async function addregex(data:RegexAddForm) {
     const { status } = await postapi("regexes/add",data) as ServerResponse;

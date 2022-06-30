@@ -15,12 +15,15 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
     const form = useForm({
         initialValues: {
             name:"",
-            port:1,
+            port:8080,
+            internalPort:30001,
+            chosenInternalPort:false,
             autostart: true
         },
         validationRules:{
             name: (value) => value !== ""?true:false,
-            port: (value) => value>0 && value<65536
+            port: (value) => value>0 && value<65536,
+            internalPort: (value) => value>0 && value<65536,
         }
     })
 
@@ -66,15 +69,34 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
                 placeholder="8080"
                 min={1}
                 max={65535}
-                label="Service port"
+                label="Public Service port"
                 {...form.getInputProps('port')}
+            />
+
+            {form.values.chosenInternalPort?<>
+                <Space h="md" />
+                <NumberInput
+                    placeholder="8080"
+                    min={1}
+                    max={65535}
+                    label="Internal Proxy Port"
+                    {...form.getInputProps('internalPort')}
+                />
+                <Space h="sm" />
+            </>:null}
+
+            <Space h="xl" />
+
+            <Switch
+                label="Auto-Start Service"
+                {...form.getInputProps('autostart', { type: 'checkbox' })}
             />
 
             <Space h="md" />
 
             <Switch
-                label="Auto-Start Service"
-                {...form.getInputProps('autostart', { type: 'checkbox' })}
+                label="Choose internal port"
+                {...form.getInputProps('chosenInternalPort', { type: 'checkbox' })}
             />
 
             <Group position="right" mt="md">
