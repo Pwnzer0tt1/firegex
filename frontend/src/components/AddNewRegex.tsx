@@ -1,8 +1,8 @@
-import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Tooltip, Modal } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Modal } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { RegexAddForm } from '../js/models';
-import { addregex, b64encode, fireUpdateRequest, getBinaryRegex, getHumanReadableRegex, okNotify } from '../js/utils';
+import { addregex, b64decode, b64encode, fireUpdateRequest, okNotify } from '../js/utils';
 import { ImCross } from "react-icons/im"
 import FilterTypeSelector from './FilterTypeSelector';
 
@@ -12,7 +12,7 @@ type RegexAddInfo = {
     type:string,
     mode:string,
     is_case_insensitive:boolean,
-    percentage_encoding:boolean
+    deactive:boolean
 }
 
 function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>void, service:string }) { 
@@ -23,7 +23,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             type:"blacklist",
             mode:"C -> S",
             is_case_insensitive:false,
-            percentage_encoding:false
+            deactive:false
         },
         validationRules:{
             regex: (value) => value !== "",
@@ -45,17 +45,13 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
         setSubmitLoading(true)
         const filter_mode = ({'C -> S':'C', 'S -> C':'S', 'C <-> S':'B'}[values.mode])
 
-        let final_regex:string|number[] = values.regex
-        if (values.percentage_encoding){
-            final_regex = getBinaryRegex(final_regex)
-        }
-
         const request:RegexAddForm = {
             is_blacklist:values.type !== "whitelist",
             is_case_sensitive: !values.is_case_insensitive,
             service_id: service,
             mode: filter_mode?filter_mode:"B",
-            regex: b64encode(final_regex)
+            regex: b64encode(values.regex),
+            active: !values.deactive
         }
         setSubmitLoading(false)
         addregex(request).then( res => {
@@ -63,7 +59,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                 setSubmitLoading(false)
                 close();
                 fireUpdateRequest();
-                okNotify(`Regex ${getHumanReadableRegex(request.regex)} has been added`, `Successfully added  ${request.is_case_sensitive?"case sensitive":"case insensitive"} ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_id} service`)
+                okNotify(`Regex ${b64decode(request.regex)} has been added`, `Successfully added  ${request.is_case_sensitive?"case sensitive":"case insensitive"} ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_id} service`)
             }else if (res.toLowerCase() === "invalid regex"){
                 setSubmitLoading(false)
                 form.setFieldError("regex", "Invalid Regex")
@@ -87,17 +83,14 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                 {...form.getInputProps('regex')}
             />
             <Space h="md" />
-            <Tooltip label="To represent binary data use URL encoding. Example: %01" transition="slide-right" openDelay={500} transitionDuration={500} transitionTimingFunction="ease"  
-                    color="gray" wrapLines width={220} withArrow position='right' gutter={20}>      
-                <Switch
-                    label="Use percentage encoding for binary values"
-                    {...form.getInputProps('percentage_encoding', { type: 'checkbox' })}
-                />
-            </Tooltip>
-            <Space h="md" />
             <Switch
                 label="Case insensitive"
                 {...form.getInputProps('is_case_insensitive', { type: 'checkbox' })}
+            />
+            <Space h="md" />
+            <Switch
+                label="Deactivate"
+                {...form.getInputProps('deactive', { type: 'checkbox' })}
             />
             <Space h="md" />
             <NativeSelect

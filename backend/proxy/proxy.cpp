@@ -7,7 +7,6 @@
 #include <cstddef>
 #include <iostream>
 #include <string>
-#include <regex>
 #include <mutex>
 
 #include <boost/thread.hpp>
@@ -16,7 +15,9 @@
 #include <boost/bind/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
+#include <jpcre2.hpp>
 
+typedef jpcre2::select<char> jp;
 using namespace std;
 
 bool unhexlify(string const &hex, string &newString) {
@@ -35,7 +36,8 @@ bool unhexlify(string const &hex, string &newString) {
    }
 }
 
-typedef vector<pair<string,regex>> regex_rule_vector;
+typedef pair<string,jp::Regex> regex_rule_pair;
+typedef vector<regex_rule_pair> regex_rule_vector;
 struct regex_rules{
    regex_rule_vector regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
 
@@ -62,24 +64,14 @@ struct regex_rules{
       if (arg[1] != 'C' && arg[1] != 'c' && arg[1] != 'S' && arg[1] != 's') return;
       string hex(arg+2), expr;
       if (!unhexlify(hex, expr)) return;
-
-      try{
-         
-         //Push regex
-         if (arg[0] == '1'){
-            regex regex(expr);
-            #ifdef DEBUG
-            cerr << "Added case sensitive regex " << expr << endl;
-            #endif
-            getByCode(arg[1])->push_back(make_pair(string(arg), regex));
-         } else {
-            regex regex(expr,regex_constants::icase);
-            #ifdef DEBUG
-            cerr << "Added case insensitive regex " << expr << endl;
-            #endif
-            getByCode(arg[1])->push_back(make_pair(string(arg), regex));
-         }
-      } catch(...){
+      //Push regex
+      jp::Regex regex(expr,arg[0] == '1'?"gS":"giS");
+      if (regex){
+         #ifdef DEBUG
+         cerr << "Added regex " << expr << " " << arg << endl;
+         #endif
+         getByCode(arg[1])->push_back(make_pair(string(arg), regex));
+      } else {
          cerr << "Regex " << arg << " was not compiled successfully" << endl;
       }
    }
@@ -92,17 +84,19 @@ mutex update_mutex;
 mutex stdout_mutex;
 #endif 
 
-bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> const &blacklist, vector<pair<string,regex>> const &whitelist){
+bool filter_data(unsigned char* data, const size_t& bytes_transferred, regex_rule_vector const &blacklist, regex_rule_vector const &whitelist){
    #ifdef DEBUG_PACKET
    cerr << "---------------- Packet ----------------" << endl;
-   for(int i=0;i<bytes_transferred;i++){
-      cerr << data[i];
-   }
-   cerr << "\n" << "---------------- End Packet ----------------" << endl;
+   for(int i=0;i<bytes_transferred;i++) cerr << data[i];
+   cerr << endl;
+   for(int i=0;i<bytes_transferred;i++) fprintf(stderr, "%x", data[i]);
+   cerr << endl;
+   cerr << "---------------- End Packet ----------------" << endl;
    #endif
-   for (pair<string,regex> ele:blacklist){
+   string str_data((char *) data, bytes_transferred);
+   for (regex_rule_pair ele:blacklist){
       try{
-         if(regex_search(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data)+bytes_transferred, ele.second)){
+         if(ele.second.match(str_data)){
             #ifdef MULTI_THREAD
             std::unique_lock<std::mutex> lck(stdout_mutex);
             #endif
@@ -113,9 +107,9 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
          cerr << "Error while matching regex: " << ele.first << endl;
       }
    }
-   for (pair<string,regex> ele:whitelist){
+   for (regex_rule_pair ele:whitelist){
       try{
-         if(!regex_search(reinterpret_cast<const char*>(data),reinterpret_cast<const char*>(data)+bytes_transferred, ele.second)){
+         if(!ele.second.match(str_data)){
             #ifdef MULTI_THREAD
             std::unique_lock<std::mutex> lck(stdout_mutex);
             #endif
@@ -394,8 +388,9 @@ void update_config (boost::asio::streambuf &input_buffer){
       std::unique_lock<std::mutex> lck(update_mutex);
       regex_rules *regex_new_config = new regex_rules();
       string data;
-      while(!config_stream.eof()){
+      while(true){
          config_stream >> data;
+         if (config_stream.eof()) break;
          regex_new_config->add(data.c_str());
       }
       regex_config.reset(regex_new_config);

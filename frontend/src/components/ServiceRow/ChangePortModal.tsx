@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { changeports, fireUpdateRequest, okNotify } from '../../js/utils';
 import { ImCross } from "react-icons/im"
 import { Service } from '../../js/models';
-import { BsArrowDownSquareFill } from 'react-icons/bs';
+import { FaLongArrowAltDown } from 'react-icons/fa';
 
 type InputForm = {
     internalPort:number,
@@ -70,7 +70,7 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
             />    
 
             <Space h="xl" />
-            <Center><BsArrowDownSquareFill size={50}/></Center>
+            <Center><FaLongArrowAltDown size={50}/></Center>
             
             <NumberInput
                 placeholder="8080"

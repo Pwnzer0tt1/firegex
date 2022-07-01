@@ -269,6 +269,7 @@ class RegexAddForm(BaseModel):
     service_id: str
     regex: str
     mode: str
+    active: Union[bool,None]
     is_blacklist: bool
     is_case_sensitive: bool
 
@@ -279,8 +280,8 @@ async def post_regexes_add(form: RegexAddForm, auth: bool = Depends(is_loggined)
     except Exception:
         return {"status":"Invalid regex"}
     try:
-        db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode, is_case_sensitive ) VALUES (?, ?, ?, ?, ?);", 
-                form.service_id, form.regex, form.is_blacklist, form.mode, form.is_case_sensitive)
+        db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode, is_case_sensitive, active ) VALUES (?, ?, ?, ?, ?, ?);", 
+                form.service_id, form.regex, form.is_blacklist, form.mode, form.is_case_sensitive, True if form.active is None else form.active )
     except sqlite3.IntegrityError:
         return {'status': 'An identical regex already exists'}
 

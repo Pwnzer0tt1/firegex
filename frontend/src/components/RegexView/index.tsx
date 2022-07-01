@@ -1,7 +1,7 @@
 import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
-import { activateregex, deactivateregex, deleteregex, errorNotify, fireUpdateRequest, getHumanReadableRegex, okNotify } from '../../js/utils';
+import { activateregex, b64decode, deactivateregex, deleteregex, errorNotify, fireUpdateRequest, okNotify } from '../../js/utils';
 import style from "./RegexView.module.scss";
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
@@ -15,7 +15,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
                       regexInfo.mode === "S"? "S -> C":
                       regexInfo.mode === "B"? "S <-> C": "🤔"
 
-  let regex_expr = getHumanReadableRegex(regexInfo.regex);
+  let regex_expr = b64decode(regexInfo.regex);
 
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleteTooltipOpened, setDeleteTooltipOpened] = useState(false);
