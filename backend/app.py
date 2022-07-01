@@ -1,6 +1,6 @@
 from base64 import b64decode
 import sqlite3, uvicorn, sys, secrets, re, os, asyncio, httpx, urllib, websockets
-from typing import Union
+from typing import List, Union
 from fastapi import FastAPI, HTTPException, WebSocket, Depends
 from pydantic import BaseModel, BaseSettings
 from fastapi.responses import FileResponse, StreamingResponse
@@ -25,12 +25,11 @@ class Settings(BaseSettings):
     REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
     VERSION = "1.3.0"
 
-
 settings = Settings()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)
 crypto = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-app = FastAPI(debug=DEBUG)
+app = FastAPI(debug=DEBUG, redoc_url=None)
 
 def APP_STATUS(): return "init" if conf.get("password") is None else "run"
 def JWT_SECRET(): return conf.get("secret")
@@ -71,8 +70,14 @@ async def is_loggined(auth: bool = Depends(check_login)):
     )
     return True
 
-@app.get("/api/status")
-async def get_status(auth: bool = Depends(check_login)):
+class StatusModel(BaseModel):
+    status: str
+    loggined: bool
+    version: str
+
+@app.get("/api/status", response_model=StatusModel)
+async def get_app_status(auth: bool = Depends(check_login)):
+    """Get the general status of firegex and your session with firegex"""
     return { 
         "status": APP_STATUS(),
         "loggined": auth,
@@ -88,6 +93,7 @@ class PasswordChangeForm(BaseModel):
 
 @app.post("/api/login")
 async def login_api(form: OAuth2PasswordRequestForm = Depends()):
+    """Get a login token to use the firegex api"""
     if APP_STATUS() != "run": raise HTTPException(status_code=400)
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
@@ -96,9 +102,13 @@ async def login_api(form: OAuth2PasswordRequestForm = Depends()):
         return {"access_token": create_access_token({"logged_in": True}), "token_type": "bearer"}
     raise HTTPException(406,"Wrong password!")
 
+class ChangePasswordModel(BaseModel):
+    status: str
+    access_token: Union[str,None]
 
-@app.post('/api/change-password')
+@app.post('/api/change-password', response_model=ChangePasswordModel)
 async def change_password(form: PasswordChangeForm, auth: bool = Depends(is_loggined)):
+    """Change the password of firegex"""
     if APP_STATUS() != "run": raise HTTPException(status_code=400)
 
     if form.password == "":
@@ -111,8 +121,9 @@ async def change_password(form: PasswordChangeForm, auth: bool = Depends(is_logg
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 
 
-@app.post('/api/set-password')
+@app.post('/api/set-password', response_model=ChangePasswordModel)
 async def set_password(form: PasswordForm):
+    """Set the password of firegex"""
     if APP_STATUS() != "init": raise HTTPException(status_code=400)
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
@@ -120,9 +131,14 @@ async def set_password(form: PasswordForm):
     conf.put("password",hash_psw)
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 
-@app.get('/api/general-stats')
+class GeneralStatModel(BaseModel):
+    closed:int
+    regexes: int
+    services: int
+
+@app.get('/api/general-stats', response_model=GeneralStatModel)
 async def get_general_stats(auth: bool = Depends(is_loggined)):
-    
+    """Get firegex general status about services"""
     return db.query("""
     SELECT
         (SELECT COALESCE(SUM(blocked_packets),0) FROM regexes) closed,
@@ -130,8 +146,18 @@ async def get_general_stats(auth: bool = Depends(is_loggined)):
         (SELECT COUNT(*) FROM services) services
     """)[0]
 
-@app.get('/api/services')
-async def get_services(auth: bool = Depends(is_loggined)):
+class ServiceModel(BaseModel):
+    id:str
+    status: str
+    public_port: int
+    internal_port: int
+    name: str
+    n_regex: int
+    n_packets: int
+
+@app.get('/api/services', response_model=List[ServiceModel])
+async def get_service_list(auth: bool = Depends(is_loggined)):
+    """Get the list of existent firegex services"""
     return db.query("""
         SELECT 
             s.service_id `id`,
@@ -145,9 +171,9 @@ async def get_services(auth: bool = Depends(is_loggined)):
         GROUP BY s.service_id;
     """)
 
-@app.get('/api/service/{service_id}')
-async def get_service(service_id: str, auth: bool = Depends(is_loggined)):
-    
+@app.get('/api/service/{service_id}', response_model=ServiceModel)
+async def get_service_by_id(service_id: str, auth: bool = Depends(is_loggined)):
+    """Get info about a specific service using his id"""
     res = db.query("""
         SELECT 
             s.service_id `id`,
@@ -163,31 +189,39 @@ async def get_service(service_id: str, auth: bool = Depends(is_loggined)):
     if len(res) == 0: raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
 
-@app.get('/api/service/{service_id}/stop')
-async def get_service_stop(service_id: str, auth: bool = Depends(is_loggined)):
+class StatusMessageModel(BaseModel):
+    status:str
+
+@app.get('/api/service/{service_id}/stop', response_model=StatusMessageModel)
+async def service_stop(service_id: str, auth: bool = Depends(is_loggined)):
+    """Request the stop of a specific service"""
     await firewall.get(service_id).next(STATUS.STOP)
     return {'status': 'ok'}
 
-@app.get('/api/service/{service_id}/pause')
-async def get_service_pause(service_id: str, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/pause', response_model=StatusMessageModel)
+async def service_pause(service_id: str, auth: bool = Depends(is_loggined)):
+    """Request the pause of a specific service"""
     await firewall.get(service_id).next(STATUS.PAUSE)
     return {'status': 'ok'}
 
-@app.get('/api/service/{service_id}/start')
-async def get_service_start(service_id: str, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/start', response_model=StatusMessageModel)
+async def service_start(service_id: str, auth: bool = Depends(is_loggined)):
+    """Request the start of a specific service"""
     await firewall.get(service_id).next(STATUS.ACTIVE)
     return {'status': 'ok'}
 
-@app.get('/api/service/{service_id}/delete')
-async def get_service_delete(service_id: str, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/delete', response_model=StatusMessageModel)
+async def service_delete(service_id: str, auth: bool = Depends(is_loggined)):
+    """Request the deletion of a specific service"""
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     db.query('DELETE FROM regexes WHERE service_id = ?;', service_id)
     await firewall.remove(service_id)
     return {'status': 'ok'}
 
 
-@app.get('/api/service/{service_id}/regen-port')
-async def get_regen_port(service_id: str, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/regen-port', response_model=StatusMessageModel)
+async def regen_service_port(service_id: str, auth: bool = Depends(is_loggined)):
+    """Request the regeneration of a the internal proxy port of a specific service"""
     db.query('UPDATE services SET internal_port = ? WHERE service_id = ?;', gen_internal_port(db), service_id)
     await firewall.get(service_id).update_port()
     return {'status': 'ok'}
@@ -196,8 +230,9 @@ class ChangePortForm(BaseModel):
     port: Union[int, None]
     internalPort: Union[int, None]
 
-@app.post('/api/service/{service_id}/change-ports')
-async def change_port(service_id: str, change_port:ChangePortForm, auth: bool = Depends(is_loggined)):
+@app.post('/api/service/{service_id}/change-ports', response_model=StatusMessageModel)
+async def change_service_ports(service_id: str, change_port:ChangePortForm, auth: bool = Depends(is_loggined)):
+    """Choose and change the ports of the service"""
     if change_port.port is None and change_port.internalPort is None:
         return {'status': 'Invalid Request!'}
     try:
@@ -218,10 +253,19 @@ async def change_port(service_id: str, change_port:ChangePortForm, auth: bool = 
     await firewall.get(service_id).update_port()
     return {'status': 'ok'}
 
+class RegexModel(BaseModel):
+    regex:str
+    mode:str
+    id:int
+    service_id:str
+    is_blacklist: bool
+    n_packets:int
+    is_case_sensitive:bool
+    active:bool
 
-
-@app.get('/api/service/{service_id}/regexes')
-async def get_service_regexes(service_id: str, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/regexes', response_model=List[RegexModel])
+async def get_service_regexe_list(service_id: str, auth: bool = Depends(is_loggined)):
+    """Get the list of the regexes of a service"""
     return db.query("""
         SELECT 
             regex, mode, regex_id `id`, service_id, is_blacklist,
@@ -229,8 +273,9 @@ async def get_service_regexes(service_id: str, auth: bool = Depends(is_loggined)
         FROM regexes WHERE service_id = ?;
     """, service_id)
 
-@app.get('/api/regex/{regex_id}')
-async def get_regex_id(regex_id: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/regex/{regex_id}', response_model=RegexModel)
+async def get_regex_by_id(regex_id: int, auth: bool = Depends(is_loggined)):
+    """Get regex info using his id"""
     res = db.query("""
         SELECT 
             regex, mode, regex_id `id`, service_id, is_blacklist,
@@ -240,8 +285,9 @@ async def get_regex_id(regex_id: int, auth: bool = Depends(is_loggined)):
     if len(res) == 0: raise HTTPException(status_code=400, detail="This regex does not exists!")
     return res[0]
 
-@app.get('/api/regex/{regex_id}/delete')
-async def get_regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/regex/{regex_id}/delete', response_model=StatusMessageModel)
+async def regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
+    """Delete a regex using his id"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
         db.query('DELETE FROM regexes WHERE regex_id = ?;', regex_id)
@@ -249,16 +295,18 @@ async def get_regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
     
     return {'status': 'ok'}
 
-@app.get('/api/regex/{regex_id}/enable')
-async def get_regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/regex/{regex_id}/enable', response_model=StatusMessageModel)
+async def regex_enable(regex_id: int, auth: bool = Depends(is_loggined)):
+    """Request the enabling of a regex"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
         db.query('UPDATE regexes SET active=1 WHERE regex_id = ?;', regex_id)
         await firewall.get(res[0]["service_id"]).update_filters()
     return {'status': 'ok'}
 
-@app.get('/api/regex/{regex_id}/disable')
-async def get_regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/regex/{regex_id}/disable', response_model=StatusMessageModel)
+async def regex_disable(regex_id: int, auth: bool = Depends(is_loggined)):
+    """Request the deactivation of a regex"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
         db.query('UPDATE regexes SET active=0 WHERE regex_id = ?;', regex_id)
@@ -273,8 +321,9 @@ class RegexAddForm(BaseModel):
     is_blacklist: bool
     is_case_sensitive: bool
 
-@app.post('/api/regexes/add')
-async def post_regexes_add(form: RegexAddForm, auth: bool = Depends(is_loggined)):
+@app.post('/api/regexes/add', response_model=StatusMessageModel)
+async def add_new_regex(form: RegexAddForm, auth: bool = Depends(is_loggined)):
+    """Add a new regex"""
     try:
         re.compile(b64decode(form.regex))
     except Exception:
@@ -293,8 +342,13 @@ class ServiceAddForm(BaseModel):
     port: int
     internalPort: Union[int, None]
 
-@app.post('/api/services/add')
-async def post_services_add(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
+class ServiceAddStatus(BaseModel):
+    status:str
+    id: Union[str,None]
+
+@app.post('/api/services/add', response_model=ServiceAddStatus)
+async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
+    """Add a new service"""
     serv_id = gen_service_id(db)
     try:
         internal_port = form.internalPort if form.internalPort else gen_internal_port(db)
@@ -339,7 +393,7 @@ if DEBUG:
             rev_task = asyncio.create_task(reverse_websocket(ws, ws_b_client))
             await asyncio.gather(fwd_task, rev_task)
 
-@app.get("/{full_path:path}")
+@app.get("/{full_path:path}", include_in_schema=False)
 async def catch_all(full_path:str):
     if DEBUG:
         try:

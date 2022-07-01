@@ -30,7 +30,7 @@ You can change the status clicking the button provided in the frontend. If you w
 Find the documentation of the backend and of the frontend in the related README files
 
 - [Frontend (React)](frontend/README.md)
-- [Backend (Flask + C++)](backend/README.md)
+- [Backend (FastAPI + C++)](backend/README.md)
 
 ![Firegex Working Scheme](docs/FiregexInternals.png)
 
@@ -39,7 +39,7 @@ Find the documentation of the backend and of the frontend in the related README 
 Firegex should not slow down the traffic on the network. For this the core of firegex is a c++ binary file.
 1. The proxy itself is built with a binary c++ file that uses the boost library, well-known for it's stability and efficiency.
 2. The proxy works thanks to async io calls, granting great efficiency and minimum time loss
-3. The filtering is done by the binary file using the regex std c++ library (in the firsts versions of firegex, the boost::regex library was used, but after some tests, and the rising of some problems with this library, we passed to the std lib also looking at the similar efficiency and more stability with the same tests we done)
+3. The filtering is done by the binary file using the regex library PCRE2 to assicure high efficiency and the possibility to create complex regexes
 #### 2. Availability
 Firegex **must** not become a problem for the SLA points!
 This means that firegex is projected to avoid any possibility to have the service down. We know that passing all the traffic through firegex, means also that if it fails, all services go down. It's for this that firegex implements different logics to avoid this.
