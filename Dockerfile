@@ -23,10 +23,6 @@ RUN c++ -O3 -march=native $GCC_PARAMS -o proxy/proxy proxy/proxy.cpp -pthread -l
 COPY ./backend/ /execute/
 COPY ./frontend/build/ ./frontend/
 
-RUN usermod -a -G root nobody
-RUN chown -R nobody:root /execute && \
-  chmod -R 660 /execute && chmod -R u+X /execute
-
 RUN chmod ug+x /execute/proxy/proxy 
 
 ENTRYPOINT ["python3", "app.py", "DOCKER"]
