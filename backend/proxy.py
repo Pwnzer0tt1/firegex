@@ -4,6 +4,7 @@ from threading import Lock, Thread
 from scapy.all import IP, TCP, UDP
 from subprocess import Popen, PIPE
 import os, pcre2, traceback, asyncio
+from kthread import KThread
 
 QUEUE_BASE_NUM = 1000
 
@@ -176,40 +177,6 @@ class FiregexFilterManager:
             if filter.port == int(port):
                 filter.delete()
 
-def c_to_s(pkt, data):
-    print("SENDING", bytes(data[TCP].payload).decode())
-    if "bug" in bytes(data[TCP].payload).decode():
-        pkt.drop()
-        return 
-    pkt.accept()
-
-def s_to_c(pkt, data):
-    print("RECIVING", bytes(data[TCP].payload).decode())
-    pkt.accept()
-
-"""
-try:
-    
-    manager.delete_all()
-    thr_list = []
-    q_list = manager.add("test_service",ProtoTypes.TCP, 8080, c_to_s, s_to_c)
-    print(manager.get())
-    for q in q_list:
-        thr_list.append(Thread(target=q.run))
-        thr_list[-1].start()
-
-    for t in thr_list:
-        t.join()
-except KeyboardInterrupt:
-    for q in q_list:
-        q.unbind()
-
-    manager.delete_by_service("test_service")
-
-#sudo iptables -I OUTPUT -p tcp --sport 8080 -j NFQUEUE --queue-num 10001 --queue-bypass -m comment --comment "&firegex&servid& Text"
-#sudo iptables -I INPUT -p tcp --dport 8080 -j NFQUEUE --queue-num 10000 --queue-bypass -m comment --comment "&firegex&servid& Text"
-"""
-
 class Filter:
     def __init__(self, regex, is_case_sensitive=True, is_blacklist=True, c_to_s=False, s_to_c=False, blocked_packets=0, code=None):
         self.regex = regex
@@ -231,16 +198,16 @@ class Filter:
         return True if self.compiled_regex.search(data) else False
 
 class Proxy:
-    def __init__(self, public_port, callback_blocked_update=None, filters=None):
+    def __init__(self, public_port = 0, callback_blocked_update=None, filters=None):
         self.manager = FiregexFilterManager()
-        self.update_config_lock = asyncio.Lock()
-        self.status_change = asyncio.Lock()
         self.port = public_port
         self.filters: Set[Filter] = set(filters) if filters else set([])
         self.use_filters = True
         self.callback_blocked_update = callback_blocked_update
-    
-    async def start(self):
+        self.threads = []
+        self.queue_list = []
+
+    def start(self):
         self.manager.delete_by_port(self.port)
 
         def c_to_s(pkt, data):
@@ -273,44 +240,24 @@ class Proxy:
                 pass
             pkt.accept()
 
-        self.manager.add(ProtoTypes.TCP, self.port, c_to_s, s_to_c)
+        self.queue_list = self.manager.add(ProtoTypes.TCP, self.port, c_to_s, s_to_c)
+        for ele in self.queue_list:
+            self.threads.append(KThread(target=ele.run))
+            self.threads[-1].daemon = True
+            self.threads[-1].start()
 
-    async def stop(self):
-        async with self.status_change:
-            if self.isactive():
-                self.process.kill()
-                return False
-            return True
+    def stop(self):
+        self.manager.delete_by_port(self.port)
+        for ele in self.threads:
+            ele.kill()
+            if ele.is_alive():
+                print("Not killed succesffully") #TODO
+        self.threads = []
+        for ele in self.queue_list:
+            ele.unbind()
+        self.queue_list = []
+        
 
-    async def restart(self, in_pause=False):
-        status = await self.stop()
-        await self.start(in_pause=in_pause)
-        return status
-    
-    async def update_config(self, filters_codes):
-        async with self.update_config_lock:
-            if (self.isactive()):
-                self.process.stdin.write((" ".join(filters_codes)+"\n").encode())
-                await self.process.stdin.drain()
-
-    async def reload(self):
-        if self.isactive():
-            async with self.filter_map_lock:
-                self.filter_map = self.compile_filters()
-                filters_codes = self.get_filter_codes()
-                await self.update_config(filters_codes)
-    
-    def get_filter_codes(self):
-        filters_codes = list(self.filter_map.keys())
-        filters_codes.sort(key=lambda a: self.filter_map[a].blocked, reverse=True)
-        return filters_codes
-
-    def isactive(self):
-        return self.process and self.process.returncode is None
-
-    async def pause(self):
-        if self.isactive():
-            await self.update_config([])
-        else:
-            await self.start(in_pause=True)
-
+    def restart(self):
+        self.stop()
+        self.start()
