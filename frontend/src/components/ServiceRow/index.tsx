@@ -70,11 +70,13 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 <MediaQuery smallerThan="md" styles={{ display: 'none' }}><div>
                     <div className="center-flex-row">
                         <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.port}</Badge></div>
+                        <Badge color={status_color} radius="sm" size="lg" variant="filled">Status: <u>{service.status}</u></Badge>
                     </div>
                 </div></MediaQuery>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}><div>
                     <div className="center-flex">
                         <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.port}</Badge></div>
+                        <Badge style={{marginLeft:"20px"}} color={status_color} radius="sm" size="lg" variant="filled">Status: <u>{service.status}</u></Badge>
                         <Space w="xl" />
                     </div>
                 </div></MediaQuery>
@@ -93,9 +95,8 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 </MediaQuery>
                 
                 <div className="center-flex-row">
-                    <Badge style={{marginBottom:"20px"}} color={status_color} radius="sm" size="xl" variant="filled">Status: <u>{service.status}</u></Badge>
-                    <Badge style={{marginBottom:"8px"}}color="violet" radius="sm" size="lg" variant="filled">Regex: {service.n_regex}</Badge>
-                    <Badge color="yellow" radius="sm" size="lg" variant="filled">Connections Blocked: {service.n_packets}</Badge>
+                    <Badge style={{marginBottom:"8px"}} color="yellow" radius="sm" size="md" variant="filled">Connections Blocked: {service.n_packets}</Badge>
+                    <Badge color="violet" radius="sm" size="md" variant="filled">Regex: {service.n_regex}</Badge>
                 </div>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}>
                     <div className='flex-spacer' />

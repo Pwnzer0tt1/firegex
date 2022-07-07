@@ -1,9 +1,8 @@
 from typing import List, Set
 from netfilterqueue import NetfilterQueue
-from threading import Lock, Thread
 from scapy.all import IP, TCP, UDP
 from subprocess import Popen, PIPE
-import os, pcre2, traceback, asyncio
+import os, pcre2, traceback
 from kthread import KThread
 
 QUEUE_BASE_NUM = 1000
@@ -51,11 +50,13 @@ class ProtoTypes:
 
 class IPTables:
 
+    @staticmethod
     def command(params):
         if os.geteuid() != 0:
             exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
         return Popen(["iptables"]+params, stdout=PIPE, stderr=PIPE).communicate()
 
+    @staticmethod
     def list_filters(param):
         stdout, strerr = IPTables.command(["-L", str(param), "--line-number", "-n"])
         output = [ele.split() for ele in stdout.decode().split("\n")]
@@ -69,21 +70,27 @@ class IPTables:
             "details": " ".join(ele[6:]) if len(ele) >= 7 else "",
         } for ele in output if len(ele) >= 6 and ele[0].isnumeric()]
 
+    @staticmethod
     def delete_command(param, id):
         IPTables.command(["-R", str(param), str(id)])
     
+    @staticmethod
     def create_chain(name):
         IPTables.command(["-N", str(name)])
 
+    @staticmethod
     def flush_chain(name):
         IPTables.command(["-F", str(name)])
 
+    @staticmethod
     def add_chain_to_input(name):
         IPTables.command(["-I", "INPUT", "-j", str(name)])
 
+    @staticmethod
     def add_chain_to_output(name):
         IPTables.command(["-I", "OUTPUT", "-j", str(name)])
 
+    @staticmethod
     def add_s_to_c(proto, port, queue_range):
         init, end = queue_range
         if init > end: init, end = end, init
@@ -94,6 +101,7 @@ class IPTables:
             f"{init}" if init == end else f"{init}:{end}", "--queue-bypass"
         ])
 
+    @staticmethod
     def add_c_to_s(proto, port, queue_range):
         init, end = queue_range
         if init > end: init, end = end, init
@@ -159,12 +167,16 @@ class FiregexFilterManager:
                     ))
         return res
     
-    def add(self, proto, port, func_c_to_s, func_s_to_c, n_threads = 1):
+    def add(self, proto, port, func, n_threads = 1):
         for ele in self.get():
             if int(port) == ele.port: return None
-        queues_c_to_s, codes = bind_queues(func_c_to_s, n_threads)
+        
+        def c_to_s(pkt, data): return func(pkt, data, True)
+        def s_to_c(pkt, data): return func(pkt, data, False)
+
+        queues_c_to_s, codes = bind_queues(c_to_s, n_threads)
         IPTables.add_c_to_s(proto, port, codes)
-        queues_s_to_c, codes = bind_queues(func_s_to_c, n_threads)
+        queues_s_to_c, codes = bind_queues(s_to_c, n_threads)
         IPTables.add_s_to_c(proto, port, codes)
         return queues_c_to_s + queues_s_to_c
 
@@ -210,11 +222,11 @@ class Proxy:
     def start(self):
         self.manager.delete_by_port(self.port)
 
-        def c_to_s(pkt, data):
-            packet = bytes(data[TCP].payload)
+        def regex_filter(pkt, data, by_client):
+            packet = bytes(data[TCP if TCP in data else UDP].payload)
             try:
                 for filter in self.filters:
-                    if filter.c_to_s:
+                    if (by_client and filter.c_to_s) or (not by_client and filter.s_to_c):
                         match = filter.check(packet)
                         if (filter.is_blacklist and match) or (not filter.is_blacklist and not match):
                             filter.blocked+=1
@@ -225,22 +237,7 @@ class Proxy:
                 pass
             pkt.accept()
 
-        def s_to_c(pkt, data):
-            packet = bytes(data[TCP].payload)
-            try:
-                for filter in self.filters:
-                    if filter.s_to_c:
-                        match = filter.check(packet)
-                        if (filter.is_blacklist and match) or (not filter.is_blacklist and not match):
-                            filter.blocked+=1
-                            self.callback_blocked_update(filter)
-                            pkt.drop()
-                            return 
-            except IndexError:
-                pass
-            pkt.accept()
-
-        self.queue_list = self.manager.add(ProtoTypes.TCP, self.port, c_to_s, s_to_c)
+        self.queue_list = self.manager.add(ProtoTypes.TCP, self.port, regex_filter)
         for ele in self.queue_list:
             self.threads.append(KThread(target=ele.run))
             self.threads[-1].daemon = True

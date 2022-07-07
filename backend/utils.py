@@ -1,7 +1,6 @@
-import secrets
 import threading
 from proxy import Filter, Proxy
-import random, string, os, sqlite3, socket, asyncio
+import os, sqlite3, socket, asyncio
 from base64 import b64decode
 
 LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
