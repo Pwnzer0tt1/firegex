@@ -10,15 +10,13 @@ import { errorNotify, eventUpdateName, fireUpdateRequest, serviceinfo, servicere
 import { useWindowEvent } from '@mantine/hooks';
 
 function ServiceDetails() {
-    const {srv_id} = useParams()
-
+    const {srv} = useParams()
+    const service_port = srv?parseInt(srv):null
     const [serviceInfo, setServiceInfo] = useState<Service>({
-        id:srv_id?srv_id:"",
-        internal_port:0,
+        port:0,
         n_packets:0,
         n_regex:0,
-        name:srv_id?srv_id:"",
-        public_port:0,
+        name:"",
         status:"🤔"
     })
 
@@ -28,9 +26,9 @@ function ServiceDetails() {
     const closeModal = () => {setOpen(false);updateInfo();}
 
     const updateInfo = async () => {
-        if (!srv_id) return
+        if (!service_port) return
         let error = false;
-        await serviceinfo(srv_id).then(res => {
+        await serviceinfo(service_port).then(res => {
             setServiceInfo(res)
         }).catch(
           err =>{
@@ -38,10 +36,10 @@ function ServiceDetails() {
             navigator("/")
         })
         if (error) return
-        await serviceregexlist(srv_id).then(res => {
+        await serviceregexlist(service_port).then(res => {
             setRegexesList(res)
         }).catch(
-          err => errorNotify(`Updater for ${srv_id} service failed [Regex list]!`, err.toString())
+          err => errorNotify(`Updater for ${service_port} service failed [Regex list]!`, err.toString())
         )
         setLoader(false)
     }
@@ -75,7 +73,7 @@ function ServiceDetails() {
             </Grid>
         }
 
-        {srv_id?<AddNewRegex opened={open} onClose={closeModal} service={srv_id} />:null}
+        {service_port?<AddNewRegex opened={open} onClose={closeModal} service={service_port} />:null}
 
 
     </div>

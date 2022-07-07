@@ -69,7 +69,9 @@ function Header() {
     setLoadingBtn(false)
   }
 
-  const {srv_id} = useParams()
+  const {srv} = useParams()
+  const service_port = srv?parseInt(srv):null
+
   const [open, setOpen] = useState(false);
   const closeModal = () => {setOpen(false);}
 
@@ -123,7 +125,7 @@ function Header() {
             </ActionIcon>
           </Tooltip>
         :null}
-        { srv_id?
+        { service_port?
           <Tooltip label="Add a new regex" zIndex={0} position='bottom' transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="blue" opened={tooltipAddOpened} tooltipId="tooltip-add-id">
             <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
              aria-describedby="tooltip-add-id"
@@ -138,8 +140,8 @@ function Header() {
           </Tooltip>
       }
         
-        {srv_id?
-            <AddNewRegex opened={open} onClose={closeModal} service={srv_id} />:
+        {service_port?
+            <AddNewRegex opened={open} onClose={closeModal} service={service_port} />:
             <AddNewService opened={open} onClose={closeModal} />
         }
         <Modal size="xl" title="Change Firewall Password" opened={changePasswordModal} onClose={()=>setChangePasswordModal(false)} closeOnClickOutside={false} centered>

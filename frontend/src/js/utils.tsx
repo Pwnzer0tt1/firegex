@@ -1,7 +1,7 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
-import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword, LoginResponse, ServerResponseToken, ServerResponseWithID, ChangePort } from "./models";
+import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword, LoginResponse, ServerResponseToken } from "./models";
 
 var Buffer = require('buffer').Buffer 
 
@@ -64,8 +64,8 @@ export async function servicelist(){
     return await getapi("services") as Service[];
 }
 
-export async function serviceinfo(service_id:string){
-    return await getapi(`service/${service_id}`) as Service;
+export async function serviceinfo(service_port:number){
+    return await getapi(`service/${service_port}`) as Service;
 }
 
 export async function logout(){
@@ -109,36 +109,22 @@ export async function deactivateregex(regex_id:number){
     return status === "ok"?undefined:status
 }
 
-export async function startservice(service_id:string){
-    const { status } = await getapi(`service/${service_id}/start`) as ServerResponse;
+export async function startservice(service_port:number){
+    const { status } = await getapi(`service/${service_port}/start`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
-export async function stopservice(service_id:string){
-    const { status } = await getapi(`service/${service_id}/stop`) as ServerResponse;
-    return status === "ok"?undefined:status
-}
-export async function pauseservice(service_id:string){
-    const { status } = await getapi(`service/${service_id}/pause`) as ServerResponse;
-    return status === "ok"?undefined:status
-}
-
-export async function regenport(service_id:string){
-    const { status } = await getapi(`service/${service_id}/regen-port`) as ServerResponse;
-    return status === "ok"?undefined:status
-}
-
-export async function changeports(service_id:string, data:ChangePort){
-    const { status } = await postapi(`service/${service_id}/change-ports`,data) as ServerResponse;
+export async function stopservice(service_port:number){
+    const { status } = await getapi(`service/${service_port}/stop`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 export async function addservice(data:ServiceAddForm) {
-    return await postapi("services/add",data) as ServerResponseWithID;
+    return await postapi("services/add",data) as ServerResponse;
 }
 
-export async function deleteservice(service_id:string) {
-    const { status } = await getapi(`service/${service_id}/delete`) as ServerResponse;
+export async function deleteservice(service_port:number) {
+    const { status } = await getapi(`service/${service_port}/delete`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
@@ -148,8 +134,8 @@ export async function addregex(data:RegexAddForm) {
     return status === "ok"?undefined:status
 }
 
-export async function serviceregexlist(service_id:string){
-    return await getapi(`service/${service_id}/regexes`) as RegexFilter[];
+export async function serviceregexlist(service_port:number){
+    return await getapi(`service/${service_port}/regexes`) as RegexFilter[];
 }
 
 

@@ -33,14 +33,13 @@ function HomePage() {
 
     return <div id="service-list" className="center-flex-row">
         <LoadingOverlay visible={loader} />
-        {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.id} onClick={()=>{
-            navigator("/"+srv.id)
+        {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.port} onClick={()=>{
+            navigator("/"+srv.port)
         }} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
             <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> 
             <div className='center-flex'>
                 <Tooltip label="Add a new service" transition="pop" transitionDuration={200} /*openDelay={500}*/ zIndex={0} transitionTimingFunction="ease" color="blue" opened={tooltipAddServOpened} tooltipId="tooltip-addServ-id">
                     <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
-                        aria-describedby="tooltip-addSrv-id"
                         onFocus={() => setTooltipAddServOpened(false)} onBlur={() => setTooltipAddServOpened(false)}
                         onMouseEnter={() => setTooltipAddServOpened(true)} onMouseLeave={() => setTooltipAddServOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
                 </Tooltip>

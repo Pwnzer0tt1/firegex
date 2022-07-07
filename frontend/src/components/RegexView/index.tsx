@@ -81,7 +81,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             />
             <Space h="md" />
             <div className='center-flex'>
-              <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_id}</Badge>
+              <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_port}</Badge>
               <Space w="xs" />
               <Badge size="md" color={regexInfo.active?"lime":"red"} variant="filled">{regexInfo.active?"ACTIVE":"DISABLED"}</Badge>
               <Space w="xs" />

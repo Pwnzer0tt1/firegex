@@ -130,7 +130,7 @@ function App() {
     return <Routes>
               <Route element={<MainLayout><Outlet /></MainLayout>}>
                 <Route index element={<HomePage />} />
-                <Route path=":srv_id" element={<ServiceDetails />} />
+                <Route path=":srv" element={<ServiceDetails />} />
                 <Route path="*" element={<Navigate to="/" />} />
               </Route>
           </Routes>
