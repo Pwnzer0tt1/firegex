@@ -9,7 +9,6 @@ import { deleteservice, errorNotify, fireUpdateRequest, okNotify, startservice, 
 import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 
-//"status":"stop"/"wait"/"active"/"pause",
 function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
     let status_color = "gray";
@@ -18,7 +17,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         case "active": status_color = "teal"; break;
     }
 
-    const [stopModal, setStopModal] = useState(false);
     const [buttonLoading, setButtonLoading] = useState(false)
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
@@ -27,7 +25,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         setButtonLoading(true)
         await stopservice(service.port).then(res => {
             if(!res){
-                okNotify(`Service ${service.port} stopped successfully!`,`The service ${service.name} has been stopped!`)
+                okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.port} has been stopped!`)
                 fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the stopping of the service ${service.port}`,`Error: ${res}`)
@@ -42,7 +40,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         setButtonLoading(true)
         await startservice(service.port).then(res => {
             if(!res){
-                okNotify(`Service ${service.port} started successfully!`,`The service ${service.name} has been started!`)
+                okNotify(`Service ${service.name} started successfully!`,`The service on ${service.port} has been started!`)
                 fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the starting of the service ${service.port}`,`Error: ${res}`)
@@ -56,7 +54,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     const deleteService = () => {
         deleteservice(service.port).then(res => {
             if (!res){
-                okNotify("Service delete complete!",`The service ${service.port} has been deleted!`)
+                okNotify("Service delete complete!",`The service ${service.name} has been deleted!`)
                 fireUpdateRequest();
             }else
                 errorNotify("An error occurred while deleting a service",`Error: ${res}`)
@@ -114,9 +112,9 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                         <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
                     </Menu>
                     <Space w="md"/>                        
-                    <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red" opened={tooltipStopOpened} tooltipId="tooltip-stop-id">
+                    <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} transitionTimingFunction="ease" color="red" opened={tooltipStopOpened} tooltipId="tooltip-stop-id">
                         <ActionIcon color="red" loading={buttonLoading}
-                        onClick={()=>setStopModal(true)} size="xl" radius="md" variant="filled"
+                        onClick={stopService} size="xl" radius="md" variant="filled"
                         disabled={service.status === "stop"}
                         aria-describedby="tooltip-stop-id"
                         onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
@@ -125,7 +123,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                         </ActionIcon>
                     </Tooltip>
                     <Space w="md"/>
-                    <Tooltip label="Start service" transition="pop" zIndex={0} transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="teal">
+                    <Tooltip label="Start service" transition="pop" zIndex={0} transitionDuration={200} transitionTimingFunction="ease" color="teal">
                         <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
                                     variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
                             <FaPlay size="20px" />
@@ -143,13 +141,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 
             </Grid.Col>
         </Grid>
-        <YesNoModal
-            title='Are you sure to stop this service?'
-            description={`You are going to delete the service '${service.port}', causing the firewall to stop. This will cause the shutdown of your service! ⚠️`}
-            onClose={()=>{setStopModal(false);}}
-            action={stopService}
-            opened={stopModal}
-        />
         <hr style={{width:"100%"}}/>
         <YesNoModal
             title='Are you sure to delete this service?'
