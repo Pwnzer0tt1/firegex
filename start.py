@@ -22,8 +22,6 @@ def sep(): puts("-----------------------------------", is_bold=True)
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
 parser.add_argument('--no-autostart', "-n", required=False, action="store_true", help='Auto-execute "docker-compose up -d --build"', default=False)
-parser.add_argument('--single-thread', "-s", required=False, action="store_true", help='Disable multi-threaded proxy"', default=False)
-parser.add_argument('--thread-num', "-t", type=int, required=False, help='Number of threads to use', default=None)
 
 args = parser.parse_args()
 sep()
@@ -33,8 +31,6 @@ puts(f"{args.port}", color=colors.cyan)
 
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
-gcc_params = "-D MULTI_THREAD" if not args.single_thread else ""
-gcc_params+= f" -D THREAD_NUM={args.thread_num}" if args.thread_num else ""
 with open("docker-compose.yml","wt") as compose:
 
     if "linux" in sys.platform and not 'microsoft-standard' in platform.uname().release: #Check if not is a wsl also
@@ -44,15 +40,14 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: 
-            context: .
-            args:
-                - GCC_PARAMS={gcc_params}
+        build: .
         network_mode: "host"
         environment:
             - PORT={args.port}
         volumes:
             - /execute/db
+        cap_add:
+            - NET_ADMIN
 """)
         #print("Done! You can start firegex with docker-compose up -d --build")
     else:
@@ -65,10 +60,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: 
-            context: .
-            args:
-                - GCC_PARAMS={gcc_params}
+        build: .
         ports:
             - {args.port}:{args.port}
         environment:
@@ -78,6 +70,8 @@ services:
             - /execute/db
         extra_hosts:
             - host.docker.internal:host-gateway
+        cap_add:
+            - NET_ADMIN
 """)
         #
 sep()

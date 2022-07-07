@@ -3,3 +3,4 @@ httpx
 uvicorn[standard]
 passlib[bcrypt]
 python-jose[cryptography]
+NetfilterQueue
