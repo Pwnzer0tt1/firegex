@@ -192,12 +192,6 @@ async def get_service_by_id(service_id: str, auth: bool = Depends(is_loggined)):
 class StatusMessageModel(BaseModel):
     status:str
 
-@app.get('/api/service/{service_id}/stop', response_model=StatusMessageModel)
-async def service_stop(service_id: str, auth: bool = Depends(is_loggined)):
-    """Request the stop of a specific service"""
-    await firewall.get(service_id).next(STATUS.STOP)
-    return {'status': 'ok'}
-
 @app.get('/api/service/{service_id}/pause', response_model=StatusMessageModel)
 async def service_pause(service_id: str, auth: bool = Depends(is_loggined)):
     """Request the pause of a specific service"""

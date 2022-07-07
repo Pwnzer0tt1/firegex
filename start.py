@@ -65,11 +65,8 @@ services:
             - {args.port}:{args.port}
         environment:
             - PORT={args.port}
-            - LOCALHOST_IP=host.docker.internal
         volumes:
             - /execute/db
-        extra_hosts:
-            - host.docker.internal:host-gateway
         cap_add:
             - NET_ADMIN
 """)

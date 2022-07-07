@@ -94,8 +94,6 @@ class KeyValueStorage:
             self.db.query('UPDATE keys_values SET value=? WHERE key = ?;', str(value), key)
 
 class STATUS:
-    WAIT = "wait"
-    STOP = "stop"
     PAUSE = "pause"
     ACTIVE = "active"
 
@@ -106,11 +104,9 @@ class ServiceManager:
         self.id = id
         self.db = db
         self.proxy = Proxy(
-            internal_host=LOCALHOST_IP,
             callback_blocked_update=self._stats_updater
         )
-        self.status = STATUS.STOP
-        self.wanted_status = STATUS.STOP
+        self.status = STATUS.PAUSE
         self.filters = {}
         self._update_port_from_db()
         self._update_filters_from_db()
@@ -125,7 +121,6 @@ class ServiceManager:
             FROM services WHERE service_id = ?;
         """, self.id)
         if len(res) == 0: raise ServiceNotFoundException()
-        self.proxy.internal_port = res[0]["internal_port"]
         self.proxy.public_port = res[0]["public_port"]
         
     def _update_filters_from_db(self):
@@ -168,26 +163,14 @@ class ServiceManager:
     
     async def _next(self, to):
         if self.status != to:
-            # ACTIVE -> PAUSE or PAUSE -> ACTIVE
+            # ACTIVE -> PAUSE
             if (self.status, to) in [(STATUS.ACTIVE, STATUS.PAUSE)]:
                 await self.proxy.pause()
                 self._set_status(to)
-
+            # PAUSE -> ACTIVE
             elif (self.status, to) in [(STATUS.PAUSE, STATUS.ACTIVE)]:
                 await self.proxy.reload()
                 self._set_status(to)
-
-            # ACTIVE -> STOP
-            elif (self.status,to) in [(STATUS.ACTIVE, STATUS.STOP), (STATUS.WAIT, STATUS.STOP), (STATUS.PAUSE, STATUS.STOP)]: #Stop proxy
-                if self.starter: self.starter.cancel()
-                await self.proxy.stop()
-                self._set_status(to)
-
-            # STOP -> ACTIVE or STOP -> PAUSE
-            elif (self.status, to) in [(STATUS.STOP, STATUS.ACTIVE), (STATUS.STOP, STATUS.PAUSE)]:
-                self.wanted_status = to
-                self._set_status(STATUS.WAIT)
-                self.__proxy_starter(to)
 
 
     def _stats_updater(self,filter:Filter):
@@ -196,10 +179,8 @@ class ServiceManager:
     async def update_port(self):
         async with self.lock:
             self._update_port_from_db()
-            if self.status in [STATUS.PAUSE, STATUS.ACTIVE]:
-                next_status = self.status if self.status != STATUS.WAIT else self.wanted_status
-                await self._next(STATUS.STOP)
-                await self._next(next_status)
+            if self.status in [STATUS.ACTIVE]:
+                await self.proxy.reload()
 
     def _set_status(self,status):
         self.status = status
@@ -211,22 +192,6 @@ class ServiceManager:
             self._update_filters_from_db()
             if self.status in [STATUS.PAUSE, STATUS.ACTIVE]:
                 await self.proxy.reload()
-    
-    def __proxy_starter(self,to):
-        async def func():
-            try:
-                while True:
-                    if check_port_is_open(self.proxy.public_port):
-                        self._set_status(to)
-                        await self.proxy.start(in_pause=(to==STATUS.PAUSE))
-                        self._set_status(STATUS.STOP)
-                        return
-                    else:
-                        await asyncio.sleep(.5)
-            except asyncio.CancelledError:
-                self._set_status(STATUS.STOP)
-                await self.proxy.stop()
-        self.starter = asyncio.create_task(func())
 
 class ProxyManager:
     def __init__(self, db:SQLite):
@@ -241,7 +206,7 @@ class ProxyManager:
     async def remove(self,id):
         async with self.lock: 
             if id in self.proxy_table:
-                await self.proxy_table[id].next(STATUS.STOP)
+                await self.proxy_table[id].next(STATUS.PAUSE)
                 del self.proxy_table[id]
     
     async def reload(self):
