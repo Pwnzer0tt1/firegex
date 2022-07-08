@@ -156,7 +156,6 @@ class ServiceManager:
 
 
     def _stats_updater(self,filter:Filter):
-        print(filter, filter.blocked, filter.code)
         self.db.query("UPDATE regexes SET blocked_packets = ? WHERE regex_id = ?;", filter.blocked, filter.code)
     
     def update_stats(self):
@@ -181,8 +180,13 @@ class ProxyManager:
     def init_updater(self):
         if not self.updater_task:
             self.updater_task = asyncio.create_task(self._stats_updater())
+    
+    def close_updater(self):
+        if self.updater_task: self.updater_task.cancel()
 
     async def close(self):
+        self.close_updater()
+        if self.updater_task: self.updater_task.cancel()
         for key in list(self.proxy_table.keys()):
             await self.remove(key)
 
@@ -192,7 +196,11 @@ class ProxyManager:
                 await self.proxy_table[port].next(STATUS.STOP)
                 del self.proxy_table[port]
     
+    async def init(self):
+        await self.reload()
+
     async def reload(self):
+        self.init_updater()
         async with self.lock: 
             for srv in self.db.query('SELECT port, status FROM services;'):
                 srv_port, req_status = srv["port"], srv["status"]
@@ -203,13 +211,18 @@ class ProxyManager:
                 await self.proxy_table[srv_port].next(req_status)
 
     async def _stats_updater(self):
-        while True:
-            try:
-                for key in list(self.proxy_table.keys()):
-                    self.proxy_table[key].update_stats()
-            except Exception:
-                traceback.print_exc()
-            await asyncio.sleep(1)
+        try:
+            while True:
+                try:
+                    for key in list(self.proxy_table.keys()):
+                        self.proxy_table[key].update_stats()
+                except Exception:
+                    traceback.print_exc()
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            self.updater_task = None
+            return
+
 
 
     def get(self,port):

@@ -114,6 +114,11 @@ export async function startservice(service_port:number){
     return status === "ok"?undefined:status
 }
 
+export async function renameservice(service_port:number, name: string){
+    const { status } = await postapi(`service/${service_port}/rename`,{ name }) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
 export async function stopservice(service_port:number){
     const { status } = await getapi(`service/${service_port}/stop`) as ServerResponse;
     return status === "ok"?undefined:status

@@ -2,7 +2,7 @@ import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/c
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
 import { activateregex, b64decode, deactivateregex, deleteregex, errorNotify, fireUpdateRequest, okNotify } from '../../js/utils';
-import style from "./RegexView.module.scss";
+import style from "./index.module.scss";
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
 import FilterTypeSelector from '../FilterTypeSelector';

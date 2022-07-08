@@ -3,11 +3,12 @@ import React, { useState } from 'react';
 import { FaPlay, FaStop } from 'react-icons/fa';
 import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
-import style from "./ServiceRow.module.scss";
+import style from "./index.module.scss";
 import YesNoModal from '../YesNoModal';
 import { deleteservice, errorNotify, fireUpdateRequest, okNotify, startservice, stopservice } from '../../js/utils';
 import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
+import RenameForm from './RenameForm';
 
 function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
@@ -20,6 +21,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     const [buttonLoading, setButtonLoading] = useState(false)
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
+    const [renameModal, setRenameModal] = useState(false)
 
     const stopService = async () => {
         setButtonLoading(true)
@@ -107,7 +109,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 <div className="center-flex">
                     <Menu>
                         <Menu.Label><b>Rename service</b></Menu.Label>
-                        <Menu.Item icon={<BiRename size={18} />} onClick={()=>{}}>Change service name</Menu.Item>
+                        <Menu.Item icon={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
                         <Divider />
                         <Menu.Label><b>Danger zone</b></Menu.Label>
                         <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
@@ -149,6 +151,11 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
             onClose={()=>setDeleteModal(false) }
             action={deleteService}
             opened={deleteModal}
+        />
+        <RenameForm
+            onClose={()=>setRenameModal(false)}
+            opened={renameModal}
+            service={service}
         />
     </>
 }

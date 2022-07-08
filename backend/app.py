@@ -37,10 +37,13 @@ def JWT_SECRET(): return conf.get("secret")
 @app.on_event("startup")
 async def startup_event():
     db.init()
-    firewall.init_updater()
+    await firewall.init()
     if not JWT_SECRET(): conf.put("secret", secrets.token_hex(32))
-    await firewall.reload()
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    await firewall.close()
+    db.disconnect()
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -200,6 +203,16 @@ async def service_delete(service_port: int, auth: bool = Depends(is_loggined)):
     db.query('DELETE FROM services WHERE port = ?;', service_port)
     db.query('DELETE FROM regexes WHERE service_port = ?;', service_port)
     await firewall.remove(service_port)
+    return {'status': 'ok'}
+
+class RenameForm(BaseModel):
+    name:str
+
+@app.post('/api/service/{service_port}/rename', response_model=StatusMessageModel)
+async def service_rename(service_port: int, form: RenameForm, auth: bool = Depends(is_loggined)):
+    """Request to change the name of a specific service"""
+    if not form.name: return {'status': 'The name cannot be empty!'} 
+    db.query('UPDATE services SET name=? WHERE port = ?;', form.name, service_port)
     return {'status': 'ok'}
 
 class RegexModel(BaseModel):
