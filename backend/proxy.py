@@ -207,10 +207,6 @@ class Filter:
 
     def check(self, data):
         return True if self.compiled_regex.search(data) else False
-    
-    def inc_block(self):
-        print("INC", self.blocked)
-        self.blocked+=1
 
 class Proxy:
     def __init__(self, port, filters=None):
@@ -231,11 +227,13 @@ class Proxy:
         def regex_filter(pkt, data, by_client):
             packet = bytes(data[TCP if TCP in data else UDP].payload)
             try:
-                for filter in self.filters:
+                for i, filter in enumerate(self.filters):
                     if (by_client and filter.c_to_s) or (not by_client and filter.s_to_c):
                         match = filter.check(packet)
                         if (filter.is_blacklist and match) or (not filter.is_blacklist and not match):
-                            filter.inc_block()
+                            filter.blocked+=1
+                            try: self.filters[i] = filter
+                            except Exception: pass
                             pkt.drop()
                             return 
             except IndexError: pass

@@ -176,9 +176,11 @@ class ProxyManager:
         self.db = db
         self.proxy_table: Dict[ServiceManager] = {}
         self.lock = asyncio.Lock()
+        self.updater_task = None
     
     def init_updater(self):
-        asyncio.create_task(self._stats_updater())
+        if not self.updater_task:
+            self.updater_task = asyncio.create_task(self._stats_updater())
 
     async def close(self):
         for key in list(self.proxy_table.keys()):
@@ -202,7 +204,6 @@ class ProxyManager:
 
     async def _stats_updater(self):
         while True:
-            print("ALIVE!")
             try:
                 for key in list(self.proxy_table.keys()):
                     self.proxy_table[key].update_stats()
