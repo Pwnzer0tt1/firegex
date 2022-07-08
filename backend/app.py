@@ -37,6 +37,7 @@ def JWT_SECRET(): return conf.get("secret")
 @app.on_event("startup")
 async def startup_event():
     db.init()
+    firewall.init_updater()
     if not JWT_SECRET(): conf.put("secret", secrets.token_hex(32))
     await firewall.reload()
 

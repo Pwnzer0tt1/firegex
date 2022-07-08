@@ -3,12 +3,6 @@ FROM python:slim-buster
 
 RUN apt-get update && apt-get -y install build-essential libpcre2-dev python-dev git iptables libnetfilter-queue-dev
 
-WORKDIR /tmp/
-RUN git clone https://github.com/gpfei/python-pcre2.git
-WORKDIR /tmp/python-pcre2/
-RUN python3 setup.py install
-WORKDIR /
-
 RUN mkdir /execute
 WORKDIR /execute
 
