@@ -1,7 +1,7 @@
 import { Button, Group, NumberInput, Space, TextInput, Notification, Modal, Switch } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
-import { addservice, fireUpdateRequest, okNotify, startservice } from '../js/utils';
+import { addservice, okNotify, startservice } from '../js/utils';
 import { ImCross } from "react-icons/im"
 
 type ServiceAddForm = {
@@ -39,7 +39,6 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             if (res.status === "ok"){
                 setSubmitLoading(false)
                 close();
-                fireUpdateRequest();
                 if (autostart) startservice(port)
                 okNotify(`Service ${name} has been added`, `Successfully added service with port ${port}`)
             }else{

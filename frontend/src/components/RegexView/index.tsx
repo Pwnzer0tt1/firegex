@@ -1,7 +1,7 @@
 import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
-import { activateregex, b64decode, deactivateregex, deleteregex, errorNotify, fireUpdateRequest, okNotify } from '../../js/utils';
+import { activateregex, b64decode, deactivateregex, deleteregex, errorNotify, okNotify } from '../../js/utils';
 import style from "./index.module.scss";
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
@@ -25,7 +25,6 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
     deleteregex(regexInfo.id).then(res => {
       if(!res){
         okNotify(`Regex ${regex_expr} deleted successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been deleted!`)
-        fireUpdateRequest()
       }else{
         errorNotify(`Regex ${regex_expr} deleation failed!`,`Error: ${res}`)
       }
@@ -37,7 +36,6 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
     (regexInfo.active?deactivateregex:activateregex)(regexInfo.id).then(res => {
       if(!res){
         okNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivated":"activated"} successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been ${regexInfo.active?"deactivated":"activated"}!`)
-        fireUpdateRequest()
       }else{
         errorNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivation":"activation"} failed!`,`Error: ${res}`)
       }

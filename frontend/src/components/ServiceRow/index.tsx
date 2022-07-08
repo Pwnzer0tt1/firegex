@@ -5,7 +5,7 @@ import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./index.module.scss";
 import YesNoModal from '../YesNoModal';
-import { deleteservice, errorNotify, fireUpdateRequest, okNotify, startservice, stopservice } from '../../js/utils';
+import { deleteservice, errorNotify, okNotify, startservice, stopservice } from '../../js/utils';
 import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
@@ -28,7 +28,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         await stopservice(service.port).then(res => {
             if(!res){
                 okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.port} has been stopped!`)
-                fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the stopping of the service ${service.port}`,`Error: ${res}`)
             }
@@ -43,7 +42,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         await startservice(service.port).then(res => {
             if(!res){
                 okNotify(`Service ${service.name} started successfully!`,`The service on ${service.port} has been started!`)
-                fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the starting of the service ${service.port}`,`Error: ${res}`)
             }
@@ -57,7 +55,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         deleteservice(service.port).then(res => {
             if (!res){
                 okNotify("Service delete complete!",`The service ${service.name} has been deleted!`)
-                fireUpdateRequest();
             }else
                 errorNotify("An error occurred while deleting a service",`Error: ${res}`)
         }).catch(err => {

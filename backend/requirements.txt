@@ -6,3 +6,4 @@ python-jose[cryptography]
 NetfilterQueue
 scapy
 python-pcre
+fastapi-socketio

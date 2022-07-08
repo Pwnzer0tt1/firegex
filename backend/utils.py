@@ -177,9 +177,9 @@ class ProxyManager:
         self.lock = asyncio.Lock()
         self.updater_task = None
     
-    def init_updater(self):
+    def init_updater(self, callback = None):
         if not self.updater_task:
-            self.updater_task = asyncio.create_task(self._stats_updater())
+            self.updater_task = asyncio.create_task(self._stats_updater(callback))
     
     def close_updater(self):
         if self.updater_task: self.updater_task.cancel()
@@ -196,11 +196,11 @@ class ProxyManager:
                 await self.proxy_table[port].next(STATUS.STOP)
                 del self.proxy_table[port]
     
-    async def init(self):
+    async def init(self, callback = None):
+        self.init_updater(callback)
         await self.reload()
 
     async def reload(self):
-        self.init_updater()
         async with self.lock: 
             for srv in self.db.query('SELECT port, status FROM services;'):
                 srv_port, req_status = srv["port"], srv["status"]
@@ -210,7 +210,7 @@ class ProxyManager:
                 self.proxy_table[srv_port] = ServiceManager(srv_port,self.db)
                 await self.proxy_table[srv_port].next(req_status)
 
-    async def _stats_updater(self):
+    async def _stats_updater(self, callback):
         try:
             while True:
                 try:
@@ -218,7 +218,10 @@ class ProxyManager:
                         self.proxy_table[key].update_stats()
                 except Exception:
                     traceback.print_exc()
-                await asyncio.sleep(1)
+                if callback:
+                    if asyncio.iscoroutinefunction(callback): await callback()
+                    else: callback()
+                await asyncio.sleep(5)
         except asyncio.CancelledError:
             self.updater_task = None
             return

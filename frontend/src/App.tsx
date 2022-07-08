@@ -5,9 +5,12 @@ import { ImCross } from 'react-icons/im';
 import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
 import { PasswordSend, ServerStatusResponse } from './js/models';
-import { fireUpdateRequest, getstatus, login, setpassword } from './js/utils';
+import { errorNotify, fireUpdateRequest, getstatus, login, setpassword } from './js/utils';
 import HomePage from './pages/HomePage';
 import ServiceDetails from './pages/ServiceDetails';
+import io from 'socket.io-client';
+
+const socket = io({transports: ["websocket", "polling"], path:"/sock" });
 
 function App() {
 
@@ -29,11 +32,19 @@ function App() {
       })
   }
 
-  useEffect(getStatus,[])
-
   useEffect(()=>{
-      const updater = setInterval(fireUpdateRequest,2000)
-      return () => clearInterval(updater)     
+    getStatus()
+    socket.on("update", () => {
+      fireUpdateRequest()
+    })
+    socket.on("connect_error", (err) => {
+      errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
+      getStatus()
+    });
+    return () => {
+      socket.off("update")
+      socket.off("connect_error")
+    }
   },[])
 
   const form = useForm({
