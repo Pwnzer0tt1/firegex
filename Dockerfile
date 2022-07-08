@@ -1,7 +1,7 @@
 #Building main conteiner
 FROM python:slim-buster
 
-RUN apt-get update && apt-get -y install build-essential libpcre2-dev python-dev git iptables libnetfilter-queue-dev
+RUN apt-get update && apt-get -y install build-essential libpcre3-dev python-dev git iptables libnetfilter-queue-dev
 
 RUN mkdir /execute
 WORKDIR /execute
