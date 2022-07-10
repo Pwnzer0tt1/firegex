@@ -50,7 +50,8 @@ else: puts(f"Test Failed: Coundl't change the password ✗", color=colors.red); 
 
 
 #Create new Service
-if (firegex.create_service(args.service_name,args.service_port)):
+service = firegex.create_service(args.service_name,args.service_port)
+if service:
      puts(f"Sucessfully created service {args.service_name} with public port {args.service_port} ✔", color=colors.green)
      service_created = True
 else: puts(f"Test Failed: Couldn't create service ✗", color=colors.red); exit(1)
@@ -58,21 +59,13 @@ else: puts(f"Test Failed: Couldn't create service ✗", color=colors.red); exit(
 #Delete the Service and exit
 def exit_test(status_code=0):
     if service_created:
-        if(firegex.delete(service_id)):
-            puts(f"Sucessfully delete service with id {service_id} ✔", color=colors.green)
+        if(firegex.delete(service)):
+            puts(f"Sucessfully delete service with id {service} ✔", color=colors.green)
         else:
             puts(f"Test Failed: Couldn't delete service ✗", color=colors.red); exit(1)
     sep()
     server.terminate()
     exit(status_code)
-
-#Find the Service
-service = firegex.get_service_details(args.service_name)
-if (service):
-    internal_port= service["internal_port"]
-    service_id = service["id"]
-    puts(f"Sucessfully received the internal port {internal_port} ✔", color=colors.green)
-else: puts(f"Test Failed: Coulnd't get the service internal port ✗", color=colors.red); exit_test(1)
 
 #Start listener
 def startServer(port):
@@ -86,11 +79,11 @@ def startServer(port):
         connection.send(buf)    		
         connection.close()
 
-server = Process(target=startServer,args=[internal_port])
+server = Process(target=startServer,args=[args.service_port])
 server.start()
 
 #Start firewall
-if(firegex.start(service_id)): puts(f"Sucessfully started service with id {service_id} ✔", color=colors.green)
+if(firegex.start(service)): puts(f"Sucessfully started service with id {service} ✔", color=colors.green)
 else: puts(f"Test Failed: Coulnd't start the service ✗", color=colors.red); exit_test(1)
 
 #Hacky solution - wait a bit for the server to start
@@ -113,7 +106,7 @@ else:
 #Add new regex
 secret = bytes(secrets.token_hex(16).encode())
 regex = base64.b64encode(secret).decode()
-if(firegex.add_regex(service_id,regex)): puts(f"Sucessfully added regex {secret} ✔", color=colors.green)
+if(firegex.add_regex(service,regex)): puts(f"Sucessfully added regex {secret} ✔", color=colors.green)
 else: puts(f"Test Failed: Coulnd't add the regex {secret} ✗", color=colors.red); exit_test(1)
 
 #Check if regex is present in the service
@@ -121,7 +114,7 @@ n_blocked = 0
 
 def checkRegex(regex):
     global n_blocked
-    for r in firegex.get_service_regexes(service_id):
+    for r in firegex.get_service_regexes(service):
         if r["regex"] == regex:
             #Test the regex
             if not sendCheckData(secrets.token_bytes(200) + secret +  secrets.token_bytes(200)):
@@ -139,7 +132,7 @@ def checkRegex(regex):
 checkRegex(regex)
 
 #Pause the proxy
-if(firegex.pause(service_id)): puts(f"Sucessfully paused service with id {service_id} ✔", color=colors.green)
+if(firegex.pause(service)): puts(f"Sucessfully paused service with id {service} ✔", color=colors.green)
 else: puts(f"Test Failed: Coulnd't pause the service ✗", color=colors.red); exit_test(1)
 
 #Check if it's actually paused
@@ -148,7 +141,7 @@ if sendCheckData(secrets.token_bytes(200) + secret +  secrets.token_bytes(200)):
 else:
     puts(f"Test Failed: The request was blocked when it shouldn't have", color=colors.red)
 #Stop the proxy
-if(firegex.stop(service_id)): puts(f"Sucessfully stopped service with id {service_id} ✔", color=colors.green)
+if(firegex.stop(service)): puts(f"Sucessfully stopped service with id {service} ✔", color=colors.green)
 else: puts(f"Test Failed: Coulnd't stop the service ✗", color=colors.red); exit_test(1)
 
 #Check if proxy is stopped and check if WAIT works
@@ -169,9 +162,9 @@ bindingTest.start()
 sleep(1)
 
 #Restart it 
-if(firegex.pause(service_id)): puts(f"Sucessfully started in pause mode ✔", color=colors.green)
+if(firegex.pause(service)): puts(f"Sucessfully started in pause mode ✔", color=colors.green)
 else: puts(f"Test Failed: Coulnd't start the service ✗", color=colors.red); exit_test(1)
-if firegex.get_service_details(args.service_name)["status"] == "wait":
+if firegex.get_service(service)["status"] == "wait":
     puts(f"Service started in WAIT mode ✔", color=colors.green)
 else:
     puts(f"Service started but it's not WAIT mode ✗", color=colors.red); exit_test(1)
@@ -179,7 +172,7 @@ else:
 bindingTest.join()
 sleep(1)
 #Check if service started in pause mode successfully
-if firegex.get_service_details(args.service_name)["status"] == "pause":
+if firegex.get_service(service)["status"] == "pause":
     puts(f"Service started in PAUSE mode ✔", color=colors.green)
 else:
     puts(f"Service is not in PAUSE mode ✗", color=colors.red); exit_test(1)
@@ -190,14 +183,14 @@ else:
     puts(f"Test Failed: The request was blocked when it shouldn't have", color=colors.red)
 
 #Restart it and check
-if(firegex.start(service_id)): puts(f"Sucessfully started service with id {service_id} ✔", color=colors.green)
+if(firegex.start(service)): puts(f"Sucessfully started service with id {service} ✔", color=colors.green)
 else: puts(f"Test Failed: Coulnd't start the service ✗", color=colors.red); exit_test(1)
 
 checkRegex(regex)
 
 #Delete the regex
 def removeRegex(regex):
-    for r in firegex.get_service_regexes(service_id):
+    for r in firegex.get_service_regexes(service):
         if r["regex"] == regex:
             if(firegex.delete_regex(r["id"])): puts(f"Sucessfully deleted regex ✔", color=colors.green)
             else: puts(f"Test Failed: Coulnd't deleted the regex ✗", color=colors.red); exit_test(1)

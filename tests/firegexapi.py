@@ -14,10 +14,10 @@ class BearerSession():
     def get(self, endpoint, json={}):
         return self.s.get(endpoint, json=json, headers=self.headers)
     
-    def setToken(self,token):
+    def set_token(self,token):
          self.headers = {"Authorization": f"Bearer {token}"}
     
-    def unsetToken(self):
+    def unset_token(self):
         self.headers = {}
 
 class FiregexAPI:
@@ -27,42 +27,32 @@ class FiregexAPI:
     
     def login(self,password):
         req = self.s.post(f"{self.address}api/login", data=f"username=login&password={password}")
+        print(req.text)
         try : 
-            self.s.setToken(req.json()["access_token"])
+            self.s.set_token(req.json()["access_token"])
             return True
         except Exception:
             return False
 
     def logout(self):
-        self.s.unsetToken()
+        self.s.unset_token()
         return True
 
     def change_password(self,password,expire):
         req = self.s.post(f"{self.address}api/change-password", json={"password":password, "expire":expire})
         try: 
-            self.s.setToken(req.json()["access_token"])
+            self.s.set_token(req.json()["access_token"])
             return True
         except Exception:
             return False
 
-    def create_service(self,service_name,service_port):
-        req = self.s.post(f"{self.address}api/services/add" , json={"name":service_name,"port":service_port})
-        return req.json()["status"] == "ok"
+    def create_service(self,service_name,service_port, ipv6 = False):
+        req = self.s.post(f"{self.address}api/services/add" , json={"name":service_name,"port":service_port, "ipv6": ipv6})
+        return req.json()["service_id"] if req.json()["status"] == "ok" else None 
     
-    def get_service_details(self,service_name):
-        req = self.s.get(f"{self.address}api/services")
-        service = None
-        try:
-            for service in req.json():
-                if service["name"] == service_name:
-                    return service
-        except Exception:
-            pass
-        return service
-
-    def get_service_status(self,service_id):
+    def get_service(self,service_id):
         req = self.s.get(f"{self.address}api/service/{service_id}")
-        return req.json()["status"]
+        return req.json()
 
     def get_service_regexes(self,service_id):
         req = self.s.get(f"{self.address}api/service/{service_id}/regexes")
