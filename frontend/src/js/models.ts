@@ -6,8 +6,10 @@ export type GeneralStats = {
 
 export type Service = {
     name:string,
+    service_id:string,
     status:string,
     port:number,
+    ipv6:boolean,
     n_packets:number,
     n_regex:number,
 }
@@ -15,7 +17,13 @@ export type Service = {
 export type ServiceAddForm = {
     name:string,
     port:number,
+    ipv6:boolean,
     internalPort?:number
+}
+
+export type ServiceAddResponse = {
+    status: string,
+    service_id?: string,
 }
 
 export type ServerResponse = {
@@ -49,7 +57,7 @@ export type ChangePassword = {
 
 export type RegexFilter = {
     id:number,
-    service_port:number,
+    service_id:string,
     regex:string
     is_blacklist:boolean,
     is_case_sensitive:boolean,
@@ -59,7 +67,7 @@ export type RegexFilter = {
 }
 
 export type RegexAddForm = {
-    service_port:number,
+    service_id:string,
     regex:string,
     is_case_sensitive:boolean,
     is_blacklist:boolean,

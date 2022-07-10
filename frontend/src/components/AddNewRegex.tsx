@@ -15,7 +15,7 @@ type RegexAddInfo = {
     deactive:boolean
 }
 
-function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>void, service:number }) { 
+function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>void, service:string }) { 
 
     const form = useForm({
         initialValues: {
@@ -48,7 +48,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
         const request:RegexAddForm = {
             is_blacklist:values.type !== "whitelist",
             is_case_sensitive: !values.is_case_insensitive,
-            service_port: service,
+            service_id: service,
             mode: filter_mode?filter_mode:"B",
             regex: b64encode(values.regex),
             active: !values.deactive
@@ -58,7 +58,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             if (!res){
                 setSubmitLoading(false)
                 close();
-                okNotify(`Regex ${b64decode(request.regex)} has been added`, `Successfully added  ${request.is_case_sensitive?"case sensitive":"case insensitive"} ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_port} service`)
+                okNotify(`Regex ${b64decode(request.regex)} has been added`, `Successfully added  ${request.is_case_sensitive?"case sensitive":"case insensitive"} ${request.is_blacklist?"blacklist":"whitelist"} regex to ${request.service_id} service`)
             }else if (res.toLowerCase() === "invalid regex"){
                 setSubmitLoading(false)
                 form.setFieldError("regex", "Invalid Regex")

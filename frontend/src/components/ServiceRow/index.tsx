@@ -25,7 +25,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
 
     const stopService = async () => {
         setButtonLoading(true)
-        await stopservice(service.port).then(res => {
+        await stopservice(service.service_id).then(res => {
             if(!res){
                 okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.port} has been stopped!`)
             }else{
@@ -39,7 +39,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
 
     const startService = async () => {
         setButtonLoading(true)
-        await startservice(service.port).then(res => {
+        await startservice(service.service_id).then(res => {
             if(!res){
                 okNotify(`Service ${service.name} started successfully!`,`The service on ${service.port} has been started!`)
             }else{
@@ -52,7 +52,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     }
 
     const deleteService = () => {
-        deleteservice(service.port).then(res => {
+        deleteservice(service.service_id).then(res => {
             if (!res){
                 okNotify("Service delete complete!",`The service ${service.name} has been deleted!`)
             }else
@@ -94,8 +94,11 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 </MediaQuery>
                 
                 <div className="center-flex-row">
-                    <Badge style={{marginBottom:"8px"}} color="yellow" radius="sm" size="md" variant="filled">Connections Blocked: {service.n_packets}</Badge>
+                    <Badge color="yellow" radius="sm" size="md" variant="filled">Connections Blocked: {service.n_packets}</Badge>
+                    <Space h="xs" />
                     <Badge color="violet" radius="sm" size="md" variant="filled">Regex: {service.n_regex}</Badge>
+                    <Space h="xs" />
+                    <Badge color={service.ipv6?"pink":"cyan"} radius="sm" size="md" variant="filled">Protocol: {service.ipv6?"IPv6":"IPv4"}</Badge>
                 </div>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}>
                     <div className='flex-spacer' />

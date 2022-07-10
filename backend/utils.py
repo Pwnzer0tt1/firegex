@@ -49,27 +49,30 @@ class SQLite():
         self.connect()
         self.create_schema({
             'services': {
+                'service_id': 'VARCHAR(100) PRIMARY KEY',
                 'status': 'VARCHAR(100) NOT NULL',
-                'port': 'INT NOT NULL CHECK(port > 0 and port < 65536) UNIQUE PRIMARY KEY',
-                'name': 'VARCHAR(100) NOT NULL'
+                'port': 'INT NOT NULL CHECK(port > 0 and port < 65536)',
+                'name': 'VARCHAR(100) NOT NULL UNIQUE',
+                'ipv6': 'BOOLEAN NOT NULL CHECK (ipv6 IN (0, 1)) DEFAULT 0',
             },
             'regexes': {
                 'regex': 'TEXT NOT NULL',
                 'mode': 'VARCHAR(1) NOT NULL',
-                'service_port': 'INT NOT NULL',
+                'service_id': 'VARCHAR(100) NOT NULL',
                 'is_blacklist': 'BOOLEAN NOT NULL CHECK (is_blacklist IN (0, 1))',
                 'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
                 'regex_id': 'INTEGER PRIMARY KEY',
                 'is_case_sensitive' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1))',
-                'active' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1)) DEFAULT 1',
-                'FOREIGN KEY (service_port)':'REFERENCES services (port)',
+                'active' : 'BOOLEAN NOT NULL CHECK (active IN (0, 1)) DEFAULT 1',
+                'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
             },
             'keys_values': {
                 'key': 'VARCHAR(100) PRIMARY KEY',
                 'value': 'VARCHAR(100) NOT NULL',
             },
         })
-        self.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_port,is_blacklist,mode,is_case_sensitive);")
+        self.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (ipv6,port);")
+        self.query("CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);")
 
 class KeyValueStorage:
     def __init__(self, db):
@@ -95,10 +98,11 @@ class STATUS:
 class ServiceNotFoundException(Exception): pass
 
 class ServiceManager:
-    def __init__(self, port, db):
+    def __init__(self, id, port, ipv6, db):
+        self.id = id
         self.port = port
         self.db = db
-        self.proxy = Proxy(port)
+        self.proxy = Proxy(port, ipv6)
         self.status = STATUS.STOP
         self.filters = {}
         self._update_filters_from_db()
@@ -110,8 +114,8 @@ class ServiceManager:
             SELECT 
                 regex, mode, regex_id `id`, is_blacklist,
                 blocked_packets n_packets, is_case_sensitive
-            FROM regexes WHERE service_port = ? AND active=1;
-        """, self.port)
+            FROM regexes WHERE service_id = ? AND active=1;
+        """, self.id)
 
         #Filter check
         old_filters = set(self.filters.keys())
@@ -137,7 +141,7 @@ class ServiceManager:
         self.proxy.set_filters(self.filters.values())
     
     def __update_status_db(self, status):
-        self.db.query("UPDATE services SET status = ? WHERE port = ?;", status, self.port)
+        self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", status, self.id)
 
     async def next(self,to):
         async with self.lock:
@@ -190,11 +194,11 @@ class ProxyManager:
         for key in list(self.proxy_table.keys()):
             await self.remove(key)
 
-    async def remove(self,port):
+    async def remove(self,srv_id):
         async with self.lock: 
-            if port in self.proxy_table:
-                await self.proxy_table[port].next(STATUS.STOP)
-                del self.proxy_table[port]
+            if srv_id in self.proxy_table:
+                await self.proxy_table[srv_id].next(STATUS.STOP)
+                del self.proxy_table[srv_id]
     
     async def init(self, callback = None):
         self.init_updater(callback)
@@ -202,13 +206,13 @@ class ProxyManager:
 
     async def reload(self):
         async with self.lock: 
-            for srv in self.db.query('SELECT port, status FROM services;'):
-                srv_port, req_status = srv["port"], srv["status"]
+            for srv in self.db.query('SELECT service_id, port, status, ipv6 FROM services;'):
+                srv_id, srv_port, req_status, srv_ipv6 = srv["service_id"], srv["port"], srv["status"], srv["ipv6"]
                 if srv_port in self.proxy_table:
                     continue
 
-                self.proxy_table[srv_port] = ServiceManager(srv_port,self.db)
-                await self.proxy_table[srv_port].next(req_status)
+                self.proxy_table[srv_id] = ServiceManager(srv_id, srv_port, srv_ipv6, self.db)
+                await self.proxy_table[srv_id].next(req_status)
 
     async def _stats_updater(self, callback):
         try:
@@ -226,10 +230,13 @@ class ProxyManager:
             self.updater_task = None
             return
 
-
-
-    def get(self,port):
-        if port in self.proxy_table:
-            return self.proxy_table[port]
+    def get(self,srv_id):
+        if srv_id in self.proxy_table:
+            return self.proxy_table[srv_id]
         else:
             raise ServiceNotFoundException()
+
+def refactor_name(name:str):
+    name = name.strip()
+    while "  " in name: name = name.replace("  "," ")
+    return name

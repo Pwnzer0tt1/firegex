@@ -7,6 +7,7 @@ import { ImCross } from "react-icons/im"
 type ServiceAddForm = {
     name:string,
     port:number,
+    ipv6:boolean,
     autostart: boolean,
 }
 
@@ -16,6 +17,7 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
         initialValues: {
             name:"",
             port:8080,
+            ipv6:false,
             autostart: true
         },
         validationRules:{
@@ -33,13 +35,13 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
     const [submitLoading, setSubmitLoading] = useState(false)
     const [error, setError] = useState<string|null>(null)
  
-    const submitRequest = ({ name, port, autostart }:ServiceAddForm) =>{
+    const submitRequest = ({ name, port, autostart, ipv6 }:ServiceAddForm) =>{
         setSubmitLoading(true)
-        addservice({name, port}).then( res => {
-            if (res.status === "ok"){
+        addservice({name, port, ipv6}).then( res => {
+            if (res.status === "ok" && res.service_id){
                 setSubmitLoading(false)
                 close();
-                if (autostart) startservice(port)
+                if (autostart) startservice(res.service_id)
                 okNotify(`Service ${name} has been added`, `Successfully added service with port ${port}`)
             }else{
                 setSubmitLoading(false)
@@ -74,6 +76,13 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             <Switch
                 label="Auto-Start Service"
                 {...form.getInputProps('autostart', { type: 'checkbox' })}
+            />
+
+            <Space h="sm" />
+
+            <Switch
+                label="Filter on Ipv6"
+                {...form.getInputProps('ipv6', { type: 'checkbox' })}
             />
 
             <Group position="right" mt="md">

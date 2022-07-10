@@ -1,5 +1,6 @@
 from base64 import b64decode
-import sqlite3, uvicorn, sys, secrets, re, os, asyncio, httpx, urllib, websockets
+import sqlite3, uvicorn, sys, secrets, re, os, asyncio
+import httpx, urllib, websockets
 from typing import List, Union
 from fastapi import FastAPI, HTTPException, WebSocket, Depends
 from pydantic import BaseModel, BaseSettings
@@ -19,12 +20,12 @@ db = SQLite('db/firegex.db')
 conf = KeyValueStorage(db)
 firewall = ProxyManager(db)
 
-
 class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
     REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
     VERSION = "1.3.0"
+    
 
 settings = Settings()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)
@@ -158,8 +159,10 @@ async def get_general_stats(auth: bool = Depends(is_loggined)):
 
 class ServiceModel(BaseModel):
     status: str
+    service_id: str
     port: int
     name: str
+    ipv6: bool
     n_regex: int
     n_packets: int
 
@@ -167,66 +170,74 @@ class ServiceModel(BaseModel):
 async def get_service_list(auth: bool = Depends(is_loggined)):
     """Get the list of existent firegex services"""
     return db.query("""
-        SELECT 
+        SELECT
+            s.service_id service_id,
             s.status status,
             s.port port,
             s.name name,
+            s.ipv6 ipv6,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
-        FROM services s LEFT JOIN regexes r ON r.service_port = s.port
-        GROUP BY s.port;
+        FROM services s LEFT JOIN regexes r
+        GROUP BY s.service_id;
     """)
 
-@app.get('/api/service/{service_port}', response_model=ServiceModel)
-async def get_service_by_id(service_port: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}', response_model=ServiceModel)
+async def get_service_by_id(service_id: str, auth: bool = Depends(is_loggined)):
     """Get info about a specific service using his id"""
     res = db.query("""
         SELECT 
+            s.service_id service_id,
             s.status status,
             s.port port,
             s.name name,
+            s.ipv6 ipv6,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
-        FROM services s LEFT JOIN regexes r ON r.service_port = s.port WHERE s.port = ?
-        GROUP BY s.port;
-    """, service_port)
+        FROM services s LEFT JOIN regexes r WHERE s.service_id = ?
+        GROUP BY s.service_id;
+    """, service_id)
     if len(res) == 0: raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
 
 class StatusMessageModel(BaseModel):
     status:str
 
-@app.get('/api/service/{service_port}/stop', response_model=StatusMessageModel)
-async def service_stop(service_port: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/stop', response_model=StatusMessageModel)
+async def service_stop(service_id: str, auth: bool = Depends(is_loggined)):
     """Request the stop of a specific service"""
-    await firewall.get(service_port).next(STATUS.STOP)
+    await firewall.get(service_id).next(STATUS.STOP)
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/api/service/{service_port}/start', response_model=StatusMessageModel)
-async def service_start(service_port: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/start', response_model=StatusMessageModel)
+async def service_start(service_id: str, auth: bool = Depends(is_loggined)):
     """Request the start of a specific service"""
-    await firewall.get(service_port).next(STATUS.ACTIVE)
+    await firewall.get(service_id).next(STATUS.ACTIVE)
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/api/service/{service_port}/delete', response_model=StatusMessageModel)
-async def service_delete(service_port: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/delete', response_model=StatusMessageModel)
+async def service_delete(service_id: str, auth: bool = Depends(is_loggined)):
     """Request the deletion of a specific service"""
-    db.query('DELETE FROM services WHERE port = ?;', service_port)
-    db.query('DELETE FROM regexes WHERE service_port = ?;', service_port)
-    await firewall.remove(service_port)
+    db.query('DELETE FROM services WHERE service_id = ?;', service_id)
+    db.query('DELETE FROM regexes WHERE service_id = ?;', service_id)
+    await firewall.remove(service_id)
     await refresh_frontend()
     return {'status': 'ok'}
 
 class RenameForm(BaseModel):
     name:str
 
-@app.post('/api/service/{service_port}/rename', response_model=StatusMessageModel)
-async def service_rename(service_port: int, form: RenameForm, auth: bool = Depends(is_loggined)):
+@app.post('/api/service/{service_id}/rename', response_model=StatusMessageModel)
+async def service_rename(service_id: str, form: RenameForm, auth: bool = Depends(is_loggined)):
     """Request to change the name of a specific service"""
+    form.name = refactor_name(form.name)
     if not form.name: return {'status': 'The name cannot be empty!'} 
-    db.query('UPDATE services SET name=? WHERE port = ?;', form.name, service_port)
+    try:
+        db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
+    except sqlite3.IntegrityError:
+        return {'status': 'This name is already used'}
     await refresh_frontend()
     return {'status': 'ok'}
 
@@ -234,28 +245,28 @@ class RegexModel(BaseModel):
     regex:str
     mode:str
     id:int
-    service_port:int
+    service_id:str
     is_blacklist: bool
     n_packets:int
     is_case_sensitive:bool
     active:bool
 
-@app.get('/api/service/{service_port}/regexes', response_model=List[RegexModel])
-async def get_service_regexe_list(service_port: int, auth: bool = Depends(is_loggined)):
+@app.get('/api/service/{service_id}/regexes', response_model=List[RegexModel])
+async def get_service_regexe_list(service_id: str, auth: bool = Depends(is_loggined)):
     """Get the list of the regexes of a service"""
     return db.query("""
         SELECT 
-            regex, mode, regex_id `id`, service_port, is_blacklist,
+            regex, mode, regex_id `id`, service_id, is_blacklist,
             blocked_packets n_packets, is_case_sensitive, active
-        FROM regexes WHERE service_port = ?;
-    """, service_port)
+        FROM regexes WHERE service_id = ?;
+    """, service_id)
 
 @app.get('/api/regex/{regex_id}', response_model=RegexModel)
 async def get_regex_by_id(regex_id: int, auth: bool = Depends(is_loggined)):
     """Get regex info using his id"""
     res = db.query("""
         SELECT 
-            regex, mode, regex_id `id`, service_port, is_blacklist,
+            regex, mode, regex_id `id`, service_id, is_blacklist,
             blocked_packets n_packets, is_case_sensitive, active
         FROM regexes WHERE `id` = ?;
     """, regex_id)
@@ -268,7 +279,7 @@ async def regex_delete(regex_id: int, auth: bool = Depends(is_loggined)):
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
         db.query('DELETE FROM regexes WHERE regex_id = ?;', regex_id)
-        await firewall.get(res[0]["service_port"]).update_filters()
+        await firewall.get(res[0]["service_id"]).update_filters()
         await refresh_frontend()
     
     return {'status': 'ok'}
@@ -279,7 +290,7 @@ async def regex_enable(regex_id: int, auth: bool = Depends(is_loggined)):
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
         db.query('UPDATE regexes SET active=1 WHERE regex_id = ?;', regex_id)
-        await firewall.get(res[0]["service_port"]).update_filters()
+        await firewall.get(res[0]["service_id"]).update_filters()
         await refresh_frontend()
     return {'status': 'ok'}
 
@@ -289,12 +300,12 @@ async def regex_disable(regex_id: int, auth: bool = Depends(is_loggined)):
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
         db.query('UPDATE regexes SET active=0 WHERE regex_id = ?;', regex_id)
-        await firewall.get(res[0]["service_port"]).update_filters()
+        await firewall.get(res[0]["service_id"]).update_filters()
         await refresh_frontend()
     return {'status': 'ok'}
 
 class RegexAddForm(BaseModel):
-    service_port: int
+    service_id: str
     regex: str
     mode: str
     active: Union[bool,None]
@@ -309,31 +320,39 @@ async def add_new_regex(form: RegexAddForm, auth: bool = Depends(is_loggined)):
     except Exception:
         return {"status":"Invalid regex"}
     try:
-        db.query("INSERT INTO regexes (service_port, regex, is_blacklist, mode, is_case_sensitive, active ) VALUES (?, ?, ?, ?, ?, ?);", 
-                form.service_port, form.regex, form.is_blacklist, form.mode, form.is_case_sensitive, True if form.active is None else form.active )
+        db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode, is_case_sensitive, active ) VALUES (?, ?, ?, ?, ?, ?);", 
+                form.service_id, form.regex, form.is_blacklist, form.mode, form.is_case_sensitive, True if form.active is None else form.active )
     except sqlite3.IntegrityError:
         return {'status': 'An identical regex already exists'}
 
-    await firewall.get(form.service_port).update_filters()
+    await firewall.get(form.service_id).update_filters()
     await refresh_frontend()
     return {'status': 'ok'}
 
 class ServiceAddForm(BaseModel):
     name: str
     port: int
+    ipv6: bool
 
-@app.post('/api/services/add', response_model=StatusMessageModel)
+class ServiceAddResponse(BaseModel):
+    status:str
+    service_id: Union[None,str]
+
+@app.post('/api/services/add', response_model=ServiceAddResponse)
 async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
     """Add a new service"""
+    import time
+    srv_id = None
     try:
-        db.query("INSERT INTO services (name, port, status) VALUES (?, ?, ?)",
-                    form.name, form.port, STATUS.STOP)
+        srv_id = str(form.port)+"::"+("ipv6" if form.ipv6 else "ipv4")
+        db.query("INSERT INTO services (service_id ,name, port, ipv6, status) VALUES (?, ?, ?, ?, ?)",
+                    srv_id, refactor_name(form.name), form.port, form.ipv6, STATUS.STOP)
     except sqlite3.IntegrityError:
-        return {'status': 'Name or/and ports of the service has been already assigned to another service'}
+        return {'status': 'Name or/and ports of the service has been already assigned'}
     await firewall.reload()
+    init_t = time.time()
     await refresh_frontend()
-
-    return {'status': 'ok'}
+    return {'status': 'ok', 'service_id': srv_id}
 
 async def frontend_debug_proxy(path):
     httpc = httpx.AsyncClient()

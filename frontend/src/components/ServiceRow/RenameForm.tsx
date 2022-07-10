@@ -25,7 +25,7 @@ function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>v
 
     const submitRequest = ({ name }:{ name:string }) => {
         setSubmitLoading(true)
-        renameservice(service.port, name).then( res => {
+        renameservice(service.service_id, name).then( res => {
             if (!res){
                 setSubmitLoading(false)
                 close();
