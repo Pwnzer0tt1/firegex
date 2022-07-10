@@ -1,6 +1,7 @@
 **/*.pyc
 **/__pycache__/
 /.vscode/**
+/.mypy_cache/**
 
 **/node_modules
 **/.pnp

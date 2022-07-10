@@ -368,17 +368,14 @@ async def react_deploy(path):
         return FileResponse(file_request)
 
 if DEBUG:
-    async def forward_websocket(ws_a: WebSocket, ws_b: websockets.WebSocketClientProtocol):
+    async def forward_websocket(ws_a, ws_b):
         while True:
             data = await ws_a.receive_bytes()
             await ws_b.send(data)
-
-
-    async def reverse_websocket(ws_a: WebSocket, ws_b: websockets.WebSocketClientProtocol):
+    async def reverse_websocket(ws_a, ws_b):
         while True:
             data = await ws_b.recv()
             await ws_a.send_text(data)
-    
     @app.websocket("/ws")
     async def websocket_debug_proxy(ws: WebSocket):
         await ws.accept()
