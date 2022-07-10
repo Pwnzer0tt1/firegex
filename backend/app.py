@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
     REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
-    VERSION = "1.3.0"
+    VERSION = "1.4.0"
     
 
 settings = Settings()
