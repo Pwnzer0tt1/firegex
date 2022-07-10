@@ -58,11 +58,11 @@ else: puts(f"Test Failed: Couldn't create service ✗", color=colors.red); exit(
 
 #Delete the Service and exit
 def exit_test(status_code=0):
-    if service_created:
-        if(firegex.delete(service)):
-            puts(f"Sucessfully delete service with id {service} ✔", color=colors.green)
-        else:
-            puts(f"Test Failed: Couldn't delete service ✗", color=colors.red); exit(1)
+    #if service_created:
+    #    if(firegex.delete(service)):
+    #        puts(f"Sucessfully delete service with id {service} ✔", color=colors.green)
+    #    else:
+    #        puts(f"Test Failed: Couldn't delete service ✗", color=colors.red); exit(1)
     sep()
     server.terminate()
     exit(status_code)

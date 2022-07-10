@@ -21,6 +21,7 @@ def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
 def sep(): puts("-----------------------------------", is_bold=True)
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
+parser.add_argument('--thread-per-queue', "-t", type=int, required=False, help='Number of threads started for each queue', default=1)
 parser.add_argument('--no-autostart', "-n", required=False, action="store_true", help='Auto-execute "docker-compose up -d --build"', default=False)
 
 args = parser.parse_args()
@@ -44,6 +45,7 @@ services:
         network_mode: "host"
         environment:
             - PORT={args.port}
+            - N_THREADS_NFQUEUE={args.thread_per_queue}
         volumes:
             - /execute/db
         cap_add:
@@ -65,6 +67,7 @@ services:
             - {args.port}:{args.port}
         environment:
             - PORT={args.port}
+            - N_THREADS_NFQUEUE={args.thread_per_queue}
         volumes:
             - /execute/db
         cap_add:

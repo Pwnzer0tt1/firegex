@@ -1,8 +1,10 @@
 #Building main conteiner
 FROM python:slim-buster
 
-RUN apt-get update && apt-get -y install build-essential libpcre3-dev python-dev git iptables libnetfilter-queue-dev
+RUN apt-get update && apt-get -y install build-essential libpcre3-dev git iptables libnetfilter-queue1
+RUN git clone https://gitlab.com/guerrera.nicola/pypacker && cd pypacker && pip3 install . 
 
+WORKDIR /
 RUN mkdir /execute
 WORKDIR /execute
 
