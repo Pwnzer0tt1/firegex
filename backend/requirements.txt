@@ -1,6 +1,5 @@
-Flask
-uwsgi
-flask-cors
-bcrypt
-kthread
-jsonschema
+fastapi[all]
+httpx
+uvicorn[standard]
+passlib[bcrypt]
+python-jose[cryptography]

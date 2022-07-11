@@ -1,11 +1,13 @@
 #Building main conteiner
 FROM python:slim-buster
 
-RUN apt-get update && apt-get -y install curl supervisor gettext-base build-essential libboost-dev nginx libboost-system-dev libboost-thread-dev
-RUN curl -sL https://deb.nodesource.com/setup_16.x | bash
-RUN apt-get install nodejs
+RUN apt-get update && apt-get -y install build-essential libboost-system-dev libboost-thread-dev libpcre2-dev git automake
 
-RUN npm install serve -g --silent
+WORKDIR /tmp/
+RUN git clone --branch release https://github.com/jpcre2/jpcre2
+WORKDIR /tmp/jpcre2
+RUN ./configure; make; make install
+WORKDIR /
 
 RUN mkdir /execute
 WORKDIR /execute
@@ -13,22 +15,16 @@ WORKDIR /execute
 ADD ./backend/requirements.txt /execute/requirements.txt
 RUN pip install --no-cache-dir -r /execute/requirements.txt
 
-COPY ./backend/ /execute/
-
 ARG GCC_PARAMS
-RUN c++ -O3 $GCC_PARAMS -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system -lboost_thread
+RUN mkdir proxy
+ADD ./backend/proxy/proxy.cpp /execute/proxy/proxy.cpp
+RUN c++ -O3 -march=native $GCC_PARAMS -o proxy/proxy proxy/proxy.cpp -pthread -lboost_system -lboost_thread -lpcre2-8
 
-COPY ./config/supervisord.conf /etc/supervisor/supervisord.conf
-COPY ./config/nginx.conf /tmp/nginx.conf
-COPY ./config/start_nginx.sh /tmp/start_nginx.sh
+COPY ./backend/ /execute/
 COPY ./frontend/build/ ./frontend/
-
-RUN usermod -a -G root nobody
-RUN chown -R nobody:root /execute && \
-  chmod -R 660 /execute && chmod -R u+X /execute
 
 RUN chmod ug+x /execute/proxy/proxy 
 
-ENTRYPOINT ["/usr/bin/supervisord","-c","/etc/supervisor/supervisord.conf"]
+ENTRYPOINT ["python3", "app.py", "DOCKER"]
 
 

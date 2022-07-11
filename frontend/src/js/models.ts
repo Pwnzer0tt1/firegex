@@ -16,11 +16,32 @@ export type Service = {
 
 export type ServiceAddForm = {
     name:string,
-    port:number
+    port:number,
+    internalPort?:number
 }
 
 export type ServerResponse = {
     status:string
+}
+export type ServerResponseWithID = {
+    status:string,
+    id:string
+}
+
+export type ChangePort = {
+    port?: number,
+    internalPort?: number
+}
+
+export type ServerResponseToken = {
+    status:string,
+    access_token?:string
+}
+
+export type LoginResponse = {
+    status?:string,
+    access_token:string,
+    token_type:string
 }
 
 export type ServerStatusResponse = {
@@ -29,7 +50,7 @@ export type ServerStatusResponse = {
 }
 
 export type PasswordSend = {
-    password:string
+    password:string,
 }
 
 export type ChangePassword = {
@@ -44,7 +65,8 @@ export type RegexFilter = {
     is_blacklist:boolean,
     is_case_sensitive:boolean,
     mode:string //C S B => C->S S->C BOTH
-    n_packets:number
+    n_packets:number,
+    active:boolean
 }
 
 export type RegexAddForm = {
@@ -52,5 +74,6 @@ export type RegexAddForm = {
     regex:string,
     is_case_sensitive:boolean,
     is_blacklist:boolean,
-    mode:string // C->S S->C BOTH
+    mode:string, // C->S S->C BOTH,
+    active: boolean
 }

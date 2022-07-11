@@ -1,9 +1,4 @@
-from signal import SIGUSR1
-from secrets import token_urlsafe
-import subprocess, re, os
-from threading import Lock
-
-#c++ -o proxy proxy.cpp
+import re, os, asyncio
 
 class Filter:
     def __init__(self, regex, is_case_sensitive=True, is_blacklist=True, c_to_s=False, s_to_c=False, blocked_packets=0, code=None):
@@ -27,9 +22,11 @@ class Filter:
             yield case_sensitive + "S" + self.regex.hex() if self.is_blacklist else case_sensitive + "s"+ self.regex.hex()
 
 class Proxy:
-    def __init__(self, internal_port, public_port, callback_blocked_update=None, filters=None, public_host="0.0.0.0", internal_host="127.0.0.1"):
+    def __init__(self, internal_port=0, public_port=0, callback_blocked_update=None, filters=None, public_host="0.0.0.0", internal_host="127.0.0.1"):
         self.filter_map = {}
-        self.filter_map_lock = Lock()
+        self.filter_map_lock = asyncio.Lock()
+        self.update_config_lock = asyncio.Lock()
+        self.status_change = asyncio.Lock()
         self.public_host = public_host
         self.public_port = public_port
         self.internal_host = internal_host
@@ -37,85 +34,76 @@ class Proxy:
         self.filters = set(filters) if filters else set([])
         self.process = None
         self.callback_blocked_update = callback_blocked_update
-        self.config_file_path = None
-        while self.config_file_path is None:
-            config_file_path = os.path.join("/tmp/" + token_urlsafe(16))
-            if not os.path.exists(config_file_path):
-                self.config_file_path = config_file_path
     
-    def start(self, in_pause=False):
+    async def start(self, in_pause=False):
+        await self.status_change.acquire()
         if not self.isactive():
-            self.filter_map = self.compile_filters()
-            filters_codes = list(self.filter_map.keys()) if not in_pause else []
-            proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
             try:
-                self.__write_config(filters_codes)
-                
-                self.process = subprocess.Popen(
-                    [ proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port), self.config_file_path],
-                    stdout=subprocess.PIPE, universal_newlines=True
+                self.filter_map = self.compile_filters()
+                filters_codes = self.get_filter_codes() if not in_pause else []
+                proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./proxy")
+
+                self.process = await asyncio.create_subprocess_exec(
+                    proxy_binary_path, str(self.public_host), str(self.public_port), str(self.internal_host), str(self.internal_port),
+                    stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE
                 )
-                for stdout_line in iter(self.process.stdout.readline, ""):
+                await self.update_config(filters_codes)
+            finally:
+                self.status_change.release()
+            try:
+                while True:
+                    buff = await self.process.stdout.readuntil()
+                    stdout_line = buff.decode()
                     if stdout_line.startswith("BLOCKED"):
                         regex_id = stdout_line.split()[1]
-                        with self.filter_map_lock:
-                            self.filter_map[regex_id].blocked+=1
-                            if self.callback_blocked_update: self.callback_blocked_update(self.filter_map[regex_id])
-                self.process.stdout.close()
-                return self.process.wait()
-            finally:
-                self.__delete_config()
-    
-
-    def stop(self):
-        if self.isactive():
-            self.process.terminate()
-            try:
-                self.process.wait(timeout=3)
+                        async with self.filter_map_lock:
+                            if regex_id in self.filter_map:
+                                self.filter_map[regex_id].blocked+=1
+                                if self.callback_blocked_update: self.callback_blocked_update(self.filter_map[regex_id])
             except Exception:
+                return await self.process.wait()
+        else:
+            self.status_change.release()
+                 
+
+    async def stop(self):
+        async with self.status_change:
+            if self.isactive():
                 self.process.kill()
                 return False
-            finally:
-                self.process = None
-        return True
+            return True
 
-    def restart(self, in_pause=False):
-        status = self.stop()
-        self.start(in_pause=in_pause)
+    async def restart(self, in_pause=False):
+        status = await self.stop()
+        await self.start(in_pause=in_pause)
         return status
     
-    def __write_config(self, filters_codes):
-        with open(self.config_file_path,'w') as config_file:
-            for line in filters_codes:
-                config_file.write(line + '\n')
-    
-    def __delete_config(self):
-        if os.path.exists(self.config_file_path):
-            os.remove(self.config_file_path)
+    async def update_config(self, filters_codes):
+        async with self.update_config_lock:
+            if (self.isactive()):
+                self.process.stdin.write((" ".join(filters_codes)+"\n").encode())
+                await self.process.stdin.drain()
 
-    def reload(self):
+    async def reload(self):
         if self.isactive():
-            with self.filter_map_lock:
+            async with self.filter_map_lock:
                 self.filter_map = self.compile_filters()
-                filters_codes = list(self.filter_map.keys())
-                self.__write_config(filters_codes)
-                self.trigger_reload_config()
+                filters_codes = self.get_filter_codes()
+                await self.update_config(filters_codes)
+    
+    def get_filter_codes(self):
+        filters_codes = list(self.filter_map.keys())
+        filters_codes.sort(key=lambda a: self.filter_map[a].blocked, reverse=True)
+        return filters_codes
 
     def isactive(self):
-        if self.process and not self.process.poll() is None:
-            self.process = None
-        return True if self.process else False
+        return self.process and self.process.returncode is None
 
-    def trigger_reload_config(self):
-        self.process.send_signal(SIGUSR1)
-
-
-    def pause(self):
+    async def pause(self):
         if self.isactive():
-            self.__write_config([])
-            self.trigger_reload_config()
+            await self.update_config([])
         else:
-            self.start(in_pause=True)
+            await self.start(in_pause=True)
 
     def compile_filters(self):
         res = {}

@@ -1,15 +1,12 @@
 import { ActionIcon, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
-import { BsTrashFill } from 'react-icons/bs';
 import { useNavigate, useParams } from 'react-router-dom';
 import RegexView from '../components/RegexView';
 import ServiceRow from '../components/ServiceRow';
 import AddNewRegex from '../components/AddNewRegex';
 import { BsPlusLg } from "react-icons/bs";
-import YesNoModal from '../components/YesNoModal';
 import { RegexFilter, Service } from '../js/models';
-import { deleteservice, errorNotify, eventUpdateName, fireUpdateRequest, okNotify, regenport, serviceinfo, serviceregexlist } from '../js/utils';
-import { BsArrowRepeat } from "react-icons/bs"
+import { errorNotify, eventUpdateName, fireUpdateRequest, serviceinfo, serviceregexlist } from '../js/utils';
 import { useWindowEvent } from '@mantine/hooks';
 
 function ServiceDetails() {
@@ -54,58 +51,12 @@ function ServiceDetails() {
 
     const navigator = useNavigate()
 
-    const [deleteModal, setDeleteModal] = useState(false)
-    const [changePortModal, setChangePortModal] = useState(false)
-    const [tooltipDeleteOpened, setTooltipDeleteOpened] = useState(false);
-    const [tooltipChangeOpened, setTooltipChangeOpened] = useState(false);
-    const [tooltipAddRegexOpened, setTooltipAddRegexOpened] = useState(false);
-    
-    const deleteService = () => {
-        deleteservice(serviceInfo.id).then(res => {
-            if (!res){
-                okNotify("Service delete complete!",`The service ${serviceInfo.id} has been deleted!`)
-                updateInfo();
-            }else
-                errorNotify("An error occurred while deleting a service",`Error: ${res}`)
-        }).catch(err => {
-            errorNotify("An error occurred while deleting a service",`Error: ${err}`)
-        })
-        
-    }
 
-    const changePort = () => {
-        regenport(serviceInfo.id).then(res => {
-            if (!res){
-                okNotify("Service port regeneration completed!",`The service ${serviceInfo.id} has changed the internal port!`)
-                updateInfo();
-            }else
-                errorNotify("An error occurred while changing the internal service port",`Error: ${res}`)
-        }).catch(err => {
-            errorNotify("An error occurred while changing the internal service port",`Error: ${err}`)
-        })
-    }
+    const [tooltipAddRegexOpened, setTooltipAddRegexOpened] = useState(false);
 
     return <div>
         <LoadingOverlay visible={loader} />
-        <ServiceRow service={serviceInfo} additional_buttons={<>
-            <Tooltip label="Delete service" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red" opened={tooltipDeleteOpened} tooltipId="tooltip-delete-id">           
-                <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"
-                 aria-describedby="tooltip-delete-id"
-                 onFocus={() => setTooltipDeleteOpened(false)} onBlur={() => setTooltipDeleteOpened(false)}
-                 onMouseEnter={() => setTooltipDeleteOpened(true)} onMouseLeave={() => setTooltipDeleteOpened(false)}
-                 ><BsTrashFill size={22} /></ActionIcon>
-            </Tooltip>
-            <Space w="md"/>
-            <Tooltip label="Change proxy port" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="blue" opened={tooltipChangeOpened} tooltipId="tooltip-change-id">           
-                <ActionIcon color="blue" onClick={()=>setChangePortModal(true)} size="xl" radius="md" variant="filled"
-                aria-describedby="tooltip-change-id"
-                onFocus={() => setTooltipChangeOpened(false)} onBlur={() => setTooltipChangeOpened(false)}
-                onMouseEnter={() => setTooltipChangeOpened(true)} onMouseLeave={() => setTooltipChangeOpened(false)}
-                ><BsArrowRepeat size={28} /></ActionIcon>
-            </Tooltip>
-            <Space w="md"/>
-        </>}></ServiceRow>
-        
+        <ServiceRow service={serviceInfo} />
         {regexesList.length === 0?<>
                 <Space h="xl" />
                 <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
@@ -126,20 +77,7 @@ function ServiceDetails() {
 
         {srv_id?<AddNewRegex opened={open} onClose={closeModal} service={srv_id} />:null}
 
-        <YesNoModal
-            title='Are you sure to delete this service?'
-            description={`You are going to delete the service '${serviceInfo.id}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}
-            onClose={()=>setDeleteModal(false) }
-            action={deleteService}
-            opened={deleteModal}
-        />
-        <YesNoModal
-            title='Are you sure to change the proxy internal port?'
-            description={`You are going to change the proxy port '${serviceInfo.internal_port}'. This will cause the shutdown of your service temporarily! ⚠️`}
-            onClose={()=>setChangePortModal(false)}
-            action={changePort}
-            opened={changePortModal}
-        />
+
     </div>
 }
 

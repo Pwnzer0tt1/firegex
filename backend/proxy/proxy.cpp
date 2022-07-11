@@ -7,9 +7,6 @@
 #include <cstddef>
 #include <iostream>
 #include <string>
-#include <csignal>
-#include <fstream>
-#include <regex>
 #include <mutex>
 
 #include <boost/thread.hpp>
@@ -18,10 +15,10 @@
 #include <boost/bind/bind.hpp>
 #include <boost/asio.hpp>
 #include <boost/thread/mutex.hpp>
+#include <jpcre2.hpp>
 
+typedef jpcre2::select<char> jp;
 using namespace std;
-
-boost::asio::io_service *ios_loop = nullptr;
 
 bool unhexlify(string const &hex, string &newString) {
    try{
@@ -39,7 +36,8 @@ bool unhexlify(string const &hex, string &newString) {
    }
 }
 
-typedef vector<pair<string,regex>> regex_rule_vector;
+typedef pair<string,jp::Regex> regex_rule_pair;
+typedef vector<regex_rule_pair> regex_rule_vector;
 struct regex_rules{
    regex_rule_vector regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
 
@@ -66,24 +64,14 @@ struct regex_rules{
       if (arg[1] != 'C' && arg[1] != 'c' && arg[1] != 'S' && arg[1] != 's') return;
       string hex(arg+2), expr;
       if (!unhexlify(hex, expr)) return;
-
-      try{
-         
-         //Push regex
-         if (arg[0] == '1'){
-            regex regex(expr);
-            #ifdef DEBUG
-            cerr << "Added case sensitive regex " << expr_str << endl;
-            #endif
-            getByCode(arg[1])->push_back(make_pair(string(arg), regex));
-         } else {
-            regex regex(expr,regex_constants::icase);
-            #ifdef DEBUG
-            cerr << "Added case insensitive regex " << expr_str << endl;
-            #endif
-            getByCode(arg[1])->push_back(make_pair(string(arg), regex));
-         }
-      } catch(...){
+      //Push regex
+      jp::Regex regex(expr,arg[0] == '1'?"gS":"giS");
+      if (regex){
+         #ifdef DEBUG
+         cerr << "Added regex " << expr << " " << arg << endl;
+         #endif
+         getByCode(arg[1])->push_back(make_pair(string(arg), regex));
+      } else {
          cerr << "Regex " << arg << " was not compiled successfully" << endl;
       }
    }
@@ -91,23 +79,24 @@ struct regex_rules{
 };
 shared_ptr<regex_rules> regex_config;
 
-const char* config_file;
 mutex update_mutex;
 #ifdef MULTI_THREAD
 mutex stdout_mutex;
 #endif 
 
-bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pair<string,regex>> const &blacklist, vector<pair<string,regex>> const &whitelist){
+bool filter_data(unsigned char* data, const size_t& bytes_transferred, regex_rule_vector const &blacklist, regex_rule_vector const &whitelist){
    #ifdef DEBUG_PACKET
    cerr << "---------------- Packet ----------------" << endl;
-   for(int i=0;i<bytes_transferred;i++){
-      cerr << data[i];
-   }
-   cerr << "\n" << "---------------- End Packet ----------------" << endl;
+   for(int i=0;i<bytes_transferred;i++) cerr << data[i];
+   cerr << endl;
+   for(int i=0;i<bytes_transferred;i++) fprintf(stderr, "%x", data[i]);
+   cerr << endl;
+   cerr << "---------------- End Packet ----------------" << endl;
    #endif
-   for (pair<string,regex> ele:blacklist){
+   string str_data((char *) data, bytes_transferred);
+   for (regex_rule_pair ele:blacklist){
       try{
-         if(regex_search(reinterpret_cast<const char*>(data), reinterpret_cast<const char*>(data)+bytes_transferred, ele.second)){
+         if(ele.second.match(str_data)){
             #ifdef MULTI_THREAD
             std::unique_lock<std::mutex> lck(stdout_mutex);
             #endif
@@ -118,9 +107,9 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, vector<pa
          cerr << "Error while matching regex: " << ele.first << endl;
       }
    }
-   for (pair<string,regex> ele:whitelist){
+   for (regex_rule_pair ele:whitelist){
       try{
-         if(!regex_search(reinterpret_cast<const char*>(data),reinterpret_cast<const char*>(data)+bytes_transferred, ele.second)){
+         if(!ele.second.match(str_data)){
             #ifdef MULTI_THREAD
             std::unique_lock<std::mutex> lck(stdout_mutex);
             #endif
@@ -148,7 +137,7 @@ namespace tcp_proxy
       typedef ip::tcp::socket socket_type;
       typedef boost::shared_ptr<bridge> ptr_type;
 
-      bridge(boost::asio::io_service& ios)
+      bridge(boost::asio::io_context& ios)
       : downstream_socket_(ios),
         upstream_socket_  (ios),
         thread_safety(ios)
@@ -322,7 +311,7 @@ namespace tcp_proxy
       enum { max_data_length = 8192 }; //8KB
       unsigned char downstream_data_[max_data_length];
       unsigned char upstream_data_  [max_data_length];
-      boost::asio::io_service::strand thread_safety;
+      boost::asio::io_context::strand thread_safety;
       boost::mutex mutex_;
    public:
 
@@ -330,12 +319,12 @@ namespace tcp_proxy
       {
       public:
 
-         acceptor(boost::asio::io_service& io_service,
+         acceptor(boost::asio::io_context& io_context,
                   const string& local_host, unsigned short local_port,
                   const string& upstream_host, unsigned short upstream_port)
-         : io_service_(io_service),
+         : io_context_(io_context),
            localhost_address(boost::asio::ip::address_v4::from_string(local_host)),
-           acceptor_(io_service_,ip::tcp::endpoint(localhost_address,local_port)),
+           acceptor_(io_context_,ip::tcp::endpoint(localhost_address,local_port)),
            upstream_port_(upstream_port),
            upstream_host_(upstream_host)
          {}
@@ -344,7 +333,7 @@ namespace tcp_proxy
          {
             try
             {
-               session_ = boost::shared_ptr<bridge>(new bridge(io_service_));
+               session_ = boost::shared_ptr<bridge>(new bridge(io_context_));
 
                acceptor_.async_accept(session_->downstream_socket(),
                     boost::asio::bind_executor(session_->thread_safety,
@@ -380,7 +369,7 @@ namespace tcp_proxy
             }
          }
 
-         boost::asio::io_service& io_service_;
+         boost::asio::io_context& io_context_;
          ip::address_v4 localhost_address;
          ip::tcp::acceptor acceptor_;
          ptr_type session_;
@@ -391,42 +380,69 @@ namespace tcp_proxy
    };
 }
 
-
-void update_regex(){
-   std::unique_lock<std::mutex> lck(update_mutex);
-   fstream fd;
-   fd.open(config_file,ios::in); 
-   if (!fd.is_open()){
-	   cerr << "Error: config file couln't be opened" << endl;
-      exit(1);
-	}
-   regex_rules *regex_new_config = new regex_rules();
-   string line;
-   while(getline(fd, line)) regex_new_config->add(line.c_str());
-   regex_config.reset(regex_new_config);
+void update_config (boost::asio::streambuf &input_buffer){
+      #ifdef DEBUG
+      cerr << "Updating configuration" << endl;
+      #endif
+      std::istream config_stream(&input_buffer);
+      std::unique_lock<std::mutex> lck(update_mutex);
+      regex_rules *regex_new_config = new regex_rules();
+      string data;
+      while(true){
+         config_stream >> data;
+         if (config_stream.eof()) break;
+         regex_new_config->add(data.c_str());
+      }
+      regex_config.reset(regex_new_config);
 }
 
-void signal_handler(int signal_num)
+class async_updater
 {
-   if (signal_num == SIGUSR1){
-      #ifdef DEBUG
-      cerr << "Updating configurtation" << endl;
-      #endif
-      update_regex();
-   }else if(signal_num == SIGTERM){
-      if (ios_loop != nullptr) ios_loop->stop();
-      #ifdef DEBUG
-      cerr << "Close Requested" << endl;
-      #endif
-      exit(0);
-   }
-}
+public:
+  async_updater(boost::asio::io_context& io_context) : input_(io_context, ::dup(STDIN_FILENO)), thread_safety(io_context)
+  {
+   
+      boost::asio::async_read_until(input_, input_buffer_, '\n',
+          boost::asio::bind_executor(thread_safety,
+          boost::bind(&async_updater::on_update, this,
+            boost::asio::placeholders::error,
+            boost::asio::placeholders::bytes_transferred)));
+  }
+
+  void on_update(const boost::system::error_code& error, std::size_t length)
+  {
+    if (!error)
+    {
+      update_config(input_buffer_);
+      boost::asio::async_read_until(input_, input_buffer_, '\n',
+         boost::asio::bind_executor(thread_safety,
+          boost::bind(&async_updater::on_update, this,
+            boost::asio::placeholders::error,
+            boost::asio::placeholders::bytes_transferred)));
+    }
+    else
+    {
+      close();
+    }
+  }
+
+  void close()
+  {
+    input_.close();
+  }
+
+private:
+  boost::asio::posix::stream_descriptor input_;
+  boost::asio::io_context::strand thread_safety;
+  boost::asio::streambuf input_buffer_;
+};
+
 
 int main(int argc, char* argv[])
 {
-   if (argc < 6)
+   if (argc < 5)
    {
-      cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port> <config_file>" << endl;
+      cerr << "usage: tcpproxy_server <local host ip> <local port> <forward host ip> <forward port>" << endl;
       return 1;
    }
 
@@ -434,16 +450,19 @@ int main(int argc, char* argv[])
    const unsigned short forward_port = static_cast<unsigned short>(::atoi(argv[4]));
    const string local_host      = argv[1];
    const string forward_host    = argv[3];
+
+   boost::asio::io_context ios;
+
+   boost::asio::streambuf buf;
+   boost::asio::posix::stream_descriptor cin_in(ios, ::dup(STDIN_FILENO));
+   boost::asio::read_until(cin_in, buf,'\n');
+   update_config(buf);
+
+   async_updater updater(ios);
    
-   config_file = argv[5];
-
-   update_regex();
-   signal(SIGUSR1, signal_handler);
-   signal(SIGTERM, signal_handler);
-
-   boost::asio::io_service ios;
-   ios_loop = &ios;
-
+   #ifdef DEBUG
+   cerr << "Starting Proxy" << endl;
+   #endif
    try
    {
       tcp_proxy::bridge::acceptor acceptor(ios,
@@ -458,7 +477,7 @@ int main(int argc, char* argv[])
       #else
       for (unsigned i = 0; i < thread::hardware_concurrency(); ++i)
       #endif
-         tg.create_thread(boost::bind(&boost::asio::io_service::run, &ios));
+         tg.create_thread(boost::bind(&boost::asio::io_context::run, &ios));
 
       tg.join_all();
       #else
@@ -470,6 +489,9 @@ int main(int argc, char* argv[])
       cerr << "Error: " << e.what() << endl;
       return 1;
    }
+   #ifdef DEBUG
+   cerr << "Proxy stopped!" << endl;
+   #endif
 
    return 0;
 }

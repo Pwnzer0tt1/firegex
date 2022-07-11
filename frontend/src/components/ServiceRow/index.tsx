@@ -1,14 +1,19 @@
-import { ActionIcon, Badge, Grid, MediaQuery, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Divider, Grid, MediaQuery, Menu, Space, Title, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { FaPause, FaPlay, FaStop } from 'react-icons/fa';
 import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
 import YesNoModal from '../YesNoModal';
-import { errorNotify, fireUpdateRequest, okNotify, pauseservice, startservice, stopservice } from '../../js/utils';
+import { deleteservice, errorNotify, fireUpdateRequest, okNotify, pauseservice, regenport, startservice, stopservice } from '../../js/utils';
+import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
+import { TbNumbers } from 'react-icons/tb';
+import { BiRename } from 'react-icons/bi'
+import ChangePortModal from './ChangePortModal';
+import RenameForm from './RenameForm';
 
 //"status":"stop"/"wait"/"active"/"pause",
-function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, onClick?:()=>void, additional_buttons?:any }) {
+function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
     let status_color = "gray";
     switch(service.status){
@@ -21,6 +26,10 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
     const [stopModal, setStopModal] = useState(false);
     const [buttonLoading, setButtonLoading] = useState(false)
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
+    const [deleteModal, setDeleteModal] = useState(false)
+    const [changePortModal, setChangePortModal] = useState(false)
+    const [choosePortModal, setChoosePortModal] = useState(false)
+    const [renameModal, setRenameModal] = useState(false)
 
     const stopService = async () => {
         setButtonLoading(true)
@@ -68,6 +77,31 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
         
     }
 
+    const deleteService = () => {
+        deleteservice(service.id).then(res => {
+            if (!res){
+                okNotify("Service delete complete!",`The service ${service.id} has been deleted!`)
+                fireUpdateRequest();
+            }else
+                errorNotify("An error occurred while deleting a service",`Error: ${res}`)
+        }).catch(err => {
+            errorNotify("An error occurred while deleting a service",`Error: ${err}`)
+        })
+        
+    }
+
+    const changePort = () => {
+        regenport(service.id).then(res => {
+            if (!res){
+                okNotify("Service port regeneration completed!",`The service ${service.id} has changed the internal port!`)
+                fireUpdateRequest();
+            }else
+                errorNotify("An error occurred while changing the internal service port",`Error: ${res}`)
+        }).catch(err => {
+            errorNotify("An error occurred while changing the internal service port",`Error: ${err}`)
+        })
+    }
+
     return <>
         <Grid className={style.row} justify="flex-end" style={{width:"100%"}}>
             <Grid.Col md={4} xs={12}>
@@ -110,7 +144,18 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
                     <><Space w="xl" /><Space w="xl" /></>
                 </MediaQuery>
                 <div className="center-flex">
-                    {additional_buttons}
+                    <Menu>
+                        <Menu.Label><b>Rename service</b></Menu.Label>
+                        <Menu.Item icon={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
+                        <Divider />
+                        <Menu.Label><b>Change ports</b></Menu.Label>
+                        <Menu.Item icon={<TbNumbers size={18} />} onClick={()=>setChoosePortModal(true)}>Change port</Menu.Item>
+                        <Menu.Item icon={<BsArrowRepeat size={18} />} onClick={()=>setChangePortModal(true)}>Regen proxy port</Menu.Item>
+                        <Divider />
+                        <Menu.Label><b>Danger zone</b></Menu.Label>
+                        <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
+                    </Menu>
+                    <Space w="md"/>
                     {["pause","wait"].includes(service.status)?
                         
                         <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="orange" opened={tooltipStopOpened} tooltipId="tooltip-stop-id">
@@ -159,6 +204,30 @@ function ServiceRow({ service, onClick, additional_buttons }:{ service:Service, 
             opened={stopModal}
         />
         <hr style={{width:"100%"}}/>
+        <YesNoModal
+            title='Are you sure to delete this service?'
+            description={`You are going to delete the service '${service.id}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}
+            onClose={()=>setDeleteModal(false) }
+            action={deleteService}
+            opened={deleteModal}
+        />
+        <YesNoModal
+            title='Are you sure to change the proxy internal port?'
+            description={`You are going to change the proxy port '${service.internal_port}'. This will cause the shutdown of your service temporarily! ⚠️`}
+            onClose={()=>setChangePortModal(false)}
+            action={changePort}
+            opened={changePortModal}
+        />
+        <ChangePortModal
+            service={service}
+            onClose={()=> setChoosePortModal(false)}
+            opened={choosePortModal}
+        />
+        <RenameForm
+            onClose={()=>setRenameModal(false)}
+            opened={renameModal}
+            service={service}
+        />
     </>
 }
 
