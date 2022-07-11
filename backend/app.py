@@ -346,6 +346,16 @@ class ServiceAddStatus(BaseModel):
     status:str
     id: Union[str,None]
 
+class RenameForm(BaseModel):
+    name:str
+
+@app.post('/api/service/{service_id}/rename', response_model=StatusMessageModel)
+async def service_rename(service_id: str, form: RenameForm, auth: bool = Depends(is_loggined)):
+    """Request to change the name of a specific service"""
+    if not form.name: return {'status': 'The name cannot be empty!'} 
+    db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
+    return {'status': 'ok'}
+
 @app.post('/api/services/add', response_model=ServiceAddStatus)
 async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
     """Add a new service"""

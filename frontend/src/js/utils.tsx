@@ -137,6 +137,11 @@ export async function addservice(data:ServiceAddForm) {
     return await postapi("services/add",data) as ServerResponseWithID;
 }
 
+export async function renameservice(service_id:string, name: string){
+    const { status } = await postapi(`service/${service_id}/rename`,{ name }) as ServerResponse;
+    return status === "ok"?undefined:status
+}
+
 export async function deleteservice(service_id:string) {
     const { status } = await getapi(`service/${service_id}/delete`) as ServerResponse;
     return status === "ok"?undefined:status

@@ -1,7 +1,7 @@
 #Building main conteiner
 FROM python:slim-buster
 
-RUN apt-get update && apt-get -y install build-essential libboost-system-dev libboost-thread-dev libpcre2-dev git
+RUN apt-get update && apt-get -y install build-essential libboost-system-dev libboost-thread-dev libpcre2-dev git automake
 
 WORKDIR /tmp/
 RUN git clone --branch release https://github.com/jpcre2/jpcre2

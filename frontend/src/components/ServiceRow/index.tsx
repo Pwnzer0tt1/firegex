@@ -10,6 +10,7 @@ import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
 import { TbNumbers } from 'react-icons/tb';
 import { BiRename } from 'react-icons/bi'
 import ChangePortModal from './ChangePortModal';
+import RenameForm from './RenameForm';
 
 //"status":"stop"/"wait"/"active"/"pause",
 function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
@@ -28,6 +29,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     const [deleteModal, setDeleteModal] = useState(false)
     const [changePortModal, setChangePortModal] = useState(false)
     const [choosePortModal, setChoosePortModal] = useState(false)
+    const [renameModal, setRenameModal] = useState(false)
 
     const stopService = async () => {
         setButtonLoading(true)
@@ -144,7 +146,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 <div className="center-flex">
                     <Menu>
                         <Menu.Label><b>Rename service</b></Menu.Label>
-                        <Menu.Item icon={<BiRename size={18} />} onClick={()=>{}}>Change service name</Menu.Item>
+                        <Menu.Item icon={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
                         <Divider />
                         <Menu.Label><b>Change ports</b></Menu.Label>
                         <Menu.Item icon={<TbNumbers size={18} />} onClick={()=>setChoosePortModal(true)}>Change port</Menu.Item>
@@ -216,7 +218,16 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
             action={changePort}
             opened={changePortModal}
         />
-        <ChangePortModal service={service} onClose={()=> setChoosePortModal(false)} opened={choosePortModal} />
+        <ChangePortModal
+            service={service}
+            onClose={()=> setChoosePortModal(false)}
+            opened={choosePortModal}
+        />
+        <RenameForm
+            onClose={()=>setRenameModal(false)}
+            opened={renameModal}
+            service={service}
+        />
     </>
 }
 
