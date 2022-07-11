@@ -18,7 +18,8 @@ export type ServiceAddForm = {
     name:string,
     port:number,
     ipv6:boolean,
-    internalPort?:number
+    proto:string,
+    ip_int:string,
 }
 
 export type ServiceAddResponse = {

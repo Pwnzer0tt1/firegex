@@ -114,13 +114,14 @@ class Interceptor:
     def _start_queue(self,func,n_threads):
         def func_wrap(ll_data, ll_proto_id, data, ctx, *args):
             pkt_parsed = ip6.IP6(data) if self.ipv6 else ip.IP(data)
+            
             try:
                 level4 = None
                 if self.proto == ProtoTypes.TCP: level4 = pkt_parsed[tcp.TCP].body_bytes
                 elif self.proto == ProtoTypes.UDP: level4 = pkt_parsed[udp.UDP].body_bytes
                 if level4:
                     if func(level4):
-                        return pkt_parsed.bin(), interceptor.NF_ACCEPT
+                        return data, interceptor.NF_ACCEPT
                     elif self.proto == ProtoTypes.TCP:
                         pkt_parsed[tcp.TCP].flags &= 0x00
                         pkt_parsed[tcp.TCP].flags |= tcp.TH_FIN | tcp.TH_ACK

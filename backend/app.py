@@ -1,6 +1,6 @@
 from base64 import b64decode
-import sqlite3, uvicorn, sys, secrets, re, os, asyncio
-import httpx, urllib, websockets
+import sqlite3, uvicorn, sys, secrets, re
+import httpx, websockets, os, asyncio
 from typing import List, Union
 from fastapi import FastAPI, HTTPException, WebSocket, Depends
 from pydantic import BaseModel, BaseSettings
@@ -333,6 +333,8 @@ class ServiceAddForm(BaseModel):
     name: str
     port: int
     ipv6: bool
+    proto: str
+    ip_int: str
 
 class ServiceAddResponse(BaseModel):
     status:str
@@ -341,22 +343,28 @@ class ServiceAddResponse(BaseModel):
 @app.post('/api/services/add', response_model=ServiceAddResponse)
 async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
     """Add a new service"""
-    import time
+    if form.ipv6:
+        if not checkIpv6(form.ip_int):
+            return {"status":"Invalid IPv6 address"}
+    else:
+        if not checkIpv4(form.ip_int):
+            return {"status":"Invalid IPv4 address"}
+    if form.proto not in ["tcp", "udp"]:
+        return {"status":"Invalid protocol"}
     srv_id = None
     try:
-        srv_id = str(form.port)+"::"+("ipv6" if form.ipv6 else "ipv4")
+        srv_id = gen_service_id(db)
         db.query("INSERT INTO services (service_id ,name, port, ipv6, status) VALUES (?, ?, ?, ?, ?)",
                     srv_id, refactor_name(form.name), form.port, form.ipv6, STATUS.STOP)
     except sqlite3.IntegrityError:
         return {'status': 'Name or/and ports of the service has been already assigned'}
     await firewall.reload()
-    init_t = time.time()
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}
 
 async def frontend_debug_proxy(path):
     httpc = httpx.AsyncClient()
-    req = httpc.build_request("GET",urllib.parse.urljoin(f"http://127.0.0.1:{os.getenv('F_PORT','3000')}", path))
+    req = httpc.build_request("GET",f"http://127.0.0.1:{os.getenv('F_PORT','3000')}/"+path)
     resp = await httpc.send(req, stream=True)
     return StreamingResponse(resp.aiter_bytes(),status_code=resp.status_code)
 

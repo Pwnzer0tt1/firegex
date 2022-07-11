@@ -1,13 +1,14 @@
-import { Button, Group, NumberInput, Space, TextInput, Notification, Modal, Switch } from '@mantine/core';
+import { Button, Group, NumberInput, Space, TextInput, Notification, Modal, Switch, SegmentedControl } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
-import { addservice, okNotify, startservice } from '../js/utils';
+import { addservice, okNotify, startservice, regex_ipv4, regex_ipv6 } from '../js/utils';
 import { ImCross } from "react-icons/im"
 
 type ServiceAddForm = {
     name:string,
     port:number,
-    ipv6:boolean,
+    proto:string,
+    ip_int:string,
     autostart: boolean,
 }
 
@@ -17,12 +18,15 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
         initialValues: {
             name:"",
             port:8080,
-            ipv6:false,
+            ip_int:"127.0.0.1",
+            proto:"tcp",
             autostart: true
         },
         validationRules:{
             name: (value) => value !== ""?true:false,
             port: (value) => value>0 && value<65536,
+            proto: (value) => ["tcp","udp"].includes(value),
+            ip_int: (value) => value.match(regex_ipv6)?true:false || value.match(regex_ipv4)?true:false
         }
     })
 
@@ -35,9 +39,10 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
     const [submitLoading, setSubmitLoading] = useState(false)
     const [error, setError] = useState<string|null>(null)
  
-    const submitRequest = ({ name, port, autostart, ipv6 }:ServiceAddForm) =>{
+    const submitRequest = ({ name, port, autostart, proto, ip_int }:ServiceAddForm) =>{
         setSubmitLoading(true)
-        addservice({name, port, ipv6}).then( res => {
+        const ipv6 = ip_int.match(regex_ipv4)?false:true
+        addservice({name, port, ipv6, proto, ip_int }).then( res => {
             if (res.status === "ok" && res.service_id){
                 setSubmitLoading(false)
                 close();
@@ -53,7 +58,6 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
         })
     }    
 
-
   return <Modal size="xl" title="Add a new service" opened={opened} onClose={close} closeOnClickOutside={false} centered>
     <form onSubmit={form.onSubmit(submitRequest)}>
             <TextInput
@@ -63,6 +67,14 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             />
             <Space h="md" />
 
+            <TextInput
+                label="Public IP Interface (ipv4/ipv6 + CIDR allowed)"
+                placeholder="10.40.20.0/8"
+                {...form.getInputProps('ip_int')}
+            />
+
+            <Space h="md" />
+
             <NumberInput
                 placeholder="8080"
                 min={1}
@@ -70,20 +82,23 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
                 label="Public Service port"
                 {...form.getInputProps('port')}
             />
+            
+            <Space h="md" />
+
+            <SegmentedControl
+                data={[
+                    { label: 'TCP', value: 'tcp' },
+                    { label: 'UDP', value: 'udp' },
+                ]}
+                {...form.getInputProps('proto')}
+            />
 
             <Space h="xl" />
 
             <Switch
                 label="Auto-Start Service"
                 {...form.getInputProps('autostart', { type: 'checkbox' })}
-            />
-
-            <Space h="sm" />
-
-            <Switch
-                label="Filter on Ipv6"
-                {...form.getInputProps('ipv6', { type: 'checkbox' })}
-            />
+            />        
 
             <Group position="right" mt="md">
                 <Button loading={submitLoading} type="submit">Add Service</Button>
