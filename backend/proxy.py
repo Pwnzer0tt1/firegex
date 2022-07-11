@@ -27,19 +27,19 @@ class IPTables:
 
     def list_filters(self, param):
         stdout, strerr = self.command(["-L", str(param), "--line-number", "-n"])
-        output = [ele.split() for ele in stdout.decode().split("\n")]
+        output = [re.findall(r"([^ ]*)[ ]{,10}([^ ]*)[ ]{,5}([^ ]*)[ ]{,5}([^ ]*)[ ]{,5}([^ ]*)[ ]+([^ ]*)[ ]+(.*)", ele) for ele in stdout.decode().split("\n")]
         return [{
-            "id": ele[0],
-            "target": ele[1],
-            "prot": ele[2],
-            "opt": ele[3],
-            "source": ele[4],
-            "destination": ele[5],
-            "details": " ".join(ele[6:]) if len(ele) >= 7 else "",
-        } for ele in output if len(ele) >= 6 and ele[0].isnumeric()]
+            "id": ele[0][0].strip(),
+            "target": ele[0][1].strip(),
+            "prot": ele[0][2].strip(),
+            "opt": ele[0][3].strip(),
+            "source": ele[0][4].strip(),
+            "destination": ele[0][5].strip(),
+            "details": " ".join(ele[0][6:]).strip() if len(ele[0]) >= 7 else "",
+        } for ele in output if len(ele) > 0 and ele[0][0].isnumeric()]
 
     def delete_command(self, param, id):
-        self.command(["-R", str(param), str(id)])
+        self.command(["-D", str(param), str(id)])
     
     def create_chain(self, name):
         self.command(["-N", str(name)])
@@ -48,10 +48,24 @@ class IPTables:
         self.command(["-F", str(name)])
 
     def add_chain_to_input(self, name):
-        self.command(["-I", "INPUT", "-j", str(name)])
+        if not self.find_if_filter_exists("INPUT", str(name)):
+            self.command(["-I", "INPUT", "-j", str(name)])
+        if not self.find_if_filter_exists("DOCKER-USER", str(name)):
+            self.command(["-I", "DOCKER-USER", "-j", str(name)])
 
     def add_chain_to_output(self, name):
-        self.command(["-I", "OUTPUT", "-j", str(name)])
+        if not self.find_if_filter_exists("OUTPUT", str(name)):
+            self.command(["-I", "OUTPUT", "-j", str(name)])
+        if not self.find_if_filter_exists("FORWARD", str(name)):
+            self.command(["-I", "FORWARD", "-j", str(name)])
+        if not self.find_if_filter_exists("DOCKER-USER", str(name)):
+            self.command(["-I", "DOCKER-USER", "-j", str(name)])
+
+    def find_if_filter_exists(self, type, target):
+        for filter in self.list_filters(type):
+            if filter["target"] == target:
+                return True
+        return False
 
     def add_s_to_c(self, proto, port, queue_range):
         init, end = queue_range
@@ -142,19 +156,8 @@ class FiregexFilterManager:
         self.iptables = IPTables(ipv6)
         self.iptables.create_chain(FilterTypes.INPUT)
         self.iptables.create_chain(FilterTypes.OUTPUT)
-        input_found = False
-        output_found = False
-        for filter in self.iptables.list_filters("INPUT"):
-            if filter["target"] == FilterTypes.INPUT:
-                input_found = True
-                break
-        for filter in self.iptables.list_filters("OUTPUT"):
-            if filter["target"] == FilterTypes.OUTPUT:
-                output_found = True
-                break
-        if not input_found: self.iptables.add_chain_to_input(FilterTypes.INPUT)
-        if not output_found: self.iptables.add_chain_to_output(FilterTypes.OUTPUT)
-
+        self.iptables.add_chain_to_input(FilterTypes.INPUT)
+        self.iptables.add_chain_to_output(FilterTypes.OUTPUT)
 
     def get(self) -> List[FiregexFilter]:
         res = []
@@ -164,7 +167,7 @@ class FiregexFilterManager:
                 balanced = re.findall(r"NFQUEUE balance ([0-9]+):([0-9]+)", filter["details"])
                 numbered = re.findall(r"NFQUEUE num ([0-9]+)", filter["details"])
                 port = re.findall(r"[sd]pt:([0-9]+)", filter["details"])
-                if balanced: queue_num = (int(balanced[0]), int(balanced[1]))
+                if balanced: queue_num = (int(balanced[0][0]), int(balanced[0][1]))
                 if numbered: queue_num = (int(numbered[0]), int(numbered[0]))
                 if queue_num and port:
                     res.append(FiregexFilter(
