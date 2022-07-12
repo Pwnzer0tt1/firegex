@@ -183,7 +183,7 @@ async def get_service_list(auth: bool = Depends(is_loggined)):
             s.ip_int ip_int,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
-        FROM services s LEFT JOIN regexes r
+        FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
         GROUP BY s.service_id;
     """)
 
@@ -201,8 +201,8 @@ async def get_service_by_id(service_id: str, auth: bool = Depends(is_loggined)):
             s.ip_int ip_int,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
-        FROM services s LEFT JOIN regexes r WHERE s.service_id = ?
-        GROUP BY s.service_id;
+        FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
+        WHERE s.service_id = ? GROUP BY s.service_id;
     """, service_id)
     if len(res) == 0: raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
