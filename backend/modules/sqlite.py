@@ -117,7 +117,7 @@ class Service:
 
 class Regex:
     def __init__(self, id: int, regex: str, mode: str, service_id: str, is_blacklist: bool, blocked_packets: int, is_case_sensitive: bool, active: bool):
-        self.regex = base64.b64decode(regex)
+        self.regex = regex
         self.mode = mode
         self.service_id = service_id
         self.is_blacklist = is_blacklist
@@ -128,4 +128,4 @@ class Regex:
         
     @classmethod
     def from_dict(cls, var: dict):
-        return cls(id=var["regex_id"], regex=var["regex"], mode=var["mode"], service_id=var["service_id"], is_blacklist=var["is_blacklist"], blocked_packets=var["blocked_packets"], is_case_sensitive=var["is_case_sensitive"], active=var["active"])
+        return cls(id=var["regex_id"], regex=base64.b64decode(var["regex"]), mode=var["mode"], service_id=var["service_id"], is_blacklist=var["is_blacklist"], blocked_packets=var["blocked_packets"], is_case_sensitive=var["is_case_sensitive"], active=var["active"])

@@ -27,7 +27,6 @@ class FiregexAPI:
     
     def login(self,password):
         req = self.s.post(f"{self.address}api/login", data=f"username=login&password={password}")
-        print(req.text)
         try : 
             self.s.set_token(req.json()["access_token"])
             return True
@@ -46,8 +45,8 @@ class FiregexAPI:
         except Exception:
             return False
 
-    def create_service(self,service_name,service_port, ipv6 = False):
-        req = self.s.post(f"{self.address}api/services/add" , json={"name":service_name,"port":service_port, "ipv6": ipv6})
+    def create_service(self,service_name,service_port, proto, ip_int):
+        req = self.s.post(f"{self.address}api/services/add" , json={"name":service_name,"port":service_port, "ip_int": ip_int, "proto": proto})
         return req.json()["service_id"] if req.json()["status"] == "ok" else None 
     
     def get_service(self,service_id):

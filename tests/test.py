@@ -50,7 +50,7 @@ else: puts(f"Test Failed: Coundl't change the password ✗", color=colors.red); 
 
 
 #Create new Service
-service = firegex.create_service(args.service_name,args.service_port)
+service = firegex.create_service(args.service_name,args.service_port,"tcp","127.0.0.1/24")
 if service:
      puts(f"Sucessfully created service {args.service_name} with public port {args.service_port} ✔", color=colors.green)
      service_created = True
