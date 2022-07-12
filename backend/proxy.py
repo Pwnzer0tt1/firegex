@@ -4,6 +4,7 @@ from pypacker.layer3 import ip, ip6
 from pypacker.layer4 import tcp, udp
 from subprocess import Popen, PIPE
 import os, traceback, pcre, re
+from ipaddress import ip_interface
 
 QUEUE_BASE_NUM = 1000
 
@@ -17,10 +18,12 @@ class ProtoTypes:
 
 class IPTables:
 
-    def __init__(self, ipv6=False):
+    def __init__(self, ipv6=False, table="mangle"):
         self.ipv6 = ipv6
+        self.table = table
     
     def command(self, params):
+        params = ["-t", self.table] + params
         if os.geteuid() != 0:
             exit("You need to have root privileges to run this script.\nPlease try again, this time using 'sudo'. Exiting.")
         return Popen(["ip6tables"]+params if self.ipv6 else ["iptables"]+params, stdout=PIPE, stderr=PIPE).communicate()
@@ -48,18 +51,12 @@ class IPTables:
         self.command(["-F", str(name)])
 
     def add_chain_to_input(self, name):
-        if not self.find_if_filter_exists("INPUT", str(name)):
-            self.command(["-I", "INPUT", "-j", str(name)])
-        if not self.find_if_filter_exists("DOCKER-USER", str(name)):
-            self.command(["-I", "DOCKER-USER", "-j", str(name)])
-
+        if not self.find_if_filter_exists("PREROUTING", str(name)):
+            self.command(["-I", "PREROUTING", "-j", str(name)])
+    
     def add_chain_to_output(self, name):
-        if not self.find_if_filter_exists("OUTPUT", str(name)):
-            self.command(["-I", "OUTPUT", "-j", str(name)])
-        if not self.find_if_filter_exists("FORWARD", str(name)):
-            self.command(["-I", "FORWARD", "-j", str(name)])
-        if not self.find_if_filter_exists("DOCKER-USER", str(name)):
-            self.command(["-I", "DOCKER-USER", "-j", str(name)])
+        if not self.find_if_filter_exists("POSTROUTING", str(name)):
+            self.command(["-I", "POSTROUTING", "-j", str(name)])
 
     def find_if_filter_exists(self, type, target):
         for filter in self.list_filters(type):
@@ -67,34 +64,39 @@ class IPTables:
                 return True
         return False
 
-    def add_s_to_c(self, proto, port, queue_range):
+    def add_s_to_c(self, queue_range, proto = None, port = None, ip_int = None):
         init, end = queue_range
         if init > end: init, end = end, init
-        self.command([
-            "-A", FilterTypes.OUTPUT, "-p", str(proto),
-            "--sport", str(port), "-j", "NFQUEUE",
-            "--queue-num" if init == end else "--queue-balance",
-            f"{init}" if init == end else f"{init}:{end}", "--queue-bypass"
+        self.command(["-A", FilterTypes.OUTPUT,
+            * (["-p", str(proto)] if proto else []),
+            * (["-s", str(ip_int)] if ip_int else []),
+            * (["--sport", str(port)] if port else []),
+            "-j", "NFQUEUE",
+            * (["--queue-num", f"{init}"] if init == end else ["--queue-balance", f"{init}:{end}"]),
+            "--queue-bypass"
         ])
 
-    def add_c_to_s(self, proto, port, queue_range):
+    def add_c_to_s(self, queue_range, proto = None, port = None, ip_int = None):
         init, end = queue_range
         if init > end: init, end = end, init
-        self.command([
-            "-A", FilterTypes.INPUT, "-p", str(proto),
-            "--dport", str(port), "-j", "NFQUEUE",
-            "--queue-num" if init == end else "--queue-balance",
-            f"{init}" if init == end else f"{init}:{end}", "--queue-bypass"
+        self.command(["-A", FilterTypes.INPUT,
+            * (["-p", str(proto)] if proto else []),
+            * (["-d", str(ip_int)] if ip_int else []),
+            * (["--dport", str(port)] if port else []),
+            "-j", "NFQUEUE",
+            * (["--queue-num", f"{init}"] if init == end else ["--queue-balance", f"{init}:{end}"]),
+            "--queue-bypass"
         ])
 
 class FiregexFilter():
-    def __init__(self, type, number, queue, proto, port, ipv6):
+    def __init__(self, type, number, queue, proto, port, ipv6, ip_int):
         self.type = type
         self.id = int(number)
         self.queue = queue
         self.proto = proto
         self.port = int(port)
         self.iptable = IPTables(ipv6)
+        self.ip_int = str(ip_int)
 
     def __repr__(self) -> str:
         return f"<FiregexFilter type={self.type} id={self.id} port={self.port} proto={self.proto} queue={self.queue}>"
@@ -103,18 +105,17 @@ class FiregexFilter():
         self.iptable.delete_command(self.type, self.id)
 
 class Interceptor:
-    def __init__(self, iptables, c_to_s, s_to_c, proto, ipv6, port, n_threads):
+    def __init__(self, iptables, ip_int, c_to_s, s_to_c, proto, ipv6, port, n_threads):
         self.proto = proto
         self.ipv6 = ipv6
         self.itor_c_to_s, codes = self._start_queue(c_to_s, n_threads)
-        iptables.add_c_to_s(proto, port, codes)
+        iptables.add_c_to_s(queue_range=codes, proto=proto, port=port, ip_int=ip_int)
         self.itor_s_to_c, codes = self._start_queue(s_to_c, n_threads)
-        iptables.add_s_to_c(proto, port, codes)
+        iptables.add_s_to_c(queue_range=codes, proto=proto, port=port, ip_int=ip_int)
 
     def _start_queue(self,func,n_threads):
         def func_wrap(ll_data, ll_proto_id, data, ctx, *args):
             pkt_parsed = ip6.IP6(data) if self.ipv6 else ip.IP(data)
-            
             try:
                 level4 = None
                 if self.proto == ProtoTypes.TCP: level4 = pkt_parsed[tcp.TCP].body_bytes
@@ -152,9 +153,9 @@ class Interceptor:
 
 class FiregexFilterManager:
 
-    def __init__(self, ipv6):
-        self.ipv6 = ipv6
-        self.iptables = IPTables(ipv6)
+    def __init__(self, srv):
+        self.ipv6 = srv["ipv6"]
+        self.iptables = IPTables(self.ipv6)
         self.iptables.create_chain(FilterTypes.INPUT)
         self.iptables.create_chain(FilterTypes.OUTPUT)
         self.iptables.add_chain_to_input(FilterTypes.INPUT)
@@ -177,30 +178,32 @@ class FiregexFilterManager:
                         queue=queue_num,
                         proto=filter["prot"],
                         port=int(port[0]),
-                        ipv6=self.ipv6
+                        ipv6=self.ipv6,
+                        ip_int=filter["source"] if filter_type == FilterTypes.OUTPUT else filter["destination"]
                     ))
         return res
     
-    def add(self, proto, port, func, n_threads = 1):
+    def add(self, proto, port, ip_int, func):
         for ele in self.get():
-            if int(port) == ele.port: return None
+            if int(port) == ele.port and proto == ele.proto and ip_interface(ip_int) == ip_interface(ele.ip_int):
+                return None
         
         def c_to_s(pkt): return func(pkt, True)
         def s_to_c(pkt): return func(pkt, False)
 
-        itor = Interceptor( self.iptables, 
-                            c_to_s, s_to_c,
-                            proto, self.ipv6, port,
-                            int(os.getenv("N_THREADS_NFQUEUE","1")))
+        itor = Interceptor( iptables=self.iptables, ip_int=ip_int,
+                            c_to_s=c_to_s, s_to_c=s_to_c,
+                            proto=proto, ipv6=self.ipv6, port=port,
+                            n_threads=int(os.getenv("N_THREADS_NFQUEUE","1")))
         return itor
 
     def delete_all(self):
         for filter_type in [FilterTypes.INPUT, FilterTypes.OUTPUT]:
             self.iptables.flush_chain(filter_type)
     
-    def delete_by_port(self, port):
+    def delete_by_srv(self, srv):
         for filter in self.get():
-            if filter.port == int(port):
+            if filter.port == int(srv["port"]) and filter.proto == srv["proto"] and ip_interface(filter.ip_int) == ip_interface(srv["ip_int"]):
                 filter.delete()
 
 class Filter:
@@ -224,10 +227,10 @@ class Filter:
         return True if self.compiled_regex.search(data) else False
 
 class Proxy:
-    def __init__(self, port, ipv6, filters=None):
-        self.manager = FiregexFilterManager(ipv6)
-        self.port = port
-        self.filters = filters if filters else []
+    def __init__(self, srv, filters=None):
+        self.srv = srv
+        self.manager = FiregexFilterManager(self.srv)
+        self.filters: List[Filter] = filters if filters else []
         self.interceptor = None
         
     def set_filters(self, filters):
@@ -239,7 +242,7 @@ class Proxy:
 
     def start(self):
         if not self.interceptor:
-            self.manager.delete_by_port(self.port)
+            self.manager.delete_by_srv(self.srv)
             def regex_filter(pkt, by_client):
                 try:
                     for filter in self.filters:
@@ -251,11 +254,11 @@ class Proxy:
                 except IndexError: pass
                 return True
 
-            self.interceptor = self.manager.add(ProtoTypes.TCP, self.port, regex_filter)
+            self.interceptor = self.manager.add(self.srv["proto"], self.srv["port"], self.srv["ip_int"], regex_filter)
 
 
     def stop(self):
-        self.manager.delete_by_port(self.port)
+        self.manager.delete_by_srv(self.srv)
         if self.interceptor:
             self.interceptor.stop()
             self.interceptor = None

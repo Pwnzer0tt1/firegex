@@ -10,6 +10,8 @@ export type Service = {
     status:string,
     port:number,
     ipv6:boolean,
+    proto: string,
+    ip_int: string,
     n_packets:number,
     n_regex:number,
 }
@@ -17,7 +19,6 @@ export type Service = {
 export type ServiceAddForm = {
     name:string,
     port:number,
-    ipv6:boolean,
     proto:string,
     ip_int:string,
 }

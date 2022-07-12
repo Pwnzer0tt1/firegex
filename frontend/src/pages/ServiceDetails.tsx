@@ -18,7 +18,9 @@ function ServiceDetails() {
         n_regex:0,
         name:"",
         ipv6:false,
-        status:"🤔"
+        status:"🤔",
+        ip_int: "",
+        proto: "tcp",
     })
 
     const [regexesList, setRegexesList] = useState<RegexFilter[]>([])

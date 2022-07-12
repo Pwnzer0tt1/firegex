@@ -98,7 +98,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                     <Space h="xs" />
                     <Badge color="violet" radius="sm" size="md" variant="filled">Regex: {service.n_regex}</Badge>
                     <Space h="xs" />
-                    <Badge color={service.ipv6?"pink":"cyan"} radius="sm" size="md" variant="filled">Protocol: {service.ipv6?"IPv6":"IPv4"}</Badge>
+                    <Badge color={service.ipv6?"pink":"cyan"} radius="sm" size="md" variant="filled">{service.ip_int} on {service.proto}</Badge>
                 </div>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}>
                     <div className='flex-spacer' />

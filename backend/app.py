@@ -10,6 +10,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi_socketio import SocketManager
+from ipaddress import ip_interface
 
 ON_DOCKER = len(sys.argv) > 1 and sys.argv[1] == "DOCKER"
 DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
@@ -24,7 +25,7 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
     REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
-    VERSION = "1.4.0"
+    VERSION = "1.5.0"
     
 
 settings = Settings()
@@ -163,6 +164,8 @@ class ServiceModel(BaseModel):
     port: int
     name: str
     ipv6: bool
+    proto: str
+    ip_int: str
     n_regex: int
     n_packets: int
 
@@ -176,6 +179,8 @@ async def get_service_list(auth: bool = Depends(is_loggined)):
             s.port port,
             s.name name,
             s.ipv6 ipv6,
+            s.proto proto,
+            s.ip_int ip_int,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r
@@ -192,6 +197,8 @@ async def get_service_by_id(service_id: str, auth: bool = Depends(is_loggined)):
             s.port port,
             s.name name,
             s.ipv6 ipv6,
+            s.proto proto,
+            s.ip_int ip_int,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r WHERE s.service_id = ?
@@ -332,7 +339,6 @@ async def add_new_regex(form: RegexAddForm, auth: bool = Depends(is_loggined)):
 class ServiceAddForm(BaseModel):
     name: str
     port: int
-    ipv6: bool
     proto: str
     ip_int: str
 
@@ -343,21 +349,22 @@ class ServiceAddResponse(BaseModel):
 @app.post('/api/services/add', response_model=ServiceAddResponse)
 async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
     """Add a new service"""
-    if form.ipv6:
-        if not checkIpv6(form.ip_int):
-            return {"status":"Invalid IPv6 address"}
-    else:
-        if not checkIpv4(form.ip_int):
-            return {"status":"Invalid IPv4 address"}
+    ipv6 = None
+    try:
+        ip_int = ip_interface(form.ip_int)
+        ipv6 = ip_int.version == 6
+        form.ip_int = str(ip_int)
+    except ValueError:
+        return {"status":"Invalid address"}
     if form.proto not in ["tcp", "udp"]:
         return {"status":"Invalid protocol"}
     srv_id = None
     try:
         srv_id = gen_service_id(db)
-        db.query("INSERT INTO services (service_id ,name, port, ipv6, status) VALUES (?, ?, ?, ?, ?)",
-                    srv_id, refactor_name(form.name), form.port, form.ipv6, STATUS.STOP)
+        db.query("INSERT INTO services (service_id ,name, port, ipv6, status, proto, ip_int) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    srv_id, refactor_name(form.name), form.port, ipv6, STATUS.STOP, form.proto, form.ip_int)
     except sqlite3.IntegrityError:
-        return {'status': 'Name or/and ports of the service has been already assigned'}
+        return {'status': 'This type of service already exists'}
     await firewall.reload()
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}

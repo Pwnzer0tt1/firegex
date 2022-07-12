@@ -41,8 +41,7 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
  
     const submitRequest = ({ name, port, autostart, proto, ip_int }:ServiceAddForm) =>{
         setSubmitLoading(true)
-        const ipv6 = ip_int.match(regex_ipv4)?false:true
-        addservice({name, port, ipv6, proto, ip_int }).then( res => {
+        addservice({name, port, proto, ip_int }).then( res => {
             if (res.status === "ok" && res.service_id){
                 setSubmitLoading(false)
                 close();
@@ -69,7 +68,7 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
 
             <TextInput
                 label="Public IP Interface (ipv4/ipv6 + CIDR allowed)"
-                placeholder="10.40.20.0/8"
+                placeholder="10.1.1.0/24"
                 {...form.getInputProps('ip_int')}
             />
 
@@ -85,20 +84,21 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             
             <Space h="md" />
 
-            <SegmentedControl
-                data={[
-                    { label: 'TCP', value: 'tcp' },
-                    { label: 'UDP', value: 'udp' },
-                ]}
-                {...form.getInputProps('proto')}
-            />
 
-            <Space h="xl" />
-
-            <Switch
-                label="Auto-Start Service"
-                {...form.getInputProps('autostart', { type: 'checkbox' })}
-            />        
+            <div className='center-flex'>
+                <Switch
+                    label="Auto-Start Service"
+                    {...form.getInputProps('autostart', { type: 'checkbox' })}
+                />  
+                <div className="flex-spacer"></div>
+                <SegmentedControl
+                    data={[
+                        { label: 'TCP', value: 'tcp' },
+                        { label: 'UDP', value: 'udp' },
+                    ]}
+                    {...form.getInputProps('proto')}
+                />
+            </div>      
 
             <Group position="right" mt="md">
                 <Button loading={submitLoading} type="submit">Add Service</Button>
