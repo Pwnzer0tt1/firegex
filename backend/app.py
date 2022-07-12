@@ -5,12 +5,14 @@ from typing import List, Union
 from fastapi import FastAPI, HTTPException, WebSocket, Depends
 from pydantic import BaseModel, BaseSettings
 from fastapi.responses import FileResponse, StreamingResponse
-from utils import *
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi_socketio import SocketManager
 from ipaddress import ip_interface
+from modules import SQLite, FirewallManager
+from modules.firewall import STATUS
+from utils import refactor_name, gen_service_id
 
 ON_DOCKER = len(sys.argv) > 1 and sys.argv[1] == "DOCKER"
 DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
@@ -18,8 +20,7 @@ DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
 # DB init
 if not os.path.exists("db"): os.mkdir("db")
 db = SQLite('db/firegex.db')
-conf = KeyValueStorage(db)
-firewall = ProxyManager(db)
+firewall = FirewallManager(db)
 
 class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
@@ -35,8 +36,8 @@ crypto = CryptContext(schemes=["bcrypt"], deprecated="auto")
 app = FastAPI(debug=DEBUG, redoc_url=None)
 sio = SocketManager(app, "/sock", socketio_path="")
 
-def APP_STATUS(): return "init" if conf.get("password") is None else "run"
-def JWT_SECRET(): return conf.get("secret")
+def APP_STATUS(): return "init" if db.get("password") is None else "run"
+def JWT_SECRET(): return db.get("secret")
 
 async def refresh_frontend():
     await sio.emit("update","Refresh")
@@ -49,7 +50,7 @@ async def startup_event():
     db.init()
     await firewall.init(refresh_frontend)
     await refresh_frontend()
-    if not JWT_SECRET(): conf.put("secret", secrets.token_hex(32))
+    if not JWT_SECRET(): db.put("secret", secrets.token_hex(32))
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -108,7 +109,7 @@ async def login_api(form: OAuth2PasswordRequestForm = Depends()):
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
     await asyncio.sleep(0.3) # No bruteforce :)
-    if crypto.verify(form.password, conf.get("password")):
+    if crypto.verify(form.password, db.get("password")):
         return {"access_token": create_access_token({"logged_in": True}), "token_type": "bearer"}
     raise HTTPException(406,"Wrong password!")
 
@@ -124,10 +125,10 @@ async def change_password(form: PasswordChangeForm, auth: bool = Depends(is_logg
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
     if form.expire:
-        conf.put("secret", secrets.token_hex(32))
+        db.put("secret", secrets.token_hex(32))
     
     hash_psw = crypto.hash(form.password)
-    conf.put("password",hash_psw)
+    db.put("password",hash_psw)
     await refresh_frontend()
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 
@@ -139,7 +140,7 @@ async def set_password(form: PasswordForm):
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
     hash_psw = crypto.hash(form.password)
-    conf.put("password",hash_psw)
+    db.put("password",hash_psw)
     await refresh_frontend()
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 
