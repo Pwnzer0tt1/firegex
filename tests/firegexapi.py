@@ -75,10 +75,6 @@ class FiregexAPI:
         req = self.s.get(f"{self.address}api/service/{service_id}/start")
         return req.json()["status"] == "ok"
 
-    def pause(self,service_id):
-        req = self.s.get(f"{self.address}api/service/{service_id}/pause")
-        return req.json()["status"] == "ok"
-
     def stop(self,service_id):
         req = self.s.get(f"{self.address}api/service/{service_id}/stop")
         return req.json()["status"] == "ok"

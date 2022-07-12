@@ -3,7 +3,7 @@ docker-compose.yml
 
 **/*.pyc
 **/__pycache__/
-/.vscode/
+**/.vscode/**
 
 #Node filters
 

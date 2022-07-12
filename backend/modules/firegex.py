@@ -71,7 +71,7 @@ class FiregexTables(IPTables):
     def add_output(self, queue_range, proto = None, port = None, ip_int = None):
         init, end = queue_range
         if init > end: init, end = end, init
-        self.append_rule(FilterTypes.OUTPUT,"NFQUEUE"
+        self.append_rule(FilterTypes.OUTPUT,"NFQUEUE",
             * (["-p", str(proto)] if proto else []),
             * (["-s", str(ip_int)] if ip_int else []),
             * (["--sport", str(port)] if port else []),
@@ -92,8 +92,9 @@ class FiregexTables(IPTables):
 
     def get(self) -> List[FiregexFilter]:
         res = []
+        iptables_filters = self.list()
         for filter_type in [FilterTypes.INPUT, FilterTypes.OUTPUT]:
-            for filter in self.list()[filter_type]:
+            for filter in iptables_filters[filter_type]:
                 port = filter.sport() if filter_type == FilterTypes.OUTPUT else filter.dport()
                 queue = filter.nfqueue()
                 if queue and port:
@@ -133,13 +134,13 @@ class FiregexInterceptor:
         def func_wrap(ll_data, ll_proto_id, data, ctx, *args):
             pkt_parsed = ip6.IP6(data) if self.ipv6 else ip.IP(data)
             try:
-                data = None
+                pkt_data = None
                 if not pkt_parsed[tcp.TCP] is None:
-                    data = pkt_parsed[tcp.TCP].body_bytes
-                if not pkt_parsed[tcp.TCP] is None:
-                    data = pkt_parsed[udp.UDP].body_bytes
-                if data:
-                    if func(data):
+                    pkt_data = pkt_parsed[tcp.TCP].body_bytes
+                elif not pkt_parsed[udp.UDP] is None:
+                    pkt_data = pkt_parsed[udp.UDP].body_bytes
+                if pkt_data:
+                    if func(pkt_data):
                         return data, interceptor.NF_ACCEPT
                     elif pkt_parsed[tcp.TCP]:
                         pkt_parsed[tcp.TCP].flags &= 0x00

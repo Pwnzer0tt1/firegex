@@ -1,6 +1,7 @@
 from typing import Union
 import json, sqlite3, os
 from hashlib import md5
+import base64
 
 class SQLite():
     def __init__(self, db_name: str) -> None:
@@ -116,7 +117,7 @@ class Service:
 
 class Regex:
     def __init__(self, id: int, regex: str, mode: str, service_id: str, is_blacklist: bool, blocked_packets: int, is_case_sensitive: bool, active: bool):
-        self.regex = regex
+        self.regex = base64.b64decode(regex)
         self.mode = mode
         self.service_id = service_id
         self.is_blacklist = is_blacklist

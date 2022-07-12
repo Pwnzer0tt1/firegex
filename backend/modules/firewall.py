@@ -45,7 +45,7 @@ class FirewallManager:
                     continue
 
                 self.proxy_table[srv.id] = ServiceManager(srv, self.db)
-                await self.proxy_table[srv.id].next(srv["status"])
+                await self.proxy_table[srv.id].next(srv.status)
 
     async def _stats_updater(self, callback):
         try:
@@ -111,7 +111,7 @@ class ServiceManager:
     def __init__(self, srv: Service, db):
         self.srv = srv
         self.db = db
-        self.iptables = FiregexTables(self.srv.ipv6)
+        self.firegextable = FiregexTables(self.srv.ipv6)
         self.status = STATUS.STOP
         self.filters: Dict[int, FiregexFilter] = {}
         self._update_filters_from_db()
@@ -137,22 +137,19 @@ class ServiceManager:
         for f in new_filters:
             if not f in old_filters:
                 filter = [ele for ele in regexes if ele.id == f][0]
-                self.filters[f] = FiregexFilter.from_regex(filter)
+                self.filters[f] = RegexFilter.from_regex(filter)
     
     def __update_status_db(self, status):
-        self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", status, self.srv["service_id"])
+        self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", status, self.srv.id)
 
     async def next(self,to):
         async with self.lock:
-            return self._next(to)
-    
-    def _next(self, to):
-        if (self.status, to) == (STATUS.ACTIVE, STATUS.STOP):
-            self.proxy.stop()
-            self._set_status(to)
-        # PAUSE -> ACTIVE
-        elif (self.status, to) == (STATUS.STOP, STATUS.ACTIVE):
-            self.proxy.restart()
+            if (self.status, to) == (STATUS.ACTIVE, STATUS.STOP):
+                self.stop()
+                self._set_status(to)
+            # PAUSE -> ACTIVE
+            elif (self.status, to) == (STATUS.STOP, STATUS.ACTIVE):
+                self.restart()
 
     def _stats_updater(self,filter:RegexFilter):
         self.db.query("UPDATE regexes SET blocked_packets = ? WHERE regex_id = ?;", filter.blocked, filter.id)
@@ -167,7 +164,7 @@ class ServiceManager:
 
     def start(self):
         if not self.interceptor:
-            self.iptables.delete_by_srv(self.srv)
+            self.firegextable.delete_by_srv(self.srv)
             def regex_filter(pkt, by_client):
                 try:
                     for filter in self.filters.values():
@@ -178,11 +175,11 @@ class ServiceManager:
                                 return False
                 except IndexError: pass
                 return True
-            self.interceptor = self.iptables.add(self.srv["proto"], self.srv["port"], self.srv["ip_int"], regex_filter)
+            self.interceptor = self.firegextable.add(FiregexFilter(self.srv.proto,self.srv.port, self.srv.ip_int, func=regex_filter))
             self._set_status(STATUS.ACTIVE)
 
     def stop(self):
-        self.iptables.delete_by_srv(self.srv)
+        self.firegextable.delete_by_srv(self.srv)
         if self.interceptor:
             self.interceptor.stop()
             self.interceptor = None

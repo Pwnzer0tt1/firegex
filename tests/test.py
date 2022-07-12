@@ -58,11 +58,11 @@ else: puts(f"Test Failed: Couldn't create service ✗", color=colors.red); exit(
 
 #Delete the Service and exit
 def exit_test(status_code=0):
-    #if service_created:
-    #    if(firegex.delete(service)):
-    #        puts(f"Sucessfully delete service with id {service} ✔", color=colors.green)
-    #    else:
-    #        puts(f"Test Failed: Couldn't delete service ✗", color=colors.red); exit(1)
+    if service_created:
+        if(firegex.delete(service)):
+            puts(f"Sucessfully delete service with id {service} ✔", color=colors.green)
+        else:
+            puts(f"Test Failed: Couldn't delete service ✗", color=colors.red); exit(1)
     sep()
     server.terminate()
     exit(status_code)
@@ -120,6 +120,7 @@ def checkRegex(regex):
             if not sendCheckData(secrets.token_bytes(200) + secret +  secrets.token_bytes(200)):
                 puts(f"The malicious request was successfully blocked ✔", color=colors.green)
                 n_blocked += 1
+                sleep(10)
                 if firegex.get_regex(r["id"])["n_packets"] == n_blocked:
                     puts(f"The packed was reported as blocked ✔", color=colors.green)
                 else:
@@ -132,7 +133,7 @@ def checkRegex(regex):
 checkRegex(regex)
 
 #Pause the proxy
-if(firegex.pause(service)): puts(f"Sucessfully paused service with id {service} ✔", color=colors.green)
+if(firegex.stop(service)): puts(f"Sucessfully paused service with id {service} ✔", color=colors.green)
 else: puts(f"Test Failed: Coulnd't pause the service ✗", color=colors.red); exit_test(1)
 
 #Check if it's actually paused
@@ -140,49 +141,8 @@ if sendCheckData(secrets.token_bytes(200) + secret +  secrets.token_bytes(200)):
     puts(f"The request wasn't blocked ✔", color=colors.green)
 else:
     puts(f"Test Failed: The request was blocked when it shouldn't have", color=colors.red)
-#Stop the proxy
-if(firegex.stop(service)): puts(f"Sucessfully stopped service with id {service} ✔", color=colors.green)
-else: puts(f"Test Failed: Coulnd't stop the service ✗", color=colors.red); exit_test(1)
 
-#Check if proxy is stopped and check if WAIT works
-def bindForSeconds(port,delay=4):
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        sock.bind(('127.0.0.1', port))
-        sock.listen()
-        puts(f"The test could bind to port {port} ✔", color=colors.green)
-        sleep(delay)
-        sock.close()
-    except Exception as e:
-        puts(f"The test couldn't bind to port {port} ✗", color=colors.red)
-
-bindingTest = Process(target=bindForSeconds, args=[args.service_port])
-bindingTest.start()
-sleep(1)
-
-#Restart it 
-if(firegex.pause(service)): puts(f"Sucessfully started in pause mode ✔", color=colors.green)
-else: puts(f"Test Failed: Coulnd't start the service ✗", color=colors.red); exit_test(1)
-if firegex.get_service(service)["status"] == "wait":
-    puts(f"Service started in WAIT mode ✔", color=colors.green)
-else:
-    puts(f"Service started but it's not WAIT mode ✗", color=colors.red); exit_test(1)
-
-bindingTest.join()
-sleep(1)
-#Check if service started in pause mode successfully
-if firegex.get_service(service)["status"] == "pause":
-    puts(f"Service started in PAUSE mode ✔", color=colors.green)
-else:
-    puts(f"Service is not in PAUSE mode ✗", color=colors.red); exit_test(1)
-
-if sendCheckData(secrets.token_bytes(200) + secret +  secrets.token_bytes(200)):
-    puts(f"The request wasn't blocked ✔", color=colors.green)
-else:
-    puts(f"Test Failed: The request was blocked when it shouldn't have", color=colors.red)
-
-#Restart it and check
+#Start firewall
 if(firegex.start(service)): puts(f"Sucessfully started service with id {service} ✔", color=colors.green)
 else: puts(f"Test Failed: Coulnd't start the service ✗", color=colors.red); exit_test(1)
 

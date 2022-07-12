@@ -12,6 +12,9 @@ class Rule():
         self.destination = destination
         self.details = details
     
+    def __repr__(self) -> str:
+        return f"Rule {self.id} : {self.target}, {self.prot}, {self.opt}, {self.source}, {self.destination}, {self.details}"
+
     def dport(self) -> Union[int, None]:
         port = re.findall(r"dpt:([0-9]+)", self.details)
         return int(port[0]) if port else None
@@ -49,7 +52,7 @@ class IPTables:
             if line.startswith("Chain"):
                 chain_name = line.split()[1]
                 res[chain_name] = []
-            elif line.split()[0].isnumeric():
+            elif line and line.split()[0].isnumeric():
                 parsed = re.findall(r"([^ ]*)[ ]{,10}([^ ]*)[ ]{,5}([^ ]*)[ ]{,5}([^ ]*)[ ]{,5}([^ ]*)[ ]+([^ ]*)[ ]+(.*)", line)
                 if len(parsed) > 0:
                     parsed = parsed[0]
@@ -60,7 +63,7 @@ class IPTables:
                         opt=parsed[3].strip(),
                         source=parsed[4].strip(),
                         destination=parsed[5].strip(),
-                        details=" ".join(parsed[6:]).strip() if len(parsed[0]) >= 7 else ""
+                        details=" ".join(parsed[6:]).strip() if len(parsed) >= 7 else ""
                     ))
         return res
 
