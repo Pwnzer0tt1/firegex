@@ -1,5 +1,7 @@
 github.com/DomySh/go-netfilter-queue v0.0.0-20220713124014-7261f0df2c15 h1:6v9D8bG3oR0dJFMuEeEAg8Xwn436Ziv+P7QWS04wAG8=
 github.com/DomySh/go-netfilter-queue v0.0.0-20220713124014-7261f0df2c15/go.mod h1:VdJ6kqHln0XlrhuxQM6eBjRIHCzvAMgcZDAtyD/GU5s=
+github.com/Jemmic/go-pcre2 v0.0.0-20190111114109-bd52ad5f7098 h1:ZwFIi+5jGJWVrB2V4NvrEhIUy6uDkfnTtBsgj3HAImI=
+github.com/Jemmic/go-pcre2 v0.0.0-20190111114109-bd52ad5f7098/go.mod h1:c+8WT1L7lfohb4xMaa3yAV7nlYNepqc2ZV09/CU8R/U=
 github.com/google/gopacket v1.1.19 h1:ves8RnFZPGiFnTS0uPQStjwru6uO6h+nlr9j6fL7kF8=
 github.com/google/gopacket v1.1.19/go.mod h1:iJ8V8n6KS+z2U1A8pUwu8bW5SyEMkXJB8Yo/Vo+TKTo=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
