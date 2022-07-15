@@ -13,9 +13,84 @@
 #include <cstring>
 #include <cstdlib>
 #include <cerrno>
+#include <sstream>
+#include <jpcre2.hpp>
 
+typedef jpcre2::select<char> jp;
 using namespace std;
 using namespace Tins;
+
+bool unhexlify(string const &hex, string &newString) {
+   try{
+      int len = hex.length();
+      for(int i=0; i< len; i+=2)
+      {
+         std::string byte = hex.substr(i,2);
+         char chr = (char) (int)strtol(byte.c_str(), NULL, 16);
+         newString.push_back(chr);
+      }
+      return true;
+   }
+   catch (...){
+      return false;
+   }
+}
+
+
+typedef pair<string,jp::Regex> regex_rule_pair;
+typedef vector<regex_rule_pair> regex_rule_vector;
+struct regex_rules{
+   regex_rule_vector regex_s_c_w, regex_c_s_w, regex_s_c_b, regex_c_s_b;
+
+   regex_rule_vector* getByCode(char code){
+      switch(code){
+         case 'C': // Client to server Blacklist
+            return &regex_c_s_b;  break;
+         case 'c': // Client to server Whitelist
+            return &regex_c_s_w;  break;
+         case 'S': // Server to client Blacklist
+            return &regex_s_c_b;  break;
+         case 's': // Server to client Whitelist
+            return &regex_s_c_w;  break;
+      }
+      throw invalid_argument( "Expected 'C' 'c' 'S' or 's'" );
+   }
+
+   int add(const char* arg){
+		//Integrity checks
+		size_t arg_len = strlen(arg);
+		if (arg_len < 2 || arg_len%2 != 0){
+			cerr << "[warning] [regex_rules.add] invalid arg passed (" << arg << "), skipping..." << endl;
+			return -1;
+		}
+		if (arg[0] != '0' && arg[0] != '1'){
+			cerr << "[warning] [regex_rules.add] invalid is_case_sensitive (" << arg[0] << ") in '" << arg << "', must be '1' or '0', skipping..." << endl;
+			return -1;
+		}
+		if (arg[1] != 'C' && arg[1] != 'c' && arg[1] != 'S' && arg[1] != 's'){
+			cerr << "[warning] [regex_rules.add] invalid filter_type (" << arg[1] << ") in '" << arg << "', must be 'C', 'c', 'S' or 's', skipping..." << endl;
+			return -1;
+		}
+		string hex(arg+2), expr;
+		if (!unhexlify(hex, expr)){
+			cerr << "[warning] [regex_rules.add] invalid hex regex value (" << hex << "), skipping..." << endl;
+			return -1;
+		}
+		//Push regex
+		jp::Regex regex(expr,arg[0] == '1'?"gS":"giS");
+		if (regex){
+			cerr << "[info] [regex_rules.add] adding new regex filter: '" << expr << "'" << endl;			
+			getByCode(arg[1])->push_back(make_pair(string(arg), regex));
+		} else {
+			cerr << "[warning] [regex_rules.add] compiling of '" << expr << "' regex failed, skipping..." << endl;
+			return -1;
+		}
+		return 0;
+	}
+
+};
+
+shared_ptr<regex_rules> regex_config;
 
 typedef bool NetFilterQueueCallback(const uint8_t*,uint32_t);
 typedef struct mnl_socket* NetFilterQueueSocket;
@@ -45,17 +120,17 @@ class NetfilterQueue {
 		nl = mnl_socket_open(NETLINK_NETFILTER);
 		
 		if (nl == NULL) {
-			throw std::runtime_error( "mnl_socket_open" );
+			throw runtime_error( "mnl_socket_open" );
 		}
 
 		if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0) {
-			throw std::runtime_error( "mnl_socket_bind" );
+			throw std::invalid_argument( "mnl_socket_bind" );
 		}
 		portid = mnl_socket_get_portid(nl);
 
 		buf = (char*) malloc(BUF_SIZE);
 		if (!buf) {
-			throw std::runtime_error( "allocate receive buffer" );
+			throw runtime_error( "allocate receive buffer" );
 		}
 
 		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
@@ -63,7 +138,7 @@ class NetfilterQueue {
 
 		if (mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0) {
 			free(buf);
-			throw std::runtime_error( "mnl_socket_send" );
+			throw runtime_error( "mnl_socket_send" );
 		}
 
 		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
@@ -74,7 +149,7 @@ class NetfilterQueue {
 
 		if (mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0) {
 			free(buf);
-			throw std::runtime_error( "mnl_socket_send" );
+			throw runtime_error( "mnl_socket_send" );
 		}
 
 	}
@@ -194,17 +269,127 @@ class NetfilterQueue {
 };
 
 
+bool is_sudo(){
+	return getuid() == 0;
+}
+
+
 bool callb(const uint8_t *data, uint32_t len){
 	return true;
 }
 
+void config_updater (){
+	string line, data;
+	while (true){
+		getline(cin, line);
+		if (cin.bad()){
+			cerr << "[fatal] [upfdater] cin.bad() != 0" << endl;
+			exit(EXIT_FAILURE);
+		}
+		cerr << "[info] [updater] Updating configuration with line " << line << endl;
+		istringstream config_stream(line);
+		regex_rules *regex_new_config = new regex_rules();
+		while(!config_stream.eof()){
+			config_stream >> data;
+			regex_new_config->add(data.c_str());
+		}
+		regex_config.reset(regex_new_config);
+		cerr << "[info] [updater] Config update done" << endl;
+
+	}
+	
+}
+
+template <NetFilterQueueCallback func>
+class NFQueueSequence{
+	private:
+		vector<* NetfilterQueue<func>> *nfq = nullptr;
+		uint16_t _init;
+		uint16_t _end;
+	public:
+		static const QUEUE_BASE_NUM = 1000;
+
+		NFQueueSequence(uint16_t seq_len){
+			if (seq_len <= 0) throw invalid_argument("seq_len <= 0");
+			nfq = new vector<* NetfilterQueue<func>>(seq_len);
+			_init = QUEUE_BASE_NUM;
+			while(nfq[0] == NULL){
+				if (_init+seq_len-1 >= 65536){
+					throw runtime_error("NFQueueSequence: too many queues!");
+				}
+				for (int i=0;i<seq_len;i++){
+					try{
+						nfq[i] = new NetfilterQueue<func>(_init+i);
+					}catch(const invalid_argument e){
+						for(int j = 0; j < i; j++) {
+							delete nfq[j];
+							nfq[j] = nullptr;
+						}
+						_init += seq_len - i;
+						break;
+					}
+				}
+			}
+			_end = _init + seq_len - 1;
+		}
+
+		uint16_t init() return _init;
+		uint16_t end() return _end;
+		
+		~NFQueueSequence(){
+			
+		}
+};
+
+template <NetFilterQueueCallback func>
+nf_queue_seq* create_queue_seq() {
+	var queue_list = make([]*netfilter.NFQueue, num)
+	var err error
+	starts := QUEUE_BASE_NUM
+	for queue_list[0] == nil {
+		if starts+num-1 >= 65536 {
+			log.Fatalf("Netfilter queue is full!")
+		}
+		for i := 0; i < len(queue_list); i++ {
+			queue_list[i], err = netfilter.NewNFQueue(uint16(starts+num-1-i), MAX_PACKET_IN_QUEUE, netfilter.NF_DEFAULT_PACKET_SIZE)
+			if err != nil {
+				for j := 0; j < i; j++ {
+					queue_list[j].Close()
+					queue_list[j] = nil
+				}
+				starts = starts + num - i
+				break
+			}
+		}
+
+	}
+	return queue_list, starts, starts + num - 1
+}
+
+
 int main(int argc, char *argv[])
 {
-	if (argc != 2) {
-		printf("Usage: %s [queue_num]\n", argv[0]);
+	if(!is_sudo()){
+		cerr << "[fatal] [main] You must be root to run this program" << endl;
 		exit(EXIT_FAILURE);
 	}
-	NetfilterQueue<callb>* queue = new NetfilterQueue<callb>(atoi(argv[1]));
-	queue->run();
-	return 0;
+
+	int n_of_queue = 1;
+	if (argc >= 2) n_of_queue = atoi(argv[1]);
+	
+
+
+
+	config_updater();
 }
+
+
+/*
+
+WORKDIR /tmp/
+RUN git clone --branch release https://github.com/jpcre2/jpcre2
+WORKDIR /tmp/jpcre2
+RUN ./configure; make; make install
+WORKDIR /
+
+*/
