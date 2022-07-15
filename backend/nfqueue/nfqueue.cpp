@@ -138,34 +138,40 @@ class NetfilterQueue {
 
 		nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(nfg->res_id));
 
-		#define PKT_OPS \
-		PDU *transport_layer = find_transport_layer(&packet); \
-		if(transport_layer->inner_pdu() == nullptr){ \
-			nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );\
-		}else{\
-			int size = transport_layer->inner_pdu()->size();\
-			if(callback_func((const uint8_t*)payload+plen - size, size)){\
-				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );\
-			} else{\
-				if (transport_layer->pdu_type() == PDU::TCP){\
-					((TCP *)transport_layer)->release_inner_pdu();\
-					((TCP *)transport_layer)->set_flag(TCP::FIN,1);\
-					((TCP *)transport_layer)->set_flag(TCP::ACK,1);\
-					((TCP *)transport_layer)->set_flag(TCP::SYN,0);\
-					nfq_nlmsg_verdict_put_pkt(nlh_verdict, packet.serialize().data(), packet.size());\
-					nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );		\
-				}else{\
-					nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_DROP );\
-				}\
-			}\
-		}\
+		/*
+			This define allow to avoid to allocate new heap memory for each packet.
+			The code under this comment is replicated for ipv6 and ip
+			Better solutions are welcome. :)
+		*/
+		#define PKT_HANDLE 																						\
+		PDU *transport_layer = find_transport_layer(&packet); 													\
+		if(transport_layer->inner_pdu() == nullptr || transport_layer == nullptr){ 								\
+			nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );								\
+		}else{																									\
+			int size = transport_layer->inner_pdu()->size();													\
+			if(callback_func((const uint8_t*)payload+plen - size, size)){										\
+				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );							\
+			} else{																								\
+				if (transport_layer->pdu_type() == PDU::TCP){													\
+					((TCP *)transport_layer)->release_inner_pdu();												\
+					((TCP *)transport_layer)->set_flag(TCP::FIN,1);												\
+					((TCP *)transport_layer)->set_flag(TCP::ACK,1);												\
+					((TCP *)transport_layer)->set_flag(TCP::SYN,0);												\
+					nfq_nlmsg_verdict_put_pkt(nlh_verdict, packet.serialize().data(), packet.size());			\
+					nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );						\
+				}else{																							\
+					nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_DROP );							\
+				}																								\
+			}																									\
+		}
 
+		// Check IP protocol version
 		if ( (((uint8_t*)payload)[0] & 0xf0) == 0x40 ){
 			IP packet = IP((uint8_t*)payload,plen);
-			PKT_OPS
+			PKT_HANDLE
 		}else{
 			IPv6 packet = IPv6((uint8_t*)payload,plen);
-			PKT_OPS
+			PKT_HANDLE
 		}	
 
 		/* example to set the connmark. First, start NFQA_CT section: */
