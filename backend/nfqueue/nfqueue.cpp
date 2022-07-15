@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cerrno>
 #include <sstream>
+#include <thread>
 #include <jpcre2.hpp>
 
 typedef jpcre2::select<char> jp;
@@ -273,11 +274,6 @@ bool is_sudo(){
 	return getuid() == 0;
 }
 
-
-bool callb(const uint8_t *data, uint32_t len){
-	return true;
-}
-
 void config_updater (){
 	string line, data;
 	while (true){
@@ -303,15 +299,16 @@ void config_updater (){
 template <NetFilterQueueCallback func>
 class NFQueueSequence{
 	private:
-		vector<* NetfilterQueue<func>> *nfq = nullptr;
+		vector<NetfilterQueue<func> *> nfq;
 		uint16_t _init;
 		uint16_t _end;
+		vector<thread> threads;
 	public:
-		static const QUEUE_BASE_NUM = 1000;
+		static const int QUEUE_BASE_NUM = 1000;
 
 		NFQueueSequence(uint16_t seq_len){
 			if (seq_len <= 0) throw invalid_argument("seq_len <= 0");
-			nfq = new vector<* NetfilterQueue<func>>(seq_len);
+			nfq = vector<NetfilterQueue<func>*>(seq_len);
 			_init = QUEUE_BASE_NUM;
 			while(nfq[0] == NULL){
 				if (_init+seq_len-1 >= 65536){
@@ -332,38 +329,41 @@ class NFQueueSequence{
 			}
 			_end = _init + seq_len - 1;
 		}
-
-		uint16_t init() return _init;
-		uint16_t end() return _end;
 		
-		~NFQueueSequence(){
-			
-		}
-};
-
-template <NetFilterQueueCallback func>
-nf_queue_seq* create_queue_seq() {
-	var queue_list = make([]*netfilter.NFQueue, num)
-	var err error
-	starts := QUEUE_BASE_NUM
-	for queue_list[0] == nil {
-		if starts+num-1 >= 65536 {
-			log.Fatalf("Netfilter queue is full!")
-		}
-		for i := 0; i < len(queue_list); i++ {
-			queue_list[i], err = netfilter.NewNFQueue(uint16(starts+num-1-i), MAX_PACKET_IN_QUEUE, netfilter.NF_DEFAULT_PACKET_SIZE)
-			if err != nil {
-				for j := 0; j < i; j++ {
-					queue_list[j].Close()
-					queue_list[j] = nil
-				}
-				starts = starts + num - i
-				break
+		void start(){
+			if (threads.size() != 0) throw runtime_error("NFQueueSequence: already started!");
+			for (int i=0;i<nfq.size();i++){
+				threads.push_back(thread(&NetfilterQueue<func>::run, nfq[i]));
 			}
 		}
 
-	}
-	return queue_list, starts, starts + num - 1
+		void join(){
+			for (int i=0;i<nfq.size();i++){
+				threads[i].join();
+			}
+			threads.clear();
+		}
+
+		uint16_t init(){
+			return _init;
+		}
+		uint16_t end(){
+			return _end;
+		}
+		
+		~NFQueueSequence(){
+			for (int i=0;i<nfq.size();i++){
+				delete nfq[i];
+			}
+		}
+};
+
+bool input_callb(const uint8_t *data, uint32_t len){
+	return true;
+}
+
+bool output_callb(const uint8_t *data, uint32_t len){
+	return true;
 }
 
 
@@ -373,18 +373,35 @@ int main(int argc, char *argv[])
 		cerr << "[fatal] [main] You must be root to run this program" << endl;
 		exit(EXIT_FAILURE);
 	}
-
+	NFQueueSequence<input_callb> nfq_input(1);
+	NetfilterQueue<output_callb> nfq_output(1000);
+	cout << "RUN INPUT" << endl;
+	nfq_input.start();
+	cout << "RUN OUTPUT" << endl;
+	nfq_output.run(); //Only in mnl_cb_run is checked is a nfqueue can be binded
+	/*
 	int n_of_queue = 1;
 	if (argc >= 2) n_of_queue = atoi(argv[1]);
-	
+	NFQueueSequence<input_callb> input_queues(n_of_queue);
+	input_queues.start();
+	NFQueueSequence<output_callb> output_queues(n_of_queue);
+	output_queues.start();
 
-
+	cout << "QUEUE INPUT " << input_queues.init() << " " << input_queues.end() << " OUTPUT " << output_queues.init() << " " << output_queues.end() << endl;
 
 	config_updater();
+	*/
 }
 
 
 /*
+
+libpcre2-dev
+libnetfilter-queue-dev
+libtins-dev
+libmnl-dev
+
+c++ nfqueue.cpp -o nfqueue -pthread -lpcre2-8 -ltins -lnetfilter_queue -lmnl
 
 WORKDIR /tmp/
 RUN git clone --branch release https://github.com/jpcre2/jpcre2
