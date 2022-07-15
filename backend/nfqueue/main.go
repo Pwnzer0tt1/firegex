@@ -132,6 +132,8 @@ func handle_packets(packets <-chan netfilter.NFPacket, filter_table_channel chan
 			}
 		case p := <-packets:
 			{
+				p.SetVerdict(netfilter.NF_ACCEPT)
+				break
 				transport_layer := p.Packet.TransportLayer()
 				data := transport_layer.LayerPayload()
 				if len(data) > 0 {
