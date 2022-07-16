@@ -121,33 +121,34 @@ class NetfilterQueue {
 		
 		if (nl == NULL) { throw runtime_error( "mnl_socket_open" );}
 
-		if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0) { throw runtime_error( "mnl_socket_bind" );}
+		if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0) {
+			mnl_socket_close(nl);
+			throw runtime_error( "mnl_socket_bind" );
+		}
 		portid = mnl_socket_get_portid(nl);
 
 		buf = (char*) malloc(BUF_SIZE);
-		if (!buf) { throw runtime_error( "allocate receive buffer" ); }
+		if (!buf) {
+			mnl_socket_close(nl);
+			throw runtime_error( "allocate receive buffer" );
+		}
 
-		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
-		nfq_nlmsg_cfg_put_cmd(nlh, AF_INET, NFQNL_CFG_CMD_BIND);
-		if (mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0) {
-			free(buf);
+		if (send_config_cmd(NFQNL_CFG_CMD_BIND) < 0) {
+			_clear();
 			throw runtime_error( "mnl_socket_send" );
 		}
 
 //TESTING QUEUE: TODO find a legal system to test if the queue was binded successfully
-		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
-		nfq_nlmsg_cfg_put_cmd(nlh, AF_INET, NFQNL_CFG_CMD_NONE);
-		if (mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0) {
-			free(buf);
+		if (send_config_cmd(NFQNL_CFG_CMD_NONE) < 0) {
+			_clear();
 			throw runtime_error( "mnl_socket_send" );
 		}
-		int ret = mnl_socket_recvfrom(nl, buf, BUF_SIZE);
-		if (ret == -1) {
-			free(buf);
+		if (recv_packet() == -1) {
+			_clear();
 			throw std::runtime_error( "mnl_socket_recvfrom" );
 		}
 		if (buf[44] == 1){
-			free(buf);
+			_clear();
 			throw std::invalid_argument( "queueid is already busy" );
 		}
 
@@ -160,11 +161,13 @@ class NetfilterQueue {
 		mnl_attr_put_u32(nlh, NFQA_CFG_MASK, htonl(NFQA_CFG_F_GSO));
 
 		if (mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0) {
-			free(buf);
+			_clear();
 			throw runtime_error( "mnl_socket_send" );
 		}
 
 	}
+
+
 
 	void run(){
 		/*
@@ -176,7 +179,7 @@ class NetfilterQueue {
 		mnl_socket_setsockopt(nl, NETLINK_NO_ENOBUFS, &ret, sizeof(int));
 
 		for (;;) {
-			ret = mnl_socket_recvfrom(nl, buf, BUF_SIZE);
+			ret = recv_packet();
 			if (ret == -1) {
 				throw std::runtime_error( "mnl_socket_recvfrom" );
 			}
@@ -189,13 +192,28 @@ class NetfilterQueue {
 	}
 	
 	~NetfilterQueue() {
+		send_config_cmd(NFQNL_CFG_CMD_UNBIND);
+		_clear();
+	}
+	private:
+
+	ssize_t send_config_cmd(nfqnl_msg_config_cmds cmd){
+		struct nlmsghdr *nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
+		nfq_nlmsg_cfg_put_cmd(nlh, AF_INET, cmd);
+		return mnl_socket_sendto(nl, nlh, nlh->nlmsg_len);
+	}
+
+	ssize_t recv_packet(){
+		return mnl_socket_recvfrom(nl, buf, BUF_SIZE);
+	}	
+
+	void _clear(){
 		if (buf != NULL) {
 			free(buf);
 			buf = NULL;
 		}
 		mnl_socket_close(nl);
 	}
-	private:
 
 	static int queue_cb(const struct nlmsghdr *nlh, void *data)
 	{
@@ -391,7 +409,7 @@ int main(int argc, char *argv[])
 	NFQueueSequence<output_callb> output_queues(n_of_queue);
 	output_queues.start();
 
-	cout << "QUEUE INPUT " << input_queues.init() << " " << input_queues.end() << " OUTPUT " << output_queues.init() << " " << output_queues.end() << endl;
+	cout << "QUEUES INPUT " << input_queues.init() << " " << input_queues.end() << " OUTPUT " << output_queues.init() << " " << output_queues.end() << endl;
 
 	config_updater();
 }
