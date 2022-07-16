@@ -94,7 +94,6 @@ struct regex_rules{
 shared_ptr<regex_rules> regex_config;
 
 typedef bool NetFilterQueueCallback(const uint8_t*,uint32_t);
-typedef struct mnl_socket* NetFilterQueueSocket;
 
 PDU * find_transport_layer(PDU* pkt){
 	while(pkt != NULL){
@@ -113,7 +112,7 @@ class NetfilterQueue {
 	char *buf = NULL;
 	unsigned int portid;
 	u_int16_t queue_num;
-	NetFilterQueueSocket nl = NULL;
+	struct mnl_socket* nl = NULL;
 
 	NetfilterQueue(u_int16_t queue_num): queue_num(queue_num) {
 		
@@ -122,7 +121,7 @@ class NetfilterQueue {
 		
 		if (nl == NULL) { throw runtime_error( "mnl_socket_open" );}
 
-		if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0) { throw std::runtime_error( "mnl_socket_bind" );}
+		if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0) { throw runtime_error( "mnl_socket_bind" );}
 		portid = mnl_socket_get_portid(nl);
 
 		buf = (char*) malloc(BUF_SIZE);
@@ -130,14 +129,32 @@ class NetfilterQueue {
 
 		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
 		nfq_nlmsg_cfg_put_cmd(nlh, AF_INET, NFQNL_CFG_CMD_BIND);
-
 		if (mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0) {
 			free(buf);
 			throw runtime_error( "mnl_socket_send" );
 		}
 
+//TESTING QUEUE: TODO find a legal system to test if the queue was binded successfully
+		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
+		nfq_nlmsg_cfg_put_cmd(nlh, AF_INET, NFQNL_CFG_CMD_NONE);
+		if (mnl_socket_sendto(nl, nlh, nlh->nlmsg_len) < 0) {
+			free(buf);
+			throw runtime_error( "mnl_socket_send" );
+		}
+		int ret = mnl_socket_recvfrom(nl, buf, BUF_SIZE);
+		if (ret == -1) {
+			free(buf);
+			throw std::runtime_error( "mnl_socket_recvfrom" );
+		}
+		if (buf[44] == 1){
+			free(buf);
+			throw std::invalid_argument( "queueid is already busy" );
+		}
+
+//END TESTING QUEUE
 		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
 		nfq_nlmsg_cfg_put_params(nlh, NFQNL_COPY_PACKET, 0xffff);
+		
 
 		mnl_attr_put_u32(nlh, NFQA_CFG_FLAGS, htonl(NFQA_CFG_F_GSO));
 		mnl_attr_put_u32(nlh, NFQA_CFG_MASK, htonl(NFQA_CFG_F_GSO));
@@ -146,8 +163,6 @@ class NetfilterQueue {
 			free(buf);
 			throw runtime_error( "mnl_socket_send" );
 		}
-
-
 
 	}
 
@@ -184,7 +199,7 @@ class NetfilterQueue {
 
 	static int queue_cb(const struct nlmsghdr *nlh, void *data)
 	{
-		NetFilterQueueSocket nl = (NetFilterQueueSocket)data;
+		struct mnl_socket* nl = (struct mnl_socket*)data;
 		//Extract attributes from the nlmsghdr
 		struct nlattr *attr[NFQA_MAX+1] = {};
 		
@@ -396,5 +411,7 @@ RUN git clone --branch release https://github.com/jpcre2/jpcre2
 WORKDIR /tmp/jpcre2
 RUN ./configure; make; make install
 WORKDIR /
+
+//NFQNL_CFG_CMD_UNBIND ???
 
 */
