@@ -18,10 +18,12 @@
 #include <mutex>
 #include <jpcre2.hpp>
 
-typedef jpcre2::select<char> jp;
-mutex stdout_mutex;
+
 using namespace std;
 using namespace Tins;
+typedef jpcre2::select<char> jp;
+mutex stdout_mutex;
+
 
 bool unhexlify(string const &hex, string &newString) {
    try{
@@ -91,34 +93,34 @@ struct regex_rules{
 		return 0;
 	}
 
-	bool check(unsigned char* data, const size_t& bytes_transferred, const bool in_input){
-		string str_data((char *) data, bytes_transferred);
-		for (regex_rule_pair ele:in_input?regex_c_s_b:regex_s_c_b){
-			try{
-				if(ele.second.match(str_data)){
-					unique_lock<mutex> lck(stdout_mutex);
-					cout << "BLOCKED " << ele.first << endl;
-					return false;
-				}
-			} catch(...){
-				cerr << "[info] [regex_rules.check] Error while matching blacklist regex: " << ele.first << endl;
-			}
-		}
-		for (regex_rule_pair ele:in_input?regex_c_s_w:regex_s_c_w){
-			try{
-				if(!ele.second.match(str_data)){
-					unique_lock<mutex> lck(stdout_mutex);
-					cout << "BLOCKED " << ele.first << endl;
-					return false;
-				}
-			} catch(...){
-				cerr << "[info] [regex_rules.check] Error while matching whitelist regex: " << ele.first << endl;
-			}      
-		}
-		return true;
-	}
-
 };
+
+bool check(unsigned char* data, const size_t& bytes_transferred, const bool in_input, regex_rules* rules){
+	string str_data((char *) data, bytes_transferred);
+	for (regex_rule_pair ele:in_input?rules->regex_c_s_b:rules->regex_s_c_b){
+		try{
+			if(ele.second.match(str_data)){
+				unique_lock<mutex> lck(stdout_mutex);
+				cout << "BLOCKED " << ele.first << endl;
+				return false;
+			}
+		} catch(...){
+			cerr << "[info] [regex_rules.check] Error while matching blacklist regex: " << ele.first << endl;
+		}
+	}
+	for (regex_rule_pair ele:in_input?rules->regex_c_s_w:rules->regex_s_c_w){
+		try{
+			if(!ele.second.match(str_data)){
+				unique_lock<mutex> lck(stdout_mutex);
+				cout << "BLOCKED " << ele.first << endl;
+				return false;
+			}
+		} catch(...){
+			cerr << "[info] [regex_rules.check] Error while matching whitelist regex: " << ele.first << endl;
+		}      
+	}
+	return true;
+}
 
 shared_ptr<regex_rules> regex_config;
 
@@ -421,14 +423,11 @@ class NFQueueSequence{
 		}
 };
 
-bool input_callb(const uint8_t *data, uint32_t len){
-	return true;
+template <bool is_input>
+bool filter_callback(const uint8_t *data, uint32_t len){
+	shared_ptr<regex_rules> current_config = regex_config;
+	return check((unsigned char *)data, len, is_input, current_config.get());
 }
-
-bool output_callb(const uint8_t *data, uint32_t len){
-	return true;
-}
-
 
 int main(int argc, char *argv[])
 {
@@ -438,9 +437,10 @@ int main(int argc, char *argv[])
 	}
 	int n_of_queue = 1;
 	if (argc >= 2) n_of_queue = atoi(argv[1]);
-	NFQueueSequence<input_callb> input_queues(n_of_queue);
+	regex_config.reset(new regex_rules());
+	NFQueueSequence<filter_callback<true>> input_queues(n_of_queue);
 	input_queues.start();
-	NFQueueSequence<output_callb> output_queues(n_of_queue);
+	NFQueueSequence<filter_callback<false>> output_queues(n_of_queue);
 	output_queues.start();
 
 	cout << "QUEUES INPUT " << input_queues.init() << " " << input_queues.end() << " OUTPUT " << output_queues.init() << " " << output_queues.end() << endl;
