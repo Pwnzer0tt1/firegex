@@ -50,13 +50,13 @@ struct regex_rules{
    regex_rule_vector* getByCode(char code){
       switch(code){
          case 'C': // Client to server Blacklist
-            return &output_blacklist;  break;
-         case 'c': // Client to server Whitelist
-            return &output_whitelist;  break;
-         case 'S': // Server to client Blacklist
             return &input_blacklist;  break;
-         case 's': // Server to client Whitelist
+         case 'c': // Client to server Whitelist
             return &input_whitelist;  break;
+         case 'S': // Server to client Blacklist
+            return &output_blacklist;  break;
+         case 's': // Server to client Whitelist
+            return &output_whitelist;  break;
       }
       throw invalid_argument( "Expected 'C' 'c' 'S' or 's'" );
    }
@@ -108,6 +108,7 @@ struct regex_rules{
 		}
 		for (regex_rule_pair ele:(in_input?input_whitelist:output_whitelist)){
 			try{
+				cerr << "[debug] [regex_rules.check] regex whitelist match " << ele.second.getPattern() << endl;
 				if(!ele.second.match(str_data)){
 					unique_lock<mutex> lck(stdout_mutex);
 					cout << "BLOCKED " << ele.first << endl;
@@ -336,33 +337,6 @@ class NetfilterQueue {
 
 };
 
-
-bool is_sudo(){
-	return getuid() == 0;
-}
-
-void config_updater (){
-	string line, data;
-	while (true){
-		getline(cin, line);
-		if (cin.bad()){
-			cerr << "[fatal] [upfdater] cin.bad() != 0" << endl;
-			exit(EXIT_FAILURE);
-		}
-		cerr << "[info] [updater] Updating configuration with line " << line << endl;
-		istringstream config_stream(line);
-		regex_rules *regex_new_config = new regex_rules();
-		while(!config_stream.eof()){
-			config_stream >> data;
-			regex_new_config->add(data.c_str());
-		}
-		regex_config.reset(regex_new_config);
-		cerr << "[info] [updater] Config update done" << endl;
-
-	}
-	
-}
-
 template <NetFilterQueueCallback func>
 class NFQueueSequence{
 	private:
@@ -424,6 +398,32 @@ class NFQueueSequence{
 			}
 		}
 };
+
+bool is_sudo(){
+	return getuid() == 0;
+}
+
+void config_updater (){
+	string line, data;
+	while (true){
+		getline(cin, line);
+		if (cin.bad()){
+			cerr << "[fatal] [upfdater] cin.bad() != 0" << endl;
+			exit(EXIT_FAILURE);
+		}
+		cerr << "[info] [updater] Updating configuration with line " << line << endl;
+		istringstream config_stream(line);
+		regex_rules *regex_new_config = new regex_rules();
+		while(!config_stream.eof()){
+			config_stream >> data;
+			regex_new_config->add(data.c_str());
+		}
+		regex_config.reset(regex_new_config);
+		cerr << "[info] [updater] Config update done" << endl;
+
+	}
+	
+}
 
 template <bool is_input>
 bool filter_callback(const uint8_t *data, uint32_t len){
