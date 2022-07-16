@@ -120,19 +120,13 @@ class NetfilterQueue {
 		struct nlmsghdr *nlh;
 		nl = mnl_socket_open(NETLINK_NETFILTER);
 		
-		if (nl == NULL) {
-			throw runtime_error( "mnl_socket_open" );
-		}
+		if (nl == NULL) { throw runtime_error( "mnl_socket_open" );}
 
-		if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0) {
-			throw std::invalid_argument( "mnl_socket_bind" );
-		}
+		if (mnl_socket_bind(nl, 0, MNL_SOCKET_AUTOPID) < 0) { throw std::runtime_error( "mnl_socket_bind" );}
 		portid = mnl_socket_get_portid(nl);
 
 		buf = (char*) malloc(BUF_SIZE);
-		if (!buf) {
-			throw runtime_error( "allocate receive buffer" );
-		}
+		if (!buf) { throw runtime_error( "allocate receive buffer" ); }
 
 		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
 		nfq_nlmsg_cfg_put_cmd(nlh, AF_INET, NFQNL_CFG_CMD_BIND);
@@ -152,6 +146,8 @@ class NetfilterQueue {
 			free(buf);
 			throw runtime_error( "mnl_socket_send" );
 		}
+
+
 
 	}
 
@@ -373,13 +369,6 @@ int main(int argc, char *argv[])
 		cerr << "[fatal] [main] You must be root to run this program" << endl;
 		exit(EXIT_FAILURE);
 	}
-	NFQueueSequence<input_callb> nfq_input(1);
-	NetfilterQueue<output_callb> nfq_output(1000);
-	cout << "RUN INPUT" << endl;
-	nfq_input.start();
-	cout << "RUN OUTPUT" << endl;
-	nfq_output.run(); //Only in mnl_cb_run is checked is a nfqueue can be binded
-	/*
 	int n_of_queue = 1;
 	if (argc >= 2) n_of_queue = atoi(argv[1]);
 	NFQueueSequence<input_callb> input_queues(n_of_queue);
@@ -390,7 +379,6 @@ int main(int argc, char *argv[])
 	cout << "QUEUE INPUT " << input_queues.init() << " " << input_queues.end() << " OUTPUT " << output_queues.init() << " " << output_queues.end() << endl;
 
 	config_updater();
-	*/
 }
 
 
