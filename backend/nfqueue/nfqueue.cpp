@@ -198,6 +198,7 @@ class NetfilterQueue {
 			_clear();
 			throw std::invalid_argument( "queueid is already busy" );
 		}
+		
 		//END TESTING BIND
 		nlh = nfq_nlmsg_put(buf, NFQNL_MSG_CONFIG, queue_num);
 		nfq_nlmsg_cfg_put_params(nlh, NFQNL_COPY_PACKET, 0xffff);
