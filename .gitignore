@@ -12,7 +12,7 @@
 
 /backend/db/firegex.db
 /backend/db/firegex.db-journal
-/backend/nfqueue/main
+/backend/nfqueue/nfqueue
 docker-compose.yml
 
 # misc

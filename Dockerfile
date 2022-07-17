@@ -1,5 +1,5 @@
 #Building main conteiner
-FROM python:slim-buster
+FROM python:slim-bullseye
 
 RUN apt-get update && apt-get -y install \    
         build-essential git iptables libpcre2-dev\
@@ -15,7 +15,8 @@ RUN mkdir /execute/
 WORKDIR /execute
 
 COPY ./backend/nfqueue /execute/nfqueue
-RUN gcc nfqueue/nfqueue.cpp -o nfqueue/nfqueue -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
+
+RUN g++ nfqueue/nfqueue.cpp -o nfqueue/nfqueue -O3 -march=native -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
 
 ADD ./backend/requirements.txt /execute/requirements.txt
 RUN pip install --no-cache-dir -r /execute/requirements.txt
