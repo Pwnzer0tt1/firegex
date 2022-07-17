@@ -1,12 +1,21 @@
 #Building main conteiner
 FROM python:slim-buster
 
-RUN apt-get update && apt-get -y install build-essential libpcre3-dev git iptables libnetfilter-queue1
-RUN git clone https://gitlab.com/guerrera.nicola/pypacker && cd pypacker && pip3 install . 
+RUN apt-get update && apt-get -y install \    
+        build-essential git iptables libpcre2-dev\
+        libnetfilter-queue-dev libtins-dev\
+        libnfnetlink-dev libmnl-dev
 
-WORKDIR /
-RUN mkdir /execute
+WORKDIR /tmp/
+RUN git clone --branch release https://github.com/jpcre2/jpcre2
+WORKDIR /tmp/jpcre2
+RUN ./configure; make; make install
+
+RUN mkdir /execute/
 WORKDIR /execute
+
+COPY ./backend/nfqueue /execute/nfqueue
+RUN gcc nfqueue/nfqueue.cpp -o nfqueue/nfqueue -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
 
 ADD ./backend/requirements.txt /execute/requirements.txt
 RUN pip install --no-cache-dir -r /execute/requirements.txt
