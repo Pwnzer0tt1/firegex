@@ -48,7 +48,7 @@ async def updater(): pass
 @app.on_event("startup")
 async def startup_event():
     db.init()
-    await firewall.init(refresh_frontend)
+    await firewall.init()
     await refresh_frontend()
     if not JWT_SECRET(): db.put("secret", secrets.token_hex(32))
 

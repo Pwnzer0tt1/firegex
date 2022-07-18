@@ -1,7 +1,9 @@
 **/*.pyc
 **/__pycache__/
 **/.vscode/**
-/.mypy_cache/**
+**/.vscode/
+**/.mypy_cache/**
+**/.mypy_cache/
 
 **/node_modules
 **/.pnp
@@ -12,7 +14,7 @@
 
 /backend/db/firegex.db
 /backend/db/firegex.db-journal
-/backend/nfqueue/nfqueue
+/backend/modules/cppqueue
 docker-compose.yml
 
 # misc

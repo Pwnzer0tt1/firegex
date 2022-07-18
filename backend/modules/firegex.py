@@ -1,12 +1,11 @@
-from typing import List
-from pypacker import interceptor
-from pypacker.layer3 import ip, ip6
-from pypacker.layer4 import tcp, udp
+from typing import Dict, List, Set
 from ipaddress import ip_interface
 from modules.iptables import IPTables
-import os, traceback
-
 from modules.sqlite import Service
+import re, os, asyncio
+import traceback
+
+from modules.sqlite import Regex
 
 class FilterTypes:
     INPUT = "FIREGEX-INPUT"
@@ -15,14 +14,13 @@ class FilterTypes:
 QUEUE_BASE_NUM = 1000
 
 class FiregexFilter():
-    def __init__(self, proto:str, port:int, ip_int:str, queue=None, target=None, id=None, func=None):
+    def __init__(self, proto:str, port:int, ip_int:str, queue=None, target=None, id=None):
         self.target = target
         self.id = int(id) if id else None
         self.queue = queue
         self.proto = proto
         self.port = int(port)
         self.ip_int = str(ip_int)
-        self.func = func
 
     def __eq__(self, o: object) -> bool:
         if isinstance(o, FiregexFilter):
@@ -34,16 +32,6 @@ class FiregexFilter():
 
     def ipv4(self):
         return ip_interface(self.ip_int).version == 4
-
-    def input_func(self):
-        def none(pkt): return True
-        def wrap(pkt): return self.func(pkt, True)
-        return wrap if self.func else none
-        
-    def output_func(self):
-        def none(pkt): return True
-        def wrap(pkt): return self.func(pkt, False)
-        return wrap if self.func else none
 
 class FiregexTables(IPTables):
 
@@ -108,9 +96,9 @@ class FiregexTables(IPTables):
                     ))
         return res
     
-    def add(self, filter:FiregexFilter):
+    async def add(self, filter:FiregexFilter):
         if filter in self.get(): return None
-        return FiregexInterceptor( iptables=self, filter=filter, n_threads=int(os.getenv("N_THREADS_NFQUEUE","1")))
+        return await FiregexInterceptor.start( iptables=self, filter=filter, n_queues=int(os.getenv("N_THREADS_NFQUEUE","1")))
 
     def delete_all(self):
         for filter_type in [FilterTypes.INPUT, FilterTypes.OUTPUT]:
@@ -120,52 +108,143 @@ class FiregexTables(IPTables):
         for filter in self.get():
             if filter.port == srv.port and filter.proto == srv.proto and ip_interface(filter.ip_int) == ip_interface(srv.ip_int):
                 self.delete_rule(filter.target, filter.id)
+            
+
+class RegexFilter:
+    def __init__(
+        self, regex,
+        is_case_sensitive=True,
+        is_blacklist=True,
+        input_mode=False,
+        output_mode=False,
+        blocked_packets=0,
+        id=None,
+        update_func = None
+    ):
+        self.regex = regex
+        self.is_case_sensitive = is_case_sensitive
+        self.is_blacklist = is_blacklist
+        if input_mode == output_mode: input_mode = output_mode = True # (False, False) == (True, True)
+        self.input_mode = input_mode
+        self.output_mode = output_mode
+        self.blocked = blocked_packets
+        self.id = id
+        self.update_func = update_func
+        self.compiled_regex = self.compile()
+    
+    @classmethod
+    def from_regex(cls, regex:Regex, update_func = None):
+        return cls(
+            id=regex.id, regex=regex.regex, is_case_sensitive=regex.is_case_sensitive,
+            is_blacklist=regex.is_blacklist, blocked_packets=regex.blocked_packets,
+            input_mode = regex.mode in ["C","B"], output_mode=regex.mode in ["S","B"],
+            update_func = update_func
+        )
+    def compile(self):
+        if isinstance(self.regex, str): self.regex = self.regex.encode()
+        if not isinstance(self.regex, bytes): raise Exception("Invalid Regex Paramether")
+        re.compile(self.regex) # raise re.error if it's invalid!
+        case_sensitive = "1" if self.is_case_sensitive else "0"
+        if self.input_mode:
+            yield case_sensitive + "C" + self.regex.hex() if self.is_blacklist else case_sensitive + "c"+ self.regex.hex()
+        if self.output_mode:
+            yield case_sensitive + "S" + self.regex.hex() if self.is_blacklist else case_sensitive + "s"+ self.regex.hex()
+    
+    async def update(self):
+        if self.update_func:
+            if asyncio.iscoroutinefunction(self.update_func): await self.update_func(self)
+            else: self.update_func(self)
 
 class FiregexInterceptor:
-    def __init__(self, iptables: FiregexTables, filter: FiregexFilter, n_threads:int = 1):
+    
+    def __init__(self):
+        self.filter:FiregexFilter
+        self.ipv6:bool
+        self.filter_map_lock:asyncio.Lock
+        self.filter_map: Dict[str, RegexFilter]
+        self.regex_filters: Set[RegexFilter]
+        self.update_config_lock:asyncio.Lock
+        self.process:asyncio.subprocess.Process
+        self.n_queues:int
+        self.update_task: asyncio.Task
+        self.iptables:FiregexTables
+    
+    @classmethod
+    async def start(cls, iptables: FiregexTables, filter: FiregexFilter, n_queues:int = 1):
+        self = cls()
         self.filter = filter
+        self.n_queues = n_queues
+        self.iptables = iptables
         self.ipv6 = self.filter.ipv6()
-        self.itor_input, codes = self._start_queue(filter.input_func(), n_threads)
-        iptables.add_input(queue_range=codes, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
-        self.itor_output, codes = self._start_queue(filter.output_func(), n_threads)
-        iptables.add_output(queue_range=codes, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
+        self.filter_map_lock = asyncio.Lock()
+        self.update_config_lock = asyncio.Lock()
+        input_range, output_range = await self._start_binary()
+        self.update_task = asyncio.create_task(self.update_blocked())
+        self.iptables.add_input(queue_range=input_range, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
+        self.iptables.add_output(queue_range=output_range, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
+        return self
+    
+    async def _start_binary(self):
+        proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"./cppqueue")
+        self.process = await asyncio.create_subprocess_exec(
+            proxy_binary_path, str(self.n_queues),
+            stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE
+        )
+        line_fut = self.process.stdout.readuntil()
+        try:
+            line_fut = await asyncio.wait_for(line_fut, timeout=1)
+        except asyncio.TimeoutError:
+            self.process.kill()
+            raise Exception("Invalid binary output")
+        line = line_fut.decode()
+        if line.startswith("QUEUES "):
+            params = line.split()
+            return (int(params[2]), int(params[3])), (int(params[5]), int(params[6]))
+        else:
+            self.process.kill()
+            raise Exception("Invalid binary output")
 
-    def _start_queue(self,func,n_threads):
-        def func_wrap(ll_data, ll_proto_id, data, ctx, *args):
-            pkt_parsed = ip6.IP6(data) if self.ipv6 else ip.IP(data)
-            try:
-                pkt_data = None
-                if not pkt_parsed[tcp.TCP] is None:
-                    pkt_data = pkt_parsed[tcp.TCP].body_bytes
-                elif not pkt_parsed[udp.UDP] is None:
-                    pkt_data = pkt_parsed[udp.UDP].body_bytes
-                if pkt_data:
-                    if func(pkt_data):
-                        return data, interceptor.NF_ACCEPT
-                    elif pkt_parsed[tcp.TCP]:
-                        pkt_parsed[tcp.TCP].flags &= 0x00
-                        pkt_parsed[tcp.TCP].flags |= tcp.TH_FIN | tcp.TH_ACK
-                        pkt_parsed[tcp.TCP].body_bytes = b""
-                        return pkt_parsed.bin(), interceptor.NF_ACCEPT
-                    else: return b"", interceptor.NF_DROP
-                else: return data, interceptor.NF_ACCEPT
-            except Exception:
-                traceback.print_exc()
-                return data, interceptor.NF_ACCEPT
-        
-        ictor = interceptor.Interceptor()
-        starts = QUEUE_BASE_NUM
-        while True:
-            if starts >= 65536:
-                raise Exception("Netfilter queue is full!")
-            queue_ids = list(range(starts,starts+n_threads))
-            try:
-                ictor.start(func_wrap, queue_ids=queue_ids)
-                break
-            except interceptor.UnableToBindException as e:
-                starts = e.queue_id + 1
-        return ictor, (starts, starts+n_threads-1)
+    async def update_blocked(self):
+        try:
+            while True:
+                line = (await self.process.stdout.readuntil()).decode()
+                if line.startswith("BLOCKED"):
+                    regex_id = line.split()[1]
+                    async with self.filter_map_lock:
+                        if regex_id in self.filter_map:
+                            self.filter_map[regex_id].blocked+=1
+                            await self.filter_map[regex_id].update()
+        except asyncio.CancelledError: pass
+        except asyncio.IncompleteReadError: pass
+        except Exception:
+            traceback.print_exc()
 
-    def stop(self):
-        self.itor_input.stop()
-        self.itor_output.stop()
+    async def stop(self):
+        self.update_task.cancel()
+        self.process.kill()
+    
+    async def _update_config(self, filters_codes):
+        async with self.update_config_lock:
+            self.process.stdin.write((" ".join(filters_codes)+"\n").encode())
+            await self.process.stdin.drain()
+
+    async def reload(self, filters:List[RegexFilter]):
+        async with self.filter_map_lock:
+            self.filter_map = self.compile_filters(filters)
+            filters_codes = self.get_filter_codes()
+            await self._update_config(filters_codes)
+    
+    def get_filter_codes(self):
+        filters_codes = list(self.filter_map.keys())
+        filters_codes.sort(key=lambda a: self.filter_map[a].blocked, reverse=True)
+        return filters_codes
+
+    def compile_filters(self, filters:List[RegexFilter]):
+        res = {}
+        for filter_obj in filters:
+            try:
+                raw_filters = filter_obj.compile()
+                for filter in raw_filters:
+                    res[filter] = filter_obj
+            except Exception: pass
+        return res
