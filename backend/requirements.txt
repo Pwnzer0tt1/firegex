@@ -3,6 +3,4 @@ httpx
 uvicorn[standard]
 passlib[bcrypt]
 python-jose[cryptography]
-#pypacker
-python-pcre
 fastapi-socketio
