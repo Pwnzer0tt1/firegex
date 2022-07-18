@@ -116,7 +116,7 @@ class Service:
 
 
 class Regex:
-    def __init__(self, id: int, regex: str, mode: str, service_id: str, is_blacklist: bool, blocked_packets: int, is_case_sensitive: bool, active: bool):
+    def __init__(self, id: int, regex: bytes, mode: str, service_id: str, is_blacklist: bool, blocked_packets: int, is_case_sensitive: bool, active: bool):
         self.regex = regex
         self.mode = mode
         self.service_id = service_id

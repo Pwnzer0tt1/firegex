@@ -47,6 +47,11 @@ function App() {
     }
   },[])
 
+  useEffect(()=>{
+    const updater = setInterval(fireUpdateRequest,6000)
+    return () => clearInterval(updater)     
+  },[])
+
   const form = useForm({
     initialValues: {
         password:"",

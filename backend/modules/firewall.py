@@ -1,4 +1,4 @@
-import traceback, asyncio
+import asyncio
 from typing import Dict
 from modules.firegex import FiregexFilter, FiregexTables, RegexFilter
 from modules.sqlite import Regex, SQLite, Service
@@ -14,7 +14,6 @@ class FirewallManager:
         self.lock = asyncio.Lock()
 
     async def close(self):
-        if self.updater_task: self.updater_task.cancel()
         for key in list(self.proxy_table.keys()):
             await self.remove(key)
 
@@ -35,22 +34,6 @@ class FirewallManager:
                     continue
                 self.proxy_table[srv.id] = ServiceManager(srv, self.db)
                 await self.proxy_table[srv.id].next(srv.status)
-
-    async def _stats_updater(self, callback):
-        try:
-            while True:
-                try:
-                    for key in list(self.proxy_table.keys()):
-                        self.proxy_table[key].update_stats()
-                except Exception:
-                    traceback.print_exc()
-                if callback:
-                    if asyncio.iscoroutinefunction(callback): await callback()
-                    else: callback()
-                await asyncio.sleep(5)
-        except asyncio.CancelledError:
-            self.updater_task = None
-            return
 
     def get(self,srv_id):
         if srv_id in self.proxy_table:

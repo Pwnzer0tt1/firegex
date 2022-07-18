@@ -8,7 +8,7 @@ using namespace std;
 shared_ptr<regex_rules> regex_config;
 
 void config_updater (){
-	string line, data;
+	string line;
 	while (true){
 		getline(cin, line);
 		if (cin.eof()){
@@ -23,6 +23,7 @@ void config_updater (){
 		istringstream config_stream(line);
 		regex_rules *regex_new_config = new regex_rules();
 		while(!config_stream.eof()){
+			string data;
 			config_stream >> data;
 			if (data != "" && data != "\n"){
 				regex_new_config->add(data.c_str());

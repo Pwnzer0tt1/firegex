@@ -192,7 +192,7 @@ class FiregexInterceptor:
         )
         line_fut = self.process.stdout.readuntil()
         try:
-            line_fut = await asyncio.wait_for(line_fut, timeout=1)
+            line_fut = await asyncio.wait_for(line_fut, timeout=3)
         except asyncio.TimeoutError:
             self.process.kill()
             raise Exception("Invalid binary output")
