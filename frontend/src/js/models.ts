@@ -9,7 +9,6 @@ export type Service = {
     service_id:string,
     status:string,
     port:number,
-    ipv6:boolean,
     proto: string,
     ip_int: string,
     n_packets:number,

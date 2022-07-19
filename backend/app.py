@@ -165,7 +165,6 @@ class ServiceModel(BaseModel):
     service_id: str
     port: int
     name: str
-    ipv6: bool
     proto: str
     ip_int: str
     n_regex: int
@@ -180,7 +179,6 @@ async def get_service_list(auth: bool = Depends(is_loggined)):
             s.status status,
             s.port port,
             s.name name,
-            s.ipv6 ipv6,
             s.proto proto,
             s.ip_int ip_int,
             COUNT(r.regex_id) n_regex,
@@ -198,7 +196,6 @@ async def get_service_by_id(service_id: str, auth: bool = Depends(is_loggined)):
             s.status status,
             s.port port,
             s.name name,
-            s.ipv6 ipv6,
             s.proto proto,
             s.ip_int ip_int,
             COUNT(r.regex_id) n_regex,
@@ -360,8 +357,8 @@ async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined
     srv_id = None
     try:
         srv_id = gen_service_id(db)
-        db.query("INSERT INTO services (service_id ,name, port, ipv6, status, proto, ip_int) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    srv_id, refactor_name(form.name), form.port, True, STATUS.STOP, form.proto, form.ip_int)
+        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int) VALUES (?, ?, ?, ?, ?, ?)",
+                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int)
     except sqlite3.IntegrityError:
         return {'status': 'This type of service already exists'}
     await firewall.reload()

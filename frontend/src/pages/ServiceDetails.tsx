@@ -17,7 +17,6 @@ function ServiceDetails() {
         n_packets:0,
         n_regex:0,
         name:"",
-        ipv6:false,
         status:"🤔",
         ip_int: "",
         proto: "tcp",

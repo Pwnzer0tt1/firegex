@@ -5,7 +5,7 @@ import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./index.module.scss";
 import YesNoModal from '../YesNoModal';
-import { deleteservice, errorNotify, okNotify, startservice, stopservice } from '../../js/utils';
+import { deleteservice, errorNotify, okNotify, regex_ipv4, startservice, stopservice } from '../../js/utils';
 import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
@@ -98,7 +98,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                     <Space h="xs" />
                     <Badge color="violet" radius="sm" size="md" variant="filled">Regex: {service.n_regex}</Badge>
                     <Space h="xs" />
-                    <Badge color={service.ipv6?"pink":"cyan"} radius="sm" size="md" variant="filled">{service.ip_int} on {service.proto}</Badge>
+                    <Badge color={service.ip_int.match(regex_ipv4)?"cyan":"pink"} radius="sm" size="md" variant="filled">{service.ip_int} on {service.proto}</Badge>
                 </div>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}>
                     <div className='flex-spacer' />

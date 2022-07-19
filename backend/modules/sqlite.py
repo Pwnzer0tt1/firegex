@@ -15,7 +15,6 @@ class SQLite():
                 'status': 'VARCHAR(100) NOT NULL',
                 'port': 'INT NOT NULL CHECK(port > 0 and port < 65536)',
                 'name': 'VARCHAR(100) NOT NULL UNIQUE',
-                'ipv6': 'BOOLEAN NOT NULL CHECK (ipv6 IN (0, 1)) DEFAULT 0',
                 'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "udp"))',
                 'ip_int': 'VARCHAR(100) NOT NULL',
             },
@@ -31,7 +30,7 @@ class SQLite():
                 'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
             },
             'QUERY':[
-                "CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (ipv6, port, ip_int, proto);",
+                "CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (port, ip_int, proto);",
                 "CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);"   
             ]
         }

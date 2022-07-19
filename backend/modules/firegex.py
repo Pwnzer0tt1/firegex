@@ -133,7 +133,6 @@ class FiregexTables:
     def delete_by_srv(self, srv:Service):
         for filter in self.get():
             if filter.port == srv.port and filter.proto == srv.proto and ip_parse(filter.ip_int) == ip_parse(srv.ip_int):
-                print("DELETE CMD", {"delete":{"rule": {"handle": filter.id, "table": self.table_name, "chain": filter.target, "family": "inet"}}})
                 self.cmd({"delete":{"rule": {"handle": filter.id, "table": self.table_name, "chain": filter.target, "family": "inet"}}})
             
 
