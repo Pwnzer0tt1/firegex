@@ -2,7 +2,7 @@
 FROM python:slim-bullseye
 
 RUN apt-get update && apt-get -y install \    
-        build-essential git python3-nftables libpcre2-dev\
+        build-essential git nftables libpcre2-dev\
         libnetfilter-queue-dev libtins-dev\
         libnfnetlink-dev libmnl-dev
 
