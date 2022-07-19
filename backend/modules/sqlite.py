@@ -8,6 +8,7 @@ class SQLite():
         self.conn: Union[None, sqlite3.Connection] = None
         self.cur = None
         self.db_name = db_name
+        self.__backup = None
         self.schema = {
             'services': {
                 'service_id': 'VARCHAR(100) PRIMARY KEY',
@@ -48,6 +49,17 @@ class SQLite():
                 d[col[0]] = row[idx]
             return d
         self.conn.row_factory = dict_factory
+
+    def backup(self):
+        if self.conn:
+            with open(self.db_name, "rb") as f:
+                self.__backup = f.read()
+    
+    def restore(self):
+        if self.__backup:
+            with open(self.db_name, "wb") as f:
+                f.write(self.__backup)
+            self.__backup = None
 
     def disconnect(self) -> None:
         if self.conn: self.conn.close()
@@ -101,18 +113,17 @@ class SQLite():
 
 
 class Service:
-    def __init__(self, id: str, status: str, port: int, name: str, ipv6: bool, proto: str, ip_int: str):
+    def __init__(self, id: str, status: str, port: int, name: str, proto: str, ip_int: str):
         self.id = id
         self.status = status
         self.port = port
         self.name = name
-        self.ipv6 = ipv6
         self.proto = proto
         self.ip_int = ip_int
     
     @classmethod
     def from_dict(cls, var: dict):
-        return cls(id=var["service_id"], status=var["status"], port=var["port"], name=var["name"], ipv6=var["ipv6"], proto=var["proto"], ip_int=var["ip_int"])
+        return cls(id=var["service_id"], status=var["status"], port=var["port"], name=var["name"], proto=var["proto"], ip_int=var["ip_int"])
 
 
 class Regex:

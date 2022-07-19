@@ -12,11 +12,11 @@ void config_updater (){
 	while (true){
 		getline(cin, line);
 		if (cin.eof()){
-			cerr << "[fatal] [upfdater] cin.eof()" << endl;
+			cerr << "[fatal] [updater] cin.eof()" << endl;
 			exit(EXIT_FAILURE);
 		}
 		if (cin.bad()){
-			cerr << "[fatal] [upfdater] cin.bad()" << endl;
+			cerr << "[fatal] [updater] cin.bad()" << endl;
 			exit(EXIT_FAILURE);
 		}
 		cerr << "[info] [updater] Updating configuration with line " << line << endl;

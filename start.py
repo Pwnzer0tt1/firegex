@@ -51,7 +51,7 @@ services:
         cap_add:
             - NET_ADMIN
 """)
-        #print("Done! You can start firegex with docker-compose up -d --build")
+
     else:
         sep()
         puts("--- WARNING ---", color=colors.yellow)
@@ -73,7 +73,7 @@ services:
         cap_add:
             - NET_ADMIN
 """)
-        #
+
 sep()
 if not args.no_autostart:
     puts("Running 'docker-compose up -d --build'\n", color=colors.green)

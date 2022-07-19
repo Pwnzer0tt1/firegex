@@ -1,113 +1,140 @@
 from typing import Dict, List, Set
-from ipaddress import ip_interface
-from modules.iptables import IPTables
+from utils import ip_parse, ip_family
 from modules.sqlite import Service
 import re, os, asyncio
-import traceback
+import traceback, nftables
 
 from modules.sqlite import Regex
-
-class FilterTypes:
-    INPUT = "FIREGEX-INPUT"
-    OUTPUT = "FIREGEX-OUTPUT"
 
 QUEUE_BASE_NUM = 1000
 
 class FiregexFilter():
-    def __init__(self, proto:str, port:int, ip_int:str, queue=None, target=None, id=None):
-        self.target = target
+    def __init__(self, proto:str, port:int, ip_int:str, queue=None, target:str=None, id=None):
+        self.nftables = nftables.Nftables()
         self.id = int(id) if id else None
         self.queue = queue
+        self.target = target
         self.proto = proto
         self.port = int(port)
         self.ip_int = str(ip_int)
 
     def __eq__(self, o: object) -> bool:
         if isinstance(o, FiregexFilter):
-            return self.port == o.port and self.proto == o.proto and ip_interface(self.ip_int) == ip_interface(o.ip_int)
+            return self.port == o.port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
         return False
-    
-    def ipv6(self):
-        return ip_interface(self.ip_int).version == 6
 
-    def ipv4(self):
-        return ip_interface(self.ip_int).version == 4
+class FiregexTables:
 
-class FiregexTables(IPTables):
+    def __init__(self):
+        self.table_name = "firegex"
+        self.nft = nftables.Nftables()
+    
+    def raw_cmd(self, *cmds):
+        return self.nft.json_cmd({"nftables": list(cmds)})
 
-    def __init__(self, ipv6=False):
-        super().__init__(ipv6, "mangle")
-        self.create_chain(FilterTypes.INPUT)
-        self.add_chain_to_input(FilterTypes.INPUT)
-        self.create_chain(FilterTypes.OUTPUT)
-        self.add_chain_to_output(FilterTypes.OUTPUT)
-    
-    def target_in_chain(self, chain, target):
-        for filter in self.list()[chain]:
-            if filter.target == target:
-                return True
-        return False
-    
-    def add_chain_to_input(self, chain):
-        if not self.target_in_chain("PREROUTING", str(chain)):
-            self.insert_rule("PREROUTING", str(chain))
-    
-    def add_chain_to_output(self, chain):
-        if not self.target_in_chain("POSTROUTING", str(chain)):
-            self.insert_rule("POSTROUTING", str(chain))
+    def cmd(self, *cmds):
+        code, out, err = self.raw_cmd(*cmds)
 
-    def add_output(self, queue_range, proto = None, port = None, ip_int = None):
+        if code == 0: return out
+        else: raise Exception(err)
+    
+    def init(self):
+        code, out, err = self.raw_cmd({"create":{"table":{"name":self.table_name,"family":"inet"}}})
+        if code == 0:
+            self.cmd(
+                {"create":{"chain":{
+                    "family":"inet",
+                    "table":self.table_name,
+                    "name":"input",
+                    "type":"filter",
+                    "hook":"prerouting",
+                    "prio":-150,
+                    "policy":"accept"
+                }}},
+                {"create":{"chain":{
+                    "family":"inet",
+                    "table":self.table_name,
+                    "name":"output",
+                    "type":"filter",
+                    "hook":"postrouting",
+                    "prio":-150,
+                    "policy":"accept"
+                }}}
+            )
+        self.reset()
+            
+    def reset(self):
+        self.cmd({"flush":{"table":{"name":"firegex","family":"inet"}}})
+
+    def list(self):
+        return self.cmd({"list": {"ruleset": None}})["nftables"]
+
+    def add_output(self, queue_range, proto, port, ip_int):
         init, end = queue_range
         if init > end: init, end = end, init
-        self.append_rule(FilterTypes.OUTPUT,"NFQUEUE",
-            * (["-p", str(proto)] if proto else []),
-            * (["-s", str(ip_int)] if ip_int else []),
-            * (["--sport", str(port)] if port else []),
-            * (["--queue-num", f"{init}"] if init == end else ["--queue-balance", f"{init}:{end}"]),
-            "--queue-bypass"
-        )
+        ip_int = ip_parse(ip_int)
+        ip_addr = str(ip_int).split("/")[0]
+        ip_addr_cidr = int(str(ip_int).split("/")[1])
+        self.cmd({ "insert":{ "rule": {
+            "family": "inet",
+            "table": self.table_name,
+            "chain": "output",
+            "expr": [
+                    {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'saddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}}, #ip_int
+                    {'match': {'left': {'meta': {'key': 'l4proto'}}, 'op': '==', 'right': str(proto)}},
+                    {'match': {"left": { "payload": {"protocol": str(proto), "field": "sport"}}, "op": "==", "right": int(port)}},
+                    {"queue": {"num": str(init) if init == end else f"{init}-{end}", "flags": ["bypass"]}}
+                ]
+        }}})
 
     def add_input(self, queue_range, proto = None, port = None, ip_int = None):
         init, end = queue_range
         if init > end: init, end = end, init
-        self.append_rule(FilterTypes.INPUT, "NFQUEUE",
-            * (["-p", str(proto)] if proto else []),
-            * (["-d", str(ip_int)] if ip_int else []),
-            * (["--dport", str(port)] if port else []),
-            * (["--queue-num", f"{init}"] if init == end else ["--queue-balance", f"{init}:{end}"]),
-            "--queue-bypass"
-        )
+        ip_int = ip_parse(ip_int)
+        ip_addr = str(ip_int).split("/")[0]
+        ip_addr_cidr = int(str(ip_int).split("/")[1])
+        self.cmd({"insert":{"rule":{
+            "family": "inet",
+            "table": self.table_name,
+            "chain": "input",
+            "expr": [
+                    {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'daddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}}, #ip_int
+                    {'match': {"left": { "payload": {"protocol": str(proto), "field": "dport"}}, "op": "==", "right": int(port)}},
+                    {"queue": {"num": str(init) if init == end else f"{init}-{end}", "flags": ["bypass"]}}
+                ]
+        }}})
 
     def get(self) -> List[FiregexFilter]:
         res = []
-        iptables_filters = self.list()
-        for filter_type in [FilterTypes.INPUT, FilterTypes.OUTPUT]:
-            for filter in iptables_filters[filter_type]:
-                port = filter.sport() if filter_type == FilterTypes.OUTPUT else filter.dport()
-                queue = filter.nfqueue()
-                if queue and port:
-                    res.append(FiregexFilter(
-                        target=filter_type,
-                        id=filter.id,
-                        queue=queue,
-                        proto=filter.prot,
-                        port=port,
-                        ip_int=filter.source if filter_type == FilterTypes.OUTPUT else filter.destination
-                    ))
+        for filter in [ele["rule"] for ele in self.list() if "rule" in ele and ele["rule"]["table"] == self.table_name]:
+            queue_str = str(filter["expr"][2]["queue"]["num"]).split("-")
+            queue = None
+            if len(queue_str) == 1: queue = int(queue_str[0]), int(queue_str[0])
+            else: queue = int(queue_str[0]), int(queue_str[1])
+            ip_int = None
+            if isinstance(filter["expr"][0]["match"]["right"],str):
+                ip_int = str(ip_parse(filter["expr"][0]["match"]["right"]))
+            else:
+                ip_int = f'{filter["expr"][0]["match"]["right"]["prefix"]["addr"]}/{filter["expr"][0]["match"]["right"]["prefix"]["len"]}'
+            res.append(FiregexFilter(
+                target=filter["chain"],
+                id=int(filter["handle"]),
+                queue=queue,
+                proto=filter["expr"][1]["match"]["left"]["payload"]["protocol"],
+                port=filter["expr"][1]["match"]["right"],
+                ip_int=ip_int
+            ))
         return res
     
     async def add(self, filter:FiregexFilter):
         if filter in self.get(): return None
-        return await FiregexInterceptor.start( iptables=self, filter=filter, n_queues=int(os.getenv("N_THREADS_NFQUEUE","1")))
-
-    def delete_all(self):
-        for filter_type in [FilterTypes.INPUT, FilterTypes.OUTPUT]:
-            self.flush_chain(filter_type)
+        return await FiregexInterceptor.start( filter=filter, n_queues=int(os.getenv("N_THREADS_NFQUEUE","1")))
     
     def delete_by_srv(self, srv:Service):
         for filter in self.get():
-            if filter.port == srv.port and filter.proto == srv.proto and ip_interface(filter.ip_int) == ip_interface(srv.ip_int):
-                self.delete_rule(filter.target, filter.id)
+            if filter.port == srv.port and filter.proto == srv.proto and ip_parse(filter.ip_int) == ip_parse(srv.ip_int):
+                print("DELETE CMD", {"delete":{"rule": {"handle": filter.id, "table": self.table_name, "chain": filter.target, "family": "inet"}}})
+                self.cmd({"delete":{"rule": {"handle": filter.id, "table": self.table_name, "chain": filter.target, "family": "inet"}}})
             
 
 class RegexFilter:
@@ -159,7 +186,6 @@ class FiregexInterceptor:
     
     def __init__(self):
         self.filter:FiregexFilter
-        self.ipv6:bool
         self.filter_map_lock:asyncio.Lock
         self.filter_map: Dict[str, RegexFilter]
         self.regex_filters: Set[RegexFilter]
@@ -167,21 +193,18 @@ class FiregexInterceptor:
         self.process:asyncio.subprocess.Process
         self.n_queues:int
         self.update_task: asyncio.Task
-        self.iptables:FiregexTables
     
     @classmethod
-    async def start(cls, iptables: FiregexTables, filter: FiregexFilter, n_queues:int = 1):
+    async def start(cls, filter: FiregexFilter, n_queues:int = 1):
         self = cls()
         self.filter = filter
         self.n_queues = n_queues
-        self.iptables = iptables
-        self.ipv6 = self.filter.ipv6()
         self.filter_map_lock = asyncio.Lock()
         self.update_config_lock = asyncio.Lock()
         input_range, output_range = await self._start_binary()
         self.update_task = asyncio.create_task(self.update_blocked())
-        self.iptables.add_input(queue_range=input_range, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
-        self.iptables.add_output(queue_range=output_range, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
+        FiregexTables().add_input(queue_range=input_range, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
+        FiregexTables().add_output(queue_range=output_range, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
         return self
     
     async def _start_binary(self):
@@ -221,7 +244,8 @@ class FiregexInterceptor:
 
     async def stop(self):
         self.update_task.cancel()
-        self.process.kill()
+        if self.process and self.process.returncode is None:
+            self.process.kill()
     
     async def _update_config(self, filters_codes):
         async with self.update_config_lock:

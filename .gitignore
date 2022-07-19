@@ -12,6 +12,7 @@
 # testing
 /frontend/coverage
 
+/backend/db/
 /backend/db/firegex.db
 /backend/db/firegex.db-journal
 /backend/modules/cppqueue

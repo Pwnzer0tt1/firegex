@@ -4,3 +4,4 @@ uvicorn[standard]
 passlib[bcrypt]
 python-jose[cryptography]
 fastapi-socketio
+git+https://salsa.debian.org/pkg-netfilter-team/pkg-nftables#egg=nftables&subdirectory=py

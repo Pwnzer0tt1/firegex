@@ -24,6 +24,7 @@ class FirewallManager:
                 del self.proxy_table[srv_id]
     
     async def init(self):
+        FiregexTables().init()
         await self.reload()
 
     async def reload(self):
@@ -47,7 +48,6 @@ class ServiceManager:
     def __init__(self, srv: Service, db):
         self.srv = srv
         self.db = db
-        self.firegextable = FiregexTables(self.srv.ipv6)
         self.status = STATUS.STOP
         self.filters: Dict[int, FiregexFilter] = {}
         self.lock = asyncio.Lock()
@@ -93,13 +93,13 @@ class ServiceManager:
 
     async def start(self):
         if not self.interceptor:
-            self.firegextable.delete_by_srv(self.srv)
-            self.interceptor = await self.firegextable.add(FiregexFilter(self.srv.proto,self.srv.port, self.srv.ip_int))
+            FiregexTables().delete_by_srv(self.srv)
+            self.interceptor = await FiregexTables().add(FiregexFilter(self.srv.proto,self.srv.port, self.srv.ip_int))
             await self._update_filters_from_db()
             self._set_status(STATUS.ACTIVE)
 
     async def stop(self):
-        self.firegextable.delete_by_srv(self.srv)
+        FiregexTables().delete_by_srv(self.srv)
         if self.interceptor:
             await self.interceptor.stop()
             self.interceptor = None

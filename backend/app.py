@@ -9,10 +9,9 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi_socketio import SocketManager
-from ipaddress import ip_interface
 from modules import SQLite, FirewallManager
 from modules.firewall import STATUS
-from utils import refactor_name, gen_service_id
+from utils import ip_parse, refactor_name, gen_service_id
 
 ON_DOCKER = len(sys.argv) > 1 and sys.argv[1] == "DOCKER"
 DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
@@ -54,8 +53,10 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
+    db.backup()
     await firewall.close()
     db.disconnect()
+    db.restore()
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -350,11 +351,8 @@ class ServiceAddResponse(BaseModel):
 @app.post('/api/services/add', response_model=ServiceAddResponse)
 async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined)):
     """Add a new service"""
-    ipv6 = None
     try:
-        ip_int = ip_interface(form.ip_int)
-        ipv6 = ip_int.version == 6
-        form.ip_int = str(ip_int)
+        form.ip_int = ip_parse(form.ip_int)
     except ValueError:
         return {"status":"Invalid address"}
     if form.proto not in ["tcp", "udp"]:
@@ -363,7 +361,7 @@ async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined
     try:
         srv_id = gen_service_id(db)
         db.query("INSERT INTO services (service_id ,name, port, ipv6, status, proto, ip_int) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    srv_id, refactor_name(form.name), form.port, ipv6, STATUS.STOP, form.proto, form.ip_int)
+                    srv_id, refactor_name(form.name), form.port, True, STATUS.STOP, form.proto, form.ip_int)
     except sqlite3.IntegrityError:
         return {'status': 'This type of service already exists'}
     await firewall.reload()
