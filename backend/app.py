@@ -11,7 +11,7 @@ from passlib.context import CryptContext
 from fastapi_socketio import SocketManager
 from modules import SQLite, FirewallManager
 from modules.firewall import STATUS
-from utils import ip_parse, refactor_name, gen_service_id
+from utils import get_interfaces, ip_parse, refactor_name, gen_service_id
 
 ON_DOCKER = len(sys.argv) > 1 and sys.argv[1] == "DOCKER"
 DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
@@ -364,6 +364,15 @@ async def add_new_service(form: ServiceAddForm, auth: bool = Depends(is_loggined
     await firewall.reload()
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}
+
+class IpInterface(BaseModel):
+    addr: str
+    name: str
+
+@app.get('/api/interfaces', response_model=List[IpInterface])
+async def get_ip_interfaces(auth: bool = Depends(is_loggined)):
+    """Get a list of ip and ip6 interfaces"""
+    return get_interfaces()
 
 async def frontend_debug_proxy(path):
     httpc = httpx.AsyncClient()

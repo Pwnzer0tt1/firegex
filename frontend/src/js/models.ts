@@ -75,3 +75,8 @@ export type RegexAddForm = {
     mode:string, // C->S S->C BOTH,
     active: boolean
 }
+
+export type IpInterface = {
+    name:string,
+    addr:string
+}

@@ -1,7 +1,7 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
-import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword, LoginResponse, ServerResponseToken, ServiceAddResponse } from "./models";
+import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword, LoginResponse, ServerResponseToken, ServiceAddResponse, IpInterface } from "./models";
 
 var Buffer = require('buffer').Buffer 
 
@@ -52,6 +52,10 @@ export async function postapi(path:string,data:any,is_form:boolean=false):Promis
 
 export function fireUpdateRequest(){
     window.dispatchEvent(new Event(eventUpdateName))
+}
+
+export async function getipinterfaces(){
+    return await getapi("interfaces") as IpInterface[];
 }
 
 export async function getstatus(){
