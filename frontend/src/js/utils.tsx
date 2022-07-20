@@ -54,6 +54,11 @@ export function fireUpdateRequest(){
     window.dispatchEvent(new Event(eventUpdateName))
 }
 
+export async function resetfiregex(delete_data:boolean = false){
+    const { status } = await postapi("reset",{delete:delete_data}) as ServerResponse;
+    return (status === "ok"?undefined:status)
+}
+
 export async function getipinterfaces(){
     return await getapi("interfaces") as IpInterface[];
 }
@@ -87,7 +92,6 @@ export async function setpassword(data:PasswordSend) {
 
 export async function changepassword(data:ChangePassword) {
     const { status, access_token } = await postapi("change-password",data) as ServerResponseToken;
-    console.log(access_token)
     if (access_token)
         window.localStorage.setItem("access_token", access_token);
         return status === "ok"?undefined:status

@@ -50,18 +50,24 @@ class SQLite():
         self.conn.row_factory = dict_factory
 
     def backup(self):
-        if self.conn:
-            with open(self.db_name, "rb") as f:
-                self.__backup = f.read()
+        with open(self.db_name, "rb") as f:
+            self.__backup = f.read()
     
     def restore(self):
+        were_active = True if self.conn else False
+        self.disconnect()
         if self.__backup:
             with open(self.db_name, "wb") as f:
                 f.write(self.__backup)
             self.__backup = None
-
+        if were_active: self.connect()
+            
+    def delete_backup(self):
+        self.__backup = None
+    
     def disconnect(self) -> None:
         if self.conn: self.conn.close()
+        self.conn = None
 
     def create_schema(self, tables = {}) -> None:
         if self.conn:

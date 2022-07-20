@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
-import { ActionIcon, Badge, Button, Divider, Group, Image, Menu, Modal, Notification, Space, Switch, Tooltip, FloatingTooltip, MediaQuery, PasswordInput } from '@mantine/core';
+import { ActionIcon, Badge, Divider, Image, Menu, Space, Tooltip, FloatingTooltip, MediaQuery } from '@mantine/core';
 import style from "./index.module.scss";
-import { changepassword, errorNotify, eventUpdateName, generalstats, logout, okNotify } from '../../js/utils';
-import { ChangePassword, GeneralStats } from '../../js/models';
+import { errorNotify, eventUpdateName, generalstats, logout } from '../../js/utils';
+import { GeneralStats } from '../../js/models';
 import { BsPlusLg } from "react-icons/bs"
 import { AiFillHome } from "react-icons/ai"
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import AddNewRegex from '../AddNewRegex';
 import AddNewService from '../AddNewService';
 import { FaLock } from 'react-icons/fa';
-import { ImCross, ImExit } from 'react-icons/im';
-import { useForm, useWindowEvent } from '@mantine/hooks';
+import { MdOutlineSettingsBackupRestore } from 'react-icons/md';
+import { ImExit } from 'react-icons/im';
+import { useWindowEvent } from '@mantine/hooks';
+import ResetPasswordModal from './ResetPasswordModal';
+import ResetModal from './ResetModal';
 
 
 function Header() {
@@ -38,36 +41,10 @@ function Header() {
     })
   } 
 
-
-  const form = useForm({
-    initialValues: {
-        password:"",
-        expire:true
-    },
-    validationRules:{
-      password: (value) => value !== ""
-    }
-  })
-
-  const [loadingBtn, setLoadingBtn] = useState(false)
-  const [error, setError] = useState<null|string>(null)
   const [changePasswordModal, setChangePasswordModal] = useState(false);
+  const [resetFiregexModal, setResetFiregexModal] = useState(false);
   const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
   const [tooltipHomeOpened, setTooltipHomeOpened] = useState(false);
-
-  const submitRequest = async (values:ChangePassword) => {
-    setLoadingBtn(true)
-    await changepassword(values).then(res => {
-      if(!res){
-        okNotify("Password change done!","The password of the firewall has been changed!")
-        setChangePasswordModal(false)
-        form.reset()
-      }else{
-        setError(res)
-      }
-    }).catch( err => setError(err.toString()))
-    setLoadingBtn(false)
-  }
 
   const {srv} = useParams()
 
@@ -108,8 +85,11 @@ function Header() {
         <Menu>
           <Menu.Label>Firewall Access</Menu.Label>
           <Menu.Item icon={<ImExit size={14} />} onClick={logout_action}>Logout</Menu.Item>
-          <Divider />
           <Menu.Item color="red" icon={<FaLock size={14} />} onClick={() => setChangePasswordModal(true)}>Change Password</Menu.Item>
+          <Divider />
+          <Menu.Label>Actions</Menu.Label>
+          <Menu.Item color="red" icon={<MdOutlineSettingsBackupRestore size={18} />} onClick={() => setResetFiregexModal(true)}>Reset Firegex</Menu.Item>
+          
         </Menu>
         <div style={{marginLeft:"20px"}}></div>
         { location.pathname !== "/"?
@@ -143,31 +123,9 @@ function Header() {
             <AddNewRegex opened={open} onClose={closeModal} service={srv} />:
             <AddNewService opened={open} onClose={closeModal} />
         }
-        <Modal size="xl" title="Change Firewall Password" opened={changePasswordModal} onClose={()=>setChangePasswordModal(false)} closeOnClickOutside={false} centered>
-
-          <form onSubmit={form.onSubmit(submitRequest)}>
-              <Space h="md" />
-              <PasswordInput
-                  label="New Password"
-                  placeholder="$3cr3t"
-                  {...form.getInputProps('password')}
-              />
-              <Space h="md" />
-              <Switch
-                  label="Expire the login status to all connections"
-                  {...form.getInputProps('expire', { type: 'checkbox' })}
-              />
-              <Space h="md" />
-              <Group position="right" mt="md">
-                <Button loading={loadingBtn} type="submit">Change Password</Button>
-              </Group>
-            </form>
-            <Space h="xl" />
-            {error?<>
-              <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
-                  Error: {error}
-              </Notification><Space h="md" /></>:null}
-        </Modal>
+        <ResetPasswordModal opened={changePasswordModal} onClose={() => setChangePasswordModal(false)} />
+        <ResetModal opened={resetFiregexModal} onClose={() => setResetFiregexModal(false)} />
+        
         <div style={{marginLeft:"40px"}}></div>
   </div>
 }

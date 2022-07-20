@@ -11,6 +11,7 @@ from passlib.context import CryptContext
 from fastapi_socketio import SocketManager
 from modules import SQLite, FirewallManager
 from modules.firewall import STATUS
+from modules.firegex import FiregexTables
 from utils import get_interfaces, ip_parse, refactor_name, gen_service_id
 
 ON_DOCKER = len(sys.argv) > 1 and sys.argv[1] == "DOCKER"
@@ -69,7 +70,7 @@ async def check_login(token: str = Depends(oauth2_scheme)):
     try:
         payload = jwt.decode(token, JWT_SECRET(), algorithms=[settings.JWT_ALGORITHM])
         logged_in: bool = payload.get("logged_in")
-    except JWTError:
+    except Exception:
         return False
     return logged_in
 
@@ -373,6 +374,27 @@ class IpInterface(BaseModel):
 async def get_ip_interfaces(auth: bool = Depends(is_loggined)):
     """Get a list of ip and ip6 interfaces"""
     return get_interfaces()
+
+class ResetRequest(BaseModel):
+    delete:bool
+
+@app.post('/api/reset', response_model=StatusMessageModel)
+async def reset_firegex(form: ResetRequest, auth: bool = Depends(is_loggined)):
+    """Reset firegex nftables rules and optionally all the database"""
+    if not form.delete: 
+        db.backup()
+    await firewall.close()
+    FiregexTables().reset()
+    if form.delete:
+        db.delete()
+        db.init()
+        db.put("secret", secrets.token_hex(32))
+    else:
+        db.restore()
+    await firewall.init()
+    await refresh_frontend()
+    
+    return {'status': 'ok'}
 
 async def frontend_debug_proxy(path):
     httpc = httpx.AsyncClient()

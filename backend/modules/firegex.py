@@ -39,6 +39,7 @@ class FiregexTables:
         else: raise Exception(err)
     
     def init(self):
+        self.reset()
         code, out, err = self.raw_cmd({"create":{"table":{"name":self.table_name,"family":"inet"}}})
         if code == 0:
             self.cmd(
@@ -61,10 +62,13 @@ class FiregexTables:
                     "policy":"accept"
                 }}}
             )
-        self.reset()
+        
             
     def reset(self):
-        self.cmd({"flush":{"table":{"name":"firegex","family":"inet"}}})
+        self.raw_cmd(
+            {"flush":{"table":{"name":"firegex","family":"inet"}}},
+            {"delete":{"table":{"name":"firegex","family":"inet"}}},
+        )
 
     def list(self):
         return self.cmd({"list": {"ruleset": None}})["nftables"]
