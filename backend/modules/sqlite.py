@@ -4,42 +4,20 @@ from hashlib import md5
 import base64
 
 class SQLite():
-    def __init__(self, db_name: str) -> None:
+    def __init__(self, db_name: str, schema:dict = None) -> None:
         self.conn: Union[None, sqlite3.Connection] = None
         self.cur = None
         self.db_name = db_name
         self.__backup = None
-        self.schema = {
-            'services': {
-                'service_id': 'VARCHAR(100) PRIMARY KEY',
-                'status': 'VARCHAR(100) NOT NULL',
-                'port': 'INT NOT NULL CHECK(port > 0 and port < 65536)',
-                'name': 'VARCHAR(100) NOT NULL UNIQUE',
-                'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "udp"))',
-                'ip_int': 'VARCHAR(100) NOT NULL',
-            },
-            'regexes': {
-                'regex': 'TEXT NOT NULL',
-                'mode': 'VARCHAR(1) NOT NULL',
-                'service_id': 'VARCHAR(100) NOT NULL',
-                'is_blacklist': 'BOOLEAN NOT NULL CHECK (is_blacklist IN (0, 1))',
-                'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
-                'regex_id': 'INTEGER PRIMARY KEY',
-                'is_case_sensitive' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1))',
-                'active' : 'BOOLEAN NOT NULL CHECK (active IN (0, 1)) DEFAULT 1',
-                'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
-            },
-            'QUERY':[
-                "CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (port, ip_int, proto);",
-                "CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);"   
-            ]
-        }
+        self.schema = {} if schema is None else schema
         self.DB_VER = md5(json.dumps(self.schema).encode()).hexdigest()
 
     def connect(self) -> None:
         try:
             self.conn = sqlite3.connect(self.db_name, check_same_thread = False)
         except Exception:
+            path_name = os.path.dirname(self.db_name)
+            if not os.path.exists(path_name): os.makedirs(path_name)
             with open(self.db_name, 'x'): pass
             self.conn = sqlite3.connect(self.db_name, check_same_thread = False)
         def dict_factory(cursor, row):

@@ -1,5 +1,5 @@
 from typing import Dict, List, Set
-from utils import ip_parse, ip_family
+from utils import ip_parse, ip_family, run_func
 from modules.sqlite import Service
 import re, os, asyncio
 import traceback, nftables
@@ -182,8 +182,7 @@ class RegexFilter:
     
     async def update(self):
         if self.update_func:
-            if asyncio.iscoroutinefunction(self.update_func): await self.update_func(self)
-            else: self.update_func(self)
+            await run_func(self.update_func, self)
 
 class FiregexInterceptor:
     

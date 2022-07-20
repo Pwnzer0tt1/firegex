@@ -68,15 +68,15 @@ export async function getstatus(){
 }
 
 export async function generalstats(){
-    return await getapi("general-stats") as GeneralStats;
+    return await getapi("nfregex/stats") as GeneralStats;
 }
 
 export async function servicelist(){
-    return await getapi("services") as Service[];
+    return await getapi("nfregex/services") as Service[];
 }
 
 export async function serviceinfo(service_id:string){
-    return await getapi(`service/${service_id}`) as Service;
+    return await getapi(`nfregex/service/${service_id}`) as Service;
 }
 
 export async function logout(){
@@ -105,55 +105,53 @@ export async function login(data:PasswordSend) {
 }
 
 export async function deleteregex(regex_id:number){
-    const { status } = await getapi(`regex/${regex_id}/delete`) as ServerResponse;
+    const { status } = await getapi(`nfregex/regex/${regex_id}/delete`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 export async function activateregex(regex_id:number){
-    const { status } = await getapi(`regex/${regex_id}/enable`) as ServerResponse;
+    const { status } = await getapi(`nfregex/regex/${regex_id}/enable`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 export async function deactivateregex(regex_id:number){
-    const { status } = await getapi(`regex/${regex_id}/disable`) as ServerResponse;
+    const { status } = await getapi(`nfregex/regex/${regex_id}/disable`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 export async function startservice(service_id:string){
-    const { status } = await getapi(`service/${service_id}/start`) as ServerResponse;
+    const { status } = await getapi(`nfregex/service/${service_id}/start`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 export async function renameservice(service_id:string, name: string){
-    const { status } = await postapi(`service/${service_id}/rename`,{ name }) as ServerResponse;
+    const { status } = await postapi(`nfregex/service/${service_id}/rename`,{ name }) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 export async function stopservice(service_id:string){
-    const { status } = await getapi(`service/${service_id}/stop`) as ServerResponse;
+    const { status } = await getapi(`nfregex/service/${service_id}/stop`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 export async function addservice(data:ServiceAddForm) {
-    return await postapi("services/add",data) as ServiceAddResponse;
+    return await postapi("nfregex/services/add",data) as ServiceAddResponse;
 }
 
 export async function deleteservice(service_id:string) {
-    const { status } = await getapi(`service/${service_id}/delete`) as ServerResponse;
+    const { status } = await getapi(`nfregex/service/${service_id}/delete`) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 
 export async function addregex(data:RegexAddForm) {
-    const { status } = await postapi("regexes/add",data) as ServerResponse;
+    const { status } = await postapi("nfregex/regexes/add",data) as ServerResponse;
     return status === "ok"?undefined:status
 }
 
 export async function serviceregexlist(service_id:string){
-    return await getapi(`service/${service_id}/regexes`) as RegexFilter[];
+    return await getapi(`nfregex/service/${service_id}/regexes`) as RegexFilter[];
 }
-
-
 
 
 export function errorNotify(title:string, description:string ){

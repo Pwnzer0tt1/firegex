@@ -13,8 +13,7 @@
 /frontend/coverage
 
 /backend/db/
-/backend/db/firegex.db
-/backend/db/firegex.db-journal
+/backend/db/**
 /backend/modules/cppqueue
 docker-compose.yml
 
