@@ -39,13 +39,6 @@ Firegex should not slow down the traffic on the network. For this the core of th
 #### 2. Availability
 Firegex **must** not become a problem for the SLA points!
 This means that firegex is projected to avoid any possibility to have the service down. We know that passing all the traffic through firegex, means also that if it fails, all services go down. It's for this that firegex implements different logics to avoid this. Also, if you add a wrong filter to your services, firegex will always offer you a fast or instant way to reset it to the previous state.
-1. Every reverse proxy is isolated from each other, avoiding the crash of all the proxies started by firegex
-2. The proxy is a binary program written in C, started as an indipendent process with indipendent memory, and uses boost lib for the connection and the std lib for checking the regex for each packet
-3. If a regex fails for whatever reason, the proxy remove this from the filter list and continue to forward the packets like it did't exist.
-4. If the firewall is restarted, at the startup it try to rebuild the previous status of proxies
-5. The firewall interface it's protected by a password. No one excepts your team must have access to firegex, this can be really really dangerous!
-6. If a regex makes trouble, you can delete it (this have an instant effect on the proxy), or put the service in pause (also called Transparent mode), this will deactivate all the filters from the proxy, but still continue to publish the service on the right port
-7. Every status change (except if you decide to stop the proxy) that you made to the service, and so to the proxy is instantaneous and done with 0 down time. The proxy is **never** restarted, it's configuration changes during runtime
     
 # Credits 
 - Copyright (c) 2007 Arash Partow (http://www.partow.net) for the base of our proxy implementation
