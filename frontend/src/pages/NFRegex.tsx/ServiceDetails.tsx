@@ -55,7 +55,7 @@ function ServiceDetails() {
 
     const [tooltipAddRegexOpened, setTooltipAddRegexOpened] = useState(false);
 
-    return <div>
+    return <>
         <LoadingOverlay visible={loader} />
         <ServiceRow service={serviceInfo} />
         {regexesList.length === 0?<>
@@ -77,9 +77,7 @@ function ServiceDetails() {
         }
 
         {srv?<AddNewRegex opened={open} onClose={closeModal} service={srv} />:null}
-
-
-    </div>
+    </>
 }
 
 export default ServiceDetails;

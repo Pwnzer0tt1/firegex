@@ -45,8 +45,8 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
 
   return <div className={style.box}>
         <Grid>
-          <Grid.Col span={2}>
-            <Title order={2} style={{color:"#FFF"}}>Regex:</Title> 
+          <Grid.Col span={2} className="center-flex">
+            <Title order={4}>Regex:</Title> 
           </Grid.Col>
           <Grid.Col span={8}>
             <Text className={style.regex_text}> {regex_expr}</Text>

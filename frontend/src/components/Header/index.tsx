@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { ActionIcon, Badge, Divider, Image, Menu, Space, Tooltip, FloatingTooltip, MediaQuery } from '@mantine/core';
+import { ActionIcon, Divider, Image, Menu, Tooltip, FloatingTooltip } from '@mantine/core';
 import style from "./index.module.scss";
-import { errorNotify, eventUpdateName, logout, nfregex } from '../../js/utils';
-import { GeneralStats } from '../../js/models';
+import { errorNotify, logout } from '../../js/utils';
 import { BsPlusLg } from "react-icons/bs"
 import { AiFillHome } from "react-icons/ai"
 import { useNavigate, useParams } from 'react-router-dom';
@@ -11,26 +10,13 @@ import AddNewService from '../NFRegex/AddNewService';
 import { FaLock } from 'react-icons/fa';
 import { MdOutlineSettingsBackupRestore } from 'react-icons/md';
 import { ImExit } from 'react-icons/im';
-import { useWindowEvent } from '@mantine/hooks';
 import ResetPasswordModal from './ResetPasswordModal';
 import ResetModal from './ResetModal';
 
 
 function Header() {
   
-  const [generalStats, setGeneralStats] = useState<GeneralStats>({closed:0, regexes:0, services:0});
-
   const navigator = useNavigate()
-
-  const updateInfo = () => {
-    nfregex.stats().then(res => {
-      setGeneralStats(res)
-    }).catch(
-      err => errorNotify("General Info Auto-Update failed!", err.toString())
-    )
-  }
-
-  useWindowEvent(eventUpdateName, updateInfo)
   
   const logout_action = () => {
     logout().then(r => {
@@ -51,34 +37,14 @@ function Header() {
   const closeModal = () => {setOpen(false);}
 
   return <div id="header-page" className={style.header}>
-        <FloatingTooltip zIndex={0} label="Home" transition="pop" transitionDuration={200} openDelay={1000} transitionTimingFunction="ease" color="dark" position="right" >
-          <div style={{ width: 240, marginLeft: 'auto', marginRight: 'auto', padding:"40px", cursor: 'pointer' }}>
+      
+        <div style={{ width: 240, marginLeft: 'auto', marginRight: 'auto', padding:"40px", cursor: 'pointer' }}>
+          <FloatingTooltip zIndex={0} label="Home" transition="pop" transitionDuration={200} openDelay={1000} transitionTimingFunction="ease" color="dark" position="right" >
             <Image src="/header-logo.png" alt="Firegex logo" onClick={()=>navigator("/")}/>
-          </div>
-        </FloatingTooltip>
-        <div className="flex-spacer" />
+          </FloatingTooltip>
+        </div>
         
-        <MediaQuery largerThan="md" styles={{ display: 'none' }}>
-          <div>
-            <Badge color="green" size="lg" variant="filled">Services: {generalStats.services}</Badge>
-              <Space h="xs" />
-            <Badge size="lg" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>
-              <Space h="xs" />
-            <Badge size="lg" color="violet" variant="filled">Regexes: {generalStats.regexes}</Badge>
-          </div>
-        </MediaQuery>  
-
-        <MediaQuery smallerThan="md" styles={{ display: 'none' }}><div>
-          <div className="center-flex">
-          <Badge color="green" size="lg" variant="filled">Services: {generalStats.services}</Badge>
-            <Space w="xs" />
-          <Badge size="lg" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>
-            <Space w="xs" />
-          <Badge size="lg" color="violet" variant="filled">Regexes: {generalStats.regexes}</Badge>
-          </div>
-        </div></MediaQuery>  
-
-        
+        <div className="flex-spacer" />        
       
         <div style={{marginLeft:"20px"}}></div>
         <Menu>
@@ -122,7 +88,6 @@ function Header() {
         }
         <ResetPasswordModal opened={changePasswordModal} onClose={() => setChangePasswordModal(false)} />
         <ResetModal opened={resetFiregexModal} onClose={() => setResetFiregexModal(false)} />
-        
         <div style={{marginLeft:"40px"}}></div>
   </div>
 }

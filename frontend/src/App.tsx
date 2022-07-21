@@ -9,7 +9,6 @@ import { errorNotify, fireUpdateRequest, getstatus, login, setpassword } from '.
 import NFRegex from './pages/NFRegex.tsx';
 import ServiceDetails from './pages/NFRegex.tsx/ServiceDetails';
 import io from 'socket.io-client';
-import HomePage from './pages/HomePage';
 
 const socket = io({transports: ["websocket", "polling"], path:"/sock" });
 
@@ -146,11 +145,9 @@ function App() {
   }else if (systemStatus.status === "run" && systemStatus.loggined){
     return <Routes>
               <Route element={<MainLayout><Outlet /></MainLayout>}>
-                <Route element={<HomePage><Outlet /></HomePage>}>
                   <Route path="nfregex" element={<NFRegex><Outlet /></NFRegex>} >
                     <Route path=":srv" element={<ServiceDetails />} />
                   </Route>
-                </Route>
                 <Route path="*" element={<Navigate to="/nfregex" />} />
               </Route>
           </Routes>
