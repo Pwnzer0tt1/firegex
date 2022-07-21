@@ -2,7 +2,6 @@
 @use "../../index.scss" as *;
 
 .footer{
-    height: 150px;
     margin-top: 50px;
     background-color: $primary_color;
     @extend .center-flex;

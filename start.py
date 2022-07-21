@@ -21,7 +21,7 @@ def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
 def sep(): puts("-----------------------------------", is_bold=True)
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
-parser.add_argument('--thread-per-queue', "-t", type=int, required=False, help='Number of threads started for each queue', default=1)
+parser.add_argument('--threads', "-t", type=int, required=False, help='Number of threads started for each service/utility', default=1)
 parser.add_argument('--no-autostart', "-n", required=False, action="store_true", help='Auto-execute "docker-compose up -d --build"', default=False)
 
 args = parser.parse_args()
@@ -30,7 +30,13 @@ puts(f"Firegex", color=colors.yellow, end="")
 puts(" will start on port ", end="")
 puts(f"{args.port}", color=colors.cyan)
 
+if args.threads < 1: 
+    puts("Insert a valid number of threads", color=colors.red)
+    exit()
+
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
+
+gcc_params = f"-D MULTI_THREAD -D THREAD_NUM={args.threads}" if args.threads > 1 else ""
 
 with open("docker-compose.yml","wt") as compose:
 
@@ -41,11 +47,14 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: .
+        build: 
+            context: .
+            args:
+                - GCC_PARAMS={gcc_params}
         network_mode: "host"
         environment:
             - PORT={args.port}
-            - N_THREADS_NFQUEUE={args.thread_per_queue}
+            - NTHREADS={args.thread_per_queue}
         volumes:
             - /execute/db
         cap_add:
@@ -62,12 +71,15 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: .
+        build: 
+            context: .
+            args:
+                - GCC_PARAMS={gcc_params}
         ports:
             - {args.port}:{args.port}
         environment:
             - PORT={args.port}
-            - N_THREADS_NFQUEUE={args.thread_per_queue}
+            - NTHREADS={args.thread_per_queue}
         volumes:
             - /execute/db
         cap_add:

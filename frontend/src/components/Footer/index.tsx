@@ -1,12 +1,13 @@
+import { Footer } from '@mantine/core';
 import React from 'react';
 
 import style from "./index.module.scss";
 
 
-function Footer() {
-  return <div id="footer" className={style.footer}>
+function FooterPage() {
+  return <Footer id="footer" height={70} className={style.footer}>
         Made by Pwnzer0tt1
-  </div>
+  </Footer>
 }
 
-export default Footer;
+export default FooterPage;

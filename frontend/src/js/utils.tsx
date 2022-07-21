@@ -1,9 +1,10 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
-import { GeneralStats, Service, ServiceAddForm, ServerResponse, RegexFilter, RegexAddForm, ServerStatusResponse, PasswordSend, ChangePassword, LoginResponse, ServerResponseToken, ServiceAddResponse, IpInterface } from "./models";
-
+import { nfregex } from "../components/NFRegex/utils";
+import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 var Buffer = require('buffer').Buffer 
+
 
 export const eventUpdateName = "update-info"
 
@@ -50,6 +51,12 @@ export async function postapi(path:string,data:any,is_form:boolean=false):Promis
     });
 }
 
+export function gatmainpath(){
+    const paths = window.location.pathname.split("/")
+    if (paths.length > 1) return paths[1]
+    return ""
+}
+
 export function fireUpdateRequest(){
     window.dispatchEvent(new Event(eventUpdateName))
 }
@@ -91,56 +98,6 @@ export async function login(data:PasswordSend) {
     const { status, access_token } = await postapi("login",from,true) as LoginResponse;
     window.localStorage.setItem("access_token", access_token);
     return status;
-}
-
-export const nfregex = {
-    stats: async () => {
-        return await getapi("nfregex/stats") as GeneralStats;
-    },
-    services: async () => {
-        return await getapi("nfregex/services") as Service[];
-    },
-    serviceinfo: async (service_id:string) => {
-        return await getapi(`nfregex/service/${service_id}`) as Service;
-    },
-    regexdelete: async (regex_id:number) => {
-        const { status } = await getapi(`nfregex/regex/${regex_id}/delete`) as ServerResponse;
-        return status === "ok"?undefined:status
-    },
-    regexenable: async (regex_id:number) => {
-        const { status } = await getapi(`nfregex/regex/${regex_id}/enable`) as ServerResponse;
-        return status === "ok"?undefined:status
-    },
-    regexdisable: async (regex_id:number) => {
-        const { status } = await getapi(`nfregex/regex/${regex_id}/disable`) as ServerResponse;
-        return status === "ok"?undefined:status
-    },
-    servicestart: async (service_id:string) => {
-        const { status } = await getapi(`nfregex/service/${service_id}/start`) as ServerResponse;
-        return status === "ok"?undefined:status
-    },
-    servicerename: async (service_id:string, name: string) => {
-        const { status } = await postapi(`nfregex/service/${service_id}/rename`,{ name }) as ServerResponse;
-        return status === "ok"?undefined:status
-    },
-    servicestop: async (service_id:string) => {
-        const { status } = await getapi(`nfregex/service/${service_id}/stop`) as ServerResponse;
-        return status === "ok"?undefined:status
-    },
-    servicesadd: async (data:ServiceAddForm) => {
-        return await postapi("nfregex/services/add",data) as ServiceAddResponse;
-    },
-    servicedelete: async (service_id:string) => {
-        const { status } = await getapi(`nfregex/service/${service_id}/delete`) as ServerResponse;
-        return status === "ok"?undefined:status
-    },
-    regexesadd: async (data:RegexAddForm) => {
-        const { status } = await postapi("nfregex/regexes/add",data) as ServerResponse;
-        return status === "ok"?undefined:status
-    },
-    serviceregexes: async (service_id:string) => {
-        return await getapi(`nfregex/service/${service_id}/regexes`) as RegexFilter[];
-    }
 }
 
 export function errorNotify(title:string, description:string ){

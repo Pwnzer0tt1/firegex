@@ -1,6 +1,6 @@
 import asyncio
 from ipaddress import ip_interface
-import os, socket, secrets, psutil
+import os, socket, psutil
 import sys
 from fastapi_socketio import SocketManager
 
@@ -29,13 +29,6 @@ def refactor_name(name:str):
     name = name.strip()
     while "  " in name: name = name.replace("  "," ")
     return name
-
-def gen_service_id(db):
-    while True:
-        res = secrets.token_hex(8)
-        if len(db.query('SELECT 1 FROM services WHERE service_id = ?;', res)) == 0:
-            break
-    return res
 
 def list_files(mypath):
     from os import listdir

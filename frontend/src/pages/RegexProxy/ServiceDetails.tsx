@@ -1,25 +1,25 @@
 import { ActionIcon, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import RegexView from '../../components/NFRegex/RegexView';
-import ServiceRow from '../../components/NFRegex/ServiceRow';
-import AddNewRegex from '../../components/NFRegex/AddNewRegex';
+import RegexView from '../components/RegexView';
+import ServiceRow from '../components/ServiceRow';
+import AddNewRegex from '../components/AddNewRegex';
 import { BsPlusLg } from "react-icons/bs";
-import { nfregex, RegexFilter, Service } from '../../components/NFRegex/utils';
-import { errorNotify, eventUpdateName, fireUpdateRequest } from '../../js/utils';
+import { RegexFilter, Service } from '../js/models';
+import { errorNotify, eventUpdateName, fireUpdateRequest, serviceinfo, serviceregexlist } from '../js/utils';
 import { useWindowEvent } from '@mantine/hooks';
 
 function ServiceDetails() {
-    const {srv} = useParams()
+    const {srv_id} = useParams()
+
     const [serviceInfo, setServiceInfo] = useState<Service>({
-        service_id: "",
-        port:0,
+        id:srv_id?srv_id:"",
+        internal_port:0,
         n_packets:0,
         n_regex:0,
-        name:"",
-        status:"🤔",
-        ip_int: "",
-        proto: "tcp",
+        name:srv_id?srv_id:"",
+        public_port:0,
+        status:"🤔"
     })
 
     const [regexesList, setRegexesList] = useState<RegexFilter[]>([])
@@ -28,9 +28,9 @@ function ServiceDetails() {
     const closeModal = () => {setOpen(false);updateInfo();}
 
     const updateInfo = async () => {
-        if (!srv) return
+        if (!srv_id) return
         let error = false;
-        await nfregex.serviceinfo(srv).then(res => {
+        await serviceinfo(srv_id).then(res => {
             setServiceInfo(res)
         }).catch(
           err =>{
@@ -38,11 +38,10 @@ function ServiceDetails() {
             navigator("/")
         })
         if (error) return
-        
-        await nfregex.serviceregexes(srv).then(res => {
+        await serviceregexlist(srv_id).then(res => {
             setRegexesList(res)
         }).catch(
-          err => errorNotify(`Updater for ${srv} service failed [Regex list]!`, err.toString())
+          err => errorNotify(`Updater for ${srv_id} service failed [Regex list]!`, err.toString())
         )
         setLoader(false)
     }
@@ -55,7 +54,7 @@ function ServiceDetails() {
 
     const [tooltipAddRegexOpened, setTooltipAddRegexOpened] = useState(false);
 
-    return <>
+    return <div>
         <LoadingOverlay visible={loader} />
         <ServiceRow service={serviceInfo} />
         {regexesList.length === 0?<>
@@ -76,8 +75,10 @@ function ServiceDetails() {
             </Grid>
         }
 
-        {srv?<AddNewRegex opened={open} onClose={closeModal} service={srv} />:null}
-    </>
+        {srv_id?<AddNewRegex opened={open} onClose={closeModal} service={srv_id} />:null}
+
+
+    </div>
 }
 
 export default ServiceDetails;

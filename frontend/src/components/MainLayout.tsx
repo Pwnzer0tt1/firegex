@@ -1,23 +1,33 @@
-import React from 'react';
-import { Container, Space, Tabs } from '@mantine/core';
-import Footer from './Footer';
-import Header from './Header';
+import React, { useState } from 'react';
+import { Container, Space } from '@mantine/core';
+import { AppShell } from '@mantine/core';
+import NavBar from './NavBar';
+import FooterPage from './Footer';
+import HeaderPage from './Header';
+
+
+
 
 function MainLayout({ children }:{ children:any }) {
+  const [opened, setOpened] = useState(false);
   return <>  
-      <Header/>
-      <Tabs grow variant="pills">
-        <Tabs.Tab label="Regex Prox"></Tabs.Tab>
-        <Tabs.Tab label="Port Hijacking"></Tabs.Tab>
-        <Tabs.Tab label="Netfilter regex"></Tabs.Tab>
-      </Tabs>
-      <Space h="xl" />
-      <Container size="lg" style={{minHeight:"57.5vh"}}>
-          {children}
-      </Container>
-      <Space h="xl" />
-      <Footer />
-  </>
+      
+  <AppShell
+    padding="md"
+    fixed
+    navbar={<NavBar closeNav={()=>setOpened(false)} opened={opened} />}
+    header={<HeaderPage navOpen={opened} setNav={setOpened} />}
+    footer={<FooterPage />}
+  >
+    <Container size="lg">
+        {children}
+    </Container>
+  <Space h="lg" />
+
+  </AppShell>
+
+</>
+
 }
 
 export default MainLayout;

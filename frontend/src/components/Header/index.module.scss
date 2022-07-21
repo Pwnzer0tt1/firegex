@@ -1,17 +1,24 @@
 
 @use "../../vars" as *;
+@use "../../index.scss" as *;
 
 .header{
     width: 100%;
-    height: 140px;
     background-color: $primary_color;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
-.logo{
-    width: 200px;
-    margin-left: 40px;
-    height: 70%;
+.divlogo{
+    width: 110px;
+    height: 100%;
+    cursor: pointer;
+    @extend .center-flex;
+}
+
+.navbtn{
+    @extend .center-flex;
+    width: 30px;
+    margin:0;
 }

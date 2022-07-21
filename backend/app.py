@@ -6,8 +6,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from passlib.context import CryptContext
 from fastapi_socketio import SocketManager
-from modules import SQLite
-from modules.firegex import FiregexTables
+from utils.sqlite import SQLite
 from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, refresh_frontend, DEBUG
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
