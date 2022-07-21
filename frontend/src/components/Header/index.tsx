@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { ActionIcon, Badge, Divider, Image, Menu, Space, Tooltip, FloatingTooltip, MediaQuery } from '@mantine/core';
 import style from "./index.module.scss";
-import { errorNotify, eventUpdateName, generalstats, logout } from '../../js/utils';
+import { errorNotify, eventUpdateName, logout, nfregex } from '../../js/utils';
 import { GeneralStats } from '../../js/models';
 import { BsPlusLg } from "react-icons/bs"
 import { AiFillHome } from "react-icons/ai"
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
-import AddNewRegex from '../AddNewRegex';
-import AddNewService from '../AddNewService';
+import { useNavigate, useParams } from 'react-router-dom';
+import AddNewRegex from '../NFRegex/AddNewRegex';
+import AddNewService from '../NFRegex/AddNewService';
 import { FaLock } from 'react-icons/fa';
 import { MdOutlineSettingsBackupRestore } from 'react-icons/md';
 import { ImExit } from 'react-icons/im';
@@ -19,12 +19,11 @@ import ResetModal from './ResetModal';
 function Header() {
   
   const [generalStats, setGeneralStats] = useState<GeneralStats>({closed:0, regexes:0, services:0});
-  const location = useLocation()
 
   const navigator = useNavigate()
 
   const updateInfo = () => {
-    generalstats().then(res => {
+    nfregex.stats().then(res => {
       setGeneralStats(res)
     }).catch(
       err => errorNotify("General Info Auto-Update failed!", err.toString())
@@ -92,18 +91,16 @@ function Header() {
           
         </Menu>
         <div style={{marginLeft:"20px"}}></div>
-        { location.pathname !== "/"?
-          <Tooltip zIndex={0} label="Home" position='bottom' transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="teal" opened={tooltipHomeOpened} tooltipId="tooltip-home-id">
-            <ActionIcon color="teal" style={{marginRight:"10px"}}
-              size="xl" radius="md" variant="filled"
-              onClick={()=>navigator("/")}
-              aria-describedby="tooltip-home-id"
-              onFocus={() => setTooltipHomeOpened(false)} onBlur={() => setTooltipHomeOpened(false)}
-              onMouseEnter={() => setTooltipHomeOpened(true)} onMouseLeave={() => setTooltipHomeOpened(false)}>
-              <AiFillHome size="25px" />
-            </ActionIcon>
-          </Tooltip>
-        :null}
+        <Tooltip zIndex={0} label="Home" position='bottom' transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="teal" opened={tooltipHomeOpened} tooltipId="tooltip-home-id">
+          <ActionIcon color="teal" style={{marginRight:"10px"}}
+            size="xl" radius="md" variant="filled"
+            onClick={()=>navigator("/")}
+            aria-describedby="tooltip-home-id"
+            onFocus={() => setTooltipHomeOpened(false)} onBlur={() => setTooltipHomeOpened(false)}
+            onMouseEnter={() => setTooltipHomeOpened(true)} onMouseLeave={() => setTooltipHomeOpened(false)}>
+            <AiFillHome size="25px" />
+          </ActionIcon>
+        </Tooltip>
         { srv?
           <Tooltip label="Add a new regex" zIndex={0} position='bottom' transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="blue" opened={tooltipAddOpened} tooltipId="tooltip-add-id">
             <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"

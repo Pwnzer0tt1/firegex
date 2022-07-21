@@ -1,0 +1,13 @@
+
+@use "../../../vars" as *;
+
+.box{
+    padding:30px;
+    margin:5px;
+}
+
+.regex_text{
+    padding: 10px;
+    background-color: $third_color;
+    border-radius: 15px;
+}

@@ -6,9 +6,10 @@ import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
 import { PasswordSend, ServerStatusResponse } from './js/models';
 import { errorNotify, fireUpdateRequest, getstatus, login, setpassword } from './js/utils';
-import HomePage from './pages/HomePage';
-import ServiceDetails from './pages/ServiceDetails';
+import NFRegex from './pages/NFRegex.tsx';
+import ServiceDetails from './pages/NFRegex.tsx/ServiceDetails';
 import io from 'socket.io-client';
+import HomePage from './pages/HomePage';
 
 const socket = io({transports: ["websocket", "polling"], path:"/sock" });
 
@@ -145,9 +146,12 @@ function App() {
   }else if (systemStatus.status === "run" && systemStatus.loggined){
     return <Routes>
               <Route element={<MainLayout><Outlet /></MainLayout>}>
-                <Route index element={<HomePage />} />
-                <Route path=":srv" element={<ServiceDetails />} />
-                <Route path="*" element={<Navigate to="/" />} />
+                <Route element={<HomePage><Outlet /></HomePage>}>
+                  <Route path="nfregex" element={<NFRegex><Outlet /></NFRegex>} >
+                    <Route path=":srv" element={<ServiceDetails />} />
+                  </Route>
+                </Route>
+                <Route path="*" element={<Navigate to="/nfregex" />} />
               </Route>
           </Routes>
   }else{
