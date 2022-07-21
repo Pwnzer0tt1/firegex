@@ -47,7 +47,7 @@ function RegexProxy({ children }: { children: any }) {
     return <>
     <Space h="sm" />
     <div className='center-flex'>
-        <Title order={4}>Netfilter Regex</Title>
+        <Title order={4}>TCP Proxy Regex Filter (IPv4 Only)</Title>
         <div className='flex-spacer' />
         <Badge size="sm" color="green" variant="filled">Services: {generalStats.services}</Badge>
         <Space w="xs" />

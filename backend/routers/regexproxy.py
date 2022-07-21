@@ -6,16 +6,16 @@ from pydantic import BaseModel
 from modules.regexproxy.utils import STATUS, ProxyManager, gen_internal_port, gen_service_id
 from utils.sqlite import SQLite
 from utils.models import ResetRequest, StatusMessageModel
-from utils.firegextables import FiregexTables
+from utils import refactor_name, refresh_frontend
 
 app = APIRouter()
-db = SQLite("regextcpproxy.db",{
+db = SQLite("db/regextcpproxy.db",{
     'services': {
         'status': 'VARCHAR(100) NOT NULL',
         'service_id': 'VARCHAR(100) PRIMARY KEY',
         'internal_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536)',
         'public_port': 'INT NOT NULL CHECK(internal_port > 0 and internal_port < 65536) UNIQUE',
-        'name': 'VARCHAR(100) NOT NULL'
+        'name': 'VARCHAR(100) NOT NULL UNIQUE'
     },
     'regexes': {
         'regex': 'TEXT NOT NULL',
@@ -31,7 +31,7 @@ db = SQLite("regextcpproxy.db",{
     'QUERY':[
         "CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);"
     ]
-    })
+})
 
 firewall = ProxyManager(db)
 
@@ -39,7 +39,6 @@ async def reset(params: ResetRequest):
     if not params.delete: 
         db.backup()
     await firewall.close()
-    FiregexTables().reset()
     if params.delete:
         db.delete()
         db.init()
@@ -122,18 +121,21 @@ async def get_service_by_id(service_id: str, ):
 async def service_stop(service_id: str, ):
     """Request the stop of a specific service"""
     await firewall.get(service_id).next(STATUS.STOP)
+    await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/pause', response_model=StatusMessageModel)
 async def service_pause(service_id: str, ):
     """Request the pause of a specific service"""
     await firewall.get(service_id).next(STATUS.PAUSE)
+    await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/start', response_model=StatusMessageModel)
 async def service_start(service_id: str, ):
     """Request the start of a specific service"""
     await firewall.get(service_id).next(STATUS.ACTIVE)
+    await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/delete', response_model=StatusMessageModel)
@@ -142,6 +144,7 @@ async def service_delete(service_id: str, ):
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     db.query('DELETE FROM regexes WHERE service_id = ?;', service_id)
     await firewall.remove(service_id)
+    await refresh_frontend()
     return {'status': 'ok'}
 
 
@@ -150,6 +153,7 @@ async def regen_service_port(service_id: str, ):
     """Request the regeneration of a the internal proxy port of a specific service"""
     db.query('UPDATE services SET internal_port = ? WHERE service_id = ?;', gen_internal_port(db), service_id)
     await firewall.get(service_id).update_port()
+    await refresh_frontend()
     return {'status': 'ok'}
 
 class ChangePortForm(BaseModel):
@@ -175,8 +179,9 @@ async def change_service_ports(service_id: str, change_port:ChangePortForm ):
         query.append(service_id)
         db.query(f'UPDATE services SET {sql_inj} WHERE service_id = ?;', *query)
     except sqlite3.IntegrityError:
-        return {'status': 'Name or/and port of the service has been already assigned to another service'}
+        return {'status': 'Port of the service has been already assigned to another service'}
     await firewall.get(service_id).update_port()
+    await refresh_frontend()
     return {'status': 'ok'}
 
 class RegexModel(BaseModel):
@@ -218,7 +223,7 @@ async def regex_delete(regex_id: int, ):
     if len(res) != 0:
         db.query('DELETE FROM regexes WHERE regex_id = ?;', regex_id)
         await firewall.get(res[0]["service_id"]).update_filters()
-    
+    await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/regex/{regex_id}/enable', response_model=StatusMessageModel)
@@ -228,6 +233,7 @@ async def regex_enable(regex_id: int, ):
     if len(res) != 0:
         db.query('UPDATE regexes SET active=1 WHERE regex_id = ?;', regex_id)
         await firewall.get(res[0]["service_id"]).update_filters()
+    await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/regex/{regex_id}/disable', response_model=StatusMessageModel)
@@ -237,6 +243,7 @@ async def regex_disable(regex_id: int, ):
     if len(res) != 0:
         db.query('UPDATE regexes SET active=0 WHERE regex_id = ?;', regex_id)
         await firewall.get(res[0]["service_id"]).update_filters()
+    await refresh_frontend()
     return {'status': 'ok'}
 
 class RegexAddForm(BaseModel):
@@ -259,8 +266,8 @@ async def add_new_regex(form: RegexAddForm, ):
                 form.service_id, form.regex, form.is_blacklist, form.mode, form.is_case_sensitive, True if form.active is None else form.active )
     except sqlite3.IntegrityError:
         return {'status': 'An identical regex already exists'}
-
     await firewall.get(form.service_id).update_filters()
+    await refresh_frontend()
     return {'status': 'ok'}
 
 class ServiceAddForm(BaseModel):
@@ -278,14 +285,20 @@ class RenameForm(BaseModel):
 @app.post('/service/{service_id}/rename', response_model=StatusMessageModel)
 async def service_rename(service_id: str, form: RenameForm, ):
     """Request to change the name of a specific service"""
+    form.name = refactor_name(form.name)
     if not form.name: return {'status': 'The name cannot be empty!'} 
-    db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
+    try:
+        db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
+    except sqlite3.IntegrityError:
+        return {'status': 'The name is already used!'}
+    await refresh_frontend()
     return {'status': 'ok'}
 
 @app.post('/services/add', response_model=ServiceAddStatus)
 async def add_new_service(form: ServiceAddForm, ):
     """Add a new service"""
     serv_id = gen_service_id(db)
+    form.name = refactor_name(form.name)
     try:
         internal_port = form.internalPort if form.internalPort else gen_internal_port(db)
         db.query("INSERT INTO services (name, service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?, ?)",
@@ -293,5 +306,5 @@ async def add_new_service(form: ServiceAddForm, ):
     except sqlite3.IntegrityError:
         return {'status': 'Name or/and ports of the service has been already assigned to another service'}
     await firewall.reload()
-
+    await refresh_frontend()
     return {'status': 'ok', "id": serv_id }

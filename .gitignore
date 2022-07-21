@@ -15,6 +15,7 @@
 /backend/db/
 /backend/db/**
 /backend/modules/cppqueue
+/backend/modules/proxy
 docker-compose.yml
 
 # misc

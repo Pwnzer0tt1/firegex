@@ -1,7 +1,7 @@
 import { Button, Group, Space, TextInput, Notification, Modal } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useEffect, useState } from 'react';
-import { fireUpdateRequest, okNotify } from '../../../js/utils';
+import { okNotify } from '../../../js/utils';
 import { ImCross } from "react-icons/im"
 import { regexproxy, Service } from '../utils';
 
@@ -29,7 +29,6 @@ function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>v
             if (!res){
                 setSubmitLoading(false)
                 close();
-                fireUpdateRequest();
                 okNotify(`Service ${service.name} has been renamed in ${ name }`, `Successfully renamed service on port ${service.public_port}`)
             }else{
                 setSubmitLoading(false)

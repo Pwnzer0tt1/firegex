@@ -10,7 +10,7 @@ import { errorNotify, eventUpdateName, fireUpdateRequest } from '../../js/utils'
 import { useWindowEvent } from '@mantine/hooks';
 import { RegexFilter } from '../../js/models';
 
-function ServiceDetails() {
+function ServiceDetailsNFRegex() {
     const {srv} = useParams()
     const [serviceInfo, setServiceInfo] = useState<Service>({
         service_id: "",
@@ -81,4 +81,4 @@ function ServiceDetails() {
     </>
 }
 
-export default ServiceDetails;
+export default ServiceDetailsNFRegex;

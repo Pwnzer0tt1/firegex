@@ -3,6 +3,7 @@ from modules.regexproxy.proxy import Filter, Proxy
 import random, socket, asyncio
 from base64 import b64decode
 from utils.sqlite import SQLite
+from utils import refresh_frontend
 
 class STATUS:
     WAIT = "wait"
@@ -129,8 +130,10 @@ class ServiceManager:
                 while True:
                     if check_port_is_open(self.proxy.public_port):
                         self._set_status(to)
+                        await refresh_frontend()
                         await self.proxy.start(in_pause=(to==STATUS.PAUSE))
                         self._set_status(STATUS.STOP)
+                        await refresh_frontend()
                         return
                     else:
                         await asyncio.sleep(.5)

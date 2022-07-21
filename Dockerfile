@@ -16,11 +16,11 @@ RUN mkdir build; cd build; cmake ../ -DLIBTINS_ENABLE_CXX11=1; make; make instal
 RUN mkdir -p /execute/modules
 WORKDIR /execute
 
-COPY ./backend/nfqueue /execute/nfqueue
+COPY ./backend/binsrc /execute/binsrc
 
 ARG GCC_PARAMS
-RUN g++ nfqueue/nfqueue.cpp -o modules/cppqueue -std=c++20 -O3 -march=native -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
-RUN g++ -O3 -march=native $GCC_PARAMS -o modules/proxy nfqueue/proxy.cpp -pthread -lboost_system -lboost_thread -lpcre2-8
+RUN g++ binsrc/nfqueue.cpp -o modules/cppqueue -O3 -march=native -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
+RUN g++ binsrc/proxy.cpp -o modules/proxy -O3 -march=native $GCC_PARAMS -pthread -lboost_system -lboost_thread -lpcre2-8
 
 ADD ./backend/requirements.txt /execute/requirements.txt
 RUN pip3 install --no-cache-dir -r /execute/requirements.txt

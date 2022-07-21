@@ -3,7 +3,7 @@ import React from "react";
 import { IoMdGitNetwork } from "react-icons/io";
 import { MdTransform } from "react-icons/md";
 import { useNavigate } from "react-router-dom";
-import { gatmainpath } from "../../js/utils";
+import { getmainpath } from "../../js/utils";
 import { GrDirections } from "react-icons/gr";
 
 function NavBarButton({ navigate, closeNav, name, icon, color, disabled }:
@@ -17,7 +17,7 @@ function NavBarButton({ navigate, closeNav, name, icon, color, disabled }:
         borderRadius: theme.radius.sm,
         opacity: disabled ? 0.4 : 1,
         color: theme.colorScheme === 'dark' ? theme.colors.dark[0] : theme.black,
-        backgroundColor:(navigate===gatmainpath()?(theme.colorScheme === 'dark' ? theme.colors.dark[6] : theme.colors.gray[0]):"transparent"),
+        backgroundColor:(navigate===getmainpath()?(theme.colorScheme === 'dark' ? theme.colors.dark[6] : theme.colors.gray[0]):"transparent"),
         '&:hover': {
             backgroundColor:
                 theme.colorScheme === 'dark' ? theme.colors.dark[6] : theme.colors.gray[0],

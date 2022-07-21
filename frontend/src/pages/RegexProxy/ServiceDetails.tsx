@@ -10,15 +10,15 @@ import ServiceRow from '../../components/RegexProxy/ServiceRow';
 import AddNewRegex from '../../components/AddNewRegex';
 import RegexView from '../../components/RegexView';
 
-function ServiceDetails() {
-    const {srv_id} = useParams()
+function ServiceDetailsProxyRegex() {
+    const {srv} = useParams()
 
     const [serviceInfo, setServiceInfo] = useState<Service>({
-        id:srv_id?srv_id:"",
+        id:srv?srv:"",
         internal_port:0,
         n_packets:0,
         n_regex:0,
-        name:srv_id?srv_id:"",
+        name:srv?srv:"",
         public_port:0,
         status:"🤔"
     })
@@ -29,9 +29,9 @@ function ServiceDetails() {
     const closeModal = () => {setOpen(false);updateInfo();}
 
     const updateInfo = async () => {
-        if (!srv_id) return
+        if (!srv) return
         let error = false;
-        await regexproxy.serviceinfo(srv_id).then(res => {
+        await regexproxy.serviceinfo(srv).then(res => {
             setServiceInfo(res)
         }).catch(
           err =>{
@@ -39,10 +39,10 @@ function ServiceDetails() {
             navigator("/")
         })
         if (error) return
-        await regexproxy.serviceregexes(srv_id).then(res => {
+        await regexproxy.serviceregexes(srv).then(res => {
             setRegexesList(res)
         }).catch(
-          err => errorNotify(`Updater for ${srv_id} service failed [Regex list]!`, err.toString())
+          err => errorNotify(`Updater for ${srv} service failed [Regex list]!`, err.toString())
         )
         setLoader(false)
     }
@@ -76,10 +76,10 @@ function ServiceDetails() {
             </Grid>
         }
 
-        {srv_id?<AddNewRegex opened={open} onClose={closeModal} service={srv_id} />:null}
+        {srv?<AddNewRegex opened={open} onClose={closeModal} service={srv} />:null}
 
 
     </div>
 }
 
-export default ServiceDetails;
+export default ServiceDetailsProxyRegex;

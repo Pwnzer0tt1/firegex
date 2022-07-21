@@ -2,13 +2,15 @@ import { Button, Group, Loader, LoadingOverlay, Notification, Space, PasswordInp
 import { useForm } from '@mantine/hooks';
 import React, { useEffect, useState } from 'react';
 import { ImCross } from 'react-icons/im';
-import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
+import { Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
 import { PasswordSend, ServerStatusResponse } from './js/models';
-import { errorNotify, fireUpdateRequest, getstatus, login, setpassword } from './js/utils';
+import { errorNotify, fireUpdateRequest, getstatus, HomeRedirector, login, setpassword } from './js/utils';
 import NFRegex from './pages/NFRegex.tsx';
-import ServiceDetails from './pages/NFRegex.tsx/ServiceDetails';
 import io from 'socket.io-client';
+import RegexProxy from './pages/RegexProxy';
+import ServiceDetailsNFRegex from './pages/NFRegex.tsx/ServiceDetails';
+import ServiceDetailsProxyRegex from './pages/RegexProxy/ServiceDetails';
 
 const socket = io({transports: ["websocket", "polling"], path:"/sock" });
 
@@ -146,9 +148,12 @@ function App() {
     return <Routes>
               <Route element={<MainLayout><Outlet /></MainLayout>}>
                   <Route path="nfregex" element={<NFRegex><Outlet /></NFRegex>} >
-                    <Route path=":srv" element={<ServiceDetails />} />
+                    <Route path=":srv" element={<ServiceDetailsNFRegex />} />
                   </Route>
-                <Route path="*" element={<Navigate to="/nfregex" />} />
+                  <Route path="regexproxy" element={<RegexProxy><Outlet /></RegexProxy>} >
+                    <Route path=":srv" element={<ServiceDetailsProxyRegex />} />
+                  </Route>
+                <Route path="*" element={<HomeRedirector />} />
               </Route>
           </Routes>
   }else{

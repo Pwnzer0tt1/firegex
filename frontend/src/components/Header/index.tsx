@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ActionIcon, Divider, Image, Menu, Tooltip, FloatingTooltip, MediaQuery, Burger, Space, Header } from '@mantine/core';
 import style from "./index.module.scss";
-import { errorNotify, gatmainpath, logout } from '../../js/utils';
+import { errorNotify, getmainpath, logout } from '../../js/utils';
 import { AiFillHome } from "react-icons/ai"
 import { useNavigate } from 'react-router-dom';
 import { FaLock } from 'react-icons/fa';
@@ -24,7 +24,7 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
   } 
 
   const go_to_home = () => {
-    navigator(`/${gatmainpath()}`)
+    navigator(`/${getmainpath()}`)
   }
 
   const [changePasswordModal, setChangePasswordModal] = useState(false);

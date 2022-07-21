@@ -4,7 +4,7 @@ import { FaPause, FaPlay, FaStop } from 'react-icons/fa';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
 import YesNoModal from '../../YesNoModal';
-import { errorNotify, fireUpdateRequest, okNotify } from '../../../js/utils';
+import { errorNotify, okNotify } from '../../../js/utils';
 import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
 import { TbNumbers } from 'react-icons/tb';
 import { BiRename } from 'react-icons/bi'
@@ -36,7 +36,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         await regexproxy.servicestop(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} stopped successfully!`,`The service ${service.name} has been stopped!`)
-                fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the stopping of the service ${service.id}`,`Error: ${res}`)
             }
@@ -51,7 +50,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         await regexproxy.servicestart(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} started successfully!`,`The service ${service.name} has been started!`)
-                fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the starting of the service ${service.id}`,`Error: ${res}`)
             }
@@ -66,7 +64,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         await regexproxy.servicepause(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} paused successfully!`,`The service ${service.name} has been paused (Transparent mode)!`)
-                fireUpdateRequest();
             }else{
                 errorNotify(`An error as occurred during the pausing of the service ${service.id}`,`Error: ${res}`)
             }
@@ -81,7 +78,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         regexproxy.servicedelete(service.id).then(res => {
             if (!res){
                 okNotify("Service delete complete!",`The service ${service.id} has been deleted!`)
-                fireUpdateRequest();
             }else
                 errorNotify("An error occurred while deleting a service",`Error: ${res}`)
         }).catch(err => {
@@ -94,7 +90,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         regexproxy.serviceregenport(service.id).then(res => {
             if (!res){
                 okNotify("Service port regeneration completed!",`The service ${service.id} has changed the internal port!`)
-                fireUpdateRequest();
             }else
                 errorNotify("An error occurred while changing the internal service port",`Error: ${res}`)
         }).catch(err => {
@@ -108,14 +103,14 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 <MediaQuery smallerThan="md" styles={{ display: 'none' }}><div>
                     <div className="center-flex-row">
                         <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
-                        <Badge color={status_color} size="xl" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
+                        <Badge color={status_color} size="lg" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
                     </div>
                 </div></MediaQuery>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}><div>
                     <div className="center-flex">
                         <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
                         <Space w="xl" />
-                        <Badge color={status_color} size="xl" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
+                        <Badge color={status_color} size="lg" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
                     </div>
                 </div></MediaQuery>
                 
@@ -133,9 +128,9 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 </MediaQuery>
                 
                 <div className="center-flex-row">
-                    <Badge style={{marginBottom:"20px"}} color={status_color} radius="sm" size="xl" variant="filled">Status: <u>{service.status}</u></Badge>
-                    <Badge style={{marginBottom:"8px"}}color="violet" radius="sm" size="lg" variant="filled">Regex: {service.n_regex}</Badge>
-                    <Badge color="yellow" radius="sm" size="lg" variant="filled">Connections Blocked: {service.n_packets}</Badge>
+                    <Badge style={{marginBottom:"20px"}} color={status_color} radius="sm" size="lg" variant="filled">Status: <u>{service.status}</u></Badge>
+                    <Badge style={{marginBottom:"8px"}}color="violet" radius="sm" size="md" variant="filled">Regex: {service.n_regex}</Badge>
+                    <Badge color="yellow" radius="sm" size="md" variant="filled">Connections Blocked: {service.n_packets}</Badge>
                 </div>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}>
                     <div className='flex-spacer' />
@@ -170,8 +165,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                         </Tooltip>:
                         <Tooltip label={service.status === "stop"?"Start in pause mode":"Pause service"} zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color={service.status === "stop"?"cyan":"red"}>
                             <ActionIcon color={service.status === "stop"?"cyan":"red"} loading={buttonLoading}
-                                    onClick={pauseService} size="xl" radius="md" variant="filled"
-                                    /*disabled={service.status === "stop"}*/>
+                                    onClick={pauseService} size="xl" radius="md" variant="filled">
                                 <FaPause size="20px" />
                             </ActionIcon>
                         </Tooltip>

@@ -15,9 +15,9 @@ Dockerfile
 /frontend/coverage
 
 /backend/db/
-/backend/db/firegex.db
-/backend/db/firegex.db-journal
+/backend/db/**
 /backend/modules/cppqueue
+/backend/modules/proxy
 docker-compose.yml
 
 # misc

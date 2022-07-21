@@ -54,7 +54,7 @@ services:
         network_mode: "host"
         environment:
             - PORT={args.port}
-            - NTHREADS={args.thread_per_queue}
+            - NTHREADS={args.threads}
         volumes:
             - /execute/db
         cap_add:
@@ -79,7 +79,7 @@ services:
             - {args.port}:{args.port}
         environment:
             - PORT={args.port}
-            - NTHREADS={args.thread_per_queue}
+            - NTHREADS={args.threads}
         volumes:
             - /execute/db
         cap_add:

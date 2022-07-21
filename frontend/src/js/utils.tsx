@@ -1,6 +1,7 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
+import { Navigate } from "react-router-dom";
 import { nfregex } from "../components/NFRegex/utils";
 import { regexproxy } from "../components/RegexProxy/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
@@ -52,20 +53,26 @@ export async function postapi(path:string,data:any,is_form:boolean=false):Promis
     });
 }
 
-export function gatmainpath(){
+export function getmainpath(){
     const paths = window.location.pathname.split("/")
     if (paths.length > 1) return paths[1]
     return ""
 }
 
 export function getapiobject(){
-    switch(gatmainpath()){
+    switch(getmainpath()){
         case "nfregex":
             return nfregex
         case "regexproxy":
             return regexproxy
       }
-      throw 'No api for this tool!';
+      throw new Error('No api for this tool!');
+}
+
+export function HomeRedirector(){
+    const section = sessionStorage.getItem("home_section")
+    const path = section?`/${section}`:`/nfqueue`
+    return <Navigate to={path} />
 }
 
 export function fireUpdateRequest(){

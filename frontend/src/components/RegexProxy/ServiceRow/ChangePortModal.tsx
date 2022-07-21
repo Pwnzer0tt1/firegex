@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { ImCross } from "react-icons/im"
 import { FaLongArrowAltDown } from 'react-icons/fa';
 import { regexproxy, Service } from '../utils';
-import { fireUpdateRequest, okNotify } from '../../../js/utils';
+import { okNotify } from '../../../js/utils';
 
 type InputForm = {
     internalPort:number,
@@ -43,7 +43,6 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
             if (!res){
                 setSubmitLoading(false)
                 close();
-                fireUpdateRequest();
                 okNotify(`Internal port on ${service.name} service has changed in ${data.internalPort}`, `Successfully changed internal port of service with id ${service.id}`)
             }else{
                 setSubmitLoading(false)
