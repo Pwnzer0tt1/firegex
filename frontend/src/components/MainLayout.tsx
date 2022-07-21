@@ -12,7 +12,7 @@ function MainLayout({ children }:{ children:any }) {
         <Tabs.Tab label="Netfilter regex"></Tabs.Tab>
       </Tabs>
       <Space h="xl" />
-      <Container size="md" style={{minHeight:"57.5vh"}}>
+      <Container size="lg" style={{minHeight:"57.5vh"}}>
           {children}
       </Container>
       <Space h="xl" />

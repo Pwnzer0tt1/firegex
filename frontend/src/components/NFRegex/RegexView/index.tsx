@@ -68,27 +68,25 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             </Tooltip>
 
             </Grid.Col>
-          <Grid.Col span={2} />
-          <Grid.Col className='center-flex-row' span={4}>
-            <Space h="xs" />
-            <FilterTypeSelector 
-                size="md"
-                color="gray"
-                disabled
-                value={regexInfo.is_blacklist?"blacklist":"whitelist"}
-            />
-            <Space h="md" />
-            <div className='center-flex'>
-              <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_id}</Badge>
-              <Space w="xs" />
-              <Badge size="md" color={regexInfo.active?"lime":"red"} variant="filled">{regexInfo.active?"ACTIVE":"DISABLED"}</Badge>
-              <Space w="xs" />
-              <Badge size="md" color="gray" variant="filled">ID: {regexInfo.id}</Badge>
-              
+          <Grid.Col className='center-flex' span={12}>
+            <div className='center-flex-row'>
+              <FilterTypeSelector 
+                  size="md"
+                  color="gray"
+                  disabled
+                  value={regexInfo.is_blacklist?"blacklist":"whitelist"}
+              />
+              <Space h="md" />
+              <div className='center-flex'>
+                <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_id}</Badge>
+                <Space w="xs" />
+                <Badge size="md" color={regexInfo.active?"lime":"red"} variant="filled">{regexInfo.active?"ACTIVE":"DISABLED"}</Badge>
+                <Space w="xs" />
+                <Badge size="md" color="gray" variant="filled">ID: {regexInfo.id}</Badge>
+                
+              </div>
             </div>
-          </Grid.Col>
-          <Grid.Col style={{width:"100%"}} span={6}>
-            <Space h="xs" />
+            <div className='flex-spacer' />
             <div className='center-flex-row'>
               <Badge size="md" color={regexInfo.is_case_sensitive?"grape":"pink"} variant="filled">Case: {regexInfo.is_case_sensitive?"SENSIIVE":"INSENSITIVE"}</Badge>
               <Space h="xs" />
