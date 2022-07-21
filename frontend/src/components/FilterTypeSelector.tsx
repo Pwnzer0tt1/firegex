@@ -3,8 +3,6 @@ import React from "react";
 import { FaListAlt } from "react-icons/fa";
 import { TiCancel } from "react-icons/ti";
 
-
-
 export default function FilterTypeSelector(props:any){
     return <SegmentedControl
         data={[

@@ -1,8 +1,9 @@
 import { Button, Group, NumberInput, Space, TextInput, Notification, Modal, Switch, SegmentedControl, Autocomplete, AutocompleteItem } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useEffect, useState } from 'react';
-import { okNotify, regex_ipv4, regex_ipv6, getipinterfaces, nfregex } from '../../js/utils';
+import { okNotify, regex_ipv4, regex_ipv6, getipinterfaces } from '../../js/utils';
 import { ImCross } from "react-icons/im"
+import { nfregex } from './utils';
 
 type ServiceAddForm = {
     name:string,

@@ -1,13 +1,14 @@
 import { ActionIcon, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import RegexView from '../components/RegexView';
-import ServiceRow from '../components/ServiceRow';
-import AddNewRegex from '../components/AddNewRegex';
 import { BsPlusLg } from "react-icons/bs";
-import { RegexFilter, Service } from '../js/models';
-import { errorNotify, eventUpdateName, fireUpdateRequest, serviceinfo, serviceregexlist } from '../js/utils';
 import { useWindowEvent } from '@mantine/hooks';
+import { regexproxy, Service } from '../../components/RegexProxy/utils';
+import { RegexFilter } from '../../js/models';
+import { errorNotify, eventUpdateName, fireUpdateRequest } from '../../js/utils';
+import ServiceRow from '../../components/RegexProxy/ServiceRow';
+import AddNewRegex from '../../components/AddNewRegex';
+import RegexView from '../../components/RegexView';
 
 function ServiceDetails() {
     const {srv_id} = useParams()
@@ -30,7 +31,7 @@ function ServiceDetails() {
     const updateInfo = async () => {
         if (!srv_id) return
         let error = false;
-        await serviceinfo(srv_id).then(res => {
+        await regexproxy.serviceinfo(srv_id).then(res => {
             setServiceInfo(res)
         }).catch(
           err =>{
@@ -38,7 +39,7 @@ function ServiceDetails() {
             navigator("/")
         })
         if (error) return
-        await serviceregexlist(srv_id).then(res => {
+        await regexproxy.serviceregexes(srv_id).then(res => {
             setRegexesList(res)
         }).catch(
           err => errorNotify(`Updater for ${srv_id} service failed [Regex list]!`, err.toString())

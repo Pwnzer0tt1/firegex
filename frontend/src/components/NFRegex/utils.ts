@@ -1,5 +1,6 @@
-import { ServerResponse } from "../../js/models"
+import { RegexFilter, ServerResponse } from "../../js/models"
 import { getapi, postapi } from "../../js/utils"
+import { RegexAddForm } from "../../js/models"
 
 export type GeneralStats = {
     services:number,
@@ -30,25 +31,7 @@ export type ServiceAddResponse = {
     service_id?: string,
 }
 
-export type RegexFilter = {
-    id:number,
-    service_id:string,
-    regex:string
-    is_blacklist:boolean,
-    is_case_sensitive:boolean,
-    mode:string //C S B => C->S S->C BOTH
-    n_packets:number,
-    active:boolean
-}
 
-export type RegexAddForm = {
-    service_id:string,
-    regex:string,
-    is_case_sensitive:boolean,
-    is_blacklist:boolean,
-    mode:string, // C->S S->C BOTH,
-    active: boolean
-}
 
 export const nfregex = {
     stats: async () => {

@@ -1,9 +1,9 @@
 import { Button, Group, Space, TextInput, Notification, Modal } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useEffect, useState } from 'react';
-import { nfregex, okNotify } from '../../../js/utils';
+import { okNotify } from '../../../js/utils';
 import { ImCross } from "react-icons/im"
-import { Service } from '../../../js/models';
+import { nfregex, Service } from '../utils';
 
 function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>void, service:Service }) { 
 

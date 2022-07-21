@@ -1,10 +1,10 @@
 import { Button, Group, NumberInput, Space, Notification, Modal, Center, Title } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useEffect, useState } from 'react';
-import { changeports, fireUpdateRequest, okNotify } from '../../js/utils';
 import { ImCross } from "react-icons/im"
-import { Service } from '../../js/models';
 import { FaLongArrowAltDown } from 'react-icons/fa';
+import { regexproxy, Service } from '../utils';
+import { fireUpdateRequest, okNotify } from '../../../js/utils';
 
 type InputForm = {
     internalPort:number,
@@ -39,7 +39,7 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
  
     const submitRequest = (data:InputForm) =>{
         setSubmitLoading(true)
-        changeports(service.id, data).then( res => {
+        regexproxy.servicechangeport(service.id, data).then( res => {
             if (!res){
                 setSubmitLoading(false)
                 close();

@@ -1,4 +1,4 @@
-import { ServerResponse } from "../../js/models"
+import { RegexAddForm, RegexFilter, ServerResponse } from "../../js/models"
 import { getapi, postapi } from "../../js/utils"
 
 export type GeneralStats = {
@@ -31,26 +31,6 @@ export type ServerResponseWithID = {
 export type ChangePort = {
     port?: number,
     internalPort?: number
-}
-
-export type RegexFilter = {
-    id:number,
-    service_id:string,
-    regex:string
-    is_blacklist:boolean,
-    is_case_sensitive:boolean,
-    mode:string //C S B => C->S S->C BOTH
-    n_packets:number,
-    active:boolean
-}
-
-export type RegexAddForm = {
-    service_id:string,
-    regex:string,
-    is_case_sensitive:boolean,
-    is_blacklist:boolean,
-    mode:string, // C->S S->C BOTH,
-    active: boolean
 }
 
 export const regexproxy = {

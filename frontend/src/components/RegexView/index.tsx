@@ -1,8 +1,8 @@
 import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { RegexFilter } from '../../js/models';
-import { activateregex, b64decode, deactivateregex, deleteregex, errorNotify, fireUpdateRequest, okNotify } from '../../js/utils';
-import style from "./RegexView.module.scss";
+import { b64decode, errorNotify, getapiobject, okNotify } from '../../js/utils';
+import style from "./index.module.scss";
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
 import FilterTypeSelector from '../FilterTypeSelector';
@@ -22,10 +22,9 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   const [statusTooltipOpened, setStatusTooltipOpened] = useState(false);
 
   const deleteRegex = () => {
-    deleteregex(regexInfo.id).then(res => {
+    getapiobject().regexdelete(regexInfo.id).then(res => {
       if(!res){
         okNotify(`Regex ${regex_expr} deleted successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been deleted!`)
-        fireUpdateRequest()
       }else{
         errorNotify(`Regex ${regex_expr} deleation failed!`,`Error: ${res}`)
       }
@@ -33,22 +32,19 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   }
 
   const changeRegexStatus = () => {
-    
-    (regexInfo.active?deactivateregex:activateregex)(regexInfo.id).then(res => {
+    (regexInfo.active?getapiobject().regexdisable:getapiobject().regexenable)(regexInfo.id).then(res => {
       if(!res){
         okNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivated":"activated"} successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been ${regexInfo.active?"deactivated":"activated"}!`)
-        fireUpdateRequest()
       }else{
         errorNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivation":"activation"} failed!`,`Error: ${res}`)
       }
     }).catch( err => errorNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivation":"activation"} failed!`,`Error: ${err}`))
-    
   }
 
   return <div className={style.box}>
         <Grid>
-          <Grid.Col span={2}>
-            <Title order={2} style={{color:"#FFF"}}>Regex:</Title> 
+          <Grid.Col span={2} className="center-flex">
+            <Title order={4}>Regex:</Title> 
           </Grid.Col>
           <Grid.Col span={8}>
             <Text className={style.regex_text}> {regex_expr}</Text>
@@ -70,27 +66,25 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             </Tooltip>
 
             </Grid.Col>
-          <Grid.Col span={2} />
-          <Grid.Col className='center-flex-row' span={4}>
-            <Space h="xs" />
-            <FilterTypeSelector 
-                size="md"
-                color="gray"
-                disabled
-                value={regexInfo.is_blacklist?"blacklist":"whitelist"}
-            />
-            <Space h="md" />
-            <div className='center-flex'>
-              <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_id}</Badge>
-              <Space w="xs" />
-              <Badge size="md" color={regexInfo.active?"lime":"red"} variant="filled">{regexInfo.active?"ACTIVE":"DISABLED"}</Badge>
-              <Space w="xs" />
-              <Badge size="md" color="gray" variant="filled">ID: {regexInfo.id}</Badge>
-              
+          <Grid.Col className='center-flex' span={12}>
+            <div className='center-flex-row'>
+              <FilterTypeSelector 
+                  size="md"
+                  color="gray"
+                  disabled
+                  value={regexInfo.is_blacklist?"blacklist":"whitelist"}
+              />
+              <Space h="md" />
+              <div className='center-flex'>
+                <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_id}</Badge>
+                <Space w="xs" />
+                <Badge size="md" color={regexInfo.active?"lime":"red"} variant="filled">{regexInfo.active?"ACTIVE":"DISABLED"}</Badge>
+                <Space w="xs" />
+                <Badge size="md" color="gray" variant="filled">ID: {regexInfo.id}</Badge>
+                
+              </div>
             </div>
-          </Grid.Col>
-          <Grid.Col style={{width:"100%"}} span={6}>
-            <Space h="xs" />
+            <div className='flex-spacer' />
             <div className='center-flex-row'>
               <Badge size="md" color={regexInfo.is_case_sensitive?"grape":"pink"} variant="filled">Case: {regexInfo.is_case_sensitive?"SENSIIVE":"INSENSITIVE"}</Badge>
               <Space h="xs" />

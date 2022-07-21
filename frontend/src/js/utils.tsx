@@ -2,6 +2,7 @@ import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
 import { nfregex } from "../components/NFRegex/utils";
+import { regexproxy } from "../components/RegexProxy/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 var Buffer = require('buffer').Buffer 
 
@@ -55,6 +56,16 @@ export function gatmainpath(){
     const paths = window.location.pathname.split("/")
     if (paths.length > 1) return paths[1]
     return ""
+}
+
+export function getapiobject(){
+    switch(gatmainpath()){
+        case "nfregex":
+            return nfregex
+        case "regexproxy":
+            return regexproxy
+      }
+      throw 'No api for this tool!';
 }
 
 export function fireUpdateRequest(){

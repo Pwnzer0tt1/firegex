@@ -1,11 +1,11 @@
 import { ActionIcon, Badge, Divider, Grid, MediaQuery, Menu, Space, Title, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { FaPlay, FaStop } from 'react-icons/fa';
-import { Service } from '../../../js/models';
+import { nfregex, Service } from '../utils';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./index.module.scss";
 import YesNoModal from '../../YesNoModal';
-import { errorNotify, nfregex, okNotify, regex_ipv4 } from '../../../js/utils';
+import { errorNotify, okNotify, regex_ipv4 } from '../../../js/utils';
 import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';

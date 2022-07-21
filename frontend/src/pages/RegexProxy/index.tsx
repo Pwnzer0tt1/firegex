@@ -2,15 +2,15 @@ import { ActionIcon, Badge, LoadingOverlay, Space, Title, Tooltip } from '@manti
 import React, { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import { useNavigate, useParams } from 'react-router-dom';
-import ServiceRow from '../../components/NFRegex/ServiceRow';
-import { GeneralStats, nfregex, Service } from '../../components/NFRegex/utils';
+import ServiceRow from '../../components/RegexProxy/ServiceRow';
+import { GeneralStats, regexproxy, Service } from '../../components/RegexProxy/utils';
 import { errorNotify, eventUpdateName, fireUpdateRequest } from '../../js/utils';
-import AddNewService from '../../components/NFRegex/AddNewService';
+import AddNewService from '../../components/RegexProxy/AddNewService';
 import { useWindowEvent } from '@mantine/hooks';
 import AddNewRegex from '../../components/AddNewRegex';
 
 
-function NFRegex({ children }: { children: any }) {
+function RegexProxy({ children }: { children: any }) {
 
     const [services, setServices] = useState<Service[]>([]);
     const [loader, setLoader] = useState(true);
@@ -25,12 +25,12 @@ function NFRegex({ children }: { children: any }) {
     const updateInfo = async () => {
         
         await Promise.all([
-            nfregex.stats().then(res => {
+            regexproxy.stats().then(res => {
                 setGeneralStats(res)
             }).catch(
                 err => errorNotify("General Info Auto-Update failed!", err.toString())
             ),
-            nfregex.services().then(res => {
+            regexproxy.services().then(res => {
                 setServices(res)    
             }).catch(err => {
                 errorNotify("Home Page Auto-Update failed!", err.toString())
@@ -71,8 +71,8 @@ function NFRegex({ children }: { children: any }) {
     <div id="service-list" className="center-flex-row">
         {srv?null:<>
             <LoadingOverlay visible={loader} />
-            {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
-                navigator("/nfregex/"+srv.service_id)
+            {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.id} onClick={()=>{
+                navigator("/regexproxy/"+srv.id)
             }} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> 
                 <div className='center-flex'>
@@ -94,4 +94,4 @@ function NFRegex({ children }: { children: any }) {
     </>
 }
 
-export default NFRegex;
+export default RegexProxy;

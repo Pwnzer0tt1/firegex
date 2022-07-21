@@ -1,11 +1,10 @@
 import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Modal } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
-import { RegexAddForm } from '../../js/models';
-import { b64decode, b64encode, nfregex, okNotify } from '../../js/utils';
+import { RegexAddForm } from '../js/models';
+import { b64decode, b64encode, getapiobject, okNotify } from '../js/utils';
 import { ImCross } from "react-icons/im"
-import FilterTypeSelector from '../FilterTypeSelector';
-
+import FilterTypeSelector from './FilterTypeSelector';
 
 type RegexAddInfo = {
     regex:string,
@@ -54,7 +53,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             active: !values.deactive
         }
         setSubmitLoading(false)
-        nfregex.regexesadd(request).then( res => {
+        getapiobject().regexesadd(request).then( res => {
             if (!res){
                 setSubmitLoading(false)
                 close();

@@ -1,13 +1,14 @@
 import { ActionIcon, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import RegexView from '../../components/NFRegex/RegexView';
+import RegexView from '../../components/RegexView';
 import ServiceRow from '../../components/NFRegex/ServiceRow';
-import AddNewRegex from '../../components/NFRegex/AddNewRegex';
+import AddNewRegex from '../../components/AddNewRegex';
 import { BsPlusLg } from "react-icons/bs";
-import { nfregex, RegexFilter, Service } from '../../components/NFRegex/utils';
+import { nfregex, Service } from '../../components/NFRegex/utils';
 import { errorNotify, eventUpdateName, fireUpdateRequest } from '../../js/utils';
 import { useWindowEvent } from '@mantine/hooks';
+import { RegexFilter } from '../../js/models';
 
 function ServiceDetails() {
     const {srv} = useParams()

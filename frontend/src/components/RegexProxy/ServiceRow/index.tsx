@@ -1,16 +1,16 @@
 import { ActionIcon, Badge, Divider, Grid, MediaQuery, Menu, Space, Title, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { FaPause, FaPlay, FaStop } from 'react-icons/fa';
-import { Service } from '../../js/models';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
-import YesNoModal from '../YesNoModal';
-import { deleteservice, errorNotify, fireUpdateRequest, okNotify, pauseservice, regenport, startservice, stopservice } from '../../js/utils';
+import YesNoModal from '../../YesNoModal';
+import { errorNotify, fireUpdateRequest, okNotify } from '../../../js/utils';
 import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
 import { TbNumbers } from 'react-icons/tb';
 import { BiRename } from 'react-icons/bi'
 import ChangePortModal from './ChangePortModal';
 import RenameForm from './RenameForm';
+import { regexproxy, Service } from '../utils';
 
 //"status":"stop"/"wait"/"active"/"pause",
 function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
@@ -33,7 +33,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
 
     const stopService = async () => {
         setButtonLoading(true)
-        await stopservice(service.id).then(res => {
+        await regexproxy.servicestop(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} stopped successfully!`,`The service ${service.name} has been stopped!`)
                 fireUpdateRequest();
@@ -48,7 +48,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
 
     const startService = async () => {
         setButtonLoading(true)
-        await startservice(service.id).then(res => {
+        await regexproxy.servicestart(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} started successfully!`,`The service ${service.name} has been started!`)
                 fireUpdateRequest();
@@ -63,7 +63,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
 
     const pauseService = async () => {
         setButtonLoading(true)
-        await pauseservice(service.id).then(res => {
+        await regexproxy.servicepause(service.id).then(res => {
             if(!res){
                 okNotify(`Service ${service.id} paused successfully!`,`The service ${service.name} has been paused (Transparent mode)!`)
                 fireUpdateRequest();
@@ -78,7 +78,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     }
 
     const deleteService = () => {
-        deleteservice(service.id).then(res => {
+        regexproxy.servicedelete(service.id).then(res => {
             if (!res){
                 okNotify("Service delete complete!",`The service ${service.id} has been deleted!`)
                 fireUpdateRequest();
@@ -91,7 +91,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     }
 
     const changePort = () => {
-        regenport(service.id).then(res => {
+        regexproxy.serviceregenport(service.id).then(res => {
             if (!res){
                 okNotify("Service port regeneration completed!",`The service ${service.id} has changed the internal port!`)
                 fireUpdateRequest();
