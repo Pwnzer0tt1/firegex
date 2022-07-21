@@ -1,29 +1,28 @@
-![Firegex Logo](docs/header-logo.png)
-
-# Firegex 
+# [Fi]*regex 🔥
 
 ## What is Firegex?
-Firegex is a reverse-proxy application firewall created for CTF Attack-Defence competitions that has the aim to limit or totally deny TCP malicious traffic through the use of regex filters.
+Firegex is a firewall that includes different functionalities, created for CTF Attack-Defence competitions that has the aim to limit or totally deny malicious traffic through the use of different kind of filters.
 
-![Firegex Network scheme](docs/FiregexWorking.png)
+## Why "Firegex"?
+Initiially the project was based only on regex filters, and also now the main function uses regexes, but firegex have and will have also other filtering tools.
 
-Firegex doesn't replace the network firewall, but works together with it.
+## Get started firegex
+What you need is a linux machine and docker ( + docker-compose )
+```
+python3 start.py
+```
+This command will generate the docker-compose configuration and start it with docker-compose, read the help with -h to customize you firegex instance.
+We recommend to use -t paramether and specify the number of threads to use for each service running on firegex, this will make you network more stable with multiple connections `python3 start.py -t 4`.
 
-## How does it work?
+The default port of firegex is 4444. At the startup you will choose a password, that is essential for your security.
 
-When you start firegex, the first step is to create the services that it has to proxy.
-The name of the service and the port where is expected to be hosted are the only things required. For each service, a random intermediate port is generated.
-You can start all the services you have created on the proxy. If the port is free, firegex will bind it, and forward the connection to the random port generated, it's expected that the real service will start at that port. If the port is already binded, firegex will keep tring to bind that port until it will succeed. This allows to reduce the down time during the transition from the old port to the new port used by the real service. When the real service will have changed port, the proxy will automatically handle the port and start proxying the service with the port set on the firewall.
+![Firegex Network scheme](docs/Firegex_Screenshot.jpg)
 
-Remember to start the service with the intermediate port, publishing this only on localhost network or blocking the public access using a network firewall.
+## Functionalities
 
-Now, you can enter in the service detail, and manage the filtering rules to use for each services. Thet service can be in 4 different states:
-- START: The proxy is running and it's filtering all tcp packets using the regex added
-- PAUSE: The proxy is running, but it's not filtering the packets, it's only keeping the service active continuing forwarding the packets
-- WAIT: The proxy is not running, but it's waiting until the port to bind will be free, after that the proxy will go in PAUSE or START mode according to what requested previously
-- STOP: The proxy is not running.
-
-You can change the status clicking the button provided in the frontend. If you want to add a regex or delete a regex you can add or remove it, and if the service is in START mode, the regex changes will have an immediate effect on the proxy that will start following the new ruleset.
+- Regex filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/doxygen/html/) with [nftables](https://netfilter.org/projects/nftables/) with a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
+- TCP Proxy regex filter, create a proxy tunnel from the service internal port to a public port published by the proxy. Internally the c++ proxy filter the request with PCRE2 regexes. For mantaining the same public port you will need to open only in localhost the real service. (Only TCP IPv4)
+- Port Hijacking (not available yet) allow you to redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
 
 ## Documentation
 
@@ -36,13 +35,10 @@ Find the documentation of the backend and of the frontend in the related README 
 
 ### Main Points of Firegex
 #### 1. Efficiency
-Firegex should not slow down the traffic on the network. For this the core of firegex is a c++ binary file.
-1. The proxy itself is built with a binary c++ file that uses the boost library, well-known for it's stability and efficiency.
-2. The proxy works thanks to async io calls, granting great efficiency and minimum time loss
-3. The filtering is done by the binary file using the regex library PCRE2 to assicure high efficiency and the possibility to create complex regexes
+Firegex should not slow down the traffic on the network. For this the core of the main functionalities of firegex is a c++ binary file.
 #### 2. Availability
 Firegex **must** not become a problem for the SLA points!
-This means that firegex is projected to avoid any possibility to have the service down. We know that passing all the traffic through firegex, means also that if it fails, all services go down. It's for this that firegex implements different logics to avoid this.
+This means that firegex is projected to avoid any possibility to have the service down. We know that passing all the traffic through firegex, means also that if it fails, all services go down. It's for this that firegex implements different logics to avoid this. Also, if you add a wrong filter to your services, firegex will always offer you a fast or instant way to reset it to the previous state.
 1. Every reverse proxy is isolated from each other, avoiding the crash of all the proxies started by firegex
 2. The proxy is a binary program written in C, started as an indipendent process with indipendent memory, and uses boost lib for the connection and the std lib for checking the regex for each packet
 3. If a regex fails for whatever reason, the proxy remove this from the filter list and continue to forward the packets like it did't exist.

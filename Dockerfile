@@ -16,14 +16,14 @@ RUN mkdir build; cd build; cmake ../ -DLIBTINS_ENABLE_CXX11=1; make; make instal
 RUN mkdir -p /execute/modules
 WORKDIR /execute
 
+ADD ./backend/requirements.txt /execute/requirements.txt
+RUN pip3 install --no-cache-dir -r /execute/requirements.txt
+
 COPY ./backend/binsrc /execute/binsrc
 
 ARG GCC_PARAMS
 RUN g++ binsrc/nfqueue.cpp -o modules/cppqueue -O3 -march=native -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
 RUN g++ binsrc/proxy.cpp -o modules/proxy -O3 -march=native $GCC_PARAMS -pthread -lboost_system -lboost_thread -lpcre2-8
-
-ADD ./backend/requirements.txt /execute/requirements.txt
-RUN pip3 install --no-cache-dir -r /execute/requirements.txt
 
 COPY ./backend/ /execute/
 COPY ./frontend/build/ ./frontend/
