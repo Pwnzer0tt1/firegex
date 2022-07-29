@@ -43,3 +43,20 @@ This means that firegex is projected to avoid any possibility to have the servic
 # Credits 
 - Copyright (c) 2007 Arash Partow (http://www.partow.net) for the base of our proxy implementation
 - Copyright (c) 2022 Pwnzer0tt1
+
+# TODO:
+
+## Until merge of dev branch to main
+
+- Drop root user and use CAP_NET_ADMIN specific permissions
+- Fix/Improve Benchmark
+- Hard testing
+
+## Next points
+
+- Create hijacking port to proxy
+- Explanation about tools in the dedicated pages making them more user-friendly
+- Give the permission to set a startup password in start.py protecting firegex also at the first run
+- buffering the TCP and(/or) the UDP stream to avoid to bypass the proxy dividing the information in more packets
+- Publish a docker image making the start of firegex fast (skip the compiling of the binaries and libraries)
+- Adding new section with "general firewall rules" to manage "simple" TCP traffic rules graphically and through nftables
