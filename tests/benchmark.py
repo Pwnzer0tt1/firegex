@@ -1,36 +1,22 @@
 #!/usr/bin/env python3
-import argparse, socket,secrets, base64, iperf3, csv
+from utils.colors import *
+from utils.firegexapi import *
+from utils.tcpserver import *
+from multiprocessing import Process
 from time import sleep
-from firegexapi import FiregexAPI
-from multiprocessing  import Process
+import iperf3, csv, argparse, base64, secrets
 
-pref = "\033["
-reset = f"{pref}0m"
 
-class colors:
-    black = "30m"
-    red = "31m"
-    green = "32m"
-    yellow = "33m"
-    blue = "34m"
-    magenta = "35m"
-    cyan = "36m"
-    white = "37m"
-
-def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
-    print(f'{pref}{1 if is_bold else 0};{color}' + text + reset, *args, **kwargs)
-
-def sep(): puts("-----------------------------------", is_bold=True)
+#TODO: make it work with Proxy and not only netfilter
 parser = argparse.ArgumentParser()
 parser.add_argument("--address", "-a", type=str , required=False, help='Address of firegex backend', default="http://127.0.0.1:4444/")
-parser.add_argument("--service_port", "-P", type=int , required=False, help='Port of the Benchmark service', default=1337)
+parser.add_argument("--port", "-P", type=int , required=False, help='Port of the Benchmark service', default=1337)
 parser.add_argument("--service_name", "-n", type=str , required=False, help='Name of the Benchmark service', default="Benchmark Service")
 parser.add_argument("--password", "-p", type=str, required=True, help='Firegex password')
 parser.add_argument("--num_of_regexes", "-r", type=int, required=True, help='Number of regexes to benchmark with')
 parser.add_argument("--duration", "-d", type=int, required=False, help='Duration of the Benchmark in seconds', default=5)
 parser.add_argument("--output_file", "-o", type=str, required=False, help='Output results csv file', default="benchmark.csv")
 parser.add_argument("--num_of_streams", "-s", type=int, required=False, help='Output results csv file', default=1)
-parser.add_argument("--new_istance", "-i", action="store_true", help='Create a new service', default=False)
 
 args = parser.parse_args()
 sep()
@@ -43,28 +29,16 @@ firegex = FiregexAPI(args.address)
 if (firegex.login(args.password)): puts(f"Sucessfully logged in ✔", color=colors.green)
 else: puts(f"Benchmark Failed: Unknown response or wrong passowrd ✗", color=colors.red); exit(1)
 
-
-if args.new_istance:
-    #Create new Service
-    if (firegex.create_service(args.service_name,args.service_port)):
-     puts(f"Sucessfully created service {args.service_name} with public port {args.service_port} ✔", color=colors.green)
-     service_created = True
-    else: puts(f"Benchmark Failed: Couldn't create service ✗", color=colors.red); exit(1)
-
-#Find the Service
-service = firegex.get_service_details(args.service_name)
-if (service):
-    internal_port= service["internal_port"]
-    service_id = service["id"]
-    puts(f"Sucessfully received the internal port {internal_port} ✔", color=colors.green)
-else: puts(f"Benchmark Failed: Coulnd't get the service internal port ✗", color=colors.red); exit_test(1)
-
+#Create new Service
+service_id = firegex.nf_add_service(args.service_name, args.port, "tcp", "127.0.0.1/24")
+if service_id: puts(f"Sucessfully created service {service_id} ✔", color=colors.green)
+else: puts(f"Test Failed: Failed to create service ✗", color=colors.red); exit(1)
 
 #Start iperf3
 def startServer():
     server = iperf3.Server()
     server.bind_address = '127.0.0.1'
-    server.port = internal_port
+    server.port = args.port
     server.verbose = False
     while True:
         server.run()
@@ -85,27 +59,24 @@ sleep(1)
 
 #Get baseline reading 
 puts(f"Baseline without proxy: ", color=colors.blue, end='')
-print(f"{getReading(internal_port)} MB/s")
+print(f"{getReading(args.port)} MB/s")
 
 #Start firewall
-if(firegex.start(service_id)): puts(f"Sucessfully started service with id {service_id} ✔", color=colors.green)
+if(firegex.nf_start_service(service_id)): puts(f"Sucessfully started service with id {service_id} ✔", color=colors.green)
 else: puts(f"Benchmark Failed: Coulnd't start the service ✗", color=colors.red); exit_test(1)
-
-#Hacky solution - wait a bit for the server to start
-sleep(1)
 
 #Get no regexs reading 
 results = []
 puts(f"Performance with no regexes: ", color=colors.yellow , end='')
-results.append(getReading(args.service_port))
+results.append(getReading(args.port))
 print(f"{results[0]} MB/s")
 
 #Add all the regexs
 for i in range(1,args.num_of_regexes+1):
     regex = base64.b64encode(bytes(secrets.token_hex(16).encode())).decode()
-    if(not firegex.add_regex(service_id,regex)): puts(f"Benchmark Failed: Coulnd't add the regex ✗", color=colors.red); exit_test(1)
+    if(not firegex.nf_add_regex(service_id,regex,"B",active=True,is_blacklist=True,is_case_sensitive=False)): puts(f"Benchmark Failed: Coulnd't add the regex ✗", color=colors.red); exit_test(1)
     puts(f"Performance with {i} regex(s): ", color=colors.red, end='')
-    results.append(getReading(args.service_port))
+    results.append(getReading(args.port))
     print(f"{results[i]} MB/s")
 
 with open(args.output_file,'w') as f:
@@ -115,11 +86,10 @@ with open(args.output_file,'w') as f:
 
 puts(f"Sucessfully written results to {args.output_file} ✔", color=colors.magenta)
 
-if args.new_istance:
-    #Delete the Service 
-    if(firegex.delete(service_id)):
-        puts(f"Sucessfully delete service with id {service_id} ✔", color=colors.green)
-    else:
-        puts(f"Test Failed: Couldn't delete service ✗", color=colors.red); exit(1)
+#Delete the Service 
+if(firegex.nf_delete_service(service_id)):
+    puts(f"Sucessfully delete service with id {service_id} ✔", color=colors.green)
+else:
+    puts(f"Test Failed: Couldn't delete service ✗", color=colors.red); exit(1)
 
 server.terminate()
