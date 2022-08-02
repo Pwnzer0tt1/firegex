@@ -2,17 +2,18 @@ from multiprocessing import Process
 import socket
 
 class TcpServer:
-    def __init__(self,port):
+    def __init__(self,port,ipv6):
         def _startServer(port):
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock = socket.socket(socket.AF_INET6 if ipv6 else socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.bind(('127.0.0.1', port))
+            sock.bind(('::1' if ipv6 else '127.0.0.1', port))
             sock.listen(8)
             while True:  
                 connection,address = sock.accept()  
                 buf = connection.recv(4096)  
                 connection.send(buf)    		
                 connection.close()
+        self.ipv6 = ipv6
         self.port = port
         self.server = Process(target=_startServer,args=[port])
 
@@ -23,8 +24,8 @@ class TcpServer:
         self.server.terminate()
 
     def sendCheckData(self,data):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(('localhost', self.port))
+        s = socket.socket(socket.AF_INET6 if self.ipv6 else socket.AF_INET, socket.SOCK_STREAM)
+        s.connect(('::1' if self.ipv6 else '127.0.0.1', self.port))
         s.sendall(data)
         received_data = s.recv(4096)
         s.close()

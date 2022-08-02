@@ -96,8 +96,8 @@ class FiregexAPI:
         req = self.s.get(f"{self.address}api/nfregex/service/{service_id}/delete")
         return verify(req)
 
-    def nf_rename_service(self,newname):
-        req = self.s.post(f"{self.address}api/nfregex/services/add" , json={"name":service_name,"port":service_port, "ip_int": ip_int, "proto": proto})
+    def nf_rename_service(self,service_id,newname):
+        req = self.s.post(f"{self.address}api/nfregex/service/{service_id}/rename" , json={"name":newname})
         return verify(req)
 
     def nf_get_service_regexes(self,service_id):
@@ -191,8 +191,8 @@ class FiregexAPI:
             json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_blacklist": is_blacklist, "is_case_sensitive": is_case_sensitive})
         return verify(req)
 
-    def px_rename_service(self,newname):
-        req = self.s.post(f"{self.address}api/regexproxy/services/add" , json={"name":service_name,"port":service_port, "ip_int": ip_int, "proto": proto})
+    def px_rename_service(self,service_id,newname):
+        req = self.s.post(f"{self.address}api/regexproxy/service/{service_id}/rename" , json={"name":newname})
         return verify(req)
 
     def px_add_service(self, name: str, port: int, internalPort: [int,None]):

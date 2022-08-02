@@ -5,30 +5,28 @@ import argparse, secrets
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--address", "-a", type=str , required=False, help='Address of firegex backend', default="http://127.0.0.1:4444/")
-parser.add_argument("--password", "-p", type=str, required=False, help='Firegex password')
+parser.add_argument("--password", "-p", type=str, required=True, help='Firegex password')
 args = parser.parse_args()
 sep()
 puts(f"Testing will start on ", color=colors.cyan, end="")
 puts(f"{args.address}", color=colors.yellow)
 
 firegex = FiregexAPI(args.address)
-password = ""
+
 #Connect to Firegex
-if args.password:
-    password = args.password
+if firegex.status()["status"] =="init":
+    if (firegex.set_password(args.password)): puts(f"Sucessfully set password to {args.password} ✔", color=colors.green)
+    else: puts(f"Test Failed: Unknown response or password already put ✗", color=colors.red); exit(1)
+else:
     if (firegex.login(args.password)): puts(f"Sucessfully logged in ✔", color=colors.green)
     else: puts(f"Test Failed: Unknown response or wrong passowrd ✗", color=colors.red); exit(1)
-else:
-    password = secrets.token_hex(10)
-    if (firegex.set_password(args.password)): puts(f"Sucessfully set password to {password} ✔", color=colors.green)
-    else: puts(f"Test Failed: Unknown response or password already put ✗", color=colors.red); exit(1)
 
 if(firegex.status()["loggined"]): puts(f"Correctly received status ✔", color=colors.green)
 else: puts(f"Test Failed: Unknown response or not logged in✗", color=colors.red); exit(1)
 
 #Prepare second instance
 firegex2 = FiregexAPI(args.address)
-if (firegex2.login(password)): puts(f"Sucessfully logged in on second instance ✔", color=colors.green)
+if (firegex2.login(args.password)): puts(f"Sucessfully logged in on second instance ✔", color=colors.green)
 else: puts(f"Test Failed: Unknown response or wrong passowrd on second instance ✗", color=colors.red); exit(1)
 
 if(firegex2.status()["loggined"]): puts(f"Correctly received status on second instance✔", color=colors.green)
@@ -51,7 +49,7 @@ if (firegex2.login(new_password)): puts(f"Sucessfully logged in on second instan
 else: puts(f"Test Failed: Unknown response or wrong passowrd on second instance ✗", color=colors.red); exit(1)
 
 #Change it back
-if (firegex.change_password(password,expire=False)): puts(f"Sucessfully restored the password ✔", color=colors.green)
+if (firegex.change_password(args.password,expire=False)): puts(f"Sucessfully restored the password ✔", color=colors.green)
 else: puts(f"Test Failed: Coundl't change the password ✗", color=colors.red); exit(1)
 
 #Check if we are still logged in
