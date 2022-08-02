@@ -3,9 +3,6 @@
 ## What is Firegex?
 Firegex is a firewall that includes different functionalities, created for CTF Attack-Defence competitions that has the aim to limit or totally deny malicious traffic through the use of different kind of filters.
 
-## Why "Firegex"?
-Initiially the project was based only on regex filters, and also now the main function uses regexes, but firegex have and will have also other filtering tools.
-
 ## Get started firegex
 What you need is a linux machine and docker ( + docker-compose )
 ```
@@ -39,7 +36,10 @@ Firegex should not slow down the traffic on the network. For this the core of th
 #### 2. Availability
 Firegex **must** not become a problem for the SLA points!
 This means that firegex is projected to avoid any possibility to have the service down. We know that passing all the traffic through firegex, means also that if it fails, all services go down. It's for this that firegex implements different logics to avoid this. Also, if you add a wrong filter to your services, firegex will always offer you a fast or instant way to reset it to the previous state.
-    
+
+## Why "Firegex"?
+Initiially the project was based only on regex filters, and also now the main function uses regexes, but firegex have and will have also other filtering tools. 
+
 # Credits 
 - Copyright (c) 2007 Arash Partow (http://www.partow.net) for the base of our proxy implementation
 - Copyright (c) 2022 Pwnzer0tt1
@@ -48,9 +48,7 @@ This means that firegex is projected to avoid any possibility to have the servic
 
 ## Until merge of dev branch to main
 
-- Drop root user and use CAP_NET_ADMIN specific permissions
-- Fix/Improve Benchmark
-- Hard testing
+- Fix/Improve Benchmark && Benchmark readme
 
 ## Next points
 
