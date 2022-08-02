@@ -20,9 +20,4 @@ bool unhexlify(std::string const &hex, std::string &newString) {
    }
 }
 
-
-bool is_sudo(){
-	return getuid() == 0;
-}
-
 #endif

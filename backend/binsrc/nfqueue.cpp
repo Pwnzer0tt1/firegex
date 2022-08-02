@@ -44,10 +44,6 @@ bool filter_callback(const uint8_t *data, uint32_t len){
 
 int main(int argc, char *argv[])
 {
-	if(!is_sudo()){
-		cerr << "[fatal] [main] You must be root to run this program" << endl;
-		exit(EXIT_FAILURE);
-	}
 	int n_of_threads = 1;
 	if (argc >= 2) n_of_threads = atoi(argv[1]);
 	if(n_of_threads <= 0) n_of_threads = 1;
