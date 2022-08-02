@@ -159,11 +159,15 @@ class FiregexAPI:
         req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}/delete")
         return verify(req)
 
-    def px_change_service_port(self,service_id, port, internalPort):
+    def px_regen_service_port(self,service_id):
+        req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}/regen-port")
+        return verify(req)
+
+    def px_change_service_port(self,service_id, port=None, internalPort=None):
         payload = {}
         if port: payload["port"] = port
         if internalPort: payload["internalPort"] = internalPort
-        req = self.s.post(f"{self.address}api/regexproxy/service/{service_id}/start", json=payload)
+        req = self.s.post(f"{self.address}api/regexproxy/service/{service_id}/change-ports", json=payload)
         return req.json() if verify(req) else False
 
     def px_get_service_regexes(self,service_id):
@@ -195,7 +199,11 @@ class FiregexAPI:
         req = self.s.post(f"{self.address}api/regexproxy/service/{service_id}/rename" , json={"name":newname})
         return verify(req)
 
-    def px_add_service(self, name: str, port: int, internalPort: [int,None]):
-        req = self.s.post(f"{self.address}api/regexproxy/services/add" , 
-            json={"name":name,"port":port, "internalPort": internalPort})
-        return req.json()["service_id"] if verify(req) else False 
+    def px_add_service(self, name: str, port: int, internalPort = None):
+        payload = {}
+        payload["name"] = name
+        payload["port"] = port
+        if internalPort:
+            payload["internalPort"] = internalPort
+        req = self.s.post(f"{self.address}api/regexproxy/services/add" , json=payload)
+        return req.json()["id"] if verify(req) else False 
