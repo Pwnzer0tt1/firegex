@@ -21,7 +21,6 @@ function NFRegex({ children }: { children: any }) {
     const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
     
     const [generalStats, setGeneralStats] = useState<GeneralStats>({closed:0, regexes:0, services:0});
-
     const updateInfo = async () => {
         
         await Promise.all([

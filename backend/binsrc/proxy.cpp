@@ -450,6 +450,10 @@ int main(int argc, char* argv[])
    const unsigned short forward_port = static_cast<unsigned short>(::atoi(argv[4]));
    const string local_host      = argv[1];
    const string forward_host    = argv[3];
+   
+   int threads = 1;
+   char * n_threads_str = getenv("NTHREADS");
+   if (n_threads_str != NULL) threads = ::atoi(n_threads_str);
 
    boost::asio::io_context ios;
 
@@ -470,19 +474,16 @@ int main(int argc, char* argv[])
                                            forward_host, forward_port);
 
       acceptor.accept_connections();
-      #ifdef MULTI_THREAD
-      boost::thread_group tg;
-      #ifdef THREAD_NUM
-      for (unsigned i = 0; i < THREAD_NUM; ++i)
-      #else
-      for (unsigned i = 0; i < thread::hardware_concurrency(); ++i)
-      #endif
-         tg.create_thread(boost::bind(&boost::asio::io_context::run, &ios));
+      
+      if (threads > 1){
+         boost::thread_group tg;
+         for (unsigned i = 0; i < threads; ++i)
+            tg.create_thread(boost::bind(&boost::asio::io_context::run, &ios));
 
       tg.join_all();
-      #else
-      ios.run();
-      #endif
+      }else{
+         ios.run();
+      }
    }
    catch(exception& e)
    {

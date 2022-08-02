@@ -141,6 +141,7 @@ if __name__ == '__main__':
         host="0.0.0.0",
         port=FIREGEX_PORT,
         reload=DEBUG,
-        access_log=DEBUG,
-        workers=1
+        access_log=True,
+        workers=1 # Multiple workers will cause a crash due to the creation
+                  # of multiple processes with separated memory
     )

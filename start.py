@@ -36,8 +36,6 @@ if args.threads < 1:
 
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
-gcc_params = f"-D MULTI_THREAD -D THREAD_NUM={args.threads}" if args.threads > 1 else ""
-
 with open("docker-compose.yml","wt") as compose:
 
     if "linux" in sys.platform and not 'microsoft-standard' in platform.uname().release: #Check if not is a wsl also
@@ -47,10 +45,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: 
-            context: .
-            args:
-                - GCC_PARAMS={gcc_params}
+        build: .
         network_mode: "host"
         environment:
             - PORT={args.port}
@@ -71,10 +66,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: 
-            context: .
-            args:
-                - GCC_PARAMS={gcc_params}
+        build: .
         ports:
             - {args.port}:{args.port}
         environment:

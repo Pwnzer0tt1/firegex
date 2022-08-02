@@ -19,6 +19,7 @@ function MainLayout({ children }:{ children:any }) {
     }
   },[location.pathname])
 
+
   return <>  
       
   <AppShell

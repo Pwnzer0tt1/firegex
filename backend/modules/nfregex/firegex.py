@@ -5,9 +5,6 @@ from modules.nfregex.models import Service, Regex
 import re, os, asyncio
 import traceback
 
-QUEUE_BASE_NUM = 1000
-
-
 class RegexFilter:
     def __init__(
         self, regex,
@@ -61,14 +58,12 @@ class FiregexInterceptor:
         self.regex_filters: Set[RegexFilter]
         self.update_config_lock:asyncio.Lock
         self.process:asyncio.subprocess.Process
-        self.n_queues:int
         self.update_task: asyncio.Task
     
     @classmethod
-    async def start(cls, filter: FiregexFilter, n_queues:int = int(os.getenv("NTHREADS","1"))):
+    async def start(cls, filter: FiregexFilter):
         self = cls()
         self.filter = filter
-        self.n_queues = n_queues
         self.filter_map_lock = asyncio.Lock()
         self.update_config_lock = asyncio.Lock()
         input_range, output_range = await self._start_binary()
@@ -81,7 +76,7 @@ class FiregexInterceptor:
     async def _start_binary(self):
         proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cppqueue")
         self.process = await asyncio.create_subprocess_exec(
-            proxy_binary_path, str(self.n_queues),
+            proxy_binary_path,
             stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE
         )
         line_fut = self.process.stdout.readuntil()

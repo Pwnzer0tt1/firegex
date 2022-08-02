@@ -45,9 +45,11 @@ bool filter_callback(const uint8_t *data, uint32_t len){
 int main(int argc, char *argv[])
 {
 	int n_of_threads = 1;
-	if (argc >= 2) n_of_threads = atoi(argv[1]);
+   	char * n_threads_str = getenv("NTHREADS");
+   	if (n_threads_str != NULL) n_of_threads = ::atoi(n_threads_str);
 	if(n_of_threads <= 0) n_of_threads = 1;
 	if (n_of_threads % 2 != 0 ) n_of_threads++;
+	cerr << "[info] [main] Using " << n_of_threads << " threads" << endl;
 	regex_config.reset(new regex_rules());
 	NFQueueSequence<filter_callback<true>> input_queues(n_of_threads/2);
 	input_queues.start();
@@ -55,6 +57,8 @@ int main(int argc, char *argv[])
 	output_queues.start();
 
 	cout << "QUEUES INPUT " << input_queues.init() << " " << input_queues.end() << " OUTPUT " << output_queues.init() << " " << output_queues.end() << endl;
+	cerr << "[info] [main] Input queues: " << input_queues.init() << ":" << input_queues.end() << " threads assigned: " << n_of_threads/2 << endl;
+	cerr << "[info] [main] Output queues: " << output_queues.init() << ":" << output_queues.end() << " threads assigned: " << n_of_threads/2 << endl;
 
 	config_updater();
 }

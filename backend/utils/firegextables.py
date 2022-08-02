@@ -80,7 +80,7 @@ class FiregexTables:
             "expr": [
                     {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'saddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
                     {'match': {"left": { "payload": {"protocol": str(proto), "field": "sport"}}, "op": "==", "right": int(port)}},
-                    {"queue": {"num": str(init) if init == end else f"{init}-{end}", "flags": ["bypass"]}}
+                    {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
         }}})
 
@@ -97,17 +97,17 @@ class FiregexTables:
             "expr": [
                     {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'daddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
                     {'match': {"left": { "payload": {"protocol": str(proto), "field": "dport"}}, "op": "==", "right": int(port)}},
-                    {"queue": {"num": str(init) if init == end else f"{init}-{end}", "flags": ["bypass"]}}
+                    {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
         }}})
 
     def get(self) -> List[FiregexFilter]:
         res = []
         for filter in [ele["rule"] for ele in self.list() if "rule" in ele and ele["rule"]["table"] == self.table_name]:
-            queue_str = str(filter["expr"][2]["queue"]["num"]).split("-")
+            queue_str = filter["expr"][2]["queue"]["num"]
             queue = None
-            if len(queue_str) == 1: queue = int(queue_str[0]), int(queue_str[0])
-            else: queue = int(queue_str[0]), int(queue_str[1])
+            if isinstance(queue_str,dict): queue = int(queue_str["range"][0]), int(queue_str["range"][1])
+            else: queue = int(queue_str), int(queue_str)
             ip_int = None
             if isinstance(filter["expr"][0]["match"]["right"],str):
                 ip_int = str(ip_parse(filter["expr"][0]["match"]["right"]))
