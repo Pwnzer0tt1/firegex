@@ -1,4 +1,5 @@
 #!/bin/sh
+pip3 install -r requirements.txt
 echo "Running standard API test"
 python3 api_test.py -p testpassword
 echo "Running Netfilter Regex TCP ipv4"
