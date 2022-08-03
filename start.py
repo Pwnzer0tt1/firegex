@@ -23,6 +23,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
 parser.add_argument('--threads', "-t", type=int, required=False, help='Number of threads started for each service/utility', default=1)
 parser.add_argument('--no-autostart', "-n", required=False, action="store_true", help='Auto-execute "docker-compose up -d --build"', default=False)
+parser.add_argument('--build', "-b", required=False, action="store_true", help='Build the container locally', default=False)
 
 args = parser.parse_args()
 sep()
@@ -45,7 +46,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: .
+        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex:latest"}
         network_mode: "host"
         environment:
             - PORT={args.port}
@@ -66,7 +67,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        build: .
+        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex:latest"}
         ports:
             - {args.port}:{args.port}
         environment:

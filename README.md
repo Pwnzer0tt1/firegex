@@ -1,5 +1,7 @@
 # [Fi]*regex 🔥
 
+<a href="https://github.com/Pwnzer0tt1/firegex/releases/latest"><img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/pwnzer0tt1/firegex?color=D62246&style=flat-square"></a> <img alt="GitHub" src="https://img.shields.io/github/license/pwnzer0tt1/firegex?style=flat-square"> <a href="https://discord.gg/79NNVJBK5Z" target="_blank"><img alt="Discord" src="https://img.shields.io/discord/860223571594051605?color=%237289DA&label=Discord&style=flat-square"></a> <img alt="GitHub top language" src="https://img.shields.io/github/languages/top/pwnzer0tt1/firegex?style=flat-square&color=44AA44"> <img alt="Lines of code" src="https://img.shields.io/tokei/lines/github/pwnzer0tt1/firegex?color=947BD3&style=flat-square"> <img alt="GitHub repo size" src="https://img.shields.io/github/repo-size/pwnzer0tt1/firegex?color=F0A7A0&style=flat-square"> 
+
 ## What is Firegex?
 Firegex is a firewall that includes different functionalities, created for CTF Attack-Defence competitions that has the aim to limit or totally deny malicious traffic through the use of different kind of filters.
 
@@ -52,5 +54,4 @@ Initiially the project was based only on regex filters, and also now the main fu
 - Explanation about tools in the dedicated pages making them more user-friendly
 - Give the permission to set a startup password in start.py protecting firegex also at the first run
 - buffering the TCP and(/or) the UDP stream to avoid to bypass the proxy dividing the information in more packets
-- Publish a docker image making the start of firegex fast (skip the compiling of the binaries and libraries)
 - Adding new section with "general firewall rules" to manage "simple" TCP traffic rules graphically and through nftables
