@@ -2,7 +2,9 @@
 FROM python:alpine
 
 RUN apk update
-RUN apk add g++ git pcre2-dev libnetfilter_queue-dev libpcap-dev libcrypto1.1 libnfnetlink-dev libmnl-dev make cmake nftables boost-dev libcap autoconf automake bash rust
+RUN apk add g++ git pcre2-dev libnetfilter_queue-dev libpcap-dev\
+        libcrypto1.1 libnfnetlink-dev libmnl-dev make cmake nftables\
+        boost-dev libcap autoconf automake bash rust cargo
 
 WORKDIR /tmp/
 RUN git clone --single-branch --branch release https://github.com/jpcre2/jpcre2
