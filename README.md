@@ -46,10 +46,6 @@ Initiially the project was based only on regex filters, and also now the main fu
 
 # TODO:
 
-## Until merge of dev branch to main
-
-- Fix/Improve Benchmark && Benchmark readme
-
 ## Next points
 
 - Create hijacking port to proxy
