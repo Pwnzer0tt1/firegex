@@ -80,9 +80,6 @@ struct regex_rules{
 shared_ptr<regex_rules> regex_config;
 
 mutex update_mutex;
-#ifdef MULTI_THREAD
-mutex stdout_mutex;
-#endif 
 
 bool filter_data(unsigned char* data, const size_t& bytes_transferred, regex_rule_vector const &blacklist, regex_rule_vector const &whitelist){
    #ifdef DEBUG_PACKET
@@ -97,10 +94,9 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, regex_rul
    for (regex_rule_pair ele:blacklist){
       try{
          if(ele.second.match(str_data)){
-            #ifdef MULTI_THREAD
-            std::unique_lock<std::mutex> lck(stdout_mutex);
-            #endif
-            cout << "BLOCKED " << ele.first << endl;
+            stringstream msg;
+            msg << "BLOCKED " << ele.first << endl;
+            cout << msg.str() << std::flush;
             return false;
          }
       } catch(...){
@@ -110,10 +106,9 @@ bool filter_data(unsigned char* data, const size_t& bytes_transferred, regex_rul
    for (regex_rule_pair ele:whitelist){
       try{
          if(!ele.second.match(str_data)){
-            #ifdef MULTI_THREAD
-            std::unique_lock<std::mutex> lck(stdout_mutex);
-            #endif
-            cout << "BLOCKED " << ele.first << endl;
+            stringstream msg;
+            msg << "BLOCKED " << ele.first << endl;
+            cout << msg.str() << std::flush;
             return false;
          }
       } catch(...){

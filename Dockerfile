@@ -19,8 +19,8 @@ ADD ./backend/requirements.txt /execute/requirements.txt
 RUN pip3 install --no-cache-dir -r /execute/requirements.txt --no-warn-script-location
 
 COPY ./backend/binsrc /execute/binsrc
-RUN g++ binsrc/nfqueue.cpp -o modules/cppqueue -O3 -march=native -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
-RUN g++ binsrc/proxy.cpp -o modules/proxy -O3 -march=native -pthread -lboost_system -lboost_thread -lpcre2-8
+RUN g++ binsrc/nfqueue.cpp -o modules/cppqueue -O3 -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
+RUN g++ binsrc/proxy.cpp -o modules/proxy -O3 -pthread -lboost_system -lboost_thread -lpcre2-8
 
 
 COPY ./backend/ /execute/
