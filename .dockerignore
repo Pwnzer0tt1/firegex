@@ -16,6 +16,8 @@ Dockerfile
 
 /backend/db/
 /backend/db/**
+/frontend/build/
+/frontend/build/**
 /backend/modules/cppqueue
 /backend/modules/proxy
 docker-compose.yml

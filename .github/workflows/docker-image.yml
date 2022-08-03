@@ -28,6 +28,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+#      - name: init node
+#        uses: actions/setup-node@v3
+#        with:
+#          node-version: 16
+
+#      - name: Install dependencies from package.json
+#        working-directory: ./frontend
+#        run: npm install
+
+#      - name: Build React frontend
+#        working-directory: ./frontend
+#        run: npm run build
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@master
         with:
@@ -51,7 +64,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
       - name: Build and push Docker image
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v3
         with:
           context: .
           builder: ${{ steps.buildx.outputs.name }}
