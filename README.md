@@ -7,13 +7,21 @@ Firegex is a firewall that includes different functionalities, created for CTF A
 
 ## Get started firegex
 What you need is a linux machine and docker ( + docker-compose )
+```bash
+curl https://raw.githubusercontent.com/Pwnzer0tt1/firegex/main/start.py -o firegex.py && python3 firegex.py
 ```
+With this command you will download firegex.py, and run it, it will require you the password to use for firegex and start it with docker-compose
+
+Or, you can start in a similar way firegex, cloning this repository and executing this command
+```bash
 python3 start.py
 ```
-This command will generate the docker-compose configuration and start it with docker-compose, read the help with -h to customize you firegex instance.
-We recommend to use -t paramether and specify the number of threads to use for each service running on firegex, this will make you network more stable with multiple connections `python3 start.py -t 4`.
+Cloning the repository you could use the `--build` option that will build a new image of firegex, this can be usefull if you need change some code of firegex, and run it with the new code.
+Image building of firegex will require more time, so it's recommended to use the version just builded and available in the github packages
 
+By default firegex will start in a multithread configuration using the number of threads available in your system.
 The default port of firegex is 4444. At the startup you will choose a password, that is essential for your security.
+All the configuration at the startup are customizable in [firegex.py](./start.py) or directly in the firegex interface.
 
 ![Firegex Network scheme](docs/Firegex_Screenshot.jpg)
 
