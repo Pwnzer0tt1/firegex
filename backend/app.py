@@ -23,6 +23,10 @@ utils.socketio = SocketManager(app, "/sock", socketio_path="")
 def APP_STATUS(): return "init" if db.get("password") is None else "run"
 def JWT_SECRET(): return db.get("secret")
 
+def set_psw(psw: str):
+    hash_psw = crypto.hash(psw)
+    db.put("password",hash_psw)
+
 @utils.socketio.on("update")
 async def updater(): pass
 
@@ -78,8 +82,7 @@ async def set_password(form: PasswordForm):
     if APP_STATUS() != "init": raise HTTPException(status_code=400)
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
-    hash_psw = crypto.hash(form.password)
-    db.put("password",hash_psw)
+    set_psw(form.password)
     await refresh_frontend()
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 
@@ -93,8 +96,7 @@ async def change_password(form: PasswordChangeForm):
     if form.expire:
         db.put("secret", secrets.token_hex(32))
     
-    hash_psw = crypto.hash(form.password)
-    db.put("password",hash_psw)
+    set_psw(form.password)
     await refresh_frontend()
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 
@@ -110,6 +112,8 @@ reset, startup, shutdown = load_routers(api)
 @app.on_event("startup")
 async def startup_event():
     db.init()
+    if os.getenv("HEX_SET_PSW"):
+        set_psw(bytes.fromhex(os.getenv("HEX_SET_PSW")).decode())
     await startup()
     if not JWT_SECRET(): db.put("secret", secrets.token_hex(32))
     await refresh_frontend()

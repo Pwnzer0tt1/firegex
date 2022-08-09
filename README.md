@@ -52,6 +52,5 @@ Initiially the project was based only on regex filters, and also now the main fu
 
 - Create hijacking port to proxy
 - Explanation about tools in the dedicated pages making them more user-friendly
-- Give the permission to set a startup password in start.py protecting firegex also at the first run
 - buffering the TCP and(/or) the UDP stream to avoid to bypass the proxy dividing the information in more packets
 - Adding new section with "general firewall rules" to manage "simple" TCP traffic rules graphically and through nftables
