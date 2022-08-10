@@ -27,11 +27,15 @@ parser.add_argument('--no-autostart', "-n", required=False, action="store_true",
 parser.add_argument('--keep','-k', required=False, action="store_true", help='Keep the docker-compose file generated', default=False)
 parser.add_argument('--build', "-b", required=False, action="store_true", help='Build the container locally', default=False)
 parser.add_argument('--stop', '-s', required=False, action="store_true", help='Stop firegex execution', default=False)
+parser.add_argument('--restart', '-r', required=False, action="store_true", help='Restart firegex', default=False)
 parser.add_argument('--psw-no-interactive',type=str, required=False, help='Password for no-interactive mode', default=None)
-parser.add_argument('--startup-psw', required=False, action="store_true", help='Insert password in the startup screen of firegex', default=False)
+parser.add_argument('--startup-psw','-P', required=False, action="store_true", help='Insert password in the startup screen of firegex', default=False)
+
 
 args = parser.parse_args()
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
+
+start_operation = not (args.stop or args.restart)
 
 if args.build and not os.path.isfile("./Dockerfile"):
     puts("This is not a clone of firegex, to build firegex the clone of the repository is needed!", color=colors.red)
@@ -40,14 +44,14 @@ if args.build and not os.path.isfile("./Dockerfile"):
 if args.threads < 1: 
     args.threads = multiprocessing.cpu_count()
 
-if not args.stop:
+if start_operation:
     sep()
     puts(f"Firegex", color=colors.yellow, end="")
     puts(" will start on port ", end="")
     puts(f"{args.port}", color=colors.cyan)
 
 psw_set = None
-if not args.stop:
+if start_operation:
     if args.psw_no_interactive:
         psw_set = args.psw_no_interactive
     elif not args.startup_psw:
@@ -100,7 +104,10 @@ services:
 sep()
 if not args.no_autostart:
     try:
-        if args.stop:
+        if args.restart:
+            puts("Running 'docker-compose restart'\n", color=colors.green)
+            os.system("docker-compose -p firegex restart")
+        elif args.stop:
             puts("Running 'docker-compose down'\n", color=colors.green)
             os.system("docker-compose -p firegex down")
         else:

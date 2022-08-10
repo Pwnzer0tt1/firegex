@@ -1,6 +1,7 @@
 import asyncio
 from typing import Dict
-from modules.nfregex.firegex import FiregexFilter, FiregexInterceptor, FiregexTables, RegexFilter, delete_by_srv
+from modules.nfregex.firegex import FiregexInterceptor, RegexFilter, delete_by_srv
+from modules.nfregex.nftables import FiregexTables, FiregexFilter
 from modules.nfregex.models import Regex, Service
 from utils.sqlite import SQLite
 

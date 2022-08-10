@@ -5,7 +5,7 @@ import sqlite3
 from typing import List, Union
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from modules.nfregex.firegex import FiregexTables
+from modules.nfregex.nftables import FiregexTables
 from modules.nfregex.firewall import STATUS, FirewallManager
 from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, refresh_frontend

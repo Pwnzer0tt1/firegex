@@ -1,7 +1,6 @@
 import asyncio
 from ipaddress import ip_interface
-import os, socket, psutil
-import sys
+import os, socket, psutil, sys, nftables
 from fastapi_socketio import SocketManager
 
 LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
@@ -48,3 +47,40 @@ def get_interfaces():
                 if interf.family in [socket.AF_INET, socket.AF_INET6]:
                     yield {"name": int_name, "addr":interf.address}
     return list(_get_interfaces())
+
+class Singleton(object):
+    __instance = None
+    def __new__(class_, *args, **kwargs):
+        if not isinstance(class_.__instance, class_):
+            class_.__instance = object.__new__(class_, *args, **kwargs)
+        return class_.__instance
+
+class NFTableManager(Singleton):
+    
+    table_name = "firegex"
+    
+    def __init__(self, init_cmd, reset_cmd):
+        self.__init_cmds = init_cmd
+        self.__reset_cmds = reset_cmd
+        self.nft = nftables.Nftables()
+    
+    def raw_cmd(self, *cmds):
+        return self.nft.json_cmd({"nftables": list(cmds)})
+
+    def cmd(self, *cmds):
+        code, out, err = self.raw_cmd(*cmds)
+
+        if code == 0: return out
+        else: raise Exception(err)
+    
+    def init(self):
+        self.reset()
+        self.raw_cmd({"create":{"table":{"name":self.table_name,"family":"inet"}}})
+        self.cmd(*self.__init_cmds)
+            
+    def reset(self):
+        print(self.raw_cmd(*self.__reset_cmds))
+
+    def list(self):
+        return self.cmd({"list": {"ruleset": None}})["nftables"]
+            

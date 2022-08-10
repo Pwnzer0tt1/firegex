@@ -38,6 +38,7 @@ RUN g++ binsrc/proxy.cpp -o modules/proxy -O3 -pthread -lboost_system -lboost_th
 
 COPY ./backend/ /execute/
 COPY --from=frontend /app/build/ ./frontend/
-ENTRYPOINT ["/bin/sh", "/execute/docker-entrypoint.sh"]
+
+CMD ["/bin/sh", "/execute/docker-entrypoint.sh"]
 
 
