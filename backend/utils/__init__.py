@@ -75,11 +75,11 @@ class NFTableManager(Singleton):
     
     def init(self):
         self.reset()
-        self.raw_cmd({"create":{"table":{"name":self.table_name,"family":"inet"}}})
+        self.raw_cmd({"add":{"table":{"name":self.table_name,"family":"inet"}}})
         self.cmd(*self.__init_cmds)
             
     def reset(self):
-        print(self.raw_cmd(*self.__reset_cmds))
+        self.raw_cmd(*self.__reset_cmds)
 
     def list(self):
         return self.cmd({"list": {"ruleset": None}})["nftables"]

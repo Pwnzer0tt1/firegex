@@ -1,67 +1,86 @@
-from typing import List
-from utils import ip_parse, ip_family, NFTableManager
 
-class FiregexFilter():
-    def __init__(self, proto:str, port:int, ip_int:str, queue=None, target:str=None, id=None):
-        self.id = int(id) if id else None
-        self.queue = queue
-        self.target = target
-        self.proto = proto
-        self.port = int(port)
-        self.ip_int = str(ip_int)
+from ipaddress import ip_interface
+import nftables, traceback
 
-    def __eq__(self, o: object) -> bool:
-        if isinstance(o, FiregexFilter):
-            return self.port == o.port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
-        return False
+def ip_parse(ip:str):
+    return str(ip_interface(ip).network)
+
+def ip_family(ip:str):
+    return "ip6" if ip_interface(ip).version == 6 else "ip"
+
+class Singleton(object):
+    __instance = None
+    def __new__(class_, *args, **kwargs):
+        if not isinstance(class_.__instance, class_):
+            class_.__instance = object.__new__(class_, *args, **kwargs)
+        return class_.__instance
+
+class NFTableManager(Singleton):
+    
+    table_name = "firegex"
+    
+    def __init__(self, init_cmd, reset_cmd):
+        self.__init_cmds = init_cmd
+        self.__reset_cmds = reset_cmd
+        self.nft = nftables.Nftables()
+    
+    def raw_cmd(self, *cmds):
+        return self.nft.json_cmd({"nftables": list(cmds)})
+
+    def cmd(self, *cmds):
+        code, out, err = self.raw_cmd(*cmds)
+
+        if code == 0: return out
+        else: raise Exception(err)
+    
+    def init(self):
+        self.reset()
+        self.raw_cmd({"add":{"table":{"name":self.table_name,"family":"inet"}}})
+        self.cmd(*self.__init_cmds)
+            
+    def reset(self):
+        self.raw_cmd(*self.__reset_cmds)
+
+    def list(self):
+        return self.cmd({"list": {"ruleset": None}})["nftables"]
+
 
 class FiregexTables(NFTableManager):
-    input_chain = "nfregex_input"
-    output_chain = "nfregex_output"
+    prerouting_porthijack = "porthijack"
     
     def __init__(self):
         super().__init__([
             {"add":{"chain":{
                 "family":"inet",
                 "table":self.table_name,
-                "name":self.input_chain,
-                "type":"filter",
-                "hook":"prerouting",
-                "prio":-150,
-                "policy":"accept"
-            }}},
-            {"add":{"chain":{
-                "family":"inet",
-                "table":self.table_name,
-                "name":self.output_chain,
-                "type":"filter",
-                "hook":"postrouting",
-                "prio":-150,
+                "name":self.prerouting_porthijack,
+                "type":"nat",
+                "hook":"output",
+                "prio":-100,
                 "policy":"accept"
             }}}
         ],[
-            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.input_chain}}},
-            {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.input_chain}}},
-            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.output_chain}}},
-            {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.output_chain}}},
+            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.prerouting_porthijack}}},
+            {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.prerouting_porthijack}}}
         ])
 
-    def add_output(self, queue_range, proto, port, ip_int):
-        init, end = queue_range
-        if init > end: init, end = end, init
+    def add(self, ip_int, proto, public_port, proxy_port):
         ip_int = ip_parse(ip_int)
         ip_addr = str(ip_int).split("/")[0]
         ip_addr_cidr = int(str(ip_int).split("/")[1])
         self.cmd({ "insert":{ "rule": {
             "family": "inet",
             "table": self.table_name,
-            "chain": self.output_chain,
+            "chain": self.prerouting_porthijack,
             "expr": [
-                    {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'saddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
-                    {'match': {"left": { "payload": {"protocol": str(proto), "field": "sport"}}, "op": "==", "right": int(port)}},
-                    {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
+                    {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'daddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
+                    {'match': {'left': { "payload": {"protocol": str(proto), "field": "dport"}}, "op": "==", "right": int(public_port)}},
+                    {'redirect' : {'port' : int(proxy_port), 'flags' : []}}
                 ]
         }}})
+"""
+    def add_output(self, queue_range, proto, port, ip_int):
+
 
     def add_input(self, queue_range, proto = None, port = None, ip_int = None):
         init, end = queue_range
@@ -101,4 +120,14 @@ class FiregexTables(NFTableManager):
                 ip_int=ip_int
             ))
         return res
-            
+"""
+try:
+    #print(FiregexTables().list())
+    FiregexTables().init()
+    FiregexTables().add("127.0.0.1","tcp", 8080, 8081)
+    input()
+except:
+    traceback.print_exc()
+    FiregexTables().reset()
+
+#https://www.mankier.com/5/libnftables-json
