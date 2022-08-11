@@ -1,8 +1,7 @@
 import asyncio
 from typing import Dict
-from modules.nfregex.firegex import FiregexInterceptor, RegexFilter
-from modules.nfregex.nftables import FiregexTables, FiregexFilter
-from modules.nfregex.models import Regex, Service
+from modules.porthijack.nftables import FiregexTables, FiregexFilter
+from modules.porthijack.models import Service
 from utils.sqlite import SQLite
 
 class STATUS:
@@ -95,13 +94,13 @@ class ServiceManager:
 
     async def start(self):
         if not self.interceptor:
-            FiregexTables().delete(self.srv)
-            self.interceptor = await FiregexInterceptor.start(FiregexFilter(self.srv))
+            FiregexTables().delete_by_srv(self.srv)
+            self.interceptor = await FiregexInterceptor.start(FiregexFilter(self.srv.proto,self.srv.port, self.srv.ip_int))
             await self._update_filters_from_db()
             self._set_status(STATUS.ACTIVE)
 
     async def stop(self):
-        FiregexTables().delete(self.srv)
+        FiregexTables().delete_by_srv(self.srv)
         if self.interceptor:
             await self.interceptor.stop()
             self.interceptor = None

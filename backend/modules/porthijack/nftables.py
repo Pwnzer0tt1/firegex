@@ -1,49 +1,19 @@
+from typing import List
+from utils import ip_parse, ip_family, NFTableManager
 
-from ipaddress import ip_interface
-import nftables, traceback
+class FiregexFilter():
+    def __init__(self, proto:str, port:int, ip_int:str, queue=None, target:str=None, id=None):
+        self.id = int(id) if id else None
+        self.queue = queue
+        self.target = target
+        self.proto = proto
+        self.port = int(port)
+        self.ip_int = str(ip_int)
 
-def ip_parse(ip:str):
-    return str(ip_interface(ip).network)
-
-def ip_family(ip:str):
-    return "ip6" if ip_interface(ip).version == 6 else "ip"
-
-class Singleton(object):
-    __instance = None
-    def __new__(class_, *args, **kwargs):
-        if not isinstance(class_.__instance, class_):
-            class_.__instance = object.__new__(class_, *args, **kwargs)
-        return class_.__instance
-
-class NFTableManager(Singleton):
-    
-    table_name = "firegex"
-    
-    def __init__(self, init_cmd, reset_cmd):
-        self.__init_cmds = init_cmd
-        self.__reset_cmds = reset_cmd
-        self.nft = nftables.Nftables()
-    
-    def raw_cmd(self, *cmds):
-        return self.nft.json_cmd({"nftables": list(cmds)})
-
-    def cmd(self, *cmds):
-        code, out, err = self.raw_cmd(*cmds)
-
-        if code == 0: return out
-        else: raise Exception(err)
-    
-    def init(self):
-        self.reset()
-        self.raw_cmd({"add":{"table":{"name":self.table_name,"family":"inet"}}})
-        self.cmd(*self.__init_cmds)
-            
-    def reset(self):
-        self.raw_cmd(*self.__reset_cmds)
-
-    def list(self):
-        return self.cmd({"list": {"ruleset": None}})["nftables"]
-
+    def __eq__(self, o: object) -> bool:
+        if isinstance(o, FiregexFilter):
+            return self.port == o.port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
+        return False
 
 class FiregexTables(NFTableManager):
     prerouting_porthijack = "prerouting_porthijack"
@@ -100,3 +70,26 @@ class FiregexTables(NFTableManager):
                     {'mangle': {'key': {'payload': {'protocol': str(proto), 'field': 'sport'}}, 'value': int(public_port)}}
                 ]
         }}})
+
+    def get(self) -> List[FiregexFilter]:
+        res = []
+        for filter in self.list_rules(tables=[self.table_name], chains=[self.input_chain,self.output_chain]):
+            queue_str = filter["expr"][2]["queue"]["num"]
+            queue = None
+            if isinstance(queue_str,dict): queue = int(queue_str["range"][0]), int(queue_str["range"][1])
+            else: queue = int(queue_str), int(queue_str)
+            ip_int = None
+            if isinstance(filter["expr"][0]["match"]["right"],str):
+                ip_int = str(ip_parse(filter["expr"][0]["match"]["right"]))
+            else:
+                ip_int = f'{filter["expr"][0]["match"]["right"]["prefix"]["addr"]}/{filter["expr"][0]["match"]["right"]["prefix"]["len"]}'
+            res.append(FiregexFilter(
+                target=filter["chain"],
+                id=int(filter["handle"]),
+                queue=queue,
+                proto=filter["expr"][1]["match"]["left"]["payload"]["protocol"],
+                port=filter["expr"][1]["match"]["right"],
+                ip_int=ip_int
+            ))
+        return res
+            

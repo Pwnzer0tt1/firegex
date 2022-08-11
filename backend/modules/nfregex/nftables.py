@@ -1,10 +1,10 @@
 from typing import List
+from modules.nfregex.models import Service
 from utils import ip_parse, ip_family, NFTableManager
 
 class FiregexFilter():
-    def __init__(self, proto:str, port:int, ip_int:str, queue=None, target:str=None, id=None):
+    def __init__(self, proto:str, port:int, ip_int:str, target:str=None, id=None):
         self.id = int(id) if id else None
-        self.queue = queue
         self.target = target
         self.proto = proto
         self.port = int(port)
@@ -46,47 +46,41 @@ class FiregexTables(NFTableManager):
             {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.output_chain}}},
         ])
 
-    def add_output(self, queue_range, proto, port, ip_int):
-        init, end = queue_range
-        if init > end: init, end = end, init
-        ip_int = ip_parse(ip_int)
+    def add(self, srv:Service, queue_range_input, queue_range_output):
+        ip_int = ip_parse(srv.ip_int)
         ip_addr = str(ip_int).split("/")[0]
         ip_addr_cidr = int(str(ip_int).split("/")[1])
+
+        init, end = queue_range_output
+        if init > end: init, end = end, init
         self.cmd({ "insert":{ "rule": {
             "family": "inet",
             "table": self.table_name,
             "chain": self.output_chain,
             "expr": [
                     {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'saddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
-                    {'match': {"left": { "payload": {"protocol": str(proto), "field": "sport"}}, "op": "==", "right": int(port)}},
+                    {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "sport"}}, "op": "==", "right": int(srv.port)}},
                     {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
         }}})
-
-    def add_input(self, queue_range, proto = None, port = None, ip_int = None):
-        init, end = queue_range
+        
+        init, end = queue_range_input
         if init > end: init, end = end, init
-        ip_int = ip_parse(ip_int)
-        ip_addr = str(ip_int).split("/")[0]
-        ip_addr_cidr = int(str(ip_int).split("/")[1])
         self.cmd({"insert":{"rule":{
             "family": "inet",
             "table": self.table_name,
             "chain": self.input_chain,
             "expr": [
                     {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'daddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
-                    {'match': {"left": { "payload": {"protocol": str(proto), "field": "dport"}}, "op": "==", "right": int(port)}},
+                    {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "dport"}}, "op": "==", "right": int(srv.port)}},
                     {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
         }}})
 
+
     def get(self) -> List[FiregexFilter]:
         res = []
-        for filter in [ele["rule"] for ele in self.list() if "rule" in ele and ele["rule"]["table"] == self.table_name]:
-            queue_str = filter["expr"][2]["queue"]["num"]
-            queue = None
-            if isinstance(queue_str,dict): queue = int(queue_str["range"][0]), int(queue_str["range"][1])
-            else: queue = int(queue_str), int(queue_str)
+        for filter in self.list_rules(tables=[self.table_name], chains=[self.input_chain,self.output_chain]):
             ip_int = None
             if isinstance(filter["expr"][0]["match"]["right"],str):
                 ip_int = str(ip_parse(filter["expr"][0]["match"]["right"]))
@@ -95,10 +89,14 @@ class FiregexTables(NFTableManager):
             res.append(FiregexFilter(
                 target=filter["chain"],
                 id=int(filter["handle"]),
-                queue=queue,
                 proto=filter["expr"][1]["match"]["left"]["payload"]["protocol"],
                 port=filter["expr"][1]["match"]["right"],
                 ip_int=ip_int
             ))
         return res
+
+    def delete(self, srv:Service):
+        for filter in self.get():
+            if filter.port == srv.port and filter.proto == srv.proto and ip_parse(filter.ip_int) == ip_parse(srv.ip_int):
+                self.cmd({"delete":{"rule": {"handle": filter.id, "table": self.table_name, "chain": filter.target, "family": "inet"}}})
             

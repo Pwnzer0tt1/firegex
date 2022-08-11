@@ -81,6 +81,13 @@ class NFTableManager(Singleton):
     def reset(self):
         self.raw_cmd(*self.__reset_cmds)
 
-    def list(self):
+    def list_rules(self, tables = None, chains = None):
+        for filter in [ele["rule"] for ele in self.raw_list() if "rule" in ele ]:
+            if tables and filter["table"] not in tables: continue
+            if chains and filter["chain"] not in chains: continue
+            yield filter
+    
+    def raw_list(self):
         return self.cmd({"list": {"ruleset": None}})["nftables"]
+
             

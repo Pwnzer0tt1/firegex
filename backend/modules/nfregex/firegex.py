@@ -141,7 +141,3 @@ class FiregexInterceptor:
             except Exception: pass
         return res
 
-def delete_by_srv(srv:Service):
-    for filter in nft.get():
-        if filter.port == srv.port and filter.proto == srv.proto and ip_parse(filter.ip_int) == ip_parse(srv.ip_int):
-            nft.cmd({"delete":{"rule": {"handle": filter.id, "table": nft.table_name, "chain": filter.target, "family": "inet"}}})
