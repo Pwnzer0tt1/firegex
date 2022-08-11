@@ -1,7 +1,6 @@
-from ast import Delete
 import asyncio
 from typing import Dict
-from modules.porthijack.nftables import FiregexTables, FiregexFilter
+from modules.porthijack.nftables import FiregexTables
 from modules.porthijack.models import Service
 from utils.sqlite import SQLite
 

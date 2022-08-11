@@ -82,6 +82,7 @@ def checkRegex(regex, should_work=True, upper=False):
                 if not server.sendCheckData(secrets.token_bytes(200) + s +  secrets.token_bytes(200)):
                     puts(f"The malicious request was successfully blocked ✔", color=colors.green)
                     n_blocked += 1
+                    time.sleep(0.5)
                     if firegex.px_get_regex(r["id"])["n_packets"] == n_blocked:
                         puts(f"The packed was reported as blocked ✔", color=colors.green)
                     else:

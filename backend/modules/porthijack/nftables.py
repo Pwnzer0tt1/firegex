@@ -91,8 +91,8 @@ class FiregexTables(NFTableManager):
                 target=filter["chain"],
                 id=int(filter["handle"]),
                 proto=filter["expr"][1]["match"]["left"]["payload"]["protocol"],
-                public_port=filter["expr"][1]["match"]["right"] if filter["target"] == self.prerouting_porthijack else filter["expr"][2]["mangle"]["value"],
-                proxy_port=filter["expr"][1]["match"]["right"] if filter["target"] == self.postrouting_porthijack else filter["expr"][2]["mangle"]["value"], 
+                public_port=filter["expr"][1]["match"]["right"] if filter["chain"] == self.prerouting_porthijack else filter["expr"][2]["mangle"]["value"],
+                proxy_port=filter["expr"][1]["match"]["right"] if filter["chain"] == self.postrouting_porthijack else filter["expr"][2]["mangle"]["value"], 
                 ip_int=ip_int
             ))
         return res

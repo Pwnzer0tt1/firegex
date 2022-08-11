@@ -41,8 +41,8 @@ db = SQLite('db/port-hijacking.db', {
     'services': {
         'service_id': 'VARCHAR(100) PRIMARY KEY',
         'active' : 'BOOLEAN NOT NULL CHECK (active IN (0, 1))',
-        'public_port': 'INT NOT NULL CHECK(port > 0 and port < 65536)',
-        'proxy_port': 'INT NOT NULL CHECK(port > 0 and port < 65536)',
+        'public_port': 'INT NOT NULL CHECK(public_port > 0 and public_port < 65536)',
+        'proxy_port': 'INT NOT NULL CHECK(proxy_port > 0 and proxy_port < 65536)',
         'name': 'VARCHAR(100) NOT NULL UNIQUE',
         'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "udp"))',
         'ip_int': 'VARCHAR(100) NOT NULL',
