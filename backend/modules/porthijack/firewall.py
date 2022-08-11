@@ -54,28 +54,24 @@ class ServiceManager:
     async def enable(self):
         if not self.active:
             async with self.lock:
-                await self.restart()
+                nft.delete(self.srv)
+                nft.add(self.srv)
                 self._set_status(True)
                 
     async def disable(self):
         if self.active:
             async with self.lock:
-                await self.stop()
+                nft.delete(self.srv)
                 self._set_status(False)
 
+    async def change_port(self, new_port):
+        self.srv.proxy_port = new_port
+        if self.active: await self.restart()
+    
     def _set_status(self,active):
         self.active = active
         self.db.query("UPDATE services SET active = ? WHERE service_id = ?;", active, self.srv.service_id)
-
-    async def start(self):
-        if not self.active:
-            nft.delete(self.srv)
-            nft.add(self.srv)
-            self._set_status(True)
-
-    async def stop(self):
-        nft.delete(self.srv)
     
     async def restart(self):
-        await self.stop()
-        await self.start()
+        await self.disable()
+        await self.enable()

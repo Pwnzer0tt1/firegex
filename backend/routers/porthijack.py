@@ -41,14 +41,15 @@ db = SQLite('db/port-hijacking.db', {
     'services': {
         'service_id': 'VARCHAR(100) PRIMARY KEY',
         'active' : 'BOOLEAN NOT NULL CHECK (active IN (0, 1))',
-        'public_port': 'INT NOT NULL CHECK(public_port > 0 and public_port < 65536)',
-        'proxy_port': 'INT NOT NULL CHECK(proxy_port > 0 and proxy_port < 65536)',
+        'public_port': 'INT NOT NULL CHECK(public_port > 0 and public_port < 65536) UNIQUE',
+        'proxy_port': 'INT NOT NULL CHECK(proxy_port > 0 and proxy_port < 65536 and proxy_port != public_port)',
         'name': 'VARCHAR(100) NOT NULL UNIQUE',
         'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "udp"))',
         'ip_int': 'VARCHAR(100) NOT NULL',
     },
     'QUERY':[
         "CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (public_port, ip_int, proto);",
+        ""
     ]
 })
 
@@ -98,28 +99,28 @@ async def get_service_list():
     return db.query("SELECT service_id, active, public_port, proxy_port, name, proto, ip_int FROM services;")
 
 @app.get('/service/{service_id}', response_model=ServiceModel)
-async def get_service_by_id(service_id: str, ):
+async def get_service_by_id(service_id: str):
     """Get info about a specific service using his id"""
     res = db.query("SELECT service_id, active, public_port, proxy_port, name, proto, ip_int FROM services WHERE service_id = ?;", service_id)
     if len(res) == 0: raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
 
 @app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
-async def service_stop(service_id: str, ):
+async def service_stop(service_id: str):
     """Request the stop of a specific service"""
     await firewall.get(service_id).disable()
     await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/start', response_model=StatusMessageModel)
-async def service_start(service_id: str, ):
+async def service_start(service_id: str):
     """Request the start of a specific service"""
     await firewall.get(service_id).enable()
     await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/delete', response_model=StatusMessageModel)
-async def service_delete(service_id: str, ):
+async def service_delete(service_id: str):
     """Request the deletion of a specific service"""
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     await firewall.remove(service_id)
@@ -127,7 +128,7 @@ async def service_delete(service_id: str, ):
     return {'status': 'ok'}
 
 @app.post('/service/{service_id}/rename', response_model=StatusMessageModel)
-async def service_rename(service_id: str, form: RenameForm, ):
+async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
     if not form.name: return {'status': 'The name cannot be empty!'} 
@@ -138,9 +139,22 @@ async def service_rename(service_id: str, form: RenameForm, ):
     await refresh_frontend()
     return {'status': 'ok'}
 
+class ChangePortRequest(BaseModel):
+    proxy_port: int
+
+@app.post('/service/{service_id}/changeport', response_model=StatusMessageModel)
+async def service_changeport(service_id: str, form: ChangePortRequest):
+    """Request to change the proxy port of a specific service"""
+    try:
+        db.query('UPDATE services SET proxy_port=? WHERE service_id = ?;', form.proxy_port, service_id)
+    except sqlite3.IntegrityError:
+        return {'status': 'Invalid proxy port or service'}
+    await firewall.get(service_id).change_port(form.proxy_port)
+    await refresh_frontend()
+    return {'status': 'ok'}
 
 @app.post('/services/add', response_model=ServiceAddResponse)
-async def add_new_service(form: ServiceAddForm, ):
+async def add_new_service(form: ServiceAddForm):
     """Add a new service"""
     try:
         form.ip_int = ip_parse(form.ip_int)

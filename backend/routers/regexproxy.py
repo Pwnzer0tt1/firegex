@@ -100,7 +100,7 @@ async def get_service_list():
     """)
 
 @app.get('/service/{service_id}', response_model=ServiceModel)
-async def get_service_by_id(service_id: str, ):
+async def get_service_by_id(service_id: str):
     """Get info about a specific service using his id"""
     res = db.query("""
         SELECT 
@@ -118,28 +118,28 @@ async def get_service_by_id(service_id: str, ):
     return res[0]
 
 @app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
-async def service_stop(service_id: str, ):
+async def service_stop(service_id: str):
     """Request the stop of a specific service"""
     await firewall.get(service_id).next(STATUS.STOP)
     await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/pause', response_model=StatusMessageModel)
-async def service_pause(service_id: str, ):
+async def service_pause(service_id: str):
     """Request the pause of a specific service"""
     await firewall.get(service_id).next(STATUS.PAUSE)
     await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/start', response_model=StatusMessageModel)
-async def service_start(service_id: str, ):
+async def service_start(service_id: str):
     """Request the start of a specific service"""
     await firewall.get(service_id).next(STATUS.ACTIVE)
     await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/delete', response_model=StatusMessageModel)
-async def service_delete(service_id: str, ):
+async def service_delete(service_id: str):
     """Request the deletion of a specific service"""
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     db.query('DELETE FROM regexes WHERE service_id = ?;', service_id)
@@ -149,7 +149,7 @@ async def service_delete(service_id: str, ):
 
 
 @app.get('/service/{service_id}/regen-port', response_model=StatusMessageModel)
-async def regen_service_port(service_id: str, ):
+async def regen_service_port(service_id: str):
     """Request the regeneration of a the internal proxy port of a specific service"""
     db.query('UPDATE services SET internal_port = ? WHERE service_id = ?;', gen_internal_port(db), service_id)
     await firewall.get(service_id).update_port()
@@ -161,7 +161,7 @@ class ChangePortForm(BaseModel):
     internalPort: Union[int, None]
 
 @app.post('/service/{service_id}/change-ports', response_model=StatusMessageModel)
-async def change_service_ports(service_id: str, change_port:ChangePortForm ):
+async def change_service_ports(service_id: str, change_port:ChangePortForm):
     """Choose and change the ports of the service"""
     if change_port.port is None and change_port.internalPort is None:
         return {'status': 'Invalid Request!'}
@@ -195,7 +195,7 @@ class RegexModel(BaseModel):
     active:bool
 
 @app.get('/service/{service_id}/regexes', response_model=List[RegexModel])
-async def get_service_regexe_list(service_id: str, ):
+async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
     return db.query("""
         SELECT 
@@ -205,7 +205,7 @@ async def get_service_regexe_list(service_id: str, ):
     """, service_id)
 
 @app.get('/regex/{regex_id}', response_model=RegexModel)
-async def get_regex_by_id(regex_id: int, ):
+async def get_regex_by_id(regex_id: int):
     """Get regex info using his id"""
     res = db.query("""
         SELECT 
@@ -217,7 +217,7 @@ async def get_regex_by_id(regex_id: int, ):
     return res[0]
 
 @app.get('/regex/{regex_id}/delete', response_model=StatusMessageModel)
-async def regex_delete(regex_id: int, ):
+async def regex_delete(regex_id: int):
     """Delete a regex using his id"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
@@ -227,7 +227,7 @@ async def regex_delete(regex_id: int, ):
     return {'status': 'ok'}
 
 @app.get('/regex/{regex_id}/enable', response_model=StatusMessageModel)
-async def regex_enable(regex_id: int, ):
+async def regex_enable(regex_id: int):
     """Request the enabling of a regex"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
@@ -237,7 +237,7 @@ async def regex_enable(regex_id: int, ):
     return {'status': 'ok'}
 
 @app.get('/regex/{regex_id}/disable', response_model=StatusMessageModel)
-async def regex_disable(regex_id: int, ):
+async def regex_disable(regex_id: int):
     """Request the deactivation of a regex"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
@@ -255,7 +255,7 @@ class RegexAddForm(BaseModel):
     is_case_sensitive: bool
 
 @app.post('/regexes/add', response_model=StatusMessageModel)
-async def add_new_regex(form: RegexAddForm, ):
+async def add_new_regex(form: RegexAddForm):
     """Add a new regex"""
     try:
         re.compile(b64decode(form.regex))
@@ -283,7 +283,7 @@ class RenameForm(BaseModel):
     name:str
 
 @app.post('/service/{service_id}/rename', response_model=StatusMessageModel)
-async def service_rename(service_id: str, form: RenameForm, ):
+async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
     if not form.name: return {'status': 'The name cannot be empty!'} 
@@ -295,7 +295,7 @@ async def service_rename(service_id: str, form: RenameForm, ):
     return {'status': 'ok'}
 
 @app.post('/services/add', response_model=ServiceAddStatus)
-async def add_new_service(form: ServiceAddForm, ):
+async def add_new_service(form: ServiceAddForm):
     """Add a new service"""
     serv_id = gen_service_id(db)
     form.name = refactor_name(form.name)

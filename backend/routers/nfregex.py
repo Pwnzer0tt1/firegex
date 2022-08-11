@@ -145,7 +145,7 @@ async def get_service_list():
     """)
 
 @app.get('/service/{service_id}', response_model=ServiceModel)
-async def get_service_by_id(service_id: str, ):
+async def get_service_by_id(service_id: str):
     """Get info about a specific service using his id"""
     res = db.query("""
         SELECT 
@@ -164,21 +164,21 @@ async def get_service_by_id(service_id: str, ):
     return res[0]
 
 @app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
-async def service_stop(service_id: str, ):
+async def service_stop(service_id: str):
     """Request the stop of a specific service"""
     await firewall.get(service_id).next(STATUS.STOP)
     await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/start', response_model=StatusMessageModel)
-async def service_start(service_id: str, ):
+async def service_start(service_id: str):
     """Request the start of a specific service"""
     await firewall.get(service_id).next(STATUS.ACTIVE)
     await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/delete', response_model=StatusMessageModel)
-async def service_delete(service_id: str, ):
+async def service_delete(service_id: str):
     """Request the deletion of a specific service"""
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     db.query('DELETE FROM regexes WHERE service_id = ?;', service_id)
@@ -187,7 +187,7 @@ async def service_delete(service_id: str, ):
     return {'status': 'ok'}
 
 @app.post('/service/{service_id}/rename', response_model=StatusMessageModel)
-async def service_rename(service_id: str, form: RenameForm, ):
+async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
     if not form.name: return {'status': 'The name cannot be empty!'} 
@@ -199,7 +199,7 @@ async def service_rename(service_id: str, form: RenameForm, ):
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/regexes', response_model=List[RegexModel])
-async def get_service_regexe_list(service_id: str, ):
+async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
     return db.query("""
         SELECT 
@@ -209,7 +209,7 @@ async def get_service_regexe_list(service_id: str, ):
     """, service_id)
 
 @app.get('/regex/{regex_id}', response_model=RegexModel)
-async def get_regex_by_id(regex_id: int, ):
+async def get_regex_by_id(regex_id: int):
     """Get regex info using his id"""
     res = db.query("""
         SELECT 
@@ -221,7 +221,7 @@ async def get_regex_by_id(regex_id: int, ):
     return res[0]
 
 @app.get('/regex/{regex_id}/delete', response_model=StatusMessageModel)
-async def regex_delete(regex_id: int, ):
+async def regex_delete(regex_id: int):
     """Delete a regex using his id"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
@@ -232,7 +232,7 @@ async def regex_delete(regex_id: int, ):
     return {'status': 'ok'}
 
 @app.get('/regex/{regex_id}/enable', response_model=StatusMessageModel)
-async def regex_enable(regex_id: int, ):
+async def regex_enable(regex_id: int):
     """Request the enabling of a regex"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
@@ -242,7 +242,7 @@ async def regex_enable(regex_id: int, ):
     return {'status': 'ok'}
 
 @app.get('/regex/{regex_id}/disable', response_model=StatusMessageModel)
-async def regex_disable(regex_id: int, ):
+async def regex_disable(regex_id: int):
     """Request the deactivation of a regex"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
     if len(res) != 0:
@@ -252,7 +252,7 @@ async def regex_disable(regex_id: int, ):
     return {'status': 'ok'}
 
 @app.post('/regexes/add', response_model=StatusMessageModel)
-async def add_new_regex(form: RegexAddForm, ):
+async def add_new_regex(form: RegexAddForm):
     """Add a new regex"""
     try:
         re.compile(b64decode(form.regex))
@@ -269,7 +269,7 @@ async def add_new_regex(form: RegexAddForm, ):
     return {'status': 'ok'}
 
 @app.post('/services/add', response_model=ServiceAddResponse)
-async def add_new_service(form: ServiceAddForm, ):
+async def add_new_service(form: ServiceAddForm):
     """Add a new service"""
     try:
         form.ip_int = ip_parse(form.ip_int)
