@@ -2,9 +2,9 @@ from typing import List
 from modules.nfregex.models import Service
 from utils import ip_parse, ip_family, NFTableManager
 
-class FiregexFilter():
-    def __init__(self, proto:str, port:int, ip_int:str, target:str=None, id=None):
-        self.id = int(id) if id else None
+class FiregexFilter:
+    def __init__(self, proto:str, port:int, ip_int:str, target:str, id:int):
+        self.id = id
         self.target = target
         self.proto = proto
         self.port = int(port)
@@ -12,6 +12,8 @@ class FiregexFilter():
 
     def __eq__(self, o: object) -> bool:
         if isinstance(o, FiregexFilter):
+            return self.port == o.port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
+        elif isinstance(o, Service):
             return self.port == o.port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
         return False
 
@@ -47,10 +49,14 @@ class FiregexTables(NFTableManager):
         ])
 
     def add(self, srv:Service, queue_range_input, queue_range_output):
+        
+        for ele in self.get():
+            if ele.__eq__(srv): return
+        
         ip_int = ip_parse(srv.ip_int)
         ip_addr = str(ip_int).split("/")[0]
         ip_addr_cidr = int(str(ip_int).split("/")[1])
-
+                
         init, end = queue_range_output
         if init > end: init, end = end, init
         self.cmd({ "insert":{ "rule": {
@@ -97,6 +103,11 @@ class FiregexTables(NFTableManager):
 
     def delete(self, srv:Service):
         for filter in self.get():
-            if filter.port == srv.port and filter.proto == srv.proto and ip_parse(filter.ip_int) == ip_parse(srv.ip_int):
-                self.cmd({"delete":{"rule": {"handle": filter.id, "table": self.table_name, "chain": filter.target, "family": "inet"}}})
+            if filter.__eq__(srv):
+                self.cmd({ "delete":{ "rule": {
+                    "family": "inet",
+                    "table": self.table_name,
+                    "chain": filter.target,
+                    "handle": filter.id
+                }}})
             

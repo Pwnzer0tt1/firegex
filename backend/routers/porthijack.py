@@ -7,7 +7,7 @@ from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, refresh_frontend
 from utils.models import ResetRequest, StatusMessageModel
 from modules.porthijack.nftables import FiregexTables
-from modules.porthijack.firewall import STATUS, FirewallManager
+from modules.porthijack.firewall import FirewallManager
 
 class ServiceModel(BaseModel):
     service_id: str
@@ -107,14 +107,14 @@ async def get_service_by_id(service_id: str, ):
 @app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
 async def service_stop(service_id: str, ):
     """Request the stop of a specific service"""
-    await firewall.get(service_id).next(STATUS.STOP)
+    await firewall.get(service_id).disable()
     await refresh_frontend()
     return {'status': 'ok'}
 
 @app.get('/service/{service_id}/start', response_model=StatusMessageModel)
 async def service_start(service_id: str, ):
     """Request the start of a specific service"""
-    await firewall.get(service_id).next(STATUS.ACTIVE)
+    await firewall.get(service_id).enable()
     await refresh_frontend()
     return {'status': 'ok'}
 
