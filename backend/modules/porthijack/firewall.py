@@ -51,16 +51,17 @@ class ServiceManager:
         self.active = False
         self.lock = asyncio.Lock()
 
-    async def enable(self,to):
-        if (self.status != to):
+    async def enable(self):
+        if not self.active:
             async with self.lock:
                 await self.restart()
+                self._set_status(True)
                 
-    async def disable(self,to):
-        if (self.status != to):
+    async def disable(self):
+        if self.active:
             async with self.lock:
                 await self.stop()
-                self._set_status(to)
+                self._set_status(False)
 
     def _set_status(self,active):
         self.active = active
