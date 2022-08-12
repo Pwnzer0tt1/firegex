@@ -25,13 +25,13 @@ if (firegex.login(args.password)): puts(f"Sucessfully logged in ✔", color=colo
 else: puts(f"Test Failed: Unknown response or wrong passowrd ✗", color=colors.red); exit(1)
 
 #Create server
-server = TcpServer(args.port,ipv6=args.ipv6) if args.proto == "tcp" else UdpServer(args.port,ipv6=args.ipv6)
+server = (TcpServer if args.proto == "tcp" else UdpServer)(args.port,ipv6=args.ipv6)
 
 def exit_test(code):
     if service_id:
         server.stop()
         if(firegex.nf_delete_service(service_id)):  puts(f"Sucessfully deleted service ✔", color=colors.green)
-        else: puts(f"Test Failed: Coulnd't deleted serivce ✗", color=colors.red); exit_test(1)        
+        else: puts(f"Test Failed: Coulnd't delete serivce ✗", color=colors.red); exit_test(1)        
     exit(code)
 
 service_id = firegex.nf_add_service(args.service_name, args.port, args.proto , "::1" if args.ipv6 else "127.0.0.1" )
