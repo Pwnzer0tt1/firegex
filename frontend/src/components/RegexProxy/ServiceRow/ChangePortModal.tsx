@@ -1,4 +1,4 @@
-import { Button, Group, NumberInput, Space, Notification, Modal, Center, Title } from '@mantine/core';
+import { Button, Group, Space, Notification, Modal, Center, Title } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useEffect, useState } from 'react';
 import { ImCross } from "react-icons/im"
@@ -62,7 +62,7 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
             <PortInput
                 fullWidth
                 label="Internal Proxy Port"
-                others={form.getInputProps('internalPort')}
+                {...form.getInputProps('internalPort')}
             />  
 
             <Space h="xl" />
@@ -71,7 +71,7 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
             <PortInput
                 fullWidth
                 label="Public Service Port"
-                others={form.getInputProps('port')}
+                {...form.getInputProps('port')}
             />
             
             <Space h="xl" />

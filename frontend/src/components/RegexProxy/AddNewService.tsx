@@ -71,7 +71,7 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             <PortInput
                 fullWidth
                 label="Public Service port"
-                others={form.getInputProps('port')}
+                {...form.getInputProps('port')}
             />
 
             {form.values.chosenInternalPort?<>
@@ -79,7 +79,7 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
                 <PortInput
                     fullWidth
                     label="Internal Proxy Port"
-                    others={form.getInputProps('internalPort')}
+                    {...form.getInputProps('internalPort')}
                 />
                 <Space h="sm" />
             </>:null}

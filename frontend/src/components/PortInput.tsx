@@ -1,17 +1,20 @@
-import { NumberInput } from "@mantine/core"
+import { NumberInput, NumberInputProps } from "@mantine/core"
 import React, { useState } from "react"
 
-export default function PortInput({ onInput, defaultValue, others, label, fullWidth }:
-        { onInput?:React.FormEventHandler<HTMLInputElement>, defaultValue?:number, label?:React.ReactNode, others:any, fullWidth?:boolean }) {
-    const [oldValue, setOldValue] = useState<string>(defaultValue?defaultValue.toString():"")
+interface PortInputProps extends NumberInputProps {
+    fullWidth?: boolean
+}
+
+const PortInput =  React.forwardRef<HTMLInputElement, PortInputProps>( (props, ref) => {
+    
+    const [oldValue, setOldValue] = useState<string>(props.defaultValue?props.defaultValue.toString():"")
     return <NumberInput
-        variant="filled"
+        variant={props.variant?props.variant:"filled"}
         hideControls
         placeholder="80"
-        label={label}
-        min={1}
-        max={65535}
-        style={fullWidth?{}:{ width: "75px" }}
+        min={props.min?props.min:1}
+        max={props.max?props.min:65535}
+        style={props.fullWidth?props.style:{ width: "75px", ...props.style }}
         onInput={(e) => {
             const value = parseInt((e.target as HTMLInputElement).value)
             if (value > 65535) {
@@ -22,8 +25,12 @@ export default function PortInput({ onInput, defaultValue, others, label, fullWi
                 (e.target as HTMLInputElement).value = value.toString()
             }
             setOldValue((e.target as HTMLInputElement).value)
-            onInput?.(e)
+            props.onInput?.(e)
         }}
-        {...others}
+        ref={ref}
+        {...props}
     />
-}
+
+})
+
+export default PortInput

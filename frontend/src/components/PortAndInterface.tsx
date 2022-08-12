@@ -40,7 +40,7 @@ export default function PortAndInterface({ form, int_name, port_name, label }:{ 
                 style={{width:"100%"}}
             />
             <Space w="sm" /><span style={{marginTop:"-3px", fontSize:"1.5em"}}>:</span><Space w="sm" />
-            <PortInput others={form.getInputProps(port_name)} />
+            <PortInput {...form.getInputProps(port_name)} />
         </div>
     </>
 }

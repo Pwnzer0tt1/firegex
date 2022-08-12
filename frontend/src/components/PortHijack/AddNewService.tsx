@@ -1,4 +1,4 @@
-import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl, Autocomplete } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { okNotify, regex_ipv6_no_cidr, regex_ipv4_no_cidr } from '../../js/utils';

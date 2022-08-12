@@ -3,7 +3,7 @@
 
 .row{
     width: 95%;
-    padding: 30px 0px;
+    padding: 15px 0px;
     border-radius: 20px;
     margin: 10px;
     @extend .center-flex;
@@ -15,4 +15,12 @@
     margin-right: 10px;
     margin-bottom: 13px;
     color:#FFF;
+}
+
+.portInput *{
+    color: #FFF;
+    font-weight: bold;
+    font-size: 1em;
+    margin-top: -1px;
+    text-decoration: underline;
 }
