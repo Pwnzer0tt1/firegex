@@ -1,6 +1,6 @@
 from typing import List
 from modules.nfregex.models import Service
-from utils import ip_parse, ip_family, NFTableManager
+from utils import ip_parse, ip_family, NFTableManager, nftables_int_to_json
 
 class FiregexFilter:
     def __init__(self, proto:str, port:int, ip_int:str, target:str, id:int):
@@ -52,10 +52,6 @@ class FiregexTables(NFTableManager):
         
         for ele in self.get():
             if ele.__eq__(srv): return
-        
-        ip_int = ip_parse(srv.ip_int)
-        ip_addr = str(ip_int).split("/")[0]
-        ip_addr_cidr = int(str(ip_int).split("/")[1])
                 
         init, end = queue_range_output
         if init > end: init, end = end, init
@@ -64,7 +60,7 @@ class FiregexTables(NFTableManager):
             "table": self.table_name,
             "chain": self.output_chain,
             "expr": [
-                    {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'saddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
+                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
                     {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "sport"}}, "op": "==", "right": int(srv.port)}},
                     {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
@@ -77,7 +73,7 @@ class FiregexTables(NFTableManager):
             "table": self.table_name,
             "chain": self.input_chain,
             "expr": [
-                    {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'daddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
+                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
                     {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "dport"}}, "op": "==", "right": int(srv.port)}},
                     {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]

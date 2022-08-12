@@ -1,5 +1,5 @@
 import asyncio
-from ipaddress import ip_interface
+from ipaddress import ip_address, ip_interface
 import os, socket, psutil, sys, nftables
 from fastapi_socketio import SocketManager
 
@@ -37,6 +37,9 @@ def list_files(mypath):
 def ip_parse(ip:str):
     return str(ip_interface(ip).network)
 
+def addr_parse(ip:str):
+    return str(ip_address(ip))
+
 def ip_family(ip:str):
     return "ip6" if ip_interface(ip).version == 6 else "ip"
 
@@ -48,6 +51,18 @@ def get_interfaces():
                     yield {"name": int_name, "addr":interf.address}
     return list(_get_interfaces())
 
+def nftables_int_to_json(ip_int):
+    ip_int = ip_parse(ip_int)
+    ip_addr = str(ip_int).split("/")[0]
+    ip_addr_cidr = int(str(ip_int).split("/")[1])
+    return {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}
+
+def nftables_json_to_int(ip_json_int):
+    if isinstance(ip_json_int,str):
+        return str(ip_parse(ip_json_int))
+    else:
+        return f'{ip_json_int["prefix"]["addr"]}/{ip_json_int["prefix"]["len"]}'
+    
 class Singleton(object):
     __instance = None
     def __new__(class_, *args, **kwargs):

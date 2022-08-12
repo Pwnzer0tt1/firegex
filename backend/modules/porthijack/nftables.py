@@ -1,21 +1,22 @@
 from typing import List
 from modules.porthijack.models import Service
-from utils import ip_parse, ip_family, NFTableManager
+from utils import addr_parse, ip_parse, ip_family, NFTableManager, nftables_json_to_int
 
 class FiregexHijackRule():
-    def __init__(self, proto:str, public_port:int,proxy_port:int, ip_int:str, target:str, id:int):
+    def __init__(self, proto:str, public_port:int,proxy_port:int, ip_src:str, ip_dst:str, target:str, id:int):
         self.id = id
         self.target = target
         self.proto = proto
         self.public_port = public_port
         self.proxy_port = proxy_port
-        self.ip_int = str(ip_int)
+        self.ip_src = str(ip_src)
+        self.ip_dst = str(ip_dst)
 
     def __eq__(self, o: object) -> bool:
         if isinstance(o, FiregexHijackRule):
-            return self.public_port == o.public_port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
+            return self.public_port == o.public_port and self.proto == o.proto and ip_parse(self.ip_src) == ip_parse(o.ip_src)
         elif isinstance(o, Service):
-            return self.public_port == o.public_port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
+            return self.public_port == o.public_port and self.proto == o.proto and ip_parse(self.ip_src) == ip_parse(o.ip_src)
         return False
 
 class FiregexTables(NFTableManager):
@@ -54,17 +55,15 @@ class FiregexTables(NFTableManager):
         for ele in self.get():
             if ele.__eq__(srv): return
         
-        ip_int = ip_parse(srv.ip_int)
-        ip_addr = str(ip_int).split("/")[0]
-        ip_addr_cidr = int(str(ip_int).split("/")[1])
         self.cmd({ "insert":{ "rule": {
             "family": "inet",
             "table": self.table_name,
             "chain": self.prerouting_porthijack,
             "expr": [
-                    {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'daddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
-                    {'match': {'left': { "payload": {"protocol": str(srv.proto), "field": "dport"}}, "op": "==", "right": int(srv.public_port)}},
-                    {'mangle': {'key': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'value': int(srv.proxy_port)}}
+                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_src), 'field': 'daddr'}}, 'op': '==', 'right': addr_parse(srv.ip_src)}},
+                    {'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'op': '==', 'right': int(srv.public_port)}},
+                    {'mangle': {'key': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'value': int(srv.proxy_port)}},
+                    {'mangle': {'key': {'payload': {'protocol': ip_family(srv.ip_src), 'field': 'daddr'}}, 'value': addr_parse(srv.ip_dst)}}
                 ]
         }}})
         self.cmd({ "insert":{ "rule": {
@@ -72,9 +71,10 @@ class FiregexTables(NFTableManager):
             "table": self.table_name,
             "chain": self.postrouting_porthijack,
             "expr": [
-                    {'match': {'left': {'payload': {'protocol': ip_family(ip_int), 'field': 'saddr'}}, 'op': '==', 'right': {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}}},
+                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_dst), 'field': 'saddr'}}, 'op': '==', 'right': addr_parse(srv.ip_dst)}},
                     {'match': {'left': { "payload": {"protocol": str(srv.proto), "field": "sport"}}, "op": "==", "right": int(srv.proxy_port)}},
-                    {'mangle': {'key': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'value': int(srv.public_port)}}
+                    {'mangle': {'key': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'value': int(srv.public_port)}},
+                    {'mangle': {'key': {'payload': {'protocol': ip_family(srv.ip_dst), 'field': 'saddr'}}, 'value': addr_parse(srv.ip_src)}}
                 ]
         }}})
 
@@ -82,18 +82,15 @@ class FiregexTables(NFTableManager):
     def get(self) -> List[FiregexHijackRule]:
         res = []
         for filter in self.list_rules(tables=[self.table_name], chains=[self.prerouting_porthijack,self.postrouting_porthijack]):
-            ip_int = None
-            if isinstance(filter["expr"][0]["match"]["right"],str):
-                ip_int = str(ip_parse(filter["expr"][0]["match"]["right"]))
-            else:
-                ip_int = f'{filter["expr"][0]["match"]["right"]["prefix"]["addr"]}/{filter["expr"][0]["match"]["right"]["prefix"]["len"]}'
+            filter["expr"][0]["match"]["right"]
             res.append(FiregexHijackRule(
                 target=filter["chain"],
                 id=int(filter["handle"]),
                 proto=filter["expr"][1]["match"]["left"]["payload"]["protocol"],
                 public_port=filter["expr"][1]["match"]["right"] if filter["chain"] == self.prerouting_porthijack else filter["expr"][2]["mangle"]["value"],
                 proxy_port=filter["expr"][1]["match"]["right"] if filter["chain"] == self.postrouting_porthijack else filter["expr"][2]["mangle"]["value"], 
-                ip_int=ip_int
+                ip_src=nftables_json_to_int(filter["expr"][0]["match"]["right"]) if filter["chain"] == self.prerouting_porthijack else nftables_json_to_int(filter["expr"][3]["mangle"]["value"]),
+                ip_dst=nftables_json_to_int(filter["expr"][0]["match"]["right"]) if filter["chain"] == self.postrouting_porthijack else nftables_json_to_int(filter["expr"][3]["mangle"]["value"]), 
             ))
         return res
 

@@ -42,7 +42,7 @@ export default function NavBar({ closeNav, opened }: {closeNav: () => void, open
         <Navbar.Section grow component={ScrollArea} px="xs" mt="xs">
             <NavBarButton navigate="nfregex" closeNav={closeNav} name="Netfilter Regex" color="blue" icon={<IoMdGitNetwork />} />
             <NavBarButton navigate="regexproxy" closeNav={closeNav} name="TCP Proxy Regex Filter" color="lime" icon={<MdTransform />} />
-            <NavBarButton navigate="porthijack" closeNav={closeNav} name="Hijack Port to Proxy" color="red" icon={<GrDirections />} disabled/>
+            <NavBarButton navigate="porthijack" closeNav={closeNav} name="Hijack Port to Proxy" color="red" icon={<GrDirections />} />
         </Navbar.Section>
         
     </Navbar>

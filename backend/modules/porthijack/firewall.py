@@ -64,8 +64,8 @@ class ServiceManager:
                 nft.delete(self.srv)
                 self._set_status(False)
 
-    async def change_port(self, new_port):
-        self.srv.proxy_port = new_port
+    async def refresh(self, srv:Service):
+        self.srv = srv
         if self.active: await self.restart()
     
     def _set_status(self,active):
