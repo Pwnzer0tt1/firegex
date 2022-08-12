@@ -1,6 +1,7 @@
 import asyncio
 from typing import Dict
-from modules.nfregex.firegex import FiregexFilter, FiregexInterceptor, FiregexTables, RegexFilter, delete_by_srv
+from modules.nfregex.firegex import FiregexInterceptor, RegexFilter
+from modules.nfregex.nftables import FiregexTables, FiregexFilter
 from modules.nfregex.models import Regex, Service
 from utils.sqlite import SQLite
 
@@ -8,38 +9,40 @@ class STATUS:
     STOP = "stop"
     ACTIVE = "active"
 
+nft = FiregexTables()
+
 class FirewallManager:
     def __init__(self, db:SQLite):
         self.db = db
-        self.proxy_table: Dict[str, ServiceManager] = {}
+        self.service_table: Dict[str, ServiceManager] = {}
         self.lock = asyncio.Lock()
 
     async def close(self):
-        for key in list(self.proxy_table.keys()):
+        for key in list(self.service_table.keys()):
             await self.remove(key)
 
     async def remove(self,srv_id):
         async with self.lock: 
-            if srv_id in self.proxy_table:
-                await self.proxy_table[srv_id].next(STATUS.STOP)
-                del self.proxy_table[srv_id]
+            if srv_id in self.service_table:
+                await self.service_table[srv_id].next(STATUS.STOP)
+                del self.service_table[srv_id]
     
     async def init(self):
-        FiregexTables().init()
+        nft.init()
         await self.reload()
 
     async def reload(self):
         async with self.lock: 
             for srv in self.db.query('SELECT * FROM services;'):
                 srv = Service.from_dict(srv)
-                if srv.id in self.proxy_table:
+                if srv.id in self.service_table:
                     continue
-                self.proxy_table[srv.id] = ServiceManager(srv, self.db)
-                await self.proxy_table[srv.id].next(srv.status)
+                self.service_table[srv.id] = ServiceManager(srv, self.db)
+                await self.service_table[srv.id].next(srv.status)
 
     def get(self,srv_id):
-        if srv_id in self.proxy_table:
-            return self.proxy_table[srv_id]
+        if srv_id in self.service_table:
+            return self.service_table[srv_id]
         else:
             raise ServiceNotFoundException()
         
@@ -94,13 +97,13 @@ class ServiceManager:
 
     async def start(self):
         if not self.interceptor:
-            delete_by_srv(self.srv)
-            self.interceptor = await FiregexInterceptor.start(FiregexFilter(self.srv.proto,self.srv.port, self.srv.ip_int))
+            nft.delete(self.srv)
+            self.interceptor = await FiregexInterceptor.start(self.srv)
             await self._update_filters_from_db()
             self._set_status(STATUS.ACTIVE)
 
     async def stop(self):
-        delete_by_srv(self.srv)
+        nft.delete(self.srv)
         if self.interceptor:
             await self.interceptor.stop()
             self.interceptor = None

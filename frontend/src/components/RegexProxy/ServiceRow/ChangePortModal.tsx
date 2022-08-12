@@ -1,10 +1,11 @@
-import { Button, Group, NumberInput, Space, Notification, Modal, Center, Title } from '@mantine/core';
+import { Button, Group, Space, Notification, Modal, Center, Title } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useEffect, useState } from 'react';
 import { ImCross } from "react-icons/im"
 import { FaLongArrowAltDown } from 'react-icons/fa';
 import { regexproxy, Service } from '../utils';
 import { okNotify } from '../../../js/utils';
+import PortInput from '../../PortInput';
 
 type InputForm = {
     internalPort:number,
@@ -58,27 +59,21 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
   return <Modal size="xl" title="Change Ports" opened={opened} onClose={close} closeOnClickOutside={false} centered>
     <form onSubmit={form.onSubmit(submitRequest)}>
 
-
-
-            <NumberInput
-                placeholder="30001"
-                min={1}
-                max={65535}
+            <PortInput
+                fullWidth
                 label="Internal Proxy Port"
                 {...form.getInputProps('internalPort')}
-            />    
+            />  
 
             <Space h="xl" />
             <Center><FaLongArrowAltDown size={50}/></Center>
             
-            <NumberInput
-                placeholder="8080"
-                min={1}
-                max={65535}
+            <PortInput
+                fullWidth
                 label="Public Service Port"
                 {...form.getInputProps('port')}
             />
-
+            
             <Space h="xl" />
 
             <Center><Title order={5}>The change of the ports will cause a temporarily shutdown of the service! ⚠️</Title></Center>

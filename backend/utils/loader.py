@@ -90,7 +90,7 @@ def load_routers(app):
     resets, startups, shutdowns = [], [], []
     for router in get_router_modules():
         if router.router:
-            app.include_router(router.router, prefix=f"/{router.name}")
+            app.include_router(router.router, prefix=f"/{router.name}", tags=[router.name])
         if router.reset:
             resets.append(router.reset)
         if router.startup:

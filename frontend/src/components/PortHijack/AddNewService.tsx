@@ -1,16 +1,18 @@
 import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
-import { okNotify, regex_ipv4, regex_ipv6 } from '../../js/utils';
+import { okNotify, regex_ipv6_no_cidr, regex_ipv4_no_cidr } from '../../js/utils';
 import { ImCross } from "react-icons/im"
-import { nfregex } from './utils';
+import { porthijack } from './utils';
 import PortAndInterface from '../PortAndInterface';
 
 type ServiceAddForm = {
     name:string,
-    port:number,
+    public_port:number,
+    proxy_port:number,
     proto:string,
-    ip_int:string,
+    ip_src:string,
+    ip_dst:string,
     autostart: boolean,
 }
 
@@ -19,16 +21,20 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
     const form = useForm({
         initialValues: {
             name:"",
-            port:8080,
-            ip_int:"",
+            public_port:80,
+            proxy_port:8080,
             proto:"tcp",
-            autostart: true
+            ip_src:"",
+            ip_dst:"127.0.0.1",
+            autostart: false,
         },
         validationRules:{
             name: (value) => value !== ""?true:false,
-            port: (value) => value>0 && value<65536,
+            public_port: (value) => value>0 && value<65536,
+            proxy_port: (value) => value>0 && value<65536,
             proto: (value) => ["tcp","udp"].includes(value),
-            ip_int: (value) => value.match(regex_ipv6)?true:false || value.match(regex_ipv4)?true:false
+            ip_src: (value) => value.match(regex_ipv6_no_cidr)?true:false || value.match(regex_ipv4_no_cidr)?true:false,
+            ip_dst: (value) => value.match(regex_ipv6_no_cidr)?true:false || value.match(regex_ipv4_no_cidr)?true:false
         }
     })
 
@@ -41,14 +47,14 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
     const [submitLoading, setSubmitLoading] = useState(false)
     const [error, setError] = useState<string|null>(null)
  
-    const submitRequest = ({ name, port, autostart, proto, ip_int }:ServiceAddForm) =>{
+    const submitRequest = ({ name, proxy_port, public_port, autostart, proto, ip_src, ip_dst }:ServiceAddForm) =>{
         setSubmitLoading(true)
-        nfregex.servicesadd({name, port, proto, ip_int }).then( res => {
+        porthijack.servicesadd({name, proxy_port, public_port, proto, ip_src, ip_dst }).then( res => {
             if (res.status === "ok" && res.service_id){
                 setSubmitLoading(false)
                 close();
-                if (autostart) nfregex.servicestart(res.service_id)
-                okNotify(`Service ${name} has been added`, `Successfully added service with port ${port}`)
+                if (autostart) porthijack.servicestart(res.service_id)
+                okNotify(`Service ${name} has been added`, `Successfully added service from port ${public_port} to ${proxy_port}`)
             }else{
                 setSubmitLoading(false)
                 setError("Invalid request! [ "+res.status+" ]")
@@ -68,7 +74,9 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
                 {...form.getInputProps('name')}
             />
             <Space h="md" />
-            <PortAndInterface form={form} int_name="ip_int" port_name="port" label={"Public IP Interface and port (ipv4/ipv6 + CIDR allowed)"} />            
+            <PortAndInterface form={form} int_name="ip_src" port_name="public_port" label="Public IP Address and port (ipv4/ipv6)" />
+            <Space h="md" />
+            <PortAndInterface form={form} int_name="ip_dst" port_name="proxy_port" label="Proxy/Internal IP Address and port (ipv4/ipv6)" />
             <Space h="md" />
 
             <div className='center-flex'>

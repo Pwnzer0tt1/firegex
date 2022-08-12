@@ -1,0 +1,26 @@
+
+@use "../../../index.scss" as *;
+
+.row{
+    width: 95%;
+    padding: 15px 0px;
+    border-radius: 20px;
+    margin: 10px;
+    @extend .center-flex;
+}
+
+.name{
+    font-size: 2.3em;
+    font-weight: bolder;
+    margin-right: 10px;
+    margin-bottom: 13px;
+    color:#FFF;
+}
+
+.portInput *{
+    color: #FFF;
+    font-weight: bold;
+    font-size: 1em;
+    margin-top: -1px;
+    text-decoration: underline;
+}

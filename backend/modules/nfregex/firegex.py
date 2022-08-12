@@ -1,9 +1,11 @@
 from typing import Dict, List, Set
-from utils.firegextables import FiregexFilter, FiregexTables
-from utils import ip_parse, ip_family, run_func
+from modules.nfregex.nftables import FiregexTables
+from utils import ip_parse, run_func
 from modules.nfregex.models import Service, Regex
 import re, os, asyncio
 import traceback
+
+nft = FiregexTables()
 
 class RegexFilter:
     def __init__(
@@ -52,7 +54,7 @@ class RegexFilter:
 class FiregexInterceptor:
     
     def __init__(self):
-        self.filter:FiregexFilter
+        self.srv:Service
         self.filter_map_lock:asyncio.Lock
         self.filter_map: Dict[str, RegexFilter]
         self.regex_filters: Set[RegexFilter]
@@ -61,16 +63,14 @@ class FiregexInterceptor:
         self.update_task: asyncio.Task
     
     @classmethod
-    async def start(cls, filter: FiregexFilter):
+    async def start(cls, srv: Service):
         self = cls()
-        self.filter = filter
+        self.srv = srv
         self.filter_map_lock = asyncio.Lock()
         self.update_config_lock = asyncio.Lock()
         input_range, output_range = await self._start_binary()
         self.update_task = asyncio.create_task(self.update_blocked())
-        if not filter in FiregexTables().get():
-            FiregexTables().add_input(queue_range=input_range, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
-            FiregexTables().add_output(queue_range=output_range, proto=self.filter.proto, port=self.filter.port, ip_int=self.filter.ip_int)
+        nft.add(self.srv, input_range, output_range)
         return self
     
     async def _start_binary(self):
@@ -139,8 +139,3 @@ class FiregexInterceptor:
             except Exception: pass
         return res
 
-def delete_by_srv(srv:Service):
-    nft = FiregexTables()
-    for filter in nft.get():
-        if filter.port == srv.port and filter.proto == srv.proto and ip_parse(filter.ip_int) == ip_parse(srv.ip_int):
-            nft.cmd({"delete":{"rule": {"handle": filter.id, "table": nft.table_name, "chain": filter.target, "family": "inet"}}})

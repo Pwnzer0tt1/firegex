@@ -6,11 +6,12 @@ import { Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
 import { PasswordSend, ServerStatusResponse } from './js/models';
 import { errorNotify, fireUpdateRequest, getstatus, HomeRedirector, login, setpassword } from './js/utils';
-import NFRegex from './pages/NFRegex.tsx';
+import NFRegex from './pages/NFRegex';
 import io from 'socket.io-client';
 import RegexProxy from './pages/RegexProxy';
-import ServiceDetailsNFRegex from './pages/NFRegex.tsx/ServiceDetails';
+import ServiceDetailsNFRegex from './pages/NFRegex/ServiceDetails';
 import ServiceDetailsProxyRegex from './pages/RegexProxy/ServiceDetails';
+import PortHijack from './pages/PortHijack';
 
 const socket = io({transports: ["websocket", "polling"], path:"/sock" });
 
@@ -153,6 +154,7 @@ function App() {
                   <Route path="regexproxy" element={<RegexProxy><Outlet /></RegexProxy>} >
                     <Route path=":srv" element={<ServiceDetailsProxyRegex />} />
                   </Route>
+                  <Route path="porthijack" element={<PortHijack />} />
                 <Route path="*" element={<HomeRedirector />} />
               </Route>
           </Routes>

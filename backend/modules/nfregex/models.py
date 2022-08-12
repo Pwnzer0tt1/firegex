@@ -11,7 +11,14 @@ class Service:
     
     @classmethod
     def from_dict(cls, var: dict):
-        return cls(id=var["service_id"], status=var["status"], port=var["port"], name=var["name"], proto=var["proto"], ip_int=var["ip_int"])
+        return cls(
+            id=var["service_id"],
+            status=var["status"],
+            port=var["port"],
+            name=var["name"],
+            proto=var["proto"],
+            ip_int=var["ip_int"]
+        )
 
 
 class Regex:
@@ -27,4 +34,13 @@ class Regex:
         
     @classmethod
     def from_dict(cls, var: dict):
-        return cls(id=var["regex_id"], regex=base64.b64decode(var["regex"]), mode=var["mode"], service_id=var["service_id"], is_blacklist=var["is_blacklist"], blocked_packets=var["blocked_packets"], is_case_sensitive=var["is_case_sensitive"], active=var["active"])
+        return cls(
+            id=var["regex_id"],
+            regex=base64.b64decode(var["regex"]),
+            mode=var["mode"],
+            service_id=var["service_id"],
+            is_blacklist=var["is_blacklist"],
+            blocked_packets=var["blocked_packets"],
+            is_case_sensitive=var["is_case_sensitive"],
+            active=var["active"]
+        )
