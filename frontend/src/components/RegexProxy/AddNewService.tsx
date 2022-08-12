@@ -1,9 +1,10 @@
-import { Button, Group, NumberInput, Space, TextInput, Notification, Modal, Switch } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Modal, Switch } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
 import React, { useState } from 'react';
 import { okNotify } from '../../js/utils';
 import { ImCross } from "react-icons/im"
 import { regexproxy } from './utils';
+import PortInput from '../PortInput';
 
 type ServiceAddForm = {
     name:string,
@@ -67,22 +68,18 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             />
             <Space h="md" />
 
-            <NumberInput
-                placeholder="8080"
-                min={1}
-                max={65535}
+            <PortInput
+                fullWidth
                 label="Public Service port"
-                {...form.getInputProps('port')}
+                others={form.getInputProps('port')}
             />
 
             {form.values.chosenInternalPort?<>
                 <Space h="md" />
-                <NumberInput
-                    placeholder="8080"
-                    min={1}
-                    max={65535}
+                <PortInput
+                    fullWidth
                     label="Internal Proxy Port"
-                    {...form.getInputProps('internalPort')}
+                    others={form.getInputProps('internalPort')}
                 />
                 <Space h="sm" />
             </>:null}

@@ -1,9 +1,10 @@
-import { Button, Group, NumberInput, Space, TextInput, Notification, Modal, Switch, SegmentedControl, Autocomplete, AutocompleteItem } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl } from '@mantine/core';
 import { useForm } from '@mantine/hooks';
-import React, { useEffect, useState } from 'react';
-import { okNotify, regex_ipv4, regex_ipv6, getipinterfaces } from '../../js/utils';
+import React, { useState } from 'react';
+import { okNotify, regex_ipv4, regex_ipv6 } from '../../js/utils';
 import { ImCross } from "react-icons/im"
 import { nfregex } from './utils';
+import PortAndInterface from '../PortAndInterface';
 
 type ServiceAddForm = {
     name:string,
@@ -12,16 +13,6 @@ type ServiceAddForm = {
     ip_int:string,
     autostart: boolean,
 }
-
-interface ItemProps extends AutocompleteItem {
-    label: string;
-}
-
-const AutoCompleteItem = React.forwardRef<HTMLDivElement, ItemProps>(
-    ({ label, value, ...props }: ItemProps, ref) => <div ref={ref} {...props}>
-            ( <b>{label}</b> ) -{">"} <b>{value}</b> 
-    </div>
-  );
 
 function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void }) {
 
@@ -40,14 +31,6 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             ip_int: (value) => value.match(regex_ipv6)?true:false || value.match(regex_ipv4)?true:false
         }
     })
-
-    const [ipInterfaces, setIpInterfaces] = useState<AutocompleteItem[]>([]);
-
-    useEffect(()=>{
-        getipinterfaces().then(data => {
-            setIpInterfaces(data.map(item => ({label:item.name, value:item.addr})));
-        })
-    },[])
 
     const close = () =>{
         onClose()
@@ -85,27 +68,8 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
                 {...form.getInputProps('name')}
             />
             <Space h="md" />
-
-            <Autocomplete
-                label="Public IP Interface (ipv4/ipv6 + CIDR allowed)"
-                placeholder="10.1.1.0/24"
-                itemComponent={AutoCompleteItem}
-                data={ipInterfaces}
-                {...form.getInputProps('ip_int')}
-            />
-
+            <PortAndInterface form={form} int_name="ip_int" port_name="port" label={"Public IP Interface and port (ipv4/ipv6 + CIDR allowed)"} />            
             <Space h="md" />
-
-            <NumberInput
-                placeholder="8080"
-                min={1}
-                max={65535}
-                label="Public Service port"
-                {...form.getInputProps('port')}
-            />
-            
-            <Space h="md" />
-
 
             <div className='center-flex'>
                 <Switch

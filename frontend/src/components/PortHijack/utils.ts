@@ -9,9 +9,9 @@ export type Service = {
     name:string,
     service_id:string,
     active:boolean,
-    port:number,
     proto: string,
-    ip_int: string,
+    ip_src: string,
+    ip_dst: string,
     proxy_port: number,
     public_port: number,
 }
@@ -21,7 +21,8 @@ export type ServiceAddForm = {
     public_port:number,
     proxy_port:number,
     proto:string,
-    ip_int:string,
+    ip_src: string,
+    ip_dst: string,
 }
 
 export type ServiceAddResponse = {
@@ -58,7 +59,7 @@ export const porthijack = {
         const { status } = await getapi(`porthijack/service/${service_id}/delete`) as ServerResponse;
         return status === "ok"?undefined:status
     },
-    changeport: async (service_id:string, proxy_port:number) => {
-        return await postapi(`porthijack/service/${service_id}/changeport`, {proxy_port}) as ServerResponse;
+    changedestination: async (service_id:string, ip_dst:string, proxy_port:number) => {
+        return await postapi(`porthijack/service/${service_id}/change-destination`, {proxy_port, ip_dst}) as ServerResponse;
     }
 }

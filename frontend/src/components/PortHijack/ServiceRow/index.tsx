@@ -2,15 +2,15 @@ import { ActionIcon, Badge, Divider, Grid, MediaQuery, Menu, Space, Title, Toolt
 import React, { useState } from 'react';
 import { FaPlay, FaStop } from 'react-icons/fa';
 import { porthijack, Service } from '../utils';
-import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./index.module.scss";
 import YesNoModal from '../../YesNoModal';
 import { errorNotify, okNotify, regex_ipv4 } from '../../../js/utils';
-import { BsTrashFill } from 'react-icons/bs';
+import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
+import ChangeDestination from './ChangeDestination';
 
-function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
+function ServiceRow({ service }:{ service:Service }) {
 
     let status_color = service.active ? "teal": "red"
 
@@ -18,18 +18,19 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
+    const [changeDestModal, setChangeDestModal] = useState(false)
 
     const stopService = async () => {
         setButtonLoading(true)
         
         await porthijack.servicestop(service.service_id).then(res => {
             if(!res){
-                okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.port} has been stopped!`)
+                okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.public_port} has been stopped!`)
             }else{
-                errorNotify(`An error as occurred during the stopping of the service ${service.port}`,`Error: ${res}`)
+                errorNotify(`An error as occurred during the stopping of the service ${service.public_port}`,`Error: ${res}`)
             }
         }).catch(err => {
-            errorNotify(`An error as occurred during the stopping of the service ${service.port}`,`Error: ${err}`)
+            errorNotify(`An error as occurred during the stopping of the service ${service.public_port}`,`Error: ${err}`)
         })
         setButtonLoading(false);
     }
@@ -38,12 +39,12 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         setButtonLoading(true)
         await porthijack.servicestart(service.service_id).then(res => {
             if(!res){
-                okNotify(`Service ${service.name} started successfully!`,`The service on ${service.port} has been started!`)
+                okNotify(`Service ${service.name} started successfully!`,`The service on ${service.public_port} has been started!`)
             }else{
-                errorNotify(`An error as occurred during the starting of the service ${service.port}`,`Error: ${res}`)
+                errorNotify(`An error as occurred during the starting of the service ${service.public_port}`,`Error: ${res}`)
             }
         }).catch(err => {
-            errorNotify(`An error as occurred during the starting of the service ${service.port}`,`Error: ${err}`)
+            errorNotify(`An error as occurred during the starting of the service ${service.public_port}`,`Error: ${err}`)
         })
         setButtonLoading(false)
     }
@@ -65,13 +66,13 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
             <Grid.Col md={4} xs={12}>
                 <MediaQuery smallerThan="md" styles={{ display: 'none' }}><div>
                     <div className="center-flex-row">
-                        <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.port}</Badge></div>
+                        <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
                         <Badge color={status_color} radius="sm" size="lg" variant="filled">Status: <u>{service.active?"ENABLED":"DISABLED"}</u></Badge>
                     </div>
                 </div></MediaQuery>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}><div>
                     <div className="center-flex">
-                        <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.port}</Badge></div>
+                        <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
                         <Badge style={{marginLeft:"20px"}} color={status_color} radius="sm" size="lg" variant="filled">Status: <u>{service.active?"ENABLED":"DISABLED"}</u></Badge>
                         <Space w="xl" />
                     </div>
@@ -91,7 +92,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                 </MediaQuery>
                 
                 <div className="center-flex-row">
-                    <Badge color={service.ip_int.match(regex_ipv4)?"cyan":"pink"} radius="sm" size="md" variant="filled">{service.ip_int} on {service.proto}</Badge>
+                    <Badge color={service.ip_src.match(regex_ipv4)?"cyan":"pink"} radius="sm" size="md" variant="filled">{service.ip_src} on {service.proto}</Badge>
                 </div>
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}>
                     <div className='flex-spacer' />
@@ -103,6 +104,8 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                     <Menu>
                         <Menu.Label><b>Rename service</b></Menu.Label>
                         <Menu.Item icon={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
+                        <Menu.Label><b>Change destination</b></Menu.Label>
+                        <Menu.Item icon={<BsArrowRepeat size={18} />} onClick={()=>setChangeDestModal(true)}>Change hijacking destination</Menu.Item>
                         <Divider />
                         <Menu.Label><b>Danger zone</b></Menu.Label>
                         <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
@@ -127,10 +130,6 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                     </Tooltip>
                 </div>
                 <Space w="xl" /><Space w="xl" />
-                {onClick?<div>
-                    <MdOutlineArrowForwardIos onClick={onClick} style={{cursor:"pointer"}} size={45} />
-                    <Space w="xl" />
-                </div>:null}
                 <MediaQuery largerThan="md" styles={{ display: 'none' }}>
                     <><Space w="xl" /><Space w="xl" /></>
                 </MediaQuery>
@@ -140,7 +139,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         <hr style={{width:"100%"}}/>
         <YesNoModal
             title='Are you sure to delete this service?'
-            description={`You are going to delete the service '${service.port}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}
+            description={`You are going to delete the service '${service.public_port}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}
             onClose={()=>setDeleteModal(false) }
             action={deleteService}
             opened={deleteModal}
@@ -148,6 +147,11 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         <RenameForm
             onClose={()=>setRenameModal(false)}
             opened={renameModal}
+            service={service}
+        />
+        <ChangeDestination
+            onClose={()=>setChangeDestModal(false)}
+            opened={changeDestModal}
             service={service}
         />
     </>

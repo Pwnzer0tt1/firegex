@@ -29,7 +29,7 @@ function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>v
             if (!res){
                 setSubmitLoading(false)
                 close();
-                okNotify(`Service ${service.name} has been renamed in ${ name }`, `Successfully renamed service on port ${service.port}`)
+                okNotify(`Service ${service.name} has been renamed in ${ name }`, `Successfully renamed service on port ${service.public_port}`)
             }else{
                 setSubmitLoading(false)
                 setError("Error: [ "+res+" ]")
@@ -42,7 +42,7 @@ function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>v
     }    
 
 
-  return <Modal size="xl" title={`Rename '${service.name}' service on port ${service.port}`} opened={opened} onClose={close} closeOnClickOutside={false} centered>
+  return <Modal size="xl" title={`Rename '${service.name}' service on port ${service.public_port}`} opened={opened} onClose={close} closeOnClickOutside={false} centered>
     <form onSubmit={form.onSubmit(submitRequest)}>
             <TextInput
                 label="Service Name"
