@@ -60,6 +60,7 @@ Initiially the project was based only on regex filters, and also now the main fu
 
 ## Next points
 
+- Add proxy script in different language to use for porthijacking to download
 - Explanation about tools in the dedicated pages making them more user-friendly
 - buffering the TCP and(/or) the UDP stream to avoid to bypass the proxy dividing the information in more packets
 - Adding new section with "general firewall rules" to manage "simple" TCP traffic rules graphically and through nftables
