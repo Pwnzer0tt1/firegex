@@ -92,7 +92,7 @@ function ServiceRow({ service }:{ service:Service }) {
             <Space w="xl" /><Space w="xl" />
             <div>
                 <div className="center-flex-row">
-                    <div className="center-flex"><Title order={4} className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
+                    <Title order={4} className={style.name}>{service.name}</Title>
                     <div className="center-flex">
                         <Badge color={status_color} radius="sm" size="md" variant="filled">Status: <u>{service.active?"ENABLED":"DISABLED"}</u></Badge>
                         <Space w="sm" />
