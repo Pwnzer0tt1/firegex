@@ -67,7 +67,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex:latest"}
+        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
         network_mode: "host"
         environment:
             - PORT={args.port}
@@ -89,7 +89,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
-        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex:latest"}
+        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
         ports:
             - {args.port}:{args.port}
         environment:
@@ -111,6 +111,9 @@ if not args.no_autostart:
             puts("Running 'docker-compose down'\n", color=colors.green)
             os.system("docker-compose -p firegex down")
         else:
+            if not args.build:
+                puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
+                os.system("docker pull ghcr.io/pwnzer0tt1/firegex")
             puts("Running 'docker-compose up -d --build'\n", color=colors.green)
             os.system("docker-compose -p firegex up -d --build")
     finally:
