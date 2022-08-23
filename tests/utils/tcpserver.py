@@ -26,7 +26,8 @@ class TcpServer:
 
     def sendCheckData(self,data):
         s = socket.socket(socket.AF_INET6 if self.ipv6 else socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(('::1' if self.ipv6 else '127.0.0.1', self.proxy_port if self.proxy_port else self.port))
+        s.settimeout(1)
+        s.connect(('::1' if self.ipv6 else '127.0.0.1', self.proxy_port if self.proxy_port else self.port), )
         s.sendall(data)
         received_data = s.recv(4096)
         s.close()

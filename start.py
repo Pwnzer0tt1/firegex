@@ -20,6 +20,12 @@ def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
 
 def sep(): puts("-----------------------------------", is_bold=True)
 
+def composecmd(cmd):
+    return os.system(f"(hash docker-compose &> /dev/null && docker-compose -p firegex {cmd} || exit 0) || (hash docker &> /dev/null && docker compose -p firegex {cmd} || exit 0) || echo 'Docker not found!, please install docker and docker-compose'")
+
+def dockercmd(cmd):
+    return os.system(f"(hash docker &> /dev/null && docker {cmd} || exit 0) || echo 'Docker not found!, please install docker and docker-compose'")
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
 parser.add_argument('--threads', "-t", type=int, required=False, help='Number of threads started for each service/utility', default=-1)
@@ -106,16 +112,16 @@ if not args.no_autostart:
     try:
         if args.restart:
             puts("Running 'docker-compose restart'\n", color=colors.green)
-            os.system("docker-compose -p firegex restart 2> /dev/null || docker compose -p firegex restart")
+            composecmd("restart")
         elif args.stop:
             puts("Running 'docker-compose down'\n", color=colors.green)
-            os.system("docker-compose -p firegex down 2> /dev/null || docker compose -p firegex restart")
+            composecmd("down")
         else:
             if not args.build:
                 puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
-                os.system("docker pull ghcr.io/pwnzer0tt1/firegex")
+                dockercmd("pull ghcr.io/pwnzer0tt1/firegex")
             puts("Running 'docker-compose up -d --build'\n", color=colors.green)
-            os.system("docker-compose -p firegex up -d --build 2> /dev/null || docker compose -p firegex up -d --build")
+            composecmd("up -d --build")
     finally:
         if not args.keep:
             os.remove("docker-compose.yml")
