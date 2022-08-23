@@ -55,7 +55,7 @@ def checkData(should_work):
         else: puts("Test Failed: Connection wasn't blocked ✗", color=colors.red); exit_test(1)
     else:
         if should_work: puts(f"Test Failed: Data wans't received ✗", color=colors.red); exit_test(1)
-        else: puts(f"Successfully blcoked connection ✔", color=colors.green)
+        else: puts(f"Successfully blocked connection ✔", color=colors.green)
 
 checkData(True)
 
