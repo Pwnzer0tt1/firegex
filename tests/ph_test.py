@@ -49,7 +49,7 @@ time.sleep(0.5)
 def checkData(should_work):
     res = None
     try: res = server.sendCheckData(secrets.token_bytes(432))
-    except ConnectionRefusedError:  res = False
+    except (ConnectionRefusedError, TimeoutError): res = None
     if res:
         if should_work: puts(f"Successfully received data ✔", color=colors.green)
         else: puts("Test Failed: Connection wasn't blocked ✗", color=colors.red); exit_test(1)
