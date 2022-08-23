@@ -106,16 +106,16 @@ if not args.no_autostart:
     try:
         if args.restart:
             puts("Running 'docker-compose restart'\n", color=colors.green)
-            os.system("docker-compose -p firegex restart")
+            os.system("docker-compose -p firegex restart || docker compose -p firegex restart")
         elif args.stop:
             puts("Running 'docker-compose down'\n", color=colors.green)
-            os.system("docker-compose -p firegex down")
+            os.system("docker-compose -p firegex down || docker compose -p firegex restart")
         else:
             if not args.build:
                 puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
                 os.system("docker pull ghcr.io/pwnzer0tt1/firegex")
             puts("Running 'docker-compose up -d --build'\n", color=colors.green)
-            os.system("docker-compose -p firegex up -d --build")
+            os.system("docker-compose -p firegex up -d --build || docker compose -p firegex up -d --build")
     finally:
         if not args.keep:
             os.remove("docker-compose.yml")
