@@ -15,7 +15,7 @@ FROM python:alpine AS base
 
 RUN apk update
 RUN apk add g++ git pcre2-dev libnetfilter_queue-dev libpcap-dev\
-        libcrypto1.1 libnfnetlink-dev libmnl-dev make cmake nftables\
+        libcrypto1.1 libnfnetlink-dev libmnl-dev make cmake nftables maturin\
         boost-dev libcap autoconf automake bash rust cargo openssl-dev libffi-dev
 
 WORKDIR /tmp/
