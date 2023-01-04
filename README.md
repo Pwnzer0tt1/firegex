@@ -23,15 +23,15 @@ Image building of firegex will require more time, so it's recommended to use the
 
 By default firegex will start in a multithread configuration using the number of threads available in your system.
 The default port of firegex is 4444. At the startup you will choose a password, that is essential for your security.
-All the configuration at the startup are customizable in [firegex.py](./start.py) or directly in the firegex interface.
+All the configuration at the startup is customizable in [firegex.py](./start.py) or directly in the firegex interface.
 
 ![Firegex Network scheme](docs/Firegex_Screenshot.jpg)
 
 ## Functionalities
 
-- Regex filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/doxygen/html/) with [nftables](https://netfilter.org/projects/nftables/) with a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
-- TCP Proxy regex filter, create a proxy tunnel from the service internal port to a public port published by the proxy. Internally the c++ proxy filter the request with PCRE2 regexes. For mantaining the same public port you will need to open only in localhost the real service. (Only TCP IPv4)
-- Port Hijacking (not available yet) allow you to redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
+- Regex filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/doxygen/html/) with [nftables](https://netfilter.org/projects/nftables/) uses a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
+- TCP Proxy regex filter, create a proxy tunnel from the service internal port to a public port published by the proxy. Internally the c++ proxy filter the request with PCRE2 regexes. For mantaining the same public port you will need to open only in localhost the real services. (Available only on TCP/IPv4)
+- Port Hijacking allows you to redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using the loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
 
 ## Documentation
 
