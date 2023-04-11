@@ -10,7 +10,7 @@ Firegex is a firewall that includes different functionalities, created for CTF A
 ## Get started firegex
 What you need is a linux machine and docker ( + docker-compose )
 ```bash
-curl https://raw.githubusercontent.com/Pwnzer0tt1/firegex/main/start.py -o firegex.py && python3 firegex.py
+sh <(curl -sLf https://pwnzer0tt1.it/firegex.sh)
 ```
 With this command you will download firegex.py, and run it, it will require you the password to use for firegex and start it with docker-compose
 
