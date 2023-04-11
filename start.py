@@ -21,10 +21,10 @@ def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
 def sep(): puts("-----------------------------------", is_bold=True)
 
 def composecmd(cmd):
-    return os.system(f"(hash docker-compose &> /dev/null && (docker-compose -p firegex {cmd} || exit 0)) || (hash docker &> /dev/null && (docker compose -p firegex {cmd} || exit 0)) || echo 'Docker not found!, please install docker and docker compose'")
+    return os.system(f"(which docker-compose &> /dev/null && (docker-compose -p firegex {cmd} || exit 0)) || (which docker &> /dev/null && (docker compose -p firegex {cmd} || exit 0)) || echo 'Docker not found!, please install docker and docker compose'")
 
 def dockercmd(cmd):
-    return os.system(f"(hash docker &> /dev/null && (docker {cmd} || exit 0)) || echo 'Docker not found!, please install docker and docker-compose'")
+    return os.system(f"(which docker &> /dev/null && (docker {cmd} || exit 0)) || echo 'Docker not found!, please install docker and docker-compose'")
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
