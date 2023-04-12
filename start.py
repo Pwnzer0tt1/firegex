@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import argparse, sys, platform, os, multiprocessing, subprocess
+import argparse, sys, platform, os, multiprocessing, subprocess, getpass
 
 pref = "\033["
 reset = f"{pref}0m"
@@ -92,8 +92,15 @@ if start_operation:
     if args.psw_no_interactive:
         psw_set = args.psw_no_interactive
     elif not args.startup_psw:
-        puts("Insert the password for firegex: ", end="" , color=colors.yellow, is_bold=True)
-        psw_set = input()
+        while True:
+            puts("Insert the password for firegex: ", end="" , color=colors.yellow, is_bold=True)
+            psw_set = getpass.getpass("")
+            puts("Confirm the password: ", end="" , color=colors.yellow, is_bold=True)
+            check = getpass.getpass("")
+            if check != psw_set:
+                puts("Passwords don't match!", end="" , color=colors.yellow, is_bold=True)
+            else:
+                break
 
 composefile = "firegex-compose.yml"
 
