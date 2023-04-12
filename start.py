@@ -55,6 +55,7 @@ def run_checks():
         puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
         exit()
 
+
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
 parser.add_argument('--threads', "-t", type=int, required=False, help='Number of threads started for each service/utility', default=-1)
@@ -69,7 +70,6 @@ parser.add_argument('--startup-psw','-P', required=False, action="store_true", h
 
 args = parser.parse_args()
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
-
 run_checks()
 
 start_operation = not (args.stop or args.restart)
@@ -78,10 +78,13 @@ if args.build and not os.path.isfile("./Dockerfile"):
     puts("This is not a clone of firegex, to build firegex the clone of the repository is needed!", color=colors.red)
     exit()
 
-if args.threads < 1: 
+if args.threads < 1:
     args.threads = multiprocessing.cpu_count()
 
 if start_operation:
+    if check_if_exists("docker ps --filter 'name=^firegex$' --no-trunc | grep firegex"):
+        puts("Firegex is already running! use --help to see options useful to manage firegex execution", color=colors.yellow)
+        exit()
     sep()
     puts(f"Firegex", color=colors.yellow, end="")
     puts(" will start on port ", end="")
@@ -113,6 +116,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
+        container_name: firegex
         {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
         network_mode: "host"
         environment:
@@ -135,6 +139,7 @@ version: '3.9'
 services:
     firewall:
         restart: unless-stopped
+        container_name: firegex
         {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
         ports:
             - {args.port}:{args.port}
