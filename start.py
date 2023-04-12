@@ -4,6 +4,7 @@ import argparse, sys, platform, os, multiprocessing, subprocess, getpass
 
 pref = "\033["
 reset = f"{pref}0m"
+composefile = "firegex-compose.yml"
 
 class colors:
     black = "30m"
@@ -72,6 +73,65 @@ args = parser.parse_args()
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
 run_checks()
 
+def write_compose(psw_set=None):
+    with open(composefile,"wt") as compose:
+
+        if "linux" in sys.platform and not 'microsoft-standard' in platform.uname().release: #Check if not is a wsl also
+             compose.write(f"""
+version: '3.9'
+
+services:
+    firewall:
+        restart: unless-stopped
+        container_name: firegex
+        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
+        network_mode: "host"
+        environment:
+            - PORT={args.port}
+            - NTHREADS={args.threads}
+            {"- HEX_SET_PSW="+psw_set.encode().hex() if psw_set else ""}
+        volumes:
+            - /execute/db
+            - type: bind
+              source: /proc/sys/net/ipv4/conf/all/route_localnet
+              target: /sys_host/net.ipv4.conf.all.route_localnet
+            - type: bind
+              source: /proc/sys/net/ipv4/ip_forward
+              target: /sys_host/net.ipv4.ip_forward
+            - type: bind
+              source: /proc/sys/net/ipv4/conf/all/forwarding
+              target: /sys_host/net.ipv4.conf.all.forwarding
+            - type: bind
+              source: /proc/sys/net/ipv6/conf/all/forwarding
+              target: /sys_host/net.ipv6.conf.all.forwarding
+        cap_add:
+            - NET_ADMIN
+""")
+
+        else:
+            sep()
+            puts("--- WARNING ---", color=colors.yellow)
+            puts("You are not in a linux machine, due to docker limitation on other platform, the firewall will not work in this machine. You will only see the interface of firegex.", color=colors.red)
+            compose.write(f"""
+version: '3.9'
+
+services:
+    firewall:
+        restart: unless-stopped
+        container_name: firegex
+        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
+        ports:
+            - {args.port}:{args.port}
+        environment:
+            - PORT={args.port}
+            - NTHREADS={args.threads}
+            {"- HEX_SET_PSW="+psw_set.encode().hex() if psw_set else ""}
+        volumes:
+            - /execute/db
+        cap_add:
+            - NET_ADMIN
+""")
+
 start_operation = not (args.stop or args.restart)
 
 if args.build and not os.path.isfile("./Dockerfile"):
@@ -81,9 +141,12 @@ if args.build and not os.path.isfile("./Dockerfile"):
 if args.threads < 1:
     args.threads = multiprocessing.cpu_count()
 
-if start_operation:
+if start_operation and (not args.build or args.keep):
     if check_if_exists("docker ps --filter 'name=^firegex$' --no-trunc | grep firegex"):
-        puts("Firegex is already running! use --help to see options useful to manage firegex execution", color=colors.yellow)
+        if args.keep:
+            write_compose()
+        else:
+            puts("Firegex is already running! use --help to see options useful to manage firegex execution", color=colors.yellow)
         exit()
     sep()
     puts(f"Firegex", color=colors.yellow, end="")
@@ -105,53 +168,8 @@ if start_operation:
             else:
                 break
 
-composefile = "firegex-compose.yml"
+write_compose(psw_set)
 
-with open(composefile,"wt") as compose:
-
-    if "linux" in sys.platform and not 'microsoft-standard' in platform.uname().release: #Check if not is a wsl also
-        compose.write(f"""
-version: '3.9'
-
-services:
-    firewall:
-        restart: unless-stopped
-        container_name: firegex
-        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
-        network_mode: "host"
-        environment:
-            - PORT={args.port}
-            - NTHREADS={args.threads}
-            {"- HEX_SET_PSW="+psw_set.encode().hex() if psw_set else ""}
-        volumes:
-            - /execute/db
-        cap_add:
-            - NET_ADMIN
-""")
-
-    else:
-        sep()
-        puts("--- WARNING ---", color=colors.yellow)
-        puts("You are not in a linux machine, due to docker limitation on other platform, the firewall will not work in this machine. You will only see the interface of firegex.", color=colors.red)
-        compose.write(f"""
-version: '3.9'
-
-services:
-    firewall:
-        restart: unless-stopped
-        container_name: firegex
-        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
-        ports:
-            - {args.port}:{args.port}
-        environment:
-            - PORT={args.port}
-            - NTHREADS={args.threads}
-            {"- HEX_SET_PSW="+psw_set.encode().hex() if psw_set else ""}
-        volumes:
-            - /execute/db
-        cap_add:
-            - NET_ADMIN
-""")
 sep()
 if not args.no_autostart:
     try:

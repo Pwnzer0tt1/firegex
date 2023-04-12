@@ -7,12 +7,18 @@ from jose import jwt
 from passlib.context import CryptContext
 from fastapi_socketio import SocketManager
 from utils.sqlite import SQLite
-from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, refresh_frontend, DEBUG
+from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, refresh_frontend, DEBUG, SysctlManager
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 
 # DB init
 db = SQLite('db/firegex.db')
+sysctl = SysctlManager({
+    "net.ipv4.conf.all.forwarding": True,
+    "net.ipv6.conf.all.forwarding": True,
+    "net.ipv4.conf.all.route_localnet": True,
+    "net.ipv4.ip_forward": True
+})
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)
 crypto = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -114,6 +120,7 @@ async def startup_event():
     db.init()
     if os.getenv("HEX_SET_PSW"):
         set_psw(bytes.fromhex(os.getenv("HEX_SET_PSW")).decode())
+    sysctl.set()
     await startup()
     if not JWT_SECRET(): db.put("secret", secrets.token_hex(32))
     await refresh_frontend()
@@ -121,6 +128,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     await shutdown()
+    sysctl.reset()
     db.disconnect()
 
 @api.post('/reset', response_model=StatusMessageModel)
@@ -130,6 +138,7 @@ async def reset_firegex(form: ResetRequest):
         db.delete()
         db.init()
         db.put("secret", secrets.token_hex(32))
+    sysctl.set()
     await reset(form)
     await refresh_frontend()
     return {'status': 'ok'}

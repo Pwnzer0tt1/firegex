@@ -29,6 +29,34 @@ def refactor_name(name:str):
     while "  " in name: name = name.replace("  "," ")
     return name
 
+class SysctlManager:
+    def __init__(self, ctl_table):
+        self.old_table = {}
+        self.new_table = {}
+        if os.path.isdir("/sys_host/"):
+            self.old_table = dict()
+            self.new_table = dict(ctl_table)
+            for name in ctl_table.keys():
+                self.old_table[name] = read_sysctl(name)
+    
+    def write_table(self, table):
+        for name, value in table.items():
+            write_sysctl(name, value)
+
+    def set(self):
+        self.write_table(self.new_table)
+
+    def reset(self):
+        self.write_table(self.old_table)
+
+def read_sysctl(name:str):
+    with open(f"/sys_host/{name}", "rt") as f:
+        return "1" in f.read()
+
+def write_sysctl(name:str, value:bool):
+    with open(f"/sys_host/{name}", "wt") as f:
+        f.write("1" if value else "0")
+
 def list_files(mypath):
     from os import listdir
     from os.path import isfile, join
