@@ -93,12 +93,12 @@ if start_operation:
         psw_set = args.psw_no_interactive
     elif not args.startup_psw:
         while True:
-            puts("Insert the password for firegex: ", end="" , color=colors.yellow, is_bold=True)
+            puts("Insert the password for firegex: ", end="" , color=colors.yellow, is_bold=True, flush=True)
             psw_set = getpass.getpass("")
-            puts("Confirm the password: ", end="" , color=colors.yellow, is_bold=True)
+            puts("Confirm the password: ", end="" , color=colors.yellow, is_bold=True, flush=True)
             check = getpass.getpass("")
             if check != psw_set:
-                puts("Passwords don't match!", end="" , color=colors.yellow, is_bold=True)
+                puts("Passwords don't match!" , color=colors.yellow, is_bold=True, flush=True)
             else:
                 break
 
