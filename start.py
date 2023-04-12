@@ -98,7 +98,7 @@ if start_operation:
             puts("Confirm the password: ", end="" , color=colors.yellow, is_bold=True, flush=True)
             check = getpass.getpass("")
             if check != psw_set:
-                puts("Passwords don't match!" , color=colors.yellow, is_bold=True, flush=True)
+                puts("Passwords don't match!" , color=colors.red, is_bold=True, flush=True)
             else:
                 break
 
