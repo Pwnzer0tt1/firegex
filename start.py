@@ -131,63 +131,69 @@ services:
         cap_add:
             - NET_ADMIN
 """)
+def main():
+    start_operation = not (args.stop or args.restart)
 
-start_operation = not (args.stop or args.restart)
-
-if args.build and not os.path.isfile("./Dockerfile"):
-    puts("This is not a clone of firegex, to build firegex the clone of the repository is needed!", color=colors.red)
-    exit()
-
-if args.threads < 1:
-    args.threads = multiprocessing.cpu_count()
-
-if start_operation and (not args.build or args.keep):
-    if check_if_exists("docker ps --filter 'name=^firegex$' --no-trunc | grep firegex"):
-        if args.keep:
-            write_compose()
-        else:
-            puts("Firegex is already running! use --help to see options useful to manage firegex execution", color=colors.yellow)
+    if args.build and not os.path.isfile("./Dockerfile"):
+        puts("This is not a clone of firegex, to build firegex the clone of the repository is needed!", color=colors.red)
         exit()
-    sep()
-    puts(f"Firegex", color=colors.yellow, end="")
-    puts(" will start on port ", end="")
-    puts(f"{args.port}", color=colors.cyan)
 
-psw_set = None
-if start_operation:
-    if args.psw_no_interactive:
-        psw_set = args.psw_no_interactive
-    elif not args.startup_psw:
-        while True:
-            puts("Insert the password for firegex: ", end="" , color=colors.yellow, is_bold=True, flush=True)
-            psw_set = getpass.getpass("")
-            puts("Confirm the password: ", end="" , color=colors.yellow, is_bold=True, flush=True)
-            check = getpass.getpass("")
-            if check != psw_set:
-                puts("Passwords don't match!" , color=colors.red, is_bold=True, flush=True)
+    if args.threads < 1:
+        args.threads = multiprocessing.cpu_count()
+
+    if start_operation and (not args.build or args.keep):
+        if check_if_exists("docker ps --filter 'name=^firegex$' --no-trunc | grep firegex"):
+            if args.keep:
+                write_compose()
             else:
-                break
+                puts("Firegex is already running! use --help to see options useful to manage firegex execution", color=colors.yellow)
+            exit()
+        sep()
+        puts(f"Firegex", color=colors.yellow, end="")
+        puts(" will start on port ", end="")
+        puts(f"{args.port}", color=colors.cyan)
 
-write_compose(psw_set)
+    psw_set = None
+    if start_operation:
+        if args.psw_no_interactive:
+            psw_set = args.psw_no_interactive
+        elif not args.startup_psw:
+            while True:
+                puts("Insert the password for firegex: ", end="" , color=colors.yellow, is_bold=True, flush=True)
+                psw_set = getpass.getpass("")
+                puts("Confirm the password: ", end="" , color=colors.yellow, is_bold=True, flush=True)
+                check = getpass.getpass("")
+                if check != psw_set:
+                    puts("Passwords don't match!" , color=colors.red, is_bold=True, flush=True)
+                else:
+                    break
 
-sep()
-if not args.no_autostart:
-    try:
-        if args.restart:
-            puts("Running 'docker-compose restart'\n", color=colors.green)
-            composecmd("restart", composefile)
-        elif args.stop:
-            puts("Running 'docker-compose down'\n", color=colors.green)
-            composecmd("down", composefile)
-        else:
-            if not args.build:
-                puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
-                dockercmd("pull ghcr.io/pwnzer0tt1/firegex")
-            puts("Running 'docker-compose up -d --build'\n", color=colors.green)
-            composecmd("up -d --build", composefile)
-    finally:
-        if not args.keep:
-            os.remove(composefile)
-else:
-    puts("Done! You can start/stop firegex with docker-compose up -d --build", color=colors.yellow)
+    write_compose(psw_set)
+
     sep()
+    if not args.no_autostart:
+        try:
+            if args.restart:
+                puts("Running 'docker-compose restart'\n", color=colors.green)
+                composecmd("restart", composefile)
+            elif args.stop:
+                puts("Running 'docker-compose down'\n", color=colors.green)
+                composecmd("down", composefile)
+            else:
+                if not args.build:
+                    puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
+                    dockercmd("pull ghcr.io/pwnzer0tt1/firegex")
+                puts("Running 'docker-compose up -d --build'\n", color=colors.green)
+                composecmd("up -d --build", composefile)
+        finally:
+            if not args.keep:
+                os.remove(composefile)
+    else:
+        puts("Done! You can start/stop firegex with docker-compose up -d --build", color=colors.yellow)
+        sep()
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print()
