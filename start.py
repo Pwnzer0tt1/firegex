@@ -30,9 +30,9 @@ def composecmd(cmd, composefile=None):
     if not check_if_exists("docker ps"):
         return puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
     elif check_if_exists("docker compose"):
-        return os.system(f"docker compose {cmd}")
+        return os.system(f"docker compose -p firegex {cmd}")
     elif check_if_exists("docker-compose"):
-        return os.system(f"docker-compose {cmd}")
+        return os.system(f"docker-compose -p firegex {cmd}")
     else:
         puts("Docker compose not found! please install docker compose!", color=colors.red)
 
@@ -56,9 +56,10 @@ def run_checks():
         puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
         exit()
 
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
+parser.add_argument('--clear', required=False, action="store_true", help='Delete docker volume associated to firegex resetting all the settings', default=False)
+parser.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
 parser.add_argument('--threads', "-t", type=int, required=False, help='Number of threads started for each service/utility', default=-1)
 parser.add_argument('--no-autostart', "-n", required=False, action="store_true", help='Save docker-compose file and not start the container', default=False)
 parser.add_argument('--build', "-b", required=False, action="store_true", help='Build the container locally', default=False)
@@ -91,7 +92,7 @@ services:
             - NTHREADS={args.threads}
             {"- HEX_SET_PSW="+psw_set.encode().hex() if psw_set else ""}
         volumes:
-            - /execute/db
+            - firegex_data:/execute/db
             - type: bind
               source: /proc/sys/net/ipv4/conf/all/route_localnet
               target: /sys_host/net.ipv4.conf.all.route_localnet
@@ -106,6 +107,8 @@ services:
               target: /sys_host/net.ipv6.conf.all.forwarding
         cap_add:
             - NET_ADMIN
+volumes:
+    firegex_data:
 """)
 
         else:
@@ -127,12 +130,24 @@ services:
             - NTHREADS={args.threads}
             {"- HEX_SET_PSW="+psw_set.encode().hex() if psw_set else ""}
         volumes:
+            - firegex_data:/execute/db
             - /execute/db
         cap_add:
             - NET_ADMIN
+volumes:
+    firegex_data:
 """)
 def main():
     start_operation = not (args.stop or args.restart)
+    volume_exists = check_if_exists('docker volume ls --filter="name=^firegex_firegex_data$" --quiet')
+
+    if args.clear:
+        dockercmd("volume rm firegex_firegex_data")
+        exit()
+
+    if args.logs:
+        composecmd("logs -f")
+        exit()
 
     if args.build and not os.path.isfile("./Dockerfile"):
         puts("This is not a clone of firegex, to build firegex the clone of the repository is needed!", color=colors.red)
@@ -154,19 +169,18 @@ def main():
         puts(f"{args.port}", color=colors.cyan)
 
     psw_set = None
-    if start_operation:
-        if args.psw_no_interactive:
-            psw_set = args.psw_no_interactive
-        elif not args.startup_psw:
-            while True:
-                puts("Insert the password for firegex: ", end="" , color=colors.yellow, is_bold=True, flush=True)
-                psw_set = getpass.getpass("")
-                puts("Confirm the password: ", end="" , color=colors.yellow, is_bold=True, flush=True)
-                check = getpass.getpass("")
-                if check != psw_set:
-                    puts("Passwords don't match!" , color=colors.red, is_bold=True, flush=True)
-                else:
-                    break
+    if args.psw_no_interactive:
+        psw_set = args.psw_no_interactive
+    elif start_operation and not volume_exists and not args.startup_psw:
+        while True:
+            puts("Insert the password for firegex: ", end="" , color=colors.yellow, is_bold=True, flush=True)
+            psw_set = getpass.getpass("")
+            puts("Confirm the password: ", end="" , color=colors.yellow, is_bold=True, flush=True)
+            check = getpass.getpass("")
+            if check != psw_set:
+                puts("Passwords don't match!" , color=colors.red, is_bold=True, flush=True)
+            else:
+                break
 
     write_compose(psw_set)
 
