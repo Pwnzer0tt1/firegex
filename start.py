@@ -139,7 +139,7 @@ volumes:
 """)
 def main():
     start_operation = not (args.stop or args.restart)
-    volume_exists = check_if_exists('docker volume ls --filter="name=^firegex_firegex_data$" --quiet')
+    volume_exists = check_if_exists('docker volume ls --filter="name=^firegex_firegex_data$" --quiet | grep firegex_firegex_data')
 
     if args.clear:
         dockercmd("volume rm firegex_firegex_data")
