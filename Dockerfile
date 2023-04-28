@@ -22,9 +22,9 @@ WORKDIR /tmp/
 RUN git clone --single-branch --branch release https://github.com/jpcre2/jpcre2
 RUN git clone --single-branch https://github.com/mfontanini/libtins.git
 WORKDIR /tmp/jpcre2
-RUN ./configure; make; make install
+RUN ./configure; make -j`nproc`; make install
 WORKDIR /tmp/libtins
-RUN mkdir build; cd build; cmake ../ -DLIBTINS_ENABLE_CXX11=1; make; make install
+RUN mkdir build; cd build; cmake ../ -DLIBTINS_ENABLE_CXX11=1; make -j`nproc`; make install
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute
