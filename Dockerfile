@@ -1,13 +1,11 @@
-FROM node:16-alpine AS frontend
-RUN apk add --update npm
-RUN npm install -g npm@latest
+FROM node:20-bullseye-slim AS frontend
 RUN mkdir /app
 WORKDIR /app
 ADD ./frontend/package.json .
 ADD ./frontend/package-lock.json .
-RUN npm install
+RUN yarn install
 COPY ./frontend/ .
-RUN npm run build
+RUN yarn build
 
 
 #Building main conteiner
