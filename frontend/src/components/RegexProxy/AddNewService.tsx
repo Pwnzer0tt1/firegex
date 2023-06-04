@@ -1,5 +1,5 @@
 import { Button, Group, Space, TextInput, Notification, Modal, Switch } from '@mantine/core';
-import { useForm } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 import React, { useState } from 'react';
 import { okNotify } from '../../js/utils';
 import { ImCross } from "react-icons/im"
@@ -24,7 +24,7 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             chosenInternalPort:false,
             autostart: true
         },
-        validationRules:{
+        validate:{
             name: (value) => value !== ""?true:false,
             port: (value) => value>0 && value<65536,
             internalPort: (value) => value>0 && value<65536,

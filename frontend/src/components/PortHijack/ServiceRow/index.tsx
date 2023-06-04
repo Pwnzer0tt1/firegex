@@ -10,7 +10,7 @@ import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
 import ChangeDestination from './ChangeDestination';
 import PortInput from '../../PortInput';
-import { useForm } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 
 function ServiceRow({ service }:{ service:Service }) {
 
@@ -25,7 +25,7 @@ function ServiceRow({ service }:{ service:Service }) {
 
     const form = useForm({
         initialValues: { proxy_port:service.proxy_port },
-        validationRules:{ proxy_port: (value) => value > 0 && value < 65536 }
+        validate:{ proxy_port: (value) => value > 0 && value < 65536 }
     })
 
     const onChangeProxyPort = ({proxy_port}:{proxy_port:number}) => {
@@ -142,7 +142,7 @@ function ServiceRow({ service }:{ service:Service }) {
                     <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
                 </Menu>
                 <Space w="md"/>                        
-                <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} transitionTimingFunction="ease" color="red" opened={tooltipStopOpened} tooltipId="tooltip-stop-id">
+                <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
                     <ActionIcon color="red" loading={buttonLoading}
                     onClick={stopService} size="xl" radius="md" variant="filled"
                     disabled={!service.active}
@@ -153,7 +153,7 @@ function ServiceRow({ service }:{ service:Service }) {
                     </ActionIcon>
                 </Tooltip>
                 <Space w="md"/>
-                <Tooltip label="Start service" transition="pop" zIndex={0} transitionDuration={200} transitionTimingFunction="ease" color="teal">
+                <Tooltip label="Start service" zIndex={0} color="teal">
                     <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
                                 variant="filled" disabled={service.active}>
                         <FaPlay size="20px" />

@@ -1,5 +1,5 @@
 import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl } from '@mantine/core';
-import { useForm } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 import React, { useState } from 'react';
 import { okNotify, regex_ipv6_no_cidr, regex_ipv4_no_cidr } from '../../js/utils';
 import { ImCross } from "react-icons/im"
@@ -28,7 +28,7 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             ip_dst:"127.0.0.1",
             autostart: false,
         },
-        validationRules:{
+        validate:{
             name: (value) => value !== ""?true:false,
             public_port: (value) => value>0 && value<65536,
             proxy_port: (value) => value>0 && value<65536,

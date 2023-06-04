@@ -1,5 +1,5 @@
 import { Button, Group, Space, Notification, Modal, Center, Title } from '@mantine/core';
-import { useForm } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 import React, { useEffect, useState } from 'react';
 import { ImCross } from "react-icons/im"
 import { FaLongArrowAltDown } from 'react-icons/fa';
@@ -19,7 +19,7 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
             internalPort: service.internal_port,
             port: service.public_port
         },
-        validationRules:{
+        validate:{
             internalPort: (value) => value>0 && value<65536,
             port: (value) => value>0 && value<65536 
         }

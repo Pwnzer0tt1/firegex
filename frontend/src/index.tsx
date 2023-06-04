@@ -4,17 +4,16 @@ import { BrowserRouter } from "react-router-dom"
 import './index.scss';
 import App from './App';
 import { MantineProvider } from '@mantine/core';
-import { NotificationsProvider } from '@mantine/notifications';
+import { Notifications } from '@mantine/notifications';
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
 root.render(
   <MantineProvider theme={{ colorScheme: 'dark' }} withGlobalStyles withNormalizeCSS>
-      <NotificationsProvider>
-        <BrowserRouter>
+    <Notifications />
+    <BrowserRouter>
             <App />
-        </BrowserRouter>
-    </NotificationsProvider>
+    </BrowserRouter>
   </MantineProvider>
 );

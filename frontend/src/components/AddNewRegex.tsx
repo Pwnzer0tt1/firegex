@@ -1,5 +1,5 @@
 import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Modal } from '@mantine/core';
-import { useForm } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 import React, { useState } from 'react';
 import { RegexAddForm } from '../js/models';
 import { b64decode, b64encode, getapiobject, okNotify } from '../js/utils';
@@ -24,7 +24,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             is_case_insensitive:false,
             deactive:false
         },
-        validationRules:{
+        validate:{
             regex: (value) => value !== "",
             type: (value) => ["blacklist","whitelist"].includes(value),
             mode: (value) => ['C -> S', 'S -> C', 'C <-> S'].includes(value)

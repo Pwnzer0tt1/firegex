@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActionIcon, Divider, Image, Menu, Tooltip, FloatingTooltip, MediaQuery, Burger, Space, Header } from '@mantine/core';
+import { ActionIcon, Divider, Image, Menu, Tooltip, MediaQuery, Burger, Space, Header } from '@mantine/core';
 import style from "./index.module.scss";
 import { errorNotify, getmainpath, logout } from '../../js/utils';
 import { AiFillHome } from "react-icons/ai"
@@ -44,9 +44,9 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
           />
         </div></MediaQuery>
         <div className={style.divlogo}>
-          <FloatingTooltip zIndex={0} label="Home" transition="pop" transitionDuration={200} openDelay={1000} transitionTimingFunction="ease" color="dark" position="right" >
+          <Tooltip zIndex={0} label="Home" openDelay={1000}color="dark" position="right" >
             <Image src="/header-logo.png" alt="Firegex logo" onClick={()=>navigator("/")}/>
-          </FloatingTooltip>
+          </Tooltip>
         </div>
         
         <div className="flex-spacer" />        
@@ -61,7 +61,7 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
           
         </Menu>
         <Space w="md" />
-        <Tooltip label="Home" position='bottom' transition="pop" transitionDuration={200} transitionTimingFunction="ease" color="teal" opened={tooltipHomeOpened} tooltipId="tooltip-home-id">
+        <Tooltip label="Home" position='bottom' color="teal" opened={tooltipHomeOpened}>
           <ActionIcon color="teal" style={{marginRight:"10px"}}
             size="xl" radius="md" variant="filled"
             onClick={go_to_home}
@@ -70,7 +70,7 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
             <AiFillHome size="25px" />
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="Logout" position='bottom' transition="pop" transitionDuration={200}  transitionTimingFunction="ease" color="blue" opened={tooltipLogoutOpened} tooltipId="tooltip-add-id">
+        <Tooltip label="Logout" position='bottom' color="blue" opened={tooltipLogoutOpened}>
           <ActionIcon color="blue" onClick={logout_action} size="xl" radius="md" variant="filled"
             onFocus={() => setTooltipLogoutOpened(false)} onBlur={() => setTooltipLogoutOpened(false)}
             onMouseEnter={() => setTooltipLogoutOpened(true)} onMouseLeave={() => setTooltipLogoutOpened(false)}><ImExit size={23} style={{marginTop:"3px", marginLeft:"2px"}}/></ActionIcon>

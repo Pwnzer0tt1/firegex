@@ -1,5 +1,5 @@
 import { Button, Group, Space, TextInput, Notification, Modal } from '@mantine/core';
-import { useForm } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 import React, { useEffect, useState } from 'react';
 import { okNotify } from '../../../js/utils';
 import { ImCross } from "react-icons/im"
@@ -9,7 +9,7 @@ function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>v
 
     const form = useForm({
         initialValues: { name:service.name },
-        validationRules:{ name: (value) => value !== "" }
+        validate:{ name: (value) => value !== "" }
     })
 
     const close = () =>{

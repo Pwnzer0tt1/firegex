@@ -5,7 +5,7 @@ import { Navigate } from "react-router-dom";
 import { nfregex } from "../components/NFRegex/utils";
 import { regexproxy } from "../components/RegexProxy/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
-var Buffer = require('buffer').Buffer 
+import { Buffer } from "buffer"
 
 
 export const eventUpdateName = "update-info"

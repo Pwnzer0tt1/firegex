@@ -1,5 +1,5 @@
 import { Button, Group, Loader, LoadingOverlay, Notification, Space, PasswordInput, Title } from '@mantine/core';
-import { useForm } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 import React, { useEffect, useState } from 'react';
 import { ImCross } from 'react-icons/im';
 import { Outlet, Route, Routes } from 'react-router-dom';
@@ -59,7 +59,7 @@ function App() {
     initialValues: {
         password:"",
     },
-    validationRules:{
+    validate:{
       password: (value) => value !== ""
     }
   })

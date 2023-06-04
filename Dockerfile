@@ -33,7 +33,7 @@ RUN g++ binsrc/nfqueue.cpp -o modules/cppqueue -O3 -lnetfilter_queue -pthread -l
 RUN g++ binsrc/proxy.cpp -o modules/proxy -O3 -pthread -lboost_system -lboost_thread -lpcre2-8
 
 COPY ./backend/ /execute/
-COPY --from=frontend /app/build/ ./frontend/
+COPY --from=frontend /app/dist/ ./frontend/
 
 CMD ["/bin/sh", "/execute/docker-entrypoint.sh"]
 

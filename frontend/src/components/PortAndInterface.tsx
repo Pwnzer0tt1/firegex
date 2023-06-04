@@ -1,9 +1,8 @@
 import { Autocomplete, AutocompleteItem, Space, Title } from "@mantine/core"
-import { UseForm } from "@mantine/hooks/lib/use-form/use-form";
 import React, { useEffect, useState } from "react"
 import { getipinterfaces } from "../js/utils";
 import PortInput from "./PortInput";
-
+import { UseFormReturnType } from "@mantine/form/lib/types";
 
 interface ItemProps extends AutocompleteItem {
     label: string;
@@ -16,7 +15,7 @@ const AutoCompleteItem = React.forwardRef<HTMLDivElement, ItemProps>(
 );
 
 
-export default function PortAndInterface({ form, int_name, port_name, label }:{ form:UseForm<any>, int_name:string, port_name:string, label?:string }) {
+export default function PortAndInterface({ form, int_name, port_name, label }:{ form:UseFormReturnType<any>, int_name:string, port_name:string, label?:string }) {
    
     const [ipInterfaces, setIpInterfaces] = useState<AutocompleteItem[]>([]);
     

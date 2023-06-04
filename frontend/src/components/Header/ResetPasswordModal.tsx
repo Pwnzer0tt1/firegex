@@ -1,5 +1,5 @@
 import { Button, Group, Modal, Notification, PasswordInput, Space, Switch } from "@mantine/core";
-import { useForm } from "@mantine/hooks";
+import { useForm } from "@mantine/form";
 import React, { useState } from "react"
 import { ImCross } from "react-icons/im";
 import { ChangePassword } from "../../js/models";
@@ -11,7 +11,7 @@ function ResetPasswordModal({ opened, onClose }:{ opened: boolean, onClose: () =
             password:"",
             expire:true
         },
-        validationRules:{
+        validate:{
           password: (value) => value !== ""
         }
       })

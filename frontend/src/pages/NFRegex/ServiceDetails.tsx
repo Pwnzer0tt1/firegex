@@ -64,7 +64,7 @@ function ServiceDetailsNFRegex() {
                 <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" />
                 <div className='center-flex'>
-                    <Tooltip label="Add a new regex" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="blue" opened={tooltipAddRegexOpened} tooltipId="tooltip-AddRegex-id">
+                    <Tooltip label="Add a new regex" zIndex={0} color="blue" opened={tooltipAddRegexOpened}>
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
                          aria-describedby="tooltip-AddRegex-id"
                          onFocus={() => setTooltipAddRegexOpened(false)} onBlur={() => setTooltipAddRegexOpened(false)}

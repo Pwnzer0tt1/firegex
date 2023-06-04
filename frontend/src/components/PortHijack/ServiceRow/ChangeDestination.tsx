@@ -1,5 +1,5 @@
 import { Button, Group, Space, Notification, Modal } from '@mantine/core';
-import { useForm } from '@mantine/hooks';
+import { useForm } from '@mantine/form';
 import React, { useEffect, useState } from 'react';
 import { okNotify, regex_ipv4_no_cidr, regex_ipv6_no_cidr } from '../../../js/utils';
 import { ImCross } from "react-icons/im"
@@ -13,7 +13,7 @@ function ChangeDestination({ opened, onClose, service }:{ opened:boolean, onClos
             ip_dst:service.ip_dst,
             proxy_port:service.proxy_port
         },
-        validationRules:{
+        validate:{
             proxy_port: (value) => value>0 && value<65536,
             ip_dst: (value) => value.match(regex_ipv6_no_cidr)?true:false || value.match(regex_ipv4_no_cidr)?true:false
         }

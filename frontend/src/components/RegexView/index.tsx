@@ -51,14 +51,14 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
           </Grid.Col>
           <Grid.Col span={2} className='center-flex'>
             <Space w="xs" />
-            <Tooltip label={regexInfo.active?"Deactivate":"Activate"} zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color={regexInfo.active?"orange":"teal"} opened={statusTooltipOpened}>
+            <Tooltip label={regexInfo.active?"Deactivate":"Activate"} zIndex={0} color={regexInfo.active?"orange":"teal"} opened={statusTooltipOpened}>
               <ActionIcon color={regexInfo.active?"orange":"teal"} onClick={changeRegexStatus} size="xl" radius="md" variant="filled"
                onFocus={() => setStatusTooltipOpened(false)} onBlur={() => setStatusTooltipOpened(false)}
                onMouseEnter={() => setStatusTooltipOpened(true)} onMouseLeave={() => setStatusTooltipOpened(false)}
               >{regexInfo.active?<FaPause size="20px" />:<FaPlay size="20px" />}</ActionIcon>
             </Tooltip>
             <Space w="xs" />
-            <Tooltip label="Delete regex" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="red" opened={deleteTooltipOpened} >
+            <Tooltip label="Delete regex" zIndex={0} color="red" opened={deleteTooltipOpened} >
               <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"
                onFocus={() => setDeleteTooltipOpened(false)} onBlur={() => setDeleteTooltipOpened(false)}
                onMouseEnter={() => setDeleteTooltipOpened(true)} onMouseLeave={() => setDeleteTooltipOpened(false)}

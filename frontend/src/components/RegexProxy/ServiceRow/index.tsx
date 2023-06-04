@@ -153,7 +153,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                     <Space w="md"/>
                     {["pause","wait"].includes(service.status)?
                         
-                        <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="orange" opened={tooltipStopOpened} tooltipId="tooltip-stop-id">
+                        <Tooltip label="Stop service" zIndex={0} color="orange" opened={tooltipStopOpened}>
                             <ActionIcon color="yellow" loading={buttonLoading}
                             onClick={()=>setStopModal(true)} size="xl" radius="md" variant="filled"
                             disabled={service.status === "stop"}
@@ -163,7 +163,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                                 <FaStop size="20px" />
                             </ActionIcon>
                         </Tooltip>:
-                        <Tooltip label={service.status === "stop"?"Start in pause mode":"Pause service"} zIndex={0} transition="pop" transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color={service.status === "stop"?"cyan":"red"}>
+                        <Tooltip label={service.status === "stop"?"Start in pause mode":"Pause service"} zIndex={0} color={service.status === "stop"?"cyan":"red"}>
                             <ActionIcon color={service.status === "stop"?"cyan":"red"} loading={buttonLoading}
                                     onClick={pauseService} size="xl" radius="md" variant="filled">
                                 <FaPause size="20px" />
@@ -172,7 +172,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                     }
                     
                     <Space w="md"/>
-                    <Tooltip label="Start service" transition="pop" zIndex={0} transitionDuration={200} /*openDelay={500}*/ transitionTimingFunction="ease" color="teal">
+                    <Tooltip label="Start service" zIndex={0} color="teal">
                         <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
                                     variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
                             <FaPlay size="20px" />

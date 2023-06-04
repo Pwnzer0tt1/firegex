@@ -46,7 +46,7 @@ function PortHijack() {
             <div className='flex-spacer' />
             <Badge size="sm" color="yellow" variant="filled">Services: {generalStats.services}</Badge>
             <Space w="xs" />
-            <Tooltip label="Add a new service" position='bottom' transition="pop" transitionDuration={200} transitionTimingFunction="ease" color="blue" opened={tooltipAddOpened}>
+            <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
                 <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
                     onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
                     onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
@@ -57,7 +57,7 @@ function PortHijack() {
             {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.service_id} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> 
                 <div className='center-flex'>
-                    <Tooltip label="Add a new service" transition="pop" transitionDuration={200} transitionTimingFunction="ease" color="blue" opened={tooltipAddServOpened}>
+                    <Tooltip label="Add a new service" color="blue" opened={tooltipAddServOpened}>
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
                             onFocus={() => setTooltipAddServOpened(false)} onBlur={() => setTooltipAddServOpened(false)}
                             onMouseEnter={() => setTooltipAddServOpened(true)} onMouseLeave={() => setTooltipAddServOpened(false)}><BsPlusLg size="20px" /></ActionIcon>

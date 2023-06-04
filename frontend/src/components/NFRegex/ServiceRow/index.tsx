@@ -116,7 +116,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                         <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
                     </Menu>
                     <Space w="md"/>                        
-                    <Tooltip label="Stop service" zIndex={0} transition="pop" transitionDuration={200} transitionTimingFunction="ease" color="red" opened={tooltipStopOpened} tooltipId="tooltip-stop-id">
+                    <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
                         <ActionIcon color="red" loading={buttonLoading}
                         onClick={stopService} size="xl" radius="md" variant="filled"
                         disabled={service.status === "stop"}
@@ -127,7 +127,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                         </ActionIcon>
                     </Tooltip>
                     <Space w="md"/>
-                    <Tooltip label="Start service" transition="pop" zIndex={0} transitionDuration={200} transitionTimingFunction="ease" color="teal">
+                    <Tooltip label="Start service" zIndex={0} color="teal">
                         <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
                                     variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
                             <FaPlay size="20px" />
