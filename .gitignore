@@ -19,6 +19,7 @@
 /backend/modules/cppqueue
 /backend/modules/proxy
 docker-compose.yml
+firegex-compose.yml
 
 # misc
 **/.DS_Store
