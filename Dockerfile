@@ -9,27 +9,24 @@ RUN yarn build
 
 
 #Building main conteiner
-FROM python:alpine AS base
-
-RUN apk update
-RUN apk add g++ git pcre2-dev libnetfilter_queue-dev libpcap-dev\
-        libcrypto1.1 libnfnetlink-dev libmnl-dev make cmake nftables maturin\
-        boost-dev libcap autoconf automake bash rust cargo openssl-dev libffi-dev
+FROM debian:bookworm-slim as base
+RUN apt-get update -qq && apt-get upgrade -qq
+RUN apt-get install -qq python3-pip build-essential
+RUN apt-get install -qq git libpcre2-dev libnetfilter-queue-dev
+RUN apt-get install -qq libssl-dev libnfnetlink-dev libmnl-dev libcap2-bin
+RUN apt-get install -qq make cmake nftables libboost-all-dev autoconf
+RUN apt-get install -qq automake cargo libffi-dev libtins-dev #python3-nftables
 
 WORKDIR /tmp/
 RUN git clone --single-branch --branch release https://github.com/jpcre2/jpcre2
-RUN git clone --single-branch https://github.com/mfontanini/libtins.git
 WORKDIR /tmp/jpcre2
 RUN ./configure; make -j`nproc`; make install
-WORKDIR /tmp/libtins
-RUN mkdir build; cd build; cmake ../ -DLIBTINS_ENABLE_CXX11=1; make -j`nproc`; make install
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute
 
 ADD ./backend/requirements.txt /execute/requirements.txt
-RUN pip3 install --upgrade pip
-RUN pip3 install --no-cache-dir -r /execute/requirements.txt --no-warn-script-location
+RUN pip3 install --no-cache-dir --break-system-packages -r /execute/requirements.txt --no-warn-script-location
 
 COPY ./backend/binsrc /execute/binsrc
 RUN g++ binsrc/nfqueue.cpp -o modules/cppqueue -O3 -lnetfilter_queue -pthread -lpcre2-8 -ltins -lmnl -lnfnetlink
