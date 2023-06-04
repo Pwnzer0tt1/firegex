@@ -2,7 +2,7 @@ FROM node:20-bullseye-slim AS frontend
 RUN mkdir /app
 WORKDIR /app
 ADD ./frontend/package.json .
-ADD ./frontend/package-lock.json .
+ADD ./frontend/yarn.lock .
 RUN yarn install
 COPY ./frontend/ .
 RUN yarn build
