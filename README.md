@@ -1,6 +1,5 @@
 # 2.2.0 VERSION NEW TO IMPLEMENT
 - TODO: Need to fix mantine form validation
-- TODO: Merge edits in the main branch to this branch
 1. PCRE2 ---> HyperScan Streams (VectorScan for arm64 compatibility using debian Bookworm)
 2. nfregex from c++ to rust 
   - https://crates.io/crates/hyperscan

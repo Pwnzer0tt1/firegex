@@ -14,7 +14,7 @@ REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
 
 async def frontend_debug_proxy(path):
     httpc = httpx.AsyncClient()
-    req = httpc.build_request("GET",f"http://127.0.0.1:{os.getenv('F_PORT','3000')}/"+path)
+    req = httpc.build_request("GET",f"http://127.0.0.1:{os.getenv('F_PORT','5173')}/"+path)
     resp = await httpc.send(req, stream=True)
     return StreamingResponse(resp.aiter_bytes(),status_code=resp.status_code)
 
@@ -38,7 +38,7 @@ def frontend_deploy(app):
         @app.websocket("/ws")
         async def websocket_debug_proxy(ws: WebSocket):
             await ws.accept()
-            async with websockets.connect(f"ws://127.0.0.1:{os.getenv('F_PORT','3000')}/ws") as ws_b_client:
+            async with websockets.connect(f"ws://127.0.0.1:{os.getenv('F_PORT','5173')}/ws") as ws_b_client:
                 fwd_task = asyncio.create_task(forward_websocket(ws, ws_b_client))
                 rev_task = asyncio.create_task(reverse_websocket(ws, ws_b_client))
                 await asyncio.gather(fwd_task, rev_task)
@@ -49,7 +49,7 @@ def frontend_deploy(app):
             try:
                 return await frontend_debug_proxy(full_path)
             except Exception:
-                return {"details":"Frontend not started at "+f"http://127.0.0.1:{os.getenv('F_PORT','3000')}"}
+                return {"details":"Frontend not started at "+f"http://127.0.0.1:{os.getenv('F_PORT','5173')}"}
         else: return await react_deploy(full_path)
         
 def list_routers():
