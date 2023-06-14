@@ -9,7 +9,7 @@ function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>v
 
     const form = useForm({
         initialValues: { name:service.name },
-        validate:{ name: (value) => value !== "" }
+        validate:{ name: (value) => value !== ""? null : "Service name is required" }
     })
 
     const close = () =>{

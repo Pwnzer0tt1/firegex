@@ -25,9 +25,9 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             deactive:false
         },
         validate:{
-            regex: (value) => value !== "",
-            type: (value) => ["blacklist","whitelist"].includes(value),
-            mode: (value) => ['C -> S', 'S -> C', 'C <-> S'].includes(value)
+            regex: (value) => value !== "" ? null : "Regex is required",
+            type: (value) => ["blacklist","whitelist"].includes(value) ? null : "Invalid type",
+            mode: (value) => ['C -> S', 'S -> C', 'C <-> S'].includes(value) ? null : "Invalid mode",
         }
     })
 

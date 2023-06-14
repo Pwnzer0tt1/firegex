@@ -20,8 +20,8 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
             port: service.public_port
         },
         validate:{
-            internalPort: (value) => value>0 && value<65536,
-            port: (value) => value>0 && value<65536 
+            internalPort: (value) => (value>0 && value<65536) ? null : "Invalid internal port",
+            port: (value) => (value>0 && value<65536) ? null : "Invalid public port",
         }
     })
 

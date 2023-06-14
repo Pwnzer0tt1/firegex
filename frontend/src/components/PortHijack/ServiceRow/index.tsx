@@ -11,6 +11,7 @@ import RenameForm from './RenameForm';
 import ChangeDestination from './ChangeDestination';
 import PortInput from '../../PortInput';
 import { useForm } from '@mantine/form';
+import { MenuDropDownWithButton } from '../../MainLayout';
 
 function ServiceRow({ service }:{ service:Service }) {
 
@@ -25,7 +26,7 @@ function ServiceRow({ service }:{ service:Service }) {
 
     const form = useForm({
         initialValues: { proxy_port:service.proxy_port },
-        validate:{ proxy_port: (value) => value > 0 && value < 65536 }
+        validate:{ proxy_port: (value) => (value > 0 && value < 65536)? null : "Invalid proxy port" }
     })
 
     const onChangeProxyPort = ({proxy_port}:{proxy_port:number}) => {
@@ -132,7 +133,7 @@ function ServiceRow({ service }:{ service:Service }) {
 
             <Space w="xl" /><Space w="xl" />
             <div className="center-flex">
-                <Menu>
+                <MenuDropDownWithButton>
                     <Menu.Label><b>Rename service</b></Menu.Label>
                     <Menu.Item icon={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
                     <Menu.Label><b>Change destination</b></Menu.Label>
@@ -140,7 +141,7 @@ function ServiceRow({ service }:{ service:Service }) {
                     <Divider />
                     <Menu.Label><b>Danger zone</b></Menu.Label>
                     <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                </Menu>
+                </MenuDropDownWithButton>
                 <Space w="md"/>                        
                 <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
                     <ActionIcon color="red" loading={buttonLoading}

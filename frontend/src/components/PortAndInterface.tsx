@@ -1,16 +1,16 @@
-import { Autocomplete, AutocompleteItem, Space, Title } from "@mantine/core"
+import { Autocomplete, AutocompleteItem, Select, Space, Title } from "@mantine/core"
 import React, { useEffect, useState } from "react"
 import { getipinterfaces } from "../js/utils";
 import PortInput from "./PortInput";
 import { UseFormReturnType } from "@mantine/form/lib/types";
 
 interface ItemProps extends AutocompleteItem {
-    label: string;
+    netint: string;
 }
 
 const AutoCompleteItem = React.forwardRef<HTMLDivElement, ItemProps>(
-    ({ label, value, ...props }: ItemProps, ref) => <div ref={ref} {...props}>
-            ( <b>{label}</b> ) -{">"} <b>{value}</b> 
+    ({ netint, value, ...props }: ItemProps, ref) => <div ref={ref} {...props}>
+            ( <b>{netint}</b> ) -{">"} <b>{value}</b> 
     </div>
 );
 
@@ -21,7 +21,7 @@ export default function PortAndInterface({ form, int_name, port_name, label }:{ 
     
     useEffect(()=>{
         getipinterfaces().then(data => {
-            setIpInterfaces(data.map(item => ({label:item.name, value:item.addr})));
+            setIpInterfaces(data.map(item => ({netint:item.name, value:item.addr, label:item.addr})));
         })
     },[])
 
@@ -29,17 +29,26 @@ export default function PortAndInterface({ form, int_name, port_name, label }:{ 
         {label?<>
             <Title order={6}>{label}</Title>
             <Space h="xs" /></> :null}
-        
-        <div className='center-flex' style={{width:"100%"}}>
-            <Autocomplete
-                placeholder="10.1.1.1"
-                itemComponent={AutoCompleteItem}
-                data={ipInterfaces}
-                {...form.getInputProps(int_name)}
-                style={{width:"100%"}}
-            />
-            <Space w="sm" /><span style={{marginTop:"-3px", fontSize:"1.5em"}}>:</span><Space w="sm" />
-            <PortInput {...form.getInputProps(port_name)} />
-        </div>
+            <div className='center-flex' style={{width:"100%"}}>
+                <Select
+                    placeholder="10.1.1.1"
+                    itemComponent={AutoCompleteItem}
+                    data={ipInterfaces}
+                    searchable
+                    dropdownPosition="bottom"
+                    maxDropdownHeight={100}
+                    creatable
+                    getCreateLabel={(query) => `+ Use this: ${query}`}
+                    onCreate={(query) => {
+                        const item = { value: query, netint: "CUSTOM", label: query };
+                        setIpInterfaces((current) => [...current, item]);
+                        return item;
+                    }}
+                    {...form.getInputProps(int_name)}
+                    style={{width:"100%"}}
+                />
+                <Space w="sm" /><span style={{marginTop:"-3px", fontSize:"1.5em"}}>:</span><Space w="sm" />
+                <PortInput {...form.getInputProps(port_name)} />
+            </div>
     </>
 }

@@ -11,6 +11,7 @@ import { BiRename } from 'react-icons/bi'
 import ChangePortModal from './ChangePortModal';
 import RenameForm from './RenameForm';
 import { regexproxy, Service } from '../utils';
+import { MenuDropDownWithButton } from '../../MainLayout';
 
 //"status":"stop"/"wait"/"active"/"pause",
 function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
@@ -139,7 +140,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                     <><Space w="xl" /><Space w="xl" /></>
                 </MediaQuery>
                 <div className="center-flex">
-                    <Menu>
+                    <MenuDropDownWithButton>
                         <Menu.Label><b>Rename service</b></Menu.Label>
                         <Menu.Item icon={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
                         <Divider />
@@ -149,7 +150,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                         <Divider />
                         <Menu.Label><b>Danger zone</b></Menu.Label>
                         <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                    </Menu>
+                    </MenuDropDownWithButton>
                     <Space w="md"/>
                     {["pause","wait"].includes(service.status)?
                         

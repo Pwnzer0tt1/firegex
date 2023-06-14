@@ -29,12 +29,12 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             autostart: false,
         },
         validate:{
-            name: (value) => value !== ""?true:false,
-            public_port: (value) => value>0 && value<65536,
-            proxy_port: (value) => value>0 && value<65536,
-            proto: (value) => ["tcp","udp"].includes(value),
-            ip_src: (value) => value.match(regex_ipv6_no_cidr)?true:false || value.match(regex_ipv4_no_cidr)?true:false,
-            ip_dst: (value) => value.match(regex_ipv6_no_cidr)?true:false || value.match(regex_ipv4_no_cidr)?true:false
+            name: (value) => value !== ""? null : "Service name is required",
+            public_port: (value) => (value>0 && value<65536) ? null : "Invalid public port",
+            proxy_port: (value) => (value>0 && value<65536) ? null : "Invalid proxy port",
+            proto: (value) => ["tcp","udp"].includes(value) ? null : "Invalid protocol",
+            ip_src: (value) => (value.match(regex_ipv6_no_cidr) || value.match(regex_ipv4_no_cidr)) ? null : "Invalid source IP address",
+            ip_dst: (value) => (value.match(regex_ipv6_no_cidr) || value.match(regex_ipv4_no_cidr)) ? null : "Invalid destination IP address",
         }
     })
 

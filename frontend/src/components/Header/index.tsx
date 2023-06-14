@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ActionIcon, Divider, Image, Menu, Tooltip, MediaQuery, Burger, Space, Header } from '@mantine/core';
+import { ActionIcon, Divider, Image, Menu, Tooltip, MediaQuery, Burger, Space, Header, Button, ThemeIcon } from '@mantine/core';
 import style from "./index.module.scss";
 import { errorNotify, getmainpath, logout } from '../../js/utils';
 import { AiFillHome } from "react-icons/ai"
@@ -9,6 +9,8 @@ import { MdOutlineSettingsBackupRestore } from 'react-icons/md';
 import { ImExit } from 'react-icons/im';
 import ResetPasswordModal from './ResetPasswordModal';
 import ResetModal from './ResetModal';
+import { RiMenu5Fill } from 'react-icons/ri';
+import { MenuDropDownWithButton } from '../MainLayout';
 
 
 function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:React.Dispatch<React.SetStateAction<boolean>>}) {
@@ -51,15 +53,13 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
         
         <div className="flex-spacer" />        
       
-        
-        <Menu>
+        <MenuDropDownWithButton>
           <Menu.Label>Firewall Access</Menu.Label>
           <Menu.Item icon={<FaLock size={14} />} onClick={() => setChangePasswordModal(true)}>Change Password</Menu.Item>
           <Divider />
           <Menu.Label>Actions</Menu.Label>
           <Menu.Item color="red" icon={<MdOutlineSettingsBackupRestore size={18} />} onClick={() => setResetFiregexModal(true)}>Reset Firegex</Menu.Item>
-          
-        </Menu>
+        </MenuDropDownWithButton>
         <Space w="md" />
         <Tooltip label="Home" position='bottom' color="teal" opened={tooltipHomeOpened}>
           <ActionIcon color="teal" style={{marginRight:"10px"}}

@@ -60,7 +60,7 @@ function App() {
         password:"",
     },
     validate:{
-      password: (value) => value !== ""
+      password: (value) => value !== "" ? null : "Password is required",
     }
   })
 

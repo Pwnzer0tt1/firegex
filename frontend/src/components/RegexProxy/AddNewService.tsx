@@ -25,9 +25,9 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             autostart: true
         },
         validate:{
-            name: (value) => value !== ""?true:false,
-            port: (value) => value>0 && value<65536,
-            internalPort: (value) => value>0 && value<65536,
+            name: (value) => value !== ""? null : "Service name is required",
+            port: (value) => (value>0 && value<65536) ? null : "Invalid port",
+            internalPort: (value) => (value>0 && value<65536) ? null : "Invalid internal port",
         }
     })
 

@@ -25,10 +25,10 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             autostart: true
         },
         validate:{
-            name: (value) => value !== ""?true:false,
-            port: (value) => value>0 && value<65536,
-            proto: (value) => ["tcp","udp"].includes(value),
-            ip_int: (value) => value.match(regex_ipv6)?true:false || value.match(regex_ipv4)?true:false
+            name: (value) => value !== "" ? null : "Service name is required",
+            port: (value) => (value>0 && value<65536) ? null : "Invalid port",
+            proto: (value) => ["tcp","udp"].includes(value) ? null : "Invalid protocol",
+            ip_int: (value) => (value.match(regex_ipv6) || value.match(regex_ipv4)) ? null : "Invalid IP address",
         }
     })
 

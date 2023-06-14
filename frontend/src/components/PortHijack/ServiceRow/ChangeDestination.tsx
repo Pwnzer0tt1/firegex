@@ -14,8 +14,8 @@ function ChangeDestination({ opened, onClose, service }:{ opened:boolean, onClos
             proxy_port:service.proxy_port
         },
         validate:{
-            proxy_port: (value) => value>0 && value<65536,
-            ip_dst: (value) => value.match(regex_ipv6_no_cidr)?true:false || value.match(regex_ipv4_no_cidr)?true:false
+            proxy_port: (value) => (value>0 && value<65536) ? null : "Invalid proxy port",
+            ip_dst: (value) => (value.match(regex_ipv6_no_cidr) || value.match(regex_ipv4_no_cidr))? null : "Invalid destination IP address",
         }
     })
 

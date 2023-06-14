@@ -12,7 +12,7 @@ function ResetPasswordModal({ opened, onClose }:{ opened: boolean, onClose: () =
             expire:true
         },
         validate:{
-          password: (value) => value !== ""
+          password: (value) => value !== ""? null : "Password is required"
         }
       })
       const [loadingBtn, setLoadingBtn] = useState(false)
