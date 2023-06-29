@@ -7,6 +7,7 @@ import { regexproxy } from "../components/RegexProxy/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 import { Buffer } from "buffer"
 
+export const IS_DEV = import.meta.env.DEV
 
 export const eventUpdateName = "update-info"
 
@@ -18,7 +19,7 @@ export const regex_ipv4_no_cidr = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[
 export async function getapi(path:string):Promise<any>{
 
     return await new Promise((resolve, reject) => {
-        fetch(`/api/${path}`,{
+        fetch(`${IS_DEV?"http://127.0.0.1:4444":""}/api/${path}`,{
             credentials: "same-origin",
             headers: { "Authorization" : "Bearer " + window.localStorage.getItem("access_token")}
         }).then(res => {
@@ -34,7 +35,7 @@ export async function getapi(path:string):Promise<any>{
 
 export async function postapi(path:string,data:any,is_form:boolean=false):Promise<any>{
     return await new Promise((resolve, reject) => {
-        fetch(`/api/${path}`, {
+        fetch(`${IS_DEV?"http://127.0.0.1:4444":""}/api/${path}`, {
             method: 'POST',
             credentials: "same-origin",
             cache: 'no-cache',

@@ -8,6 +8,7 @@ from starlette.responses import StreamingResponse
 from fastapi.responses import FileResponse
 from utils import DEBUG, ON_DOCKER, ROUTERS_DIR, list_files, run_func
 from utils.models import ResetRequest
+from fastapi.middleware.cors import CORSMiddleware
 
 REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
 REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
@@ -27,21 +28,13 @@ async def react_deploy(path):
 
 def frontend_deploy(app):
     if DEBUG:
-        async def forward_websocket(ws_a, ws_b):
-            while True:
-                data = await ws_a.receive_bytes()
-                await ws_b.send(data)
-        async def reverse_websocket(ws_a, ws_b):
-            while True:
-                data = await ws_b.recv()
-                await ws_a.send_text(data)
-        @app.websocket("/")
-        async def websocket_debug_proxy(ws: WebSocket):
-            await ws.accept()
-            async with websockets.connect(f"ws://127.0.0.1:{os.getenv('F_PORT','5173')}/") as ws_b_client:
-                fwd_task = asyncio.create_task(forward_websocket(ws, ws_b_client))
-                rev_task = asyncio.create_task(reverse_websocket(ws, ws_b_client))
-                await asyncio.gather(fwd_task, rev_task)
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def catch_all(full_path:str):

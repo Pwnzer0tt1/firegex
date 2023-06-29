@@ -10,6 +10,7 @@ from utils.sqlite import SQLite
 from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, refresh_frontend, DEBUG, SysctlManager
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
+from fastapi.middleware.cors import CORSMiddleware
 
 # DB init
 db = SQLite('db/firegex.db')
@@ -155,6 +156,6 @@ if __name__ == '__main__':
         port=FIREGEX_PORT,
         reload=DEBUG,
         access_log=True,
-        workers=1 # Multiple workers will cause a crash due to the creation
+        workers=1, # Multiple workers will cause a crash due to the creation
                   # of multiple processes with separated memory
     )

@@ -1,11 +1,11 @@
-FROM node:20-bullseye-slim AS frontend
+FROM node:18 AS frontend
 RUN mkdir /app
 WORKDIR /app
 ADD ./frontend/package.json .
 ADD ./frontend/yarn.lock .
 RUN yarn install --network-timeout 300000
 COPY ./frontend/ .
-RUN yarn build --production=true
+RUN yarn build
 
 
 #Building main conteiner
