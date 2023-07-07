@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 hyperscan = "0.3.2"
 nfqueue = "0.9.1"
+libtins-rs = { git = "https://github.com/Pwnzer0tt1/libtins-rs.git" }
