@@ -84,5 +84,7 @@ class FiregexTables(NFTableManager):
             "expr": [
                     {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_src), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_src)}},
                     {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_dst), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_dst)}},
-                ] + port_filters + [{'accept': None} if srv.action == "accept" else {'reject': {}} if srv.action == "reject" else {'drop': None}]
+                ] + port_filters +
+            [{'accept': None} if srv.action == "accept" else {'reject': {}} if (srv.action == "reject" and not srv.output_mode) else {'drop': None}]
+            #If srv.output_mode is True, then the rule is in the output chain, so the reject action is not allowed
         }}})
