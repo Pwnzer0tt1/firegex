@@ -56,7 +56,7 @@ class FirewallManager:
                 del self.service_table[srv_id]
     
     async def init(self):
-        FiregexTables().init()
+        nft.init()
         await self.reload()
 
     async def reload(self):

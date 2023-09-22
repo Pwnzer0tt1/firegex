@@ -1,8 +1,5 @@
 class Rule:
-    def __init__(self, rule_id: int, name: str, active: bool, proto: str, ip_src:str, ip_dst:str, port_src_from:str, port_dst_from:str, port_src_to:str, port_dst_to:str, action:str, mode:str):
-        self.rule_id = rule_id
-        self.active = active
-        self.name = name
+    def __init__(self, proto: str, ip_src:str, ip_dst:str, port_src_from:str, port_dst_from:str, port_src_to:str, port_dst_to:str, action:str, mode:str):
         self.proto = proto
         self.ip_src = ip_src
         self.ip_dst = ip_dst
@@ -18,9 +15,6 @@ class Rule:
     @classmethod
     def from_dict(cls, var: dict):
         return cls(
-            rule_id=var["rule_id"],
-            active=var["active"],
-            name=var["name"],
             proto=var["proto"],
             ip_src=var["ip_src"],
             ip_dst=var["ip_dst"],

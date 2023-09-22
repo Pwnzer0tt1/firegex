@@ -99,10 +99,10 @@ class SQLite():
             self.create_schema(self.schema)
             self.put('DB_VERSION', self.DB_VER)
 
-    def get(self, key):
+    def get(self, key, default = None):
         q = self.query('SELECT value FROM keys_values WHERE key = ?', key)
         if len(q) == 0:
-            return None
+            return default
         else:
             return q[0]["value"]
 
@@ -111,3 +111,6 @@ class SQLite():
             self.query('INSERT INTO keys_values (key, value) VALUES (?, ?);', key, str(value))
         else:
             self.query('UPDATE keys_values SET value=? WHERE key = ?;', str(value), key)
+    
+    def set(self, key, value):
+        return self.put(key, value)

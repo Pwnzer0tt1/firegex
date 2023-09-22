@@ -28,8 +28,8 @@ class FiregexTables(NFTableManager):
     rules_chain_in = "firewall_rules_in"
     rules_chain_out = "firewall_rules_out"
     
-    def __init__(self):
-        super().__init__([
+    def init_comands(self, policy:str="accept", policy_out:str="accept"):
+        return [
             {"add":{"chain":{
                 "family":"inet",
                 "table":self.table_name,
@@ -37,7 +37,7 @@ class FiregexTables(NFTableManager):
                 "type":"filter",
                 "hook":"prerouting",
                 "prio":-300,
-                "policy":"accept"
+                "policy":policy
             }}},
             {"add":{"chain":{
                 "family":"inet",
@@ -46,24 +46,38 @@ class FiregexTables(NFTableManager):
                 "type":"filter",
                 "hook":"postrouting",
                 "prio":-300,
-                "policy":"accept"
+                "policy":policy_out
             }}},    
-        ],[
+        ]
+    
+    def __init__(self):
+        super().__init__(self.init_comands(),[
             {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.rules_chain_in}}},
             {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.rules_chain_in}}},
             {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.rules_chain_out}}},
             {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.rules_chain_out}}},
         ])
     
-    def delete_all(self):
-        self.cmd(
-            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.rules_chain_in}}},
-            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.rules_chain_out}}},
-        )
-    
-    def set(self, srv:list[Rule]):
-        self.delete_all()
-        for ele in srv: self.add(ele)
+    def set(self, srvs:list[Rule], policy:str="accept"):
+        srvs = list(srvs)
+        self.reset()
+        if policy == "reject":
+            policy = "drop"
+            srvs.extend([
+                Rule(
+                    proto="any",
+                    ip_src=iprule,
+                    ip_dst=iprule,
+                    port_src_from=1,
+                    port_dst_from=1,
+                    port_src_to=65535,
+                    port_dst_to=65535,
+                    action="reject",
+                    mode="I"
+                ) for iprule in ["0.0.0.0/0", "::/0"]
+            ])
+        self.cmd(*self.init_comands(policy))
+        for ele in srvs[::-1]: self.add(ele)
 
     def add(self, srv:Rule):
         port_filters = []
