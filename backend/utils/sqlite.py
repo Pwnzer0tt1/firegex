@@ -64,6 +64,7 @@ class SQLite():
     def queries_iter(self, queries: list[tuple[str, ...]]):
         cur = self.conn.cursor()
         try:
+            cur.execute("BEGIN")
             for query_data in queries:
                 values = []
                 str_query = None
@@ -75,6 +76,10 @@ class SQLite():
                 if str_query:
                     cur.execute(str_query, values)
                 yield cur.fetchall()
+            cur.execute("COMMIT")
+        except Exception as e:
+            cur.execute("ROLLBACK")
+            raise e
         finally:
             cur.close()
             try: self.conn.commit()
