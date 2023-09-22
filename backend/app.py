@@ -1,6 +1,5 @@
 import uvicorn, secrets, utils
 import os, asyncio
-from typing import List
 from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
@@ -108,7 +107,7 @@ async def change_password(form: PasswordChangeForm):
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 
 
-@api.get('/interfaces', response_model=List[IpInterface])
+@api.get('/interfaces', response_model=list[IpInterface])
 async def get_ip_interfaces():
     """Get a list of ip and ip6 interfaces"""
     return get_interfaces()

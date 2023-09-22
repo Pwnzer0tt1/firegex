@@ -1,4 +1,3 @@
-from typing import Union
 from pydantic import BaseModel
 
 class StatusMessageModel(BaseModel):
@@ -18,7 +17,7 @@ class PasswordChangeForm(BaseModel):
 
 class ChangePasswordModel(BaseModel):
     status: str
-    access_token: Union[str,None]
+    access_token: str|None
 
 class IpInterface(BaseModel):
     addr: str

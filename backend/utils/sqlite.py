@@ -1,11 +1,9 @@
-from typing import Union
 import json, sqlite3, os
 from hashlib import md5
-import base64
 
 class SQLite():
     def __init__(self, db_name: str, schema:dict = None) -> None:
-        self.conn: Union[None, sqlite3.Connection] = None
+        self.conn: sqlite3.Connection|None = None
         self.cur = None
         self.db_name = db_name
         self.__backup = None
@@ -58,10 +56,25 @@ class SQLite():
             cur.close()
     
     def query(self, query, *values):
+        return self.queries([(query, *values)])[0]
+
+    def queries(self, queries: list[tuple[str, ...]]):
+        return list(self.queries_iter(queries))
+
+    def queries_iter(self, queries: list[tuple[str, ...]]):
         cur = self.conn.cursor()
         try:
-            cur.execute(query, values)
-            return cur.fetchall()
+            for query_data in queries:
+                values = []
+                str_query = None
+                if isinstance(query_data, str):
+                    str_query = query_data
+                elif (isinstance(query_data, tuple) or isinstance(query_data, list)) and len(query_data) > 0 and isinstance(query_data[0], str):
+                    str_query = query_data[0]
+                    values = query_data[1:]
+                if str_query:
+                    cur.execute(str_query, values)
+                yield cur.fetchall()
         finally:
             cur.close()
             try: self.conn.commit()

@@ -1,4 +1,3 @@
-from typing import List
 from modules.porthijack.models import Service
 from utils import addr_parse, ip_parse, ip_family, NFTableManager, nftables_json_to_int
 
@@ -13,9 +12,7 @@ class FiregexHijackRule():
         self.ip_dst = str(ip_dst)
 
     def __eq__(self, o: object) -> bool:
-        if isinstance(o, FiregexHijackRule):
-            return self.public_port == o.public_port and self.proto == o.proto and ip_parse(self.ip_src) == ip_parse(o.ip_src)
-        elif isinstance(o, Service):
+        if isinstance(o, FiregexHijackRule) or isinstance(o, Service):
             return self.public_port == o.public_port and self.proto == o.proto and ip_parse(self.ip_src) == ip_parse(o.ip_src)
         return False
 
@@ -79,10 +76,9 @@ class FiregexTables(NFTableManager):
         }}})
 
 
-    def get(self) -> List[FiregexHijackRule]:
+    def get(self) -> list[FiregexHijackRule]:
         res = []
         for filter in self.list_rules(tables=[self.table_name], chains=[self.prerouting_porthijack,self.postrouting_porthijack]):
-            filter["expr"][0]["match"]["right"]
             res.append(FiregexHijackRule(
                 target=filter["chain"],
                 id=int(filter["handle"]),

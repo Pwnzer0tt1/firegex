@@ -1,7 +1,6 @@
 
-import os, httpx, websockets
-from sys import prefix
-from typing import Callable, List, Union
+import os, httpx
+from typing import Callable
 from fastapi import APIRouter, WebSocket
 import asyncio
 from starlette.responses import StreamingResponse
@@ -49,10 +48,10 @@ def list_routers():
     return [ele[:-3] for ele in list_files(ROUTERS_DIR) if ele != "__init__.py" and " " not in ele and ele.endswith(".py")]
 
 class RouterModule():
-    router: Union[None, APIRouter]
-    reset: Union[None, Callable]
-    startup: Union[None, Callable]
-    shutdown: Union[None, Callable]
+    router: None|APIRouter
+    reset: None|Callable
+    startup: None|Callable
+    shutdown: None|Callable
     name: str
     
     def __init__(self, router: APIRouter, reset: Callable, startup: Callable, shutdown: Callable, name:str):
@@ -66,7 +65,7 @@ class RouterModule():
         return f"RouterModule(router={self.router}, reset={self.reset}, startup={self.startup}, shutdown={self.shutdown})"
 
 def get_router_modules():
-    res: List[RouterModule] = []
+    res: list[RouterModule] = []
     for route in list_routers():
         module = getattr(__import__(f"routers.{route}"), route, None)
         if module:

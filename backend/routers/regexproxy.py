@@ -1,12 +1,11 @@
 from base64 import b64decode
 import sqlite3, re
-from typing import List, Union
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from modules.regexproxy.utils import STATUS, ProxyManager, gen_internal_port, gen_service_id
 from utils.sqlite import SQLite
 from utils.models import ResetRequest, StatusMessageModel
-from utils import refactor_name, refresh_frontend
+from utils import refactor_name, refresh_frontend, PortType
 
 app = APIRouter()
 db = SQLite("db/regextcpproxy.db",{
@@ -77,13 +76,13 @@ async def get_general_stats():
 class ServiceModel(BaseModel):
     id:str
     status: str
-    public_port: int
-    internal_port: int
+    public_port: PortType
+    internal_port: PortType
     name: str
     n_regex: int
     n_packets: int
 
-@app.get('/services', response_model=List[ServiceModel])
+@app.get('/services', response_model=list[ServiceModel])
 async def get_service_list():
     """Get the list of existent firegex services"""
     return db.query("""
@@ -157,8 +156,8 @@ async def regen_service_port(service_id: str):
     return {'status': 'ok'}
 
 class ChangePortForm(BaseModel):
-    port: Union[int, None]
-    internalPort: Union[int, None]
+    port: int|None
+    internalPort: int|None
 
 @app.post('/service/{service_id}/change-ports', response_model=StatusMessageModel)
 async def change_service_ports(service_id: str, change_port:ChangePortForm):
@@ -167,7 +166,7 @@ async def change_service_ports(service_id: str, change_port:ChangePortForm):
         return {'status': 'Invalid Request!'}
     try:
         sql_inj = ""
-        query:List[Union[str,int]] = []
+        query:list[str|int] = []
         if not change_port.port is None:
             sql_inj+=" public_port = ? "
             query.append(change_port.port)
@@ -194,7 +193,7 @@ class RegexModel(BaseModel):
     is_case_sensitive:bool
     active:bool
 
-@app.get('/service/{service_id}/regexes', response_model=List[RegexModel])
+@app.get('/service/{service_id}/regexes', response_model=list[RegexModel])
 async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
     return db.query("""
@@ -250,7 +249,7 @@ class RegexAddForm(BaseModel):
     service_id: str
     regex: str
     mode: str
-    active: Union[bool,None]
+    active: bool|None
     is_blacklist: bool
     is_case_sensitive: bool
 
@@ -272,12 +271,12 @@ async def add_new_regex(form: RegexAddForm):
 
 class ServiceAddForm(BaseModel):
     name: str
-    port: int
-    internalPort: Union[int, None]
+    port: PortType
+    internalPort: int|None
 
 class ServiceAddStatus(BaseModel):
     status:str
-    id: Union[str,None]
+    id: str|None
 
 class RenameForm(BaseModel):
     name:str

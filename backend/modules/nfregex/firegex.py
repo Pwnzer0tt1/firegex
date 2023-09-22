@@ -1,4 +1,3 @@
-from typing import Dict, List, Set
 from modules.nfregex.nftables import FiregexTables
 from utils import ip_parse, run_func
 from modules.nfregex.models import Service, Regex
@@ -56,8 +55,8 @@ class FiregexInterceptor:
     def __init__(self):
         self.srv:Service
         self.filter_map_lock:asyncio.Lock
-        self.filter_map: Dict[str, RegexFilter]
-        self.regex_filters: Set[RegexFilter]
+        self.filter_map: dict[str, RegexFilter]
+        self.regex_filters: set[RegexFilter]
         self.update_config_lock:asyncio.Lock
         self.process:asyncio.subprocess.Process
         self.update_task: asyncio.Task
@@ -118,7 +117,7 @@ class FiregexInterceptor:
             self.process.stdin.write((" ".join(filters_codes)+"\n").encode())
             await self.process.stdin.drain()
 
-    async def reload(self, filters:List[RegexFilter]):
+    async def reload(self, filters:list[RegexFilter]):
         async with self.filter_map_lock:
             self.filter_map = self.compile_filters(filters)
             filters_codes = self.get_filter_codes()
@@ -129,7 +128,7 @@ class FiregexInterceptor:
         filters_codes.sort(key=lambda a: self.filter_map[a].blocked, reverse=True)
         return filters_codes
 
-    def compile_filters(self, filters:List[RegexFilter]):
+    def compile_filters(self, filters:list[RegexFilter]):
         res = {}
         for filter_obj in filters:
             try:

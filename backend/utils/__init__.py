@@ -2,6 +2,8 @@ import asyncio
 from ipaddress import ip_address, ip_interface
 import os, socket, psutil, sys, nftables
 from fastapi_socketio import SocketManager
+from fastapi import Path
+from typing import Annotated
 
 LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
 
@@ -14,6 +16,8 @@ DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
 FIREGEX_PORT = int(os.getenv("PORT","4444"))
 JWT_ALGORITHM: str = "HS256"
 API_VERSION = "2.0.0"
+
+PortType = Annotated[int, Path(gt=0, lt=65536)]   
 
 async def run_func(func, *args, **kwargs):
     if asyncio.iscoroutinefunction(func): 
@@ -133,4 +137,4 @@ class NFTableManager(Singleton):
     def raw_list(self):
         return self.cmd({"list": {"ruleset": None}})["nftables"]
 
-            
+   

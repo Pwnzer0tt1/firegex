@@ -1,5 +1,4 @@
 import asyncio
-from typing import Dict
 from modules.nfregex.firegex import FiregexInterceptor, RegexFilter
 from modules.nfregex.nftables import FiregexTables, FiregexFilter
 from modules.nfregex.models import Regex, Service
@@ -11,49 +10,13 @@ class STATUS:
 
 nft = FiregexTables()
 
-class FirewallManager:
-    def __init__(self, db:SQLite):
-        self.db = db
-        self.service_table: Dict[str, ServiceManager] = {}
-        self.lock = asyncio.Lock()
-
-    async def close(self):
-        for key in list(self.service_table.keys()):
-            await self.remove(key)
-
-    async def remove(self,srv_id):
-        async with self.lock: 
-            if srv_id in self.service_table:
-                await self.service_table[srv_id].next(STATUS.STOP)
-                del self.service_table[srv_id]
-    
-    async def init(self):
-        nft.init()
-        await self.reload()
-
-    async def reload(self):
-        async with self.lock: 
-            for srv in self.db.query('SELECT * FROM services;'):
-                srv = Service.from_dict(srv)
-                if srv.id in self.service_table:
-                    continue
-                self.service_table[srv.id] = ServiceManager(srv, self.db)
-                await self.service_table[srv.id].next(srv.status)
-
-    def get(self,srv_id):
-        if srv_id in self.service_table:
-            return self.service_table[srv_id]
-        else:
-            raise ServiceNotFoundException()
-        
-class ServiceNotFoundException(Exception): pass
 
 class ServiceManager:
     def __init__(self, srv: Service, db):
         self.srv = srv
         self.db = db
         self.status = STATUS.STOP
-        self.filters: Dict[int, FiregexFilter] = {}
+        self.filters: dict[int, FiregexFilter] = {}
         self.lock = asyncio.Lock()
         self.interceptor = None
     
@@ -115,3 +78,40 @@ class ServiceManager:
     async def update_filters(self):
         async with self.lock:
             await self._update_filters_from_db()
+
+class FirewallManager:
+    def __init__(self, db:SQLite):
+        self.db = db
+        self.service_table: dict[str, ServiceManager] = {}
+        self.lock = asyncio.Lock()
+
+    async def close(self):
+        for key in list(self.service_table.keys()):
+            await self.remove(key)
+
+    async def remove(self,srv_id):
+        async with self.lock: 
+            if srv_id in self.service_table:
+                await self.service_table[srv_id].next(STATUS.STOP)
+                del self.service_table[srv_id]
+    
+    async def init(self):
+        nft.init()
+        await self.reload()
+
+    async def reload(self):
+        async with self.lock: 
+            for srv in self.db.query('SELECT * FROM services;'):
+                srv = Service.from_dict(srv)
+                if srv.id in self.service_table:
+                    continue
+                self.service_table[srv.id] = ServiceManager(srv, self.db)
+                await self.service_table[srv.id].next(srv.status)
+
+    def get(self,srv_id) -> ServiceManager:
+        if srv_id in self.service_table:
+            return self.service_table[srv_id]
+        else:
+            raise ServiceNotFoundException()
+        
+class ServiceNotFoundException(Exception): pass

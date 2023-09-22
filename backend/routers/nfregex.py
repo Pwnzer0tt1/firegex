@@ -2,13 +2,12 @@ from base64 import b64decode
 import re
 import secrets
 import sqlite3
-from typing import List, Union
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from modules.nfregex.nftables import FiregexTables
 from modules.nfregex.firewall import STATUS, FirewallManager
 from utils.sqlite import SQLite
-from utils import ip_parse, refactor_name, refresh_frontend
+from utils import ip_parse, refactor_name, refresh_frontend, PortType
 from utils.models import ResetRequest, StatusMessageModel
 
 class GeneralStatModel(BaseModel):
@@ -19,7 +18,7 @@ class GeneralStatModel(BaseModel):
 class ServiceModel(BaseModel):
     status: str
     service_id: str
-    port: int
+    port: PortType
     name: str
     proto: str
     ip_int: str
@@ -43,19 +42,19 @@ class RegexAddForm(BaseModel):
     service_id: str
     regex: str
     mode: str
-    active: Union[bool,None]
+    active: bool|None
     is_blacklist: bool
     is_case_sensitive: bool
 
 class ServiceAddForm(BaseModel):
     name: str
-    port: int
+    port: PortType
     proto: str
     ip_int: str
 
 class ServiceAddResponse(BaseModel):
     status:str
-    service_id: Union[None,str]
+    service_id: str|None
 
 app = APIRouter()
 
@@ -70,7 +69,7 @@ db = SQLite('db/nft-regex.db', {
     },
     'regexes': {
         'regex': 'TEXT NOT NULL',
-        'mode': 'VARCHAR(1) NOT NULL',
+        'mode': 'VARCHAR(1) NOT NULL CHECK (mode IN ("C", "S", "B"))', # C = to the client, S = to the server, B = both
         'service_id': 'VARCHAR(100) NOT NULL',
         'is_blacklist': 'BOOLEAN NOT NULL CHECK (is_blacklist IN (0, 1))',
         'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
@@ -127,7 +126,7 @@ async def get_general_stats():
         (SELECT COUNT(*) FROM services) services
     """)[0]
 
-@app.get('/services', response_model=List[ServiceModel])
+@app.get('/services', response_model=list[ServiceModel])
 async def get_service_list():
     """Get the list of existent firegex services"""
     return db.query("""
@@ -198,7 +197,7 @@ async def service_rename(service_id: str, form: RenameForm):
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/service/{service_id}/regexes', response_model=List[RegexModel])
+@app.get('/service/{service_id}/regexes', response_model=list[RegexModel])
 async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
     return db.query("""

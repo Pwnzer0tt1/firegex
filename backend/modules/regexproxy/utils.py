@@ -145,7 +145,7 @@ class ServiceManager:
 class ProxyManager:
     def __init__(self, db:SQLite):
         self.db = db
-        self.proxy_table:dict = {}
+        self.proxy_table: dict[str, ServiceManager] = {}
         self.lock = asyncio.Lock()
 
     async def close(self):
@@ -168,7 +168,7 @@ class ProxyManager:
                 self.proxy_table[srv_id] = ServiceManager(srv_id,self.db)
                 await self.proxy_table[srv_id].next(req_status)
 
-    def get(self,id):
+    def get(self,id) -> ServiceManager:
         if id in self.proxy_table:
             return self.proxy_table[id]
         else:

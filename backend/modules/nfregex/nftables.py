@@ -1,4 +1,3 @@
-from typing import List
 from modules.nfregex.models import Service
 from utils import ip_parse, ip_family, NFTableManager, nftables_int_to_json
 
@@ -11,9 +10,7 @@ class FiregexFilter:
         self.ip_int = str(ip_int)
 
     def __eq__(self, o: object) -> bool:
-        if isinstance(o, FiregexFilter):
-            return self.port == o.port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
-        elif isinstance(o, Service):
+        if isinstance(o, FiregexFilter) or isinstance(o, Service):
             return self.port == o.port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
         return False
 
@@ -80,7 +77,7 @@ class FiregexTables(NFTableManager):
         }}})
 
 
-    def get(self) -> List[FiregexFilter]:
+    def get(self) -> list[FiregexFilter]:
         res = []
         for filter in self.list_rules(tables=[self.table_name], chains=[self.input_chain,self.output_chain]):
             ip_int = None

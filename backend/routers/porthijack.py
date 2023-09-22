@@ -1,11 +1,10 @@
 import secrets
 import sqlite3
-from typing import List, Union
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from modules.porthijack.models import Service
 from utils.sqlite import SQLite
-from utils import addr_parse, ip_family, refactor_name, refresh_frontend
+from utils import addr_parse, ip_family, refactor_name, refresh_frontend, PortType
 from utils.models import ResetRequest, StatusMessageModel
 from modules.porthijack.nftables import FiregexTables
 from modules.porthijack.firewall import FirewallManager
@@ -13,8 +12,8 @@ from modules.porthijack.firewall import FirewallManager
 class ServiceModel(BaseModel):
     service_id: str
     active: bool
-    public_port: int
-    proxy_port: int
+    public_port: PortType
+    proxy_port: PortType
     name: str
     proto: str
     ip_src: str
@@ -25,15 +24,15 @@ class RenameForm(BaseModel):
 
 class ServiceAddForm(BaseModel):
     name: str
-    public_port: int
-    proxy_port: int
+    public_port: PortType
+    proxy_port: PortType
     proto: str
     ip_src: str
     ip_dst: str
 
 class ServiceAddResponse(BaseModel):
     status:str
-    service_id: Union[None,str]
+    service_id: str|None
 
 class GeneralStatModel(BaseModel):
     services: int
@@ -96,7 +95,7 @@ async def get_general_stats():
         (SELECT COUNT(*) FROM services) services
     """)[0]
 
-@app.get('/services', response_model=List[ServiceModel])
+@app.get('/services', response_model=list[ServiceModel])
 async def get_service_list():
     """Get the list of existent firegex services"""
     return db.query("SELECT service_id, active, public_port, proxy_port, name, proto, ip_src, ip_dst FROM services;")
@@ -144,7 +143,7 @@ async def service_rename(service_id: str, form: RenameForm):
 
 class ChangeDestination(BaseModel):
     ip_dst: str
-    proxy_port: int
+    proxy_port: PortType
 
 @app.post('/service/{service_id}/change-destination', response_model=StatusMessageModel)
 async def service_change_destination(service_id: str, form: ChangeDestination):
