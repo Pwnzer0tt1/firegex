@@ -47,7 +47,7 @@ db = SQLite('db/firewall-rules.db', {
         'action': 'VARCHAR(10) NOT NULL CHECK (action IN ("accept", "drop", "reject"))',
     },
     'QUERY':[
-        "CREATE UNIQUE INDEX IF NOT EXISTS unique_rules ON rules (proto, ip_src, ip_dst, port_src_from, port_src_to, port_dst_from, port_dst_to, action, mode);"
+        "CREATE UNIQUE INDEX IF NOT EXISTS unique_rules ON rules (proto, ip_src, ip_dst, port_src_from, port_src_to, port_dst_from, port_dst_to, mode);"
     ]
 })
 
