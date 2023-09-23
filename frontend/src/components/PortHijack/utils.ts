@@ -25,10 +25,7 @@ export type ServiceAddForm = {
     ip_dst: string,
 }
 
-export type ServiceAddResponse = {
-    status: string,
-    service_id?: string,
-}
+export type ServiceAddResponse = ServerResponse & { service_id: string }
 
 export const porthijack = {
     stats: async () => {

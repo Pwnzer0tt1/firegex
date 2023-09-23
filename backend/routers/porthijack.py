@@ -32,7 +32,7 @@ class ServiceAddForm(BaseModel):
 
 class ServiceAddResponse(BaseModel):
     status:str
-    service_id: str|None
+    service_id: str|None = None
 
 class GeneralStatModel(BaseModel):
     services: int

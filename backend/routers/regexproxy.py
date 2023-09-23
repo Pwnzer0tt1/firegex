@@ -156,8 +156,8 @@ async def regen_service_port(service_id: str):
     return {'status': 'ok'}
 
 class ChangePortForm(BaseModel):
-    port: int|None
-    internalPort: int|None
+    port: int|None = None
+    internalPort: int|None = None
 
 @app.post('/service/{service_id}/change-ports', response_model=StatusMessageModel)
 async def change_service_ports(service_id: str, change_port:ChangePortForm):
@@ -249,7 +249,7 @@ class RegexAddForm(BaseModel):
     service_id: str
     regex: str
     mode: str
-    active: bool|None
+    active: bool|None = None
     is_blacklist: bool
     is_case_sensitive: bool
 
@@ -272,11 +272,11 @@ async def add_new_regex(form: RegexAddForm):
 class ServiceAddForm(BaseModel):
     name: str
     port: PortType
-    internalPort: int|None
+    internalPort: int|None = None
 
 class ServiceAddStatus(BaseModel):
     status:str
-    id: str|None
+    id: str|None = None
 
 class RenameForm(BaseModel):
     name:str

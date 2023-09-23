@@ -48,10 +48,10 @@ def list_routers():
     return [ele[:-3] for ele in list_files(ROUTERS_DIR) if ele != "__init__.py" and " " not in ele and ele.endswith(".py")]
 
 class RouterModule():
-    router: None|APIRouter
-    reset: None|Callable
-    startup: None|Callable
-    shutdown: None|Callable
+    router: APIRouter|None = None
+    reset: Callable|None = None
+    startup: Callable|None = None
+    shutdown: Callable|None = None
     name: str
     
     def __init__(self, router: APIRouter, reset: Callable, startup: Callable, shutdown: Callable, name:str):

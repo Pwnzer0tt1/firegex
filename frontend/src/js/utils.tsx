@@ -16,10 +16,12 @@ export const regex_ipv6_no_cidr = "^s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|
 export const regex_ipv4 = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\\/(3[0-2]|[1-2][0-9]|[0-9]))?$"
 export const regex_ipv4_no_cidr = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
 
+export const DEV_IP_BACKEND = "127.0.0.1:4444"
+
 export async function getapi(path:string):Promise<any>{
 
     return await new Promise((resolve, reject) => {
-        fetch(`${IS_DEV?"http://127.0.0.1:4444":""}/api/${path}`,{
+        fetch(`${IS_DEV?`http://${DEV_IP_BACKEND}`:""}/api/${path}`,{
             credentials: "same-origin",
             headers: { "Authorization" : "Bearer " + window.localStorage.getItem("access_token")}
         }).then(res => {
@@ -35,7 +37,7 @@ export async function getapi(path:string):Promise<any>{
 
 export async function postapi(path:string,data:any,is_form:boolean=false):Promise<any>{
     return await new Promise((resolve, reject) => {
-        fetch(`${IS_DEV?"http://127.0.0.1:4444":""}/api/${path}`, {
+        fetch(`${IS_DEV?`http://${DEV_IP_BACKEND}`:""}/api/${path}`, {
             method: 'POST',
             credentials: "same-origin",
             cache: 'no-cache',

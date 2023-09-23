@@ -6,15 +6,15 @@ interface PortInputProps extends NumberInputProps {
 }
 
 const PortInput =  React.forwardRef<HTMLInputElement, PortInputProps>( (props, ref) => {
-    
     const [oldValue, setOldValue] = useState<string>(props.defaultValue?props.defaultValue.toString():"")
+    const {fullWidth, ...propeties} = props
     return <NumberInput
         variant={props.variant?props.variant:"filled"}
         hideControls
         placeholder="80"
         min={props.min?props.min:1}
         max={props.max?props.min:65535}
-        style={props.fullWidth?props.style:{ width: "75px", ...props.style }}
+        style={fullWidth?props.style:{ width: "75px", ...props.style }}
         onInput={(e) => {
             const value = parseInt((e.target as HTMLInputElement).value)
             if (value > 65535) {
@@ -28,7 +28,7 @@ const PortInput =  React.forwardRef<HTMLInputElement, PortInputProps>( (props, r
             props.onInput?.(e)
         }}
         ref={ref}
-        {...props}
+        {...propeties}
     />
 
 })

@@ -42,7 +42,7 @@ class RegexAddForm(BaseModel):
     service_id: str
     regex: str
     mode: str
-    active: bool|None
+    active: bool|None = None
     is_blacklist: bool
     is_case_sensitive: bool
 
@@ -54,7 +54,7 @@ class ServiceAddForm(BaseModel):
 
 class ServiceAddResponse(BaseModel):
     status:str
-    service_id: str|None
+    service_id: str|None = None
 
 app = APIRouter()
 

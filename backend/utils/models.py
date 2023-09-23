@@ -17,7 +17,7 @@ class PasswordChangeForm(BaseModel):
 
 class ChangePasswordModel(BaseModel):
     status: str
-    access_token: str|None
+    access_token: str|None = None
 
 class IpInterface(BaseModel):
     addr: str
