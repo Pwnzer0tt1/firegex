@@ -36,7 +36,7 @@ export default function PortAndInterface({ form, int_name, port_name, label }:{ 
                     data={ipInterfaces}
                     searchable
                     dropdownPosition="bottom"
-                    maxDropdownHeight={100}
+                    maxDropdownHeight={200}
                     creatable
                     getCreateLabel={(query) => `+ Use this: ${query}`}
                     onCreate={(query) => {
