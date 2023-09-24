@@ -7,6 +7,8 @@ import { nfregexServiceQuery } from '../../components/NFRegex/utils';
 import { errorNotify, getErrorMessage } from '../../js/utils';
 import AddNewService from '../../components/NFRegex/AddNewService';
 import AddNewRegex from '../../components/AddNewRegex';
+import { useQueryClient } from '@tanstack/react-query';
+import { TbReload } from 'react-icons/tb';
 
 
 function NFRegex({ children }: { children: any }) {
@@ -14,16 +16,16 @@ function NFRegex({ children }: { children: any }) {
     const navigator = useNavigate()
     const [open, setOpen] = useState(false);
     const {srv} = useParams()
+    const queryClient = useQueryClient()
+    const [tooltipRefreshOpened, setTooltipRefreshOpened] = useState(false);
     const [tooltipAddServOpened, setTooltipAddServOpened] = useState(false);
     const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
 
     const services = nfregexServiceQuery()
 
     useEffect(()=> {
-        if(services.isError){
+        if(services.isError)
             errorNotify("NFRegex Update failed!", getErrorMessage(services.error))
-        }
-        
     },[services.isError])
 
     const closeModal = () => {setOpen(false);}
@@ -51,6 +53,13 @@ function NFRegex({ children }: { children: any }) {
              onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
           </Tooltip>
       }
+      <Space w="xs" />
+        <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
+            <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfregex"])} size="lg" radius="md" variant="filled"
+            loading={services.isFetching}
+            onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
+            onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
+        </Tooltip>
     </div>
     <div id="service-list" className="center-flex-row">
         {srv?null:<>

@@ -50,7 +50,7 @@ export type ServerResponseListed = {
 }
 
 export const rulesQueryKey = ["firewall","rules"]
-export const firewallRulesQuery = () => useQuery({queryKey:rulesQueryKey, queryFn:firewall.rules})
+export const firewallRulesQuery = () => useQuery({queryKey:rulesQueryKey, queryFn:firewall.rules, refetchInterval: false})
 
 export const firewall = {
     rules: async() => {
@@ -72,7 +72,7 @@ export const firewall = {
         const { status } = await postapi(`firewall/rule/${rule_id}/rename`,{ name }) as ServerResponse;
         return status === "ok"?undefined:status
     },
-    servicesadd: async (data:RuleAddForm) => {
+    ruleset: async (data:RuleAddForm) => {
         return await postapi("firewall/rules/set", data) as ServerResponseListed;
     }
 }

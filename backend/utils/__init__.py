@@ -15,7 +15,7 @@ ON_DOCKER = len(sys.argv) > 1 and sys.argv[1] == "DOCKER"
 DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
 FIREGEX_PORT = int(os.getenv("PORT","4444"))
 JWT_ALGORITHM: str = "HS256"
-API_VERSION = "2.0.0"
+API_VERSION = "2.2.0"
 
 PortType = Annotated[int, Path(gt=0, lt=65536)]   
 
