@@ -158,6 +158,7 @@ export const Firewall = () => {
               { value: "0.0.0.0/0", netint: "ANY IPv4", label: "0.0.0.0/0" },
               { value: "::/0", netint: "ANY IPv6", label: "::/0" }
             ]
+            const ip_layer_not_filtered = item.ip_dst == "any" || item.ip_src == "any"
             const src_custom_int = customInt.map(v => v.value).includes(item.ip_src)?[]:[{ value: item.ip_src, netint: "SELECTED", label: item.ip_src }]
             const dst_custom_int = customInt.map(v => v.value).includes(item.ip_dst)?[]:[{ value: item.ip_src, netint: "SELECTED", label: item.ip_dst }]
             return <div
@@ -185,6 +186,7 @@ export const Firewall = () => {
                   <ModeSelector
                     value={item.mode}
                   />
+                  Filter IP Layer: <Switch checked={!ip_layer_not_filtered} />
               </div>
             </div>
         }}
