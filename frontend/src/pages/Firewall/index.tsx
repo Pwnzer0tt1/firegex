@@ -92,9 +92,11 @@ export const Firewall = () => {
     },[rules.isError])
 
     useEffect(()=> {
-        if(!rules.isLoading && rules.isSuccess)
+        if(!rules.isLoading && rules.isFetched && !rules.isFetching){
+          setCurrentPolicy(rules.data?.policy??ActionType.ACCEPT)
           handlers.setState(JSON.parse(JSON.stringify(rules.data?.rules??[])))
-    },[rules.isSuccess, rules.isLoading])
+        }
+    },[rules.isFetched, rules.isLoading, rules.isFetching])
 
     const fwEnabled = rules.data?.enabled??false
     const valuesChanged = JSON.stringify(rules.data?.rules) != JSON.stringify(state) || rules.data?.policy != currentPolicy
