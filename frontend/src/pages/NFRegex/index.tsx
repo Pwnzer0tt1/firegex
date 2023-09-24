@@ -1,45 +1,30 @@
 import { ActionIcon, Badge, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import { useNavigate, useParams } from 'react-router-dom';
 import ServiceRow from '../../components/NFRegex/ServiceRow';
-import { GeneralStats, nfregex, Service } from '../../components/NFRegex/utils';
-import { errorNotify, eventUpdateName, fireUpdateRequest } from '../../js/utils';
+import { nfregexServiceQuery } from '../../components/NFRegex/utils';
+import { errorNotify, getErrorMessage } from '../../js/utils';
 import AddNewService from '../../components/NFRegex/AddNewService';
-import { useWindowEvent } from '@mantine/hooks';
 import AddNewRegex from '../../components/AddNewRegex';
 
 
 function NFRegex({ children }: { children: any }) {
 
-    const [services, setServices] = useState<Service[]>([]);
-    const [loader, setLoader] = useState(true);
     const navigator = useNavigate()
     const [open, setOpen] = useState(false);
     const {srv} = useParams()
     const [tooltipAddServOpened, setTooltipAddServOpened] = useState(false);
     const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
-    
-    const [generalStats, setGeneralStats] = useState<GeneralStats>({closed:0, regexes:0, services:0});
-    const updateInfo = async () => {
-        
-        await Promise.all([
-            nfregex.stats().then(res => {
-                setGeneralStats(res)
-            }).catch(
-                err => errorNotify("General Info Auto-Update failed!", err.toString())
-            ),
-            nfregex.services().then(res => {
-                setServices(res)    
-            }).catch(err => {
-                errorNotify("Home Page Auto-Update failed!", err.toString())
-            })
-        ])
-        setLoader(false)
-    }
 
-    useWindowEvent(eventUpdateName, updateInfo)
-    useEffect(fireUpdateRequest,[])
+    const services = nfregexServiceQuery()
+
+    useEffect(()=> {
+        if(services.isError){
+            errorNotify("NFRegex Update failed!", getErrorMessage(services.error))
+        }
+        
+    },[services.isError])
 
     const closeModal = () => {setOpen(false);}
 
@@ -48,11 +33,11 @@ function NFRegex({ children }: { children: any }) {
     <div className='center-flex'>
         <Title order={4}>Netfilter Regex</Title>
         <div className='flex-spacer' />
-        <Badge size="sm" color="green" variant="filled">Services: {generalStats.services}</Badge>
+        <Badge size="sm" color="green" variant="filled">Services: {services.isLoading?0:services.data?.length}</Badge>
         <Space w="xs" />
-        <Badge size="sm" color="yellow" variant="filled">Filtered Connections: {generalStats.closed}</Badge>
+        <Badge size="sm" color="yellow" variant="filled">Filtered Connections: {services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_packets, 0)}</Badge>
         <Space w="xs" />
-        <Badge size="sm" color="violet" variant="filled">Regexes: {generalStats.regexes}</Badge>
+        <Badge size="sm" color="violet" variant="filled">Regexes: {services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_regex, 0)}</Badge>
         <Space w="xs" />
         { srv?
           <Tooltip label="Add a new regex" position='bottom' color="blue" opened={tooltipAddOpened}>
@@ -69,8 +54,8 @@ function NFRegex({ children }: { children: any }) {
     </div>
     <div id="service-list" className="center-flex-row">
         {srv?null:<>
-            <LoadingOverlay visible={loader} />
-            {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
+            <LoadingOverlay visible={services.isLoading} />
+            {(services.data && services.data?.length > 0)?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
                 navigator("/nfregex/"+srv.service_id)
             }} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> 

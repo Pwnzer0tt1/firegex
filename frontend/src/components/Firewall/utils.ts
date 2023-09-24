@@ -1,9 +1,6 @@
-import { RegexAddForm, RegexFilter, ServerResponse } from "../../js/models"
+import { useQuery } from "@tanstack/react-query"
+import { ServerResponse } from "../../js/models"
 import { getapi, postapi } from "../../js/utils"
-
-export type GeneralStats = {
-    rules:number,
-}
 
 export enum Protocol {
     TCP = "tcp",
@@ -38,6 +35,12 @@ export type Rule = {
 
 export type RuleInfo = {
     rules: Rule[]
+    policy: ActionType,
+    enabled: boolean
+}
+
+export type RuleAddForm = {
+    rules: Rule[]
     policy: ActionType
 }
 
@@ -46,13 +49,18 @@ export type ServerResponseListed = {
     status:(ServerResponse & {rule_id:number})[]|string,
 }
 
+export const rulesQueryKey = ["firewall","rules"]
+export const firewallRulesQuery = () => useQuery({queryKey:rulesQueryKey, queryFn:firewall.rules})
 
 export const firewall = {
-    stats: async () => {
-        return await getapi("firewall/stats") as GeneralStats;
-    },
     rules: async() => {
         return await getapi("firewall/rules") as RuleInfo;
+    },
+    enable: async() => {
+        return await getapi("firewall/enable") as ServerResponse;
+    },
+    disable: async() => {
+        return await getapi("firewall/disable") as ServerResponse;
     },
     rulenable: async (rule_id:number) => {
         return await getapi(`firewall/rule/${rule_id}/enable`) as ServerResponse;
@@ -64,7 +72,7 @@ export const firewall = {
         const { status } = await postapi(`firewall/rule/${rule_id}/rename`,{ name }) as ServerResponse;
         return status === "ok"?undefined:status
     },
-    servicesadd: async (data:RuleInfo) => {
+    servicesadd: async (data:RuleAddForm) => {
         return await postapi("firewall/rules/set", data) as ServerResponseListed;
     }
 }

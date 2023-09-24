@@ -20,5 +20,8 @@ class FirewallManager:
 
     async def reload(self):
         async with self.lock:
-            nft.set(map(Rule.from_dict, self.db.query('SELECT * FROM rules WHERE active = 1 ORDER BY rule_id;')), policy=self.db.get('POLICY', 'accept'))
+            if self.db.get("ENABLED", "0") == "1":
+                nft.set(map(Rule.from_dict, self.db.query('SELECT * FROM rules WHERE active = 1 ORDER BY rule_id;')), policy=self.db.get('POLICY', 'accept'))
+            else:
+                nft.reset()
 

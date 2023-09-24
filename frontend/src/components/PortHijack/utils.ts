@@ -1,5 +1,6 @@
 import { ServerResponse } from "../../js/models"
 import { getapi, postapi } from "../../js/utils"
+import { UseQueryOptions, useQuery } from "@tanstack/react-query"
 
 export type GeneralStats = {
     services:number
@@ -27,11 +28,12 @@ export type ServiceAddForm = {
 
 export type ServiceAddResponse = ServerResponse & { service_id: string }
 
+export const queryKey = ["porthijack","services"]
+
+export const porthijackServiceQuery = () => useQuery({queryKey, queryFn:porthijack.services})
+
 export const porthijack = {
-    stats: async () => {
-        return await getapi("porthijack/stats") as GeneralStats;
-    },
-    services: async () => {
+    services: async () : Promise<Service[]>  => {
         return await getapi("porthijack/services") as Service[];
     },
     serviceinfo: async (service_id:string) => {

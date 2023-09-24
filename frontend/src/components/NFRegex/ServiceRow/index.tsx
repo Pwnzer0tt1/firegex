@@ -1,7 +1,7 @@
 import { ActionIcon, Badge, Divider, Grid, MediaQuery, Menu, Space, Title, Tooltip } from '@mantine/core';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FaPlay, FaStop } from 'react-icons/fa';
-import { nfregex, Service } from '../utils';
+import { nfregex, Service, serviceQueryKey } from '../utils';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./index.module.scss";
 import YesNoModal from '../../YesNoModal';
@@ -10,6 +10,7 @@ import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
 import { MenuDropDownWithButton } from '../../MainLayout';
+import { useQueryClient } from '@tanstack/react-query';
 
 function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
@@ -19,6 +20,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         case "active": status_color = "teal"; break;
     }
 
+    const queryClient = useQueryClient()
     const [buttonLoading, setButtonLoading] = useState(false)
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
@@ -30,6 +32,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         await nfregex.servicestop(service.service_id).then(res => {
             if(!res){
                 okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.port} has been stopped!`)
+                queryClient.invalidateQueries(serviceQueryKey)
             }else{
                 errorNotify(`An error as occurred during the stopping of the service ${service.port}`,`Error: ${res}`)
             }
@@ -44,6 +47,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         await nfregex.servicestart(service.service_id).then(res => {
             if(!res){
                 okNotify(`Service ${service.name} started successfully!`,`The service on ${service.port} has been started!`)
+                queryClient.invalidateQueries(serviceQueryKey)
             }else{
                 errorNotify(`An error as occurred during the starting of the service ${service.port}`,`Error: ${res}`)
             }
@@ -57,6 +61,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
         nfregex.servicedelete(service.service_id).then(res => {
             if (!res){
                 okNotify("Service delete complete!",`The service ${service.name} has been deleted!`)
+                queryClient.invalidateQueries(serviceQueryKey)
             }else
                 errorNotify("An error occurred while deleting a service",`Error: ${res}`)
         }).catch(err => {

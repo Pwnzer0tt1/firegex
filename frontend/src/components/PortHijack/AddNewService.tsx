@@ -1,6 +1,6 @@
 import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { okNotify, regex_ipv6_no_cidr, regex_ipv4_no_cidr } from '../../js/utils';
 import { ImCross } from "react-icons/im"
 import { porthijack } from './utils';

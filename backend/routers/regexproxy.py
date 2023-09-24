@@ -196,6 +196,7 @@ class RegexModel(BaseModel):
 @app.get('/service/{service_id}/regexes', response_model=list[RegexModel])
 async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
+    if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id): raise HTTPException(status_code=400, detail="This service does not exists!")
     return db.query("""
         SELECT 
             regex, mode, regex_id `id`, service_id, is_blacklist,

@@ -1,4 +1,4 @@
-import { Box, Collapse, Divider, Group, MantineColor, Navbar, ScrollArea, Text, ThemeIcon, Title, UnstyledButton } from "@mantine/core";
+import { Collapse, Divider, Group, MantineColor, Navbar, ScrollArea, Text, ThemeIcon, Title, UnstyledButton } from "@mantine/core";
 import { useState } from "react";
 import { IoMdGitNetwork } from "react-icons/io";
 import { MdOutlineExpandLess, MdOutlineExpandMore, MdTransform } from "react-icons/md";
@@ -37,10 +37,8 @@ function NavBarButton({ navigate, closeNav, name, icon, color, disabled, onClick
 } 
 
 export default function NavBar({ closeNav, opened }: {closeNav: () => void, opened: boolean}) {
-    const [toggleState, setToggleState] = useState(false);
-    const advancedPaths = ["regexproxy"]
-    const advancedSelected = advancedPaths.includes(getmainpath())
-    const toggle = (toggleState||advancedSelected)
+    const [toggle, setToggleState] = useState(false);
+
     
     return <Navbar p="md" hiddenBreakpoint="md" hidden={!opened} width={{ md: 300 }}>
         <Navbar.Section px="xs" mt="xs">
@@ -53,7 +51,7 @@ export default function NavBar({ closeNav, opened }: {closeNav: () => void, open
             <NavBarButton navigate="nfregex" closeNav={closeNav} name="Netfilter Regex" color="lime" icon={<IoMdGitNetwork />} />
             <NavBarButton navigate="porthijack" closeNav={closeNav} name="Hijack Port to Proxy" color="blue" icon={<GrDirections />} />
             <Divider my="xs" label="Advanced" labelPosition="center" />
-            <NavBarButton closeNav={closeNav} name="Deprecated options" color="gray" icon={toggle ? <MdOutlineExpandLess /> : <MdOutlineExpandMore />} onClick={()=>setToggleState(!toggleState)} disabled={advancedSelected}/>
+            <NavBarButton closeNav={closeNav} name="Deprecated options" color="gray" icon={toggle ? <MdOutlineExpandLess /> : <MdOutlineExpandMore />} onClick={()=>setToggleState(!toggle)}/>
             <Collapse in={toggle}>
                 <NavBarButton navigate="regexproxy" closeNav={closeNav} name="TCP Proxy Regex Filter" color="grape" icon={<MdTransform />} />
             </Collapse>

@@ -20,18 +20,20 @@ class RuleModel(BaseModel):
     action: str
     mode:str
 
-class RuleForm(BaseModel):
+class RuleFormAdd(BaseModel):
     rules: list[RuleModel]
     policy: str
+    
+class RuleInfo(BaseModel):
+    rules: list[RuleModel]
+    policy: str
+    enabled: bool
 
 class RuleAddResponse(BaseModel):
     status:str|list[dict]
 
 class RenameForm(BaseModel):
     name:str
-
-class GeneralStatModel(BaseModel):
-    rules: int
 
 app = APIRouter()
 
@@ -85,18 +87,27 @@ async def apply_changes():
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/stats', response_model=GeneralStatModel)
-async def get_general_stats():
-    """Get firegex general status about rules"""
-    return db.query("SELECT (SELECT COUNT(*) FROM rules) rules")[0]
-
-@app.get('/rules', response_model=RuleForm)
+@app.get('/rules', response_model=RuleInfo)
 async def get_rule_list():
     """Get the list of existent firegex rules"""
     return {
         "policy": db.get("POLICY", "accept"),
-        "rules": db.query("SELECT active, name, proto, ip_src, ip_dst, port_src_from, port_dst_from, port_src_to, port_dst_to, action, mode FROM rules ORDER BY rule_id;")
+        "rules": db.query("SELECT active, name, proto, ip_src, ip_dst, port_src_from, port_dst_from, port_src_to, port_dst_to, action, mode FROM rules ORDER BY rule_id;"),
+        "enabled": db.get("ENABLED", "0") == "1"
     }
+
+@app.get('/enable', response_model=StatusMessageModel)
+async def enable_firewall():
+    """Request enabling the firewall"""
+    db.set("ENABLED", "1")
+    return await apply_changes()
+
+@app.get('/disable', response_model=StatusMessageModel)
+async def disable_firewall():
+    """Request disabling the firewall"""
+    db.set("ENABLED", "0")
+    return await apply_changes()
+
 @app.get('/rule/{rule_id}/disable', response_model=StatusMessageModel)
 async def service_disable(rule_id: str):
     """Request disabling a specific rule"""
@@ -147,7 +158,7 @@ def parse_and_check_rule(rule:RuleModel):
     
 
 @app.post('/rules/set', response_model=RuleAddResponse)
-async def add_new_service(form: RuleForm):
+async def add_new_service(form: RuleFormAdd):
     """Add a new service"""
     if form.policy not in ["accept", "drop", "reject"]:
         return {"status": "Invalid policy"}

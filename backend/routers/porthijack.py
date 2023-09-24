@@ -34,9 +34,6 @@ class ServiceAddResponse(BaseModel):
     status:str
     service_id: str|None = None
 
-class GeneralStatModel(BaseModel):
-    services: int
-
 app = APIRouter()
 
 db = SQLite('db/port-hijacking.db', {
@@ -86,14 +83,6 @@ def gen_service_id():
     return res
 
 firewall = FirewallManager(db)
-
-@app.get('/stats', response_model=GeneralStatModel)
-async def get_general_stats():
-    """Get firegex general status about services"""
-    return db.query("""
-    SELECT
-        (SELECT COUNT(*) FROM services) services
-    """)[0]
 
 @app.get('/services', response_model=list[ServiceModel])
 async def get_service_list():

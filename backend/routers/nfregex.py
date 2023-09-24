@@ -10,11 +10,6 @@ from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, refresh_frontend, PortType
 from utils.models import ResetRequest, StatusMessageModel
 
-class GeneralStatModel(BaseModel):
-    closed:int
-    regexes: int
-    services: int
-
 class ServiceModel(BaseModel):
     status: str
     service_id: str
@@ -116,16 +111,6 @@ def gen_service_id():
 
 firewall = FirewallManager(db)
 
-@app.get('/stats', response_model=GeneralStatModel)
-async def get_general_stats():
-    """Get firegex general status about services"""
-    return db.query("""
-    SELECT
-        (SELECT COALESCE(SUM(blocked_packets),0) FROM regexes) closed,
-        (SELECT COUNT(*) FROM regexes) regexes,
-        (SELECT COUNT(*) FROM services) services
-    """)[0]
-
 @app.get('/services', response_model=list[ServiceModel])
 async def get_service_list():
     """Get the list of existent firegex services"""
@@ -200,6 +185,7 @@ async def service_rename(service_id: str, form: RenameForm):
 @app.get('/service/{service_id}/regexes', response_model=list[RegexModel])
 async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
+    if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id): raise HTTPException(status_code=400, detail="This service does not exists!")
     return db.query("""
         SELECT 
             regex, mode, regex_id `id`, service_id, is_blacklist,

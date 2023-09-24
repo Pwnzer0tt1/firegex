@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Divider, Grid, MediaQuery, Menu, Space, Title, Tooltip } from '@mantine/core';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FaPause, FaPlay, FaStop } from 'react-icons/fa';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";

@@ -1,4 +1,4 @@
-import { Autocomplete, AutocompleteItem, Select, Space, Title } from "@mantine/core"
+import { AutocompleteItem, Select, Space, Title } from "@mantine/core"
 import React, { useEffect, useState } from "react"
 import { getipinterfaces } from "../js/utils";
 import PortInput from "./PortInput";

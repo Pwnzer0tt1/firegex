@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ActionIcon, Container, Menu, Space, ThemeIcon } from '@mantine/core';
+import { useEffect, useState } from 'react';
+import { ActionIcon, Container, Menu, Space } from '@mantine/core';
 import { AppShell } from '@mantine/core';
 import NavBar from './NavBar';
 import FooterPage from './Footer';

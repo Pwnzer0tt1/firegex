@@ -1,12 +1,7 @@
 import { RegexFilter, ServerResponse } from "../../js/models"
 import { getapi, postapi } from "../../js/utils"
 import { RegexAddForm } from "../../js/models"
-
-export type GeneralStats = {
-    services:number,
-    closed:number,
-    regexes:number
-}
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 export type Service = {
     name:string,
@@ -31,12 +26,16 @@ export type ServiceAddResponse = {
     service_id?: string,
 }
 
+export const serviceQueryKey = ["nfregex","services"]
+export const statsQueryKey = ["nfregex","stats"]
 
+export const nfregexServiceQuery = () => useQuery({queryKey:serviceQueryKey, queryFn:nfregex.services})
+export const nfregexServiceRegexesQuery = (service_id:string) => useQuery({
+    queryKey:[...serviceQueryKey,service_id,"regexes"],
+    queryFn:() => nfregex.serviceregexes(service_id)
+})
 
 export const nfregex = {
-    stats: async () => {
-        return await getapi("nfregex/stats") as GeneralStats;
-    },
     services: async () => {
         return await getapi("nfregex/services") as Service[];
     },

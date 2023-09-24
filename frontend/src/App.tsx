@@ -1,6 +1,6 @@
 import { Button, Group, Loader, LoadingOverlay, Notification, Space, PasswordInput, Title } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ImCross } from 'react-icons/im';
 import { Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
@@ -50,11 +50,6 @@ function App() {
       socket.off("update")
       socket.off("connect_error")
     }
-  },[])
-
-  useEffect(()=>{
-    const updater = setInterval(fireUpdateRequest,6000)
-    return () => clearInterval(updater)     
   },[])
 
   const form = useForm({

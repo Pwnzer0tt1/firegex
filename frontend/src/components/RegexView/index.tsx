@@ -1,5 +1,5 @@
 import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/core';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { RegexFilter } from '../../js/models';
 import { b64decode, errorNotify, getapiobject, okNotify } from '../../js/utils';
 import style from "./index.module.scss";

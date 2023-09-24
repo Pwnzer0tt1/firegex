@@ -1,11 +1,6 @@
+import { useQuery } from "@tanstack/react-query"
 import { RegexAddForm, RegexFilter, ServerResponse } from "../../js/models"
 import { getapi, postapi } from "../../js/utils"
-
-export type GeneralStats = {
-    services:number,
-    closed:number,
-    regexes:number
-}
 
 export type Service = {
     id:string,
@@ -33,10 +28,16 @@ export type ChangePort = {
     internalPort?: number
 }
 
+export const serviceQueryKey = ["regexproxy","services"]
+
+export const regexproxyServiceQuery = () => useQuery({queryKey:serviceQueryKey, queryFn:regexproxy.services})
+export const regexproxyServiceRegexesQuery = (service_id:string) => useQuery({
+    queryKey:[...serviceQueryKey,service_id,"regexes"],
+    queryFn:() => regexproxy.serviceregexes(service_id)
+})
+
+
 export const regexproxy = {
-    stats: async () => {
-        return await getapi("regexproxy/stats") as GeneralStats;
-    },
     services: async() => {
         return await getapi("regexproxy/services") as Service[];
     },

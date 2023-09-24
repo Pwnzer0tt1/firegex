@@ -1,6 +1,6 @@
 import { Button, Group, Modal, Notification, PasswordInput, Space, Switch } from "@mantine/core";
 import { useForm } from "@mantine/form";
-import React, { useState } from "react"
+import { useState } from "react"
 import { ImCross } from "react-icons/im";
 import { ChangePassword } from "../../js/models";
 import { changepassword, okNotify } from "../../js/utils";

@@ -1,41 +1,26 @@
 import { ActionIcon, Badge, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import ServiceRow from '../../components/PortHijack/ServiceRow';
-import { GeneralStats, porthijack, Service } from '../../components/PortHijack/utils';
-import { errorNotify, eventUpdateName, fireUpdateRequest } from '../../js/utils';
+import { porthijackServiceQuery } from '../../components/PortHijack/utils';
+import { errorNotify, getErrorMessage } from '../../js/utils';
 import AddNewService from '../../components/PortHijack/AddNewService';
-import { useWindowEvent } from '@mantine/hooks';
 
 
 function PortHijack() {
 
-    const [services, setServices] = useState<Service[]>([]);
-    const [loader, setLoader] = useState(true);
     const [open, setOpen] = useState(false);
     const [tooltipAddServOpened, setTooltipAddServOpened] = useState(false);
     const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
-    
-    const [generalStats, setGeneralStats] = useState<GeneralStats>({services:0});
-    const updateInfo = async () => {
-        
-        await Promise.all([
-            porthijack.stats().then(res => {
-                setGeneralStats(res)
-            }).catch(
-                err => errorNotify("General Info Auto-Update failed!", err.toString())
-            ),
-            porthijack.services().then(res => {
-                setServices(res)    
-            }).catch(err => {
-                errorNotify("Home Page Auto-Update failed!", err.toString())
-            })
-        ])
-        setLoader(false)
-    }
 
-    useWindowEvent(eventUpdateName, updateInfo)
-    useEffect(fireUpdateRequest,[])
+
+    const services = porthijackServiceQuery()
+
+    useEffect(()=>{
+        if(services.isError){
+            errorNotify("Porthijack Update failed!", getErrorMessage(services.error))
+        }
+    },[services.isError])
 
     const closeModal = () => {setOpen(false);}
 
@@ -44,7 +29,7 @@ function PortHijack() {
         <div className='center-flex'>
             <Title order={4}>Hijack port to proxy</Title>
             <div className='flex-spacer' />
-            <Badge size="sm" color="yellow" variant="filled">Services: {generalStats.services}</Badge>
+            <Badge size="sm" color="yellow" variant="filled">Services: {services.isLoading?0:services.data?.length}</Badge>
             <Space w="xs" />
             <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
                 <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
@@ -53,8 +38,9 @@ function PortHijack() {
             </Tooltip>
         </div>
         <div id="service-list" className="center-flex-row">
-            <LoadingOverlay visible={loader} />
-            {services.length > 0?services.map( srv => <ServiceRow service={srv} key={srv.service_id} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
+            <LoadingOverlay visible={services.isLoading} />
+            {(services.data && services.data.length > 0) ?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} />):<>
+            <Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> 
                 <div className='center-flex'>
                     <Tooltip label="Add a new service" color="blue" opened={tooltipAddServOpened}>
