@@ -1,5 +1,5 @@
 from modules.firewall.models import Rule
-from utils import nftables_int_to_json, ip_parse, ip_family, NFTableManager, nftables_json_to_int
+from utils import nftables_int_to_json, ip_parse, ip_family, NFTableManager
 
 
 class FiregexHijackRule():
@@ -80,6 +80,13 @@ class FiregexTables(NFTableManager):
         for ele in srvs[::-1]: self.add(ele)
 
     def add(self, srv:Rule):
+        ip_filters = []
+        if srv.ip_src.lower() != "any" and srv.ip_dst.lower() != "any":
+            ip_filters = [
+                {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_src), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_src)}},
+                {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_dst), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_dst)}},
+            ]
+        
         port_filters = []
         if srv.proto != "any":
             if srv.port_src_from != 1 or srv.port_src_to != 65535: #Any Port
@@ -90,15 +97,13 @@ class FiregexTables(NFTableManager):
                 port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'op': '<=', 'right': int(srv.port_dst_to)}})
             if len(port_filters) == 0:
                 port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '!=', 'right': 0}}) #filter the protocol if no port is specified
-                
+        
+        end_rules =  [{'accept': None} if srv.action == "accept" else {'reject': {}} if (srv.action == "reject" and not srv.output_mode) else {'drop': None}]
+        
         self.cmd({ "insert":{ "rule": {
             "family": "inet",
             "table": self.table_name,
             "chain": self.rules_chain_out if srv.output_mode else self.rules_chain_in,
-            "expr": [
-                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_src), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_src)}},
-                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_dst), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_dst)}},
-                ] + port_filters +
-            [{'accept': None} if srv.action == "accept" else {'reject': {}} if (srv.action == "reject" and not srv.output_mode) else {'drop': None}]
+            "expr": ip_filters + port_filters + end_rules
             #If srv.output_mode is True, then the rule is in the output chain, so the reject action is not allowed
         }}})

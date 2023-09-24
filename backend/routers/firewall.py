@@ -108,42 +108,16 @@ async def disable_firewall():
     db.set("ENABLED", "0")
     return await apply_changes()
 
-@app.get('/rule/{rule_id}/disable', response_model=StatusMessageModel)
-async def service_disable(rule_id: str):
-    """Request disabling a specific rule"""
-    if len(db.query('SELECT 1 FROM rules WHERE rule_id = ?;', rule_id)) == 0:
-        return {'status': 'Rule not found'}
-    db.query('UPDATE rules SET active = 0 WHERE rule_id = ?;', rule_id)
-    return await apply_changes()
-
-@app.get('/rule/{rule_id}/enable', response_model=StatusMessageModel)
-async def service_start(rule_id: str):
-    """Request the enabling a specific rule"""
-    if len(db.query('SELECT 1 FROM rules WHERE rule_id = ?;', rule_id)) == 0:
-        return {'status': 'Rule not found'}
-    db.query('UPDATE rules SET active = 1 WHERE rule_id = ?;', rule_id)
-    return await apply_changes()
-
-@app.post('/service/{rule_id}/rename', response_model=StatusMessageModel)
-async def service_rename(rule_id: str, form: RenameForm):
-    """Request to change the name of a specific service"""
-    if len(db.query('SELECT 1 FROM rules WHERE rule_id = ?;', rule_id)) == 0:
-        return {'status': 'Rule not found'}
-    form.name = refactor_name(form.name)
-    if not form.name: return {'status': 'The name cannot be empty!'} 
-    try:
-        db.query('UPDATE rules SET name=? WHERE rule_id = ?;', form.name, rule_id)
-    except sqlite3.IntegrityError:
-        return {'status': 'This name is already used'}
-    await refresh_frontend()
-    return {'status': 'ok'}
-
 def parse_and_check_rule(rule:RuleModel):
-    try:
-        rule.ip_src = ip_parse(rule.ip_src)
-        rule.ip_dst = ip_parse(rule.ip_dst)
-    except ValueError:
-        return {"status":"Invalid address"}
+    
+    if rule.ip_src.lower().strip() == "any" or rule.ip_dst.lower().split() == "any":
+        rule.ip_dst = rule.ip_src = "any"
+    else:
+        try:
+            rule.ip_src = ip_parse(rule.ip_src)
+            rule.ip_dst = ip_parse(rule.ip_dst)
+        except ValueError:
+            return {"status":"Invalid address"}
     
     rule.port_dst_from, rule.port_dst_to = min(rule.port_dst_from, rule.port_dst_to), max(rule.port_dst_from, rule.port_dst_to)
     rule.port_src_from, rule.port_src_to = min(rule.port_src_from, rule.port_src_to), max(rule.port_src_from, rule.port_src_to)
@@ -155,7 +129,6 @@ def parse_and_check_rule(rule:RuleModel):
     if rule.action not in ["accept", "drop", "reject"]:
         return {"status":"Invalid action"}
     return rule
-    
 
 @app.post('/rules/set', response_model=RuleAddResponse)
 async def add_new_service(form: RuleFormAdd):
