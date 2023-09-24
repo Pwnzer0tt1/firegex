@@ -6,7 +6,7 @@ import { nfregex } from "../components/NFRegex/utils";
 import { regexproxy } from "../components/RegexProxy/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 import { Buffer } from "buffer"
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, useQuery } from "@tanstack/react-query";
 
 export const IS_DEV = import.meta.env.DEV
 
@@ -110,6 +110,8 @@ export async function resetfiregex(delete_data:boolean = false){
     const { status } = await postapi("reset",{delete:delete_data}) as ServerResponse;
     return (status === "ok"?undefined:status)
 }
+
+export const ipInterfacesQuery = () => useQuery(["ipinterfaces"], getipinterfaces)
 
 export async function getipinterfaces(){
     return await getapi("interfaces") as IpInterface[];

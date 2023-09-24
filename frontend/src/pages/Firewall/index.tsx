@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, LoadingOverlay, NativeSelect, SegmentedControl, Space, Switch, Title, Tooltip } from "@mantine/core"
+import { ActionIcon, Badge, LoadingOverlay, Space, Switch, Title, Tooltip } from "@mantine/core"
 import { useEffect, useState } from "react";
 import { BsPlusLg } from "react-icons/bs"
 import { rem, Text } from '@mantine/core';
@@ -12,6 +12,11 @@ import classes from './DndListHandle.module.scss';
 import { useQueryClient } from "@tanstack/react-query";
 import { TiTick } from "react-icons/ti";
 import YesNoModal from "../../components/YesNoModal";
+import { PortRangeInput } from "../../components/PortInput";
+import { InterfaceInput } from "../../components/InterfaceInput";
+import { ActionTypeSelector } from "../../components/Firewall/ActionTypeSelector";
+import { ProtocolSelector } from "../../components/Firewall/ProtocolSelector";
+import { ModeSelector } from "../../components/Firewall/ModeSelector";
 
   /*
   {
@@ -148,8 +153,14 @@ export const Firewall = () => {
 
     const items = state.map((item, index) => (
         <Draggable key={index} index={index} draggableId={index.toString()}>
-          {(provided, snapshot) => (
-            <div
+          {(provided, snapshot) => {
+            const customInt = [
+              { value: "0.0.0.0/0", netint: "ANY IPv4", label: "0.0.0.0/0" },
+              { value: "::/0", netint: "ANY IPv6", label: "::/0" }
+            ]
+            const src_custom_int = customInt.map(v => v.value).includes(item.ip_src)?[]:[{ value: item.ip_src, netint: "SELECTED", label: item.ip_src }]
+            const dst_custom_int = customInt.map(v => v.value).includes(item.ip_dst)?[]:[{ value: item.ip_src, netint: "SELECTED", label: item.ip_dst }]
+            return <div
               className={cx(classes.item, { [classes.itemDragging]: snapshot.isDragging })}
               ref={provided.innerRef}
               {...provided.draggableProps}
@@ -158,18 +169,25 @@ export const Firewall = () => {
                 <TbGripVertical style={{ width: rem(18), height: rem(18) }} />
               </div>
               <Space w="sm" />
-              <Switch
-                defaultChecked
-                label="I agree to sell my privacy"
-              />
+              <Switch checked={item.active} />
               <div>
                 <Text>{item.name}</Text>
-                <Text c="dimmed" size="sm">
-                  {JSON.stringify(item)}
-                </Text>
+                <InterfaceInput initialCustomInterfaces={[...src_custom_int, ...customInt]} defaultValue={item.ip_src}/>
+                <PortRangeInput defaultValues={[item.port_src_from, item.port_src_to]} />
+                <InterfaceInput initialCustomInterfaces={[...dst_custom_int, ...customInt]} defaultValue={item.ip_dst}/>
+                <PortRangeInput defaultValues={[item.port_dst_from, item.port_dst_to]} />
+                <ActionTypeSelector
+                  value={item.action}
+                />
+                <ProtocolSelector
+                  value={item.proto}
+                />
+                  <ModeSelector
+                    value={item.mode}
+                  />
               </div>
             </div>
-          )}
+        }}
         </Draggable>
       ));
 
@@ -184,21 +202,7 @@ export const Firewall = () => {
             <Space w="sm" />
             Policy:
             <Space w="xs" />
-            <SegmentedControl
-                data={[
-                    {
-                      value: ActionType.ACCEPT,
-                      label: 'Accept',
-                    },
-                    {
-                      value: ActionType.REJECT,
-                      label: 'Reject',
-                    },
-                    {
-                      value: ActionType.DROP,
-                      label: 'Drop',
-                    }
-                ]}
+            <ActionTypeSelector
                 value={currentPolicy}
                 onChange={(value)=>setCurrentPolicy(value as ActionType)}
             />
