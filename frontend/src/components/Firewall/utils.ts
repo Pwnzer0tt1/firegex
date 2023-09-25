@@ -44,6 +44,12 @@ export type RuleAddForm = {
     policy: ActionType
 }
 
+export type FirewallSettings = {
+    keep_rules: boolean,
+    allow_loopback: boolean,
+    allow_established: boolean,
+}
+
 
 export type ServerResponseListed = {
     status:(ServerResponse & {rule_id:number})[]|string,
@@ -55,6 +61,12 @@ export const firewallRulesQuery = () => useQuery({queryKey:rulesQueryKey, queryF
 export const firewall = {
     rules: async() => {
         return await getapi("firewall/rules") as RuleInfo;
+    },
+    settings: async() => {
+        return await getapi("firewall/settings") as FirewallSettings;
+    },
+    setsettings: async(data:FirewallSettings) => {
+        return await postapi("firewall/settings/set", data) as ServerResponse;
     },
     enable: async() => {
         return await getapi("firewall/enable") as ServerResponse;

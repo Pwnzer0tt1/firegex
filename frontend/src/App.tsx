@@ -5,7 +5,7 @@ import { ImCross } from 'react-icons/im';
 import { Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
 import { PasswordSend, ServerStatusResponse } from './js/models';
-import { DEV_IP_BACKEND, errorNotify, fireUpdateRequest, getstatus, HomeRedirector, IS_DEV, login, setpassword } from './js/utils';
+import { DEV_IP_BACKEND, errorNotify, getstatus, HomeRedirector, IS_DEV, login, setpassword } from './js/utils';
 import NFRegex from './pages/NFRegex';
 import io from 'socket.io-client';
 import RegexProxy from './pages/RegexProxy';
@@ -13,6 +13,7 @@ import ServiceDetailsNFRegex from './pages/NFRegex/ServiceDetails';
 import ServiceDetailsProxyRegex from './pages/RegexProxy/ServiceDetails';
 import PortHijack from './pages/PortHijack';
 import { Firewall } from './pages/Firewall';
+import { useQueryClient } from '@tanstack/react-query';
 
 
 const socket = IS_DEV?io("ws://"+DEV_IP_BACKEND, {transports: ["websocket", "polling"], path:"/sock" }):io({transports: ["websocket", "polling"], path:"/sock"});
@@ -24,6 +25,7 @@ function App() {
   const [reqError, setReqError] = useState<undefined|string>()
   const [error, setError] = useState<string|null>()
   const [loadinBtn, setLoadingBtn] = useState(false);
+  const queryClient = useQueryClient()
 
   const getStatus = () =>{
       getstatus().then( res =>{
@@ -39,8 +41,8 @@ function App() {
 
   useEffect(()=>{
     getStatus()
-    socket.on("update", () => {
-      fireUpdateRequest()
+    socket.on("update", (data) => {
+      queryClient.invalidateQueries({ queryKey: data  })
     })
     socket.on("connect_error", (err) => {
       errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)

@@ -103,11 +103,6 @@ export function HomeRedirector(){
     return <Navigate to={path} replace/>
 }
 
-export function fireUpdateRequest(){ //TODO: change me: specify what to update
-    queryClient.invalidateQueries({ queryKey: [] })
-}
-
-
 export async function resetfiregex(delete_data:boolean = false){
     const { status } = await postapi("reset",{delete:delete_data}) as ServerResponse;
     return (status === "ok"?undefined:status)

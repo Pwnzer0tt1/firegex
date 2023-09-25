@@ -18,6 +18,8 @@ import { ModeSelector } from "../../components/Firewall/ModeSelector";
 import { OnOffButton } from "../../components/OnOffButton";
 import { LuArrowBigRightDash } from "react-icons/lu"
 import { ImCheckmark, ImCross } from "react-icons/im";
+import { IoSettingsSharp } from "react-icons/io5";
+import { SettingsModal } from "./SettingsModal";
 
 
 export const Firewall = () => {
@@ -25,6 +27,7 @@ export const Firewall = () => {
     const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
     const [tooltipRefreshOpened, setTooltipRefreshOpened] = useState(false);
     const [tooltipApplyOpened, setTooltipApplyOpened] = useState(false);
+    const [tooltipSettingsOpened, setTooltipSettingsOpened] = useState(false);
     const [currentPolicy, setCurrentPolicy] = useState<ActionType>(ActionType.ACCEPT)
     const [tooltipAddRulOpened, setTooltipAddRulOpened] = useState(false)
     const queryClient = useQueryClient()
@@ -32,6 +35,7 @@ export const Firewall = () => {
     const [state, handlers] = useListState<Rule & {rule_id:string}>([]);
     const [enableFwModal, setEnableFwModal] = useState(false)
     const [applyChangeModal, setApplyChangeModal] = useState(false)
+    const [settingsModal, setSettingsModal] = useState(false)
     const theme = useMantineTheme();
 
     const [updateMevalueinternal, internalUpdateme] = useState(false)
@@ -383,6 +387,12 @@ export const Firewall = () => {
                 onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
             </Tooltip>
             <Space w="xs" />
+            <Tooltip label="Settings" position='bottom' color="cyan" opened={tooltipSettingsOpened}>
+                <ActionIcon color="cyan" onClick={()=>setSettingsModal(true)} size="lg" radius="md" variant="filled"
+                onFocus={() => setTooltipSettingsOpened(false)} onBlur={() => setTooltipSettingsOpened(false)}
+                onMouseEnter={() => setTooltipSettingsOpened(true)} onMouseLeave={() => setTooltipSettingsOpened(false)}><IoSettingsSharp size={18} /></ActionIcon>
+            </Tooltip>
+            <Space w="xs" />
             <Tooltip label="Apply" position='bottom' color="grape" opened={tooltipApplyOpened}>
                 <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled"
                 onFocus={() => setTooltipApplyOpened(false)} onBlur={() => setTooltipApplyOpened(false)}
@@ -435,6 +445,12 @@ export const Firewall = () => {
           action={applyChangesRaw}
           opened={applyChangeModal}
       />
+
+      <SettingsModal
+        opened={settingsModal}
+        onClose={()=>setSettingsModal(false)}
+      />
+
 
     </>
 }

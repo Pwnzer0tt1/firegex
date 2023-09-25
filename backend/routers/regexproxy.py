@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from modules.regexproxy.utils import STATUS, ProxyManager, gen_internal_port, gen_service_id
 from utils.sqlite import SQLite
 from utils.models import ResetRequest, StatusMessageModel
-from utils import refactor_name, refresh_frontend, PortType
+from utils import refactor_name, socketio_emit, PortType
 
 app = APIRouter()
 db = SQLite("db/regextcpproxy.db",{
@@ -56,7 +56,8 @@ async def shutdown():
     db.disconnect()
     db.restore()
     
-    
+async def refresh_frontend(additional:list[str]=[]):
+    await socketio_emit(["regexproxy"]+additional)
 
 class GeneralStatModel(BaseModel):
     closed:int

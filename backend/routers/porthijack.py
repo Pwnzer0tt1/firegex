@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from modules.porthijack.models import Service
 from utils.sqlite import SQLite
-from utils import addr_parse, ip_family, refactor_name, refresh_frontend, PortType
+from utils import addr_parse, ip_family, refactor_name, socketio_emit, PortType
 from utils.models import ResetRequest, StatusMessageModel
 from modules.porthijack.nftables import FiregexTables
 from modules.porthijack.firewall import FirewallManager
@@ -74,6 +74,9 @@ async def shutdown():
     await firewall.close()
     db.disconnect()
     db.restore()
+
+async def refresh_frontend(additional:list[str]=[]):
+    await socketio_emit(["porthijack"]+additional)
 
 def gen_service_id():
     while True:

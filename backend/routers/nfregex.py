@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from modules.nfregex.nftables import FiregexTables
 from modules.nfregex.firewall import STATUS, FirewallManager
 from utils.sqlite import SQLite
-from utils import ip_parse, refactor_name, refresh_frontend, PortType
+from utils import ip_parse, refactor_name, socketio_emit, PortType
 from utils.models import ResetRequest, StatusMessageModel
 
 class ServiceModel(BaseModel):
@@ -78,6 +78,9 @@ db = SQLite('db/nft-regex.db', {
         "CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);"   
     ]
 })
+
+async def refresh_frontend(additional:list[str]=[]):
+    await socketio_emit(["nfregex"]+additional)
 
 async def reset(params: ResetRequest):
     if not params.delete: 

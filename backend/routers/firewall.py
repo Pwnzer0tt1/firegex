@@ -2,7 +2,7 @@ import sqlite3
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from utils.sqlite import SQLite
-from utils import ip_parse, ip_family, refactor_name, refresh_frontend, PortType
+from utils import ip_parse, ip_family, socketio_emit, PortType
 from utils.models import ResetRequest, StatusMessageModel
 from modules.firewall.nftables import FiregexTables
 from modules.firewall.firewall import FirewallManager
@@ -34,6 +34,11 @@ class RuleAddResponse(BaseModel):
 
 class RenameForm(BaseModel):
     name:str
+
+class FirewallSettings(BaseModel):
+    keep_rules: bool
+    allow_loopback: bool
+    allow_established: bool
 
 app = APIRouter()
 
@@ -77,14 +82,37 @@ async def startup():
     await firewall.init()
 
 async def shutdown():
+    keep_rules = firewall.keep_rules
     db.backup()
-    await firewall.close()
+    if not keep_rules:
+        await firewall.close()
     db.disconnect()
     db.restore()
+
+async def refresh_frontend(additional:list[str]=[]):
+    await socketio_emit(["firewall"]+additional)
 
 async def apply_changes():
     await firewall.reload()
     await refresh_frontend()
+    return {'status': 'ok'}
+
+
+@app.get("/settings", response_model=FirewallSettings)
+async def get_settings():
+    """Get the firewall settings"""
+    return {
+        "keep_rules": firewall.keep_rules,
+        "allow_loopback": firewall.allow_loopback,
+        "allow_established": firewall.allow_established
+    }
+
+@app.post("/settings/set", response_model=StatusMessageModel)
+async def set_settings(form: FirewallSettings):
+    """Set the firewall settings"""
+    firewall.keep_rules = form.keep_rules
+    firewall.allow_loopback = form.allow_loopback
+    firewall.allow_established = form.allow_established
     return {'status': 'ok'}
 
 @app.get('/rules', response_model=RuleInfo)

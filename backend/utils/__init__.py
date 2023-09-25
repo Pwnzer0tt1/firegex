@@ -4,6 +4,7 @@ import os, socket, psutil, sys, nftables
 from fastapi_socketio import SocketManager
 from fastapi import Path
 from typing import Annotated
+import json
 
 LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
 
@@ -25,8 +26,8 @@ async def run_func(func, *args, **kwargs):
     else: 
         return func(*args, **kwargs)
 
-async def refresh_frontend():
-    await socketio.emit("update","Refresh")
+async def socketio_emit(elements:list[str]):
+    await socketio.emit("update",elements)
 
 def refactor_name(name:str):
     name = name.strip()

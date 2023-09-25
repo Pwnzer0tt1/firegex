@@ -6,7 +6,7 @@ from jose import jwt
 from passlib.context import CryptContext
 from fastapi_socketio import SocketManager
 from utils.sqlite import SQLite
-from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, refresh_frontend, DEBUG, SysctlManager
+from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +40,9 @@ def create_access_token(data: dict):
     to_encode = data.copy()
     encoded_jwt = jwt.encode(to_encode, JWT_SECRET(), algorithm=JWT_ALGORITHM)
     return encoded_jwt
+
+async def refresh_frontend(additional:list[str]=[]):
+    await socketio_emit([]+additional)
 
 async def check_login(token: str = Depends(oauth2_scheme)):
     if not token:
