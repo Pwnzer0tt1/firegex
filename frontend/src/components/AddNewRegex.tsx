@@ -1,10 +1,11 @@
-import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Modal } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Modal, Alert } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useState } from 'react';
 import { RegexAddForm } from '../js/models';
 import { b64decode, b64encode, getapiobject, okNotify } from '../js/utils';
 import { ImCross } from "react-icons/im"
 import FilterTypeSelector from './FilterTypeSelector';
+import { AiFillWarning } from 'react-icons/ai';
 
 type RegexAddInfo = {
     regex:string,
@@ -103,6 +104,10 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                 color="gray"
                 {...form.getInputProps('type')}
             />
+            {form.values.type == "whitelist"?<><Space h="md" />
+            <Alert variant="light" color="yellow" radius="lg" title="You are using whitelists" icon={<AiFillWarning />}>
+                Using whitelist means that EVERY packet that doesn't match the regex will be DROPPED... In most cases this cause the service interruption.
+            </Alert></>:null}
             <Group position="right" mt="md">
                 <Button loading={submitLoading} type="submit">Add Filter</Button>
             </Group>

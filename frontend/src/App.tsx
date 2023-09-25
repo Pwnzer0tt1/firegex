@@ -69,7 +69,7 @@ function App() {
       <Space h="md" />
       <Title order={4} align="center">Error communicating with backend</Title>
       <Space h="md" />
-      Errore: {reqError}
+      Error: {reqError}
       <Space h="xl" />
       <Loader />
     </div>

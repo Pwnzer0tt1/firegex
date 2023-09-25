@@ -67,7 +67,7 @@ function NFRegex({ children }: { children: any }) {
             {(services.data && services.data?.length > 0)?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
                 navigator("/nfregex/"+srv.service_id)
             }} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
-                <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> 
+                <Space h="xl" /> <Space h="xl" /> 
                 <div className='center-flex'>
                     <Tooltip label="Add a new service" color="blue" opened={tooltipAddServOpened}>
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"

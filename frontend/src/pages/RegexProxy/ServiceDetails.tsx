@@ -24,7 +24,7 @@ function ServiceDetailsProxyRegex() {
         {(!regexesList.data || regexesList.data.length == 0)?<>
                 <Space h="xl" />
                 <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
-                <Space h="xl" /> <Space h="xl" /> <Space h="xl" /> <Space h="xl" />
+                <Space h="xl" /> <Space h="xl" /> 
                 <div className='center-flex'>
                     <Tooltip label="Add a new regex" zIndex={0} color="blue" opened={tooltipAddRegexOpened}>
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
