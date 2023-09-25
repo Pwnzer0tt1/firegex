@@ -18,6 +18,7 @@ export const ProtocolSelector = (props:Omit<SegmentedControlProps, "data">) => (
                 label: 'ANY',
             }
         ]}
+        size={props.size?props.size:"xs"}
         {...props}
     />
 )

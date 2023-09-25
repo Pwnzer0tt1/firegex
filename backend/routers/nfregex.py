@@ -174,11 +174,11 @@ async def service_delete(service_id: str):
 async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
-    if not form.name: return {'status': 'The name cannot be empty!'} 
+    if not form.name: raise HTTPException(status_code=400, detail="The name cannot be empty!") 
     try:
         db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
     except sqlite3.IntegrityError:
-        return {'status': 'This name is already used'}
+        raise HTTPException(status_code=400, detail="This name is already used")
     await refresh_frontend()
     return {'status': 'ok'}
 
@@ -242,12 +242,12 @@ async def add_new_regex(form: RegexAddForm):
     try:
         re.compile(b64decode(form.regex))
     except Exception:
-        return {"status":"Invalid regex"}
+        raise HTTPException(status_code=400, detail="Invalid regex")
     try:
         db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode, is_case_sensitive, active ) VALUES (?, ?, ?, ?, ?, ?);", 
                 form.service_id, form.regex, form.is_blacklist, form.mode, form.is_case_sensitive, True if form.active is None else form.active )
     except sqlite3.IntegrityError:
-        return {'status': 'An identical regex already exists'}
+        raise HTTPException(status_code=400, detail="An identical regex already exists")
 
     await firewall.get(form.service_id).update_filters()
     await refresh_frontend()
@@ -259,16 +259,16 @@ async def add_new_service(form: ServiceAddForm):
     try:
         form.ip_int = ip_parse(form.ip_int)
     except ValueError:
-        return {"status":"Invalid address"}
+        raise HTTPException(status_code=400, detail="Invalid address")
     if form.proto not in ["tcp", "udp"]:
-        return {"status":"Invalid protocol"}
+        raise HTTPException(status_code=400, detail="Invalid protocol")
     srv_id = None
     try:
         srv_id = gen_service_id()
         db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int) VALUES (?, ?, ?, ?, ?, ?)",
                     srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int)
     except sqlite3.IntegrityError:
-        return {'status': 'This type of service already exists'}
+        raise HTTPException(status_code=400, detail="This type of service already exists")
     await firewall.reload()
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}

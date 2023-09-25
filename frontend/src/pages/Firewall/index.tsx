@@ -1,14 +1,12 @@
-import { ActionIcon, Badge, LoadingOverlay, Space, Switch, Title, Tooltip } from "@mantine/core"
+import { ActionIcon, Badge, Button, LoadingOverlay, Space, Switch, TextInput, Title, Tooltip } from "@mantine/core"
 import { useEffect, useState } from "react";
-import { BsPlusLg } from "react-icons/bs"
-import { rem, Text } from '@mantine/core';
-import { ActionType, Rule, firewall, firewallRulesQuery } from "../../components/Firewall/utils";
-import cx from 'clsx'
-import { errorNotify, getErrorMessage, okNotify } from "../../js/utils";
+import { BsPlusLg, BsTrashFill } from "react-icons/bs"
+import { rem } from '@mantine/core';
+import { ActionType, Protocol, Rule, RuleMode, firewall, firewallRulesQuery } from "../../components/Firewall/utils";
+import { errorNotify, getErrorMessage, makeid, okNotify } from "../../js/utils";
 import { useListState } from '@mantine/hooks';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { TbGripVertical, TbReload } from "react-icons/tb";
-import classes from './DndListHandle.module.scss';
 import { useQueryClient } from "@tanstack/react-query";
 import { TiTick } from "react-icons/ti";
 import YesNoModal from "../../components/YesNoModal";
@@ -17,79 +15,27 @@ import { InterfaceInput } from "../../components/InterfaceInput";
 import { ActionTypeSelector } from "../../components/Firewall/ActionTypeSelector";
 import { ProtocolSelector } from "../../components/Firewall/ProtocolSelector";
 import { ModeSelector } from "../../components/Firewall/ModeSelector";
+import { OnOffButton } from "../../components/OnOffButton";
+import { LuArrowBigRightDash } from "react-icons/lu"
 
-  /*
-  {
-  "rules": [
-    {
-      "active": true,
-      "name": "R1",
-      "proto": "tcp",
-      "ip_src": "0.0.0.0/0",
-      "ip_dst": "0.0.0.0/0",
-      "port_src_from": 1,
-      "port_dst_from": 3030,
-      "port_src_to": 65535,
-      "port_dst_to": 3030,
-      "action": "reject",
-      "mode": "I"
-    },
-    {
-      "active": true,
-      "name": "R2",
-      "proto": "tcp",
-      "ip_src": "0.0.0.0/0",
-      "ip_dst": "0.0.0.0/0",
-      "port_src_from": 1,
-      "port_dst_from": 3030,
-      "port_src_to": 65535,
-      "port_dst_to": 3030,
-      "action": "drop",
-      "mode": "O"
-    },
-    {
-      "active": false,
-      "name": "R3",
-      "proto": "udp",
-      "ip_src": "192.168.0.1/24",
-      "ip_dst": "0.0.0.0/0",
-      "port_src_from": 1,
-      "port_dst_from": 2020,
-      "port_src_to": 65535,
-      "port_dst_to": 2020,
-      "action": "drop",
-      "mode": "I"
-    },
-    {
-      "active": true,
-      "name": "R4",
-      "proto": "any",
-      "ip_src": "::/0",
-      "ip_dst": "fdfd::ffff:123/64",
-      "port_src_from": 1,
-      "port_dst_from": 1,
-      "port_src_to": 1,
-      "port_dst_to": 1,
-      "action": "accept",
-      "mode": "I"
-    }
-  ],
-  "policy": "accept"
-} 
-  */
 
 export const Firewall = () => {
 
     const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
     const [tooltipRefreshOpened, setTooltipRefreshOpened] = useState(false);
     const [tooltipApplyOpened, setTooltipApplyOpened] = useState(false);
-    const [open, setOpen] = useState(false);
     const [currentPolicy, setCurrentPolicy] = useState<ActionType>(ActionType.ACCEPT)
+    const [tooltipAddRulOpened, setTooltipAddRulOpened] = useState(false)
     const queryClient = useQueryClient()
     const rules = firewallRulesQuery()
-    const [state, handlers] = useListState<Rule>([]);
+    const [state, handlers] = useListState<Rule & {rule_id:string}>([]);
     const [enableFwModal, setEnableFwModal] = useState(false)
     const [applyChangeModal, setApplyChangeModal] = useState(false)
+
+    const [updateMevalueinternal, internalUpdateme] = useState(false)
+    const updateMe = () => {
+      internalUpdateme(!updateMevalueinternal)
+    }
 
     useEffect(()=> {
         if(rules.isError)
@@ -99,12 +45,15 @@ export const Firewall = () => {
     useEffect(()=> {
         if(!rules.isLoading && rules.isFetched && !rules.isFetching){
           setCurrentPolicy(rules.data?.policy??ActionType.ACCEPT)
-          handlers.setState(JSON.parse(JSON.stringify(rules.data?.rules??[])))
+          handlers.setState(JSON.parse(JSON.stringify((rules.data?.rules??[]).map( v => ({rule_id: makeid(30), ...v})))))
         }
     },[rules.isFetched, rules.isLoading, rules.isFetching])
 
     const fwEnabled = rules.data?.enabled??false
-    const valuesChanged = JSON.stringify(rules.data?.rules) != JSON.stringify(state) || rules.data?.policy != currentPolicy
+    const valuesChanged = JSON.stringify(rules.data?.rules) != JSON.stringify(state.map(v => {
+      const {rule_id, ...rest} = v
+      return rest
+    })) || rules.data?.policy != currentPolicy
 
     const enableFirewall = () => {
       if (valuesChanged){
@@ -145,49 +94,189 @@ export const Firewall = () => {
       }
     }
 
-    const applyChangesRaw = () => {
-      return firewall.ruleset({rules:state, policy:currentPolicy})
-      .then(()=>okNotify("Firewall rules applied", "The firewall rules has been applied"))
-      .catch((e)=>errorNotify("Firewall rules apply failed!", getErrorMessage(e)))
+    const emptyRuleAdd = () => {
+      handlers.insert(0,{
+        rule_id: makeid(30),
+        active: true,
+        name: "Rule name",
+        proto: Protocol.TCP,
+        ip_src: "any",
+        ip_dst: "any",
+        port_src_from: 1,
+        port_dst_from: 8080,
+        port_src_to: 65535,
+        port_dst_to: 8080,
+        action: ActionType.ACCEPT,
+        mode: RuleMode.IN
+      })
     }
 
+    const parseRules = () => {
+      return state
+    }
+
+    const applyChangesRaw = () => {
+      const parsedRules = parseRules()
+      if (parsedRules === undefined){
+        errorNotify("Firewall rules apply failed!", "The firewall rules are not valid")
+        return Promise.reject()
+      }else{
+        return firewall.ruleset({rules:state, policy:currentPolicy})
+        .then(()=>okNotify("Firewall rules applied", "The firewall rules has been applied"))
+        .catch((e)=>errorNotify("Firewall rules apply failed!", getErrorMessage(e)))
+      }
+    }
+
+
+
     const items = state.map((item, index) => (
-        <Draggable key={index} index={index} draggableId={index.toString()}>
+        <Draggable key={item.rule_id} index={index} draggableId={item.rule_id}>
           {(provided, snapshot) => {
             const customInt = [
               { value: "0.0.0.0/0", netint: "ANY IPv4", label: "0.0.0.0/0" },
               { value: "::/0", netint: "ANY IPv6", label: "::/0" }
             ]
-            const ip_layer_not_filtered = item.ip_dst == "any" || item.ip_src == "any"
-            const src_custom_int = customInt.map(v => v.value).includes(item.ip_src)?[]:[{ value: item.ip_src, netint: "SELECTED", label: item.ip_src }]
-            const dst_custom_int = customInt.map(v => v.value).includes(item.ip_dst)?[]:[{ value: item.ip_src, netint: "SELECTED", label: item.ip_dst }]
+            const src_custom_int = customInt.map(v => v.value).includes(item.ip_src) || item.ip_dst == "any"?[]:[{ value: item.ip_src, netint: "SELECTED", label: item.ip_src }]
+            const dst_custom_int = customInt.map(v => v.value).includes(item.ip_dst) || item.ip_dst == "any"?[]:[{ value: item.ip_dst, netint: "SELECTED", label: item.ip_dst }]
+            const [srcPortEnabled, setSrcPortEnabled] = useState(item.port_src_from != 1 || item.port_src_to != 65535)
+            const [dstPortEnabled, setDstPortEnabled] = useState(item.port_dst_from != 1 || item.port_dst_to != 65535)
+            const [srcPortValue, setSrcPortValue] = useState(item.port_src_from==item.port_src_to?`${item.port_src_from}`:`${item.port_src_from}-${item.port_src_to}`)
+            const [dstPortValue, setDstPortValue] = useState(item.port_dst_from==item.port_dst_to?`${item.port_dst_from}`:`${item.port_dst_from}-${item.port_dst_to}`)
+            const [ipFilteringEnabled, setIpFilteringEnabled] = useState(!(item.ip_dst == "any" || item.ip_src == "any"))
+
+            const [srcIp, setSrcIp] = useState(item.ip_src!="any"?item.ip_src:"")
+            const [dstIp, setDstIp] = useState(item.ip_dst!="any"?item.ip_dst:"")
+
+            const port_range_setter = (rule:Rule, v:string, {src=false, dst=false}:{src?:boolean, dst?:boolean}) => {
+              const elements = v.split("-")
+              const values = [elements[0]?parseInt(elements[0]):0, elements[1]?parseInt(elements[1]):0]
+              values[1] = values[1]?values[1]:values[0]
+              if (src){
+                rule.port_src_from = values[0]
+                rule.port_src_to = values[1]
+                setSrcPortValue(v)
+              }
+              if (dst){
+                rule.port_dst_from = values[0]
+                rule.port_dst_to = values[1]
+                setDstPortValue(v)
+              }
+              updateMe()
+            }
+
+            const ip_setter = (rule:Rule, v:string|null, {src=false, dst=false}:{src?:boolean, dst?:boolean}) => {
+              const values = v?v:""
+              if (src){
+                rule.ip_src = values
+                setSrcIp(values)
+              }
+              if (dst){
+                rule.ip_dst = values
+                setDstIp(values)
+              }
+              updateMe()
+            }
+
+            const set_filtering_ip = (value:boolean) => {
+              if (!value){
+                item.ip_src = "any"
+                item.ip_dst = "any"
+              }else{
+                item.ip_src = srcIp
+                item.ip_dst = dstIp
+              }
+              setIpFilteringEnabled(value)
+              updateMe()
+            }
+
+            const proto_any = item.proto == Protocol.ANY
+
             return <div
-              className={cx(classes.item, { [classes.itemDragging]: snapshot.isDragging })}
               ref={provided.innerRef}
               {...provided.draggableProps}
             >
-              <div {...provided.dragHandleProps} className={classes.dragHandle}>
-                <TbGripVertical style={{ width: rem(18), height: rem(18) }} />
+              <div className='center-flex' style={{width:"100%"}}>
+              <div {...provided.dragHandleProps}>
+                <TbGripVertical style={{ width: rem(30), height: rem(40) }} />
               </div>
               <Space w="sm" />
-              <Switch checked={item.active} />
-              <div>
-                <Text>{item.name}</Text>
-                <InterfaceInput initialCustomInterfaces={[...src_custom_int, ...customInt]} defaultValue={item.ip_src}/>
-                <PortRangeInput defaultValues={[item.port_src_from, item.port_src_to]} />
-                <InterfaceInput initialCustomInterfaces={[...dst_custom_int, ...customInt]} defaultValue={item.ip_dst}/>
-                <PortRangeInput defaultValues={[item.port_dst_from, item.port_dst_to]} />
-                <ActionTypeSelector
-                  value={item.action}
-                />
-                <ProtocolSelector
-                  value={item.proto}
-                />
+              <div className="center-flex-row" style={{width:"100%"}}>
+                <div className="center-flex" style={{width:"97%"}}>
+                <OnOffButton value={item.active} onClick={() =>{
+                  item.active = !item.active
+                  updateMe()
+                }} size="lg" variant="filled" radius="md" />
+                <Space w="sm" />
+                <ActionIcon color="red" onClick={()=>handlers.remove(index)} size="lg" radius="md" variant="filled"><BsTrashFill size={18} /></ActionIcon>
+                <Space w="sm" />
+                <TextInput defaultValue={item.name} onChange={(v)=>{item.name = v.target.value;updateMe()}} style={{width:"100%"}}/>
+                </div>
+                <Space h="sm" />
+                <div className="center-flex" style={{width:"97%"}}>
+                  <div  style={{width:"100%"}}>
+                  <InterfaceInput initialCustomInterfaces={[...src_custom_int, ...customInt]} value={srcIp} onChange={v => ip_setter(item, v, {src:true})} disabled={!ipFilteringEnabled} />
+                  <Space h="sm" />
+                  <div className="center-flex" style={{width:"100%"}}>
+                  <OnOffButton value={srcPortEnabled} onClick={() =>{
+                    const value = !srcPortEnabled
+                    setSrcPortEnabled(value)
+                    if (!value){
+                      item.port_src_from = 1
+                      item.port_src_to = 65535
+                      updateMe()
+                    }else{
+                      port_range_setter(item, srcPortValue, {src:true})
+                    }
+                  }} size="lg" disabled={proto_any} variant="light" />
+                  <Space w="xs" />
+                  <PortRangeInput onChange={v => port_range_setter(item, v.target.value, {src:true})} value={srcPortValue} disabled={!srcPortEnabled || proto_any} style={{width:"100%"}} />
+                  </div>
+                  </div>
+                  <Space w="lg" />
+                  <LuArrowBigRightDash size={100} />
+                  <Space w="lg" />
+                  <div style={{width:"100%"}}>
+                  <InterfaceInput initialCustomInterfaces={[...dst_custom_int, ...customInt]} defaultValue={dstIp} onChange={v => ip_setter(item, v, {dst:true})} disabled={!ipFilteringEnabled} />
+                  <Space h="sm" />
+                  <div className="center-flex" style={{width:"100%"}}>
+                    <OnOffButton value={dstPortEnabled} onClick={() =>{
+                      const value = !dstPortEnabled
+                      setDstPortEnabled(value)
+                      if (!value){
+                        item.port_dst_from = 1
+                        item.port_dst_to = 65535
+                        updateMe()
+                      }else{
+                        port_range_setter(item, dstPortValue, {dst:true})
+                      }
+                    }} size="lg" disabled={proto_any} variant="light" />
+                    <Space w="xs" />
+                    <PortRangeInput onChange={v => port_range_setter(item, v.target.value, {dst:true})} value={dstPortValue} disabled={!dstPortEnabled || proto_any} style={{width:"100%"}} />
+                  </div>
+                  </div>
+                </div>
+              </div>
+              <div className="center-flex-row">
+                  <ActionTypeSelector
+                      value={item.action}
+                      onChange={(value)=>{item.action = value as ActionType;updateMe()}}
+                    />
+                    <Space h="xs" />
                   <ModeSelector
                     value={item.mode}
+                    onChange={(value)=>{item.mode = value as RuleMode;updateMe()}}
                   />
-                  Filter IP Layer: <Switch checked={!ip_layer_not_filtered} />
+                  <Space h="xs" />
+                  <ProtocolSelector
+                      value={item.proto}
+                      onChange={(value)=>{item.proto = value as Protocol;updateMe()}}
+                    />
+                    <Space h="xs" />
+
+                  <Button size="xs" variant="light" color={ipFilteringEnabled?"lime":"red"} onClick={()=>set_filtering_ip(!ipFilteringEnabled)} >{ipFilteringEnabled?"IP Filtering ON":"IP Filtering OFF"}</Button>
               </div>
+              </div>
+              <Space h="md" />
             </div>
         }}
         </Draggable>
@@ -212,7 +301,7 @@ export const Firewall = () => {
             <Badge size="sm" color="green" variant="filled">Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
             <Space w="xs" />
             <Tooltip label="Add a new rule" position='bottom' color="blue" opened={tooltipAddOpened}>
-                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
+                <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"
                 onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
                 onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
             </Tooltip>
@@ -234,20 +323,30 @@ export const Firewall = () => {
         </div>
         <Space h="xl" />
         
-        <DragDropContext
-      onDragEnd={({ destination, source }) =>
-        handlers.reorder({ from: source.index, to: destination?.index || 0 })
-      }
-    >
-      <Droppable droppableId="dnd-list" direction="vertical">
-        {(provided) => (
-          <div {...provided.droppableProps} ref={provided.innerRef}>
-            {items}
-            {provided.placeholder}
-          </div>
-        )}
-      </Droppable>
-    </DragDropContext>
+        {items.length > 0?<DragDropContext
+          onDragEnd={({ destination, source }) =>
+            handlers.reorder({ from: source.index, to: destination?.index || 0 })
+          }
+        >
+          <Droppable droppableId="dnd-list" direction="vertical">
+            {(provided) => (
+              <div {...provided.droppableProps} ref={provided.innerRef}>
+                {items}
+                {provided.placeholder}
+              </div>
+            )}
+          </Droppable>
+        </DragDropContext>:<>
+    <Space h="xl"/> <Title className='center-flex' align='center' order={3}>No rule found! Add one clicking the "+" buttons</Title>
+    <Space h="xl" /> <Space h="xl" /> 
+    <div className='center-flex'>
+        <Tooltip label="Add a new rule" color="blue" opened={tooltipAddRulOpened}>
+            <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled"
+                onFocus={() => setTooltipAddRulOpened(false)} onBlur={() => setTooltipAddRulOpened(false)}
+                onMouseEnter={() => setTooltipAddRulOpened(true)} onMouseLeave={() => setTooltipAddRulOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
+        </Tooltip>
+    </div>
+</>}
 
       <YesNoModal
           title='Are you sure to apply the changes to the firewall?'

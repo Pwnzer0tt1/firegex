@@ -18,6 +18,7 @@ export const ActionTypeSelector = (props:Omit<SegmentedControlProps, "data">) =>
                 label: 'Drop',
             }
         ]}
+        size={props.size?props.size:"xs"}
         {...props}
     />
 )

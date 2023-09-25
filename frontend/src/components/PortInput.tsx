@@ -1,19 +1,9 @@
 import { Input, NumberInput, NumberInputProps, TextInput, TextInputProps } from "@mantine/core"
 import React, { useState } from "react"
+import { regex_port, regex_range_port } from "../js/utils"
 
 interface PortInputProps extends NumberInputProps {
     fullWidth?: boolean
-}
-
-const valueParse = (raw_value:string, oldValue:string = "") => {
-    const value = parseInt(raw_value)
-    if (value > 65535) {
-        return oldValue
-    } else if (value < 1) {
-        return oldValue
-    }else{
-        return value.toString()
-    }
 }
 
 
@@ -29,8 +19,7 @@ const PortInput =  React.forwardRef<HTMLInputElement, PortInputProps>( (props, r
         style={fullWidth?props.style:{ width: "75px", ...props.style }}
         onInput={(e) => {
             const target = e.target as HTMLInputElement
-            target.value = target.value?valueParse(target.value, oldValue):""
-            setOldValue(target.value)
+            target.value.match(regex_port)?setOldValue(target.value):target.value = oldValue
             props.onInput?.(e)
         }}
         ref={ref}
@@ -46,10 +35,7 @@ interface PortRangeInputProps extends TextInputProps {
 }
 
 export const PortRangeInput =  React.forwardRef<HTMLInputElement, PortRangeInputProps>( (props, ref) => {
-    const oldValueStates = [
-        useState<string>(props.defaultValue?props.defaultValue?.toString().split("-")[0]:""),
-        useState<string|undefined>(props.defaultValue?.toString().split("-")[1])
-    ]
+    const [oldValue, setOldValue] = useState<string>(props.defaultValue?props.defaultValue.toString():"")
     const {fullWidth, defaultValues, ...propeties} = props
     let defaultValuesInt = defaultValues
     if (defaultValuesInt?.length == 2 && defaultValuesInt[0] == defaultValuesInt[1]){
@@ -62,13 +48,7 @@ export const PortRangeInput =  React.forwardRef<HTMLInputElement, PortRangeInput
         style={fullWidth?props.style:{ width: "150px", ...props.style }}
         onInput={(e) => {
             const target = e.target as HTMLInputElement
-            const splitted = target.value.split("-")
-            const parsedValues = [splitted[0], splitted[1]].map((value, index) => {
-                const res = value?valueParse(value,oldValueStates[index][0]):value
-                if (res != oldValueStates[index][0]) oldValueStates[index][1](value)
-                return res
-            })
-            target.value = parsedValues.filter((v, i) => (v !== undefined && (i != 0 || v !== ""))).join("-")
+            target.value.match(regex_range_port)?setOldValue(target.value):target.value = oldValue
             props.onInput?.(e)
         }}
         ref={ref}

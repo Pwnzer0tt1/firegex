@@ -117,24 +117,24 @@ def parse_and_check_rule(rule:RuleModel):
             rule.ip_src = ip_parse(rule.ip_src)
             rule.ip_dst = ip_parse(rule.ip_dst)
         except ValueError:
-            return {"status":"Invalid address"}
+            raise HTTPException(status_code=400, detail="Invalid address")
+        if ip_family(rule.ip_dst) != ip_family(rule.ip_src):
+            raise HTTPException(status_code=400, detail="Destination and source addresses must be of the same family")
     
     rule.port_dst_from, rule.port_dst_to = min(rule.port_dst_from, rule.port_dst_to), max(rule.port_dst_from, rule.port_dst_to)
     rule.port_src_from, rule.port_src_to = min(rule.port_src_from, rule.port_src_to), max(rule.port_src_from, rule.port_src_to)
-    
-    if ip_family(rule.ip_dst) != ip_family(rule.ip_src):
-        return  {"status":"Destination and source addresses must be of the same family"}
+
     if rule.proto not in ["tcp", "udp", "any"]:
-        return {"status":"Invalid protocol"}
+        raise HTTPException(status_code=400, detail="Invalid protocol")
     if rule.action not in ["accept", "drop", "reject"]:
-        return {"status":"Invalid action"}
+        raise HTTPException(status_code=400, detail="Invalid action")
     return rule
 
 @app.post('/rules/set', response_model=RuleAddResponse)
 async def add_new_service(form: RuleFormAdd):
     """Add a new service"""
     if form.policy not in ["accept", "drop", "reject"]:
-        return {"status": "Invalid policy"}
+        raise HTTPException(status_code=400, detail="Invalid policy")
     rules = [parse_and_check_rule(ele) for ele in form.rules]
     errors = [({"rule":i} | ele) for i, ele in enumerate(rules) if isinstance(ele, dict)]
     if len(errors) > 0:
@@ -160,5 +160,5 @@ async def add_new_service(form: RuleFormAdd):
         )
         db.set("POLICY", form.policy)
     except sqlite3.IntegrityError:
-        return {'status': 'Error saving the rules: maybe there are duplicated rules'}
+        raise HTTPException(status_code=400, detail="Error saving the rules: maybe there are duplicated rules")
     return await apply_changes()
