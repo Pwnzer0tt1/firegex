@@ -163,7 +163,7 @@ class ChangePortForm(BaseModel):
 async def change_service_ports(service_id: str, change_port:ChangePortForm):
     """Choose and change the ports of the service"""
     if change_port.port is None and change_port.internalPort is None:
-        return {'status': 'Invalid Request!'}
+        raise HTTPException(status_code=400, detail="Invalid Request!")
     try:
         sql_inj = ""
         query:list[str|int] = []
@@ -178,7 +178,7 @@ async def change_service_ports(service_id: str, change_port:ChangePortForm):
         query.append(service_id)
         db.query(f'UPDATE services SET {sql_inj} WHERE service_id = ?;', *query)
     except sqlite3.IntegrityError:
-        return {'status': 'Port of the service has been already assigned to another service'}
+        raise HTTPException(status_code=400, detail="Port of the service has been already assigned to another service")
     await firewall.get(service_id).update_port()
     await refresh_frontend()
     return {'status': 'ok'}
@@ -260,12 +260,12 @@ async def add_new_regex(form: RegexAddForm):
     try:
         re.compile(b64decode(form.regex))
     except Exception:
-        return {"status":"Invalid regex"}
+        raise HTTPException(status_code=400, detail="Invalid regex")
     try:
         db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode, is_case_sensitive, active ) VALUES (?, ?, ?, ?, ?, ?);", 
                 form.service_id, form.regex, form.is_blacklist, form.mode, form.is_case_sensitive, True if form.active is None else form.active )
     except sqlite3.IntegrityError:
-        return {'status': 'An identical regex already exists'}
+        raise HTTPException(status_code=400, detail="An identical regex already exists")
     await firewall.get(form.service_id).update_filters()
     await refresh_frontend()
     return {'status': 'ok'}
@@ -286,11 +286,11 @@ class RenameForm(BaseModel):
 async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
-    if not form.name: return {'status': 'The name cannot be empty!'} 
+    if not form.name: raise HTTPException(status_code=400, detail="The name cannot be empty!") 
     try:
         db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
     except sqlite3.IntegrityError:
-        return {'status': 'The name is already used!'}
+        raise HTTPException(status_code=400, detail="The name is already used!")
     await refresh_frontend()
     return {'status': 'ok'}
 
@@ -304,7 +304,7 @@ async def add_new_service(form: ServiceAddForm):
         db.query("INSERT INTO services (name, service_id, internal_port, public_port, status) VALUES (?, ?, ?, ?, ?)",
                     form.name, serv_id, internal_port, form.port, 'stop')
     except sqlite3.IntegrityError:
-        return {'status': 'Name or/and ports of the service has been already assigned to another service'}
+        raise HTTPException(status_code=400, detail="Name or/and ports of the service has been already assigned to another service")
     await firewall.reload()
     await refresh_frontend()
     return {'status': 'ok', "id": serv_id }

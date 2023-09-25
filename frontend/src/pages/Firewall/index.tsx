@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Button, LoadingOverlay, Space, Switch, TextInput, Title, Tooltip } from "@mantine/core"
+import { ActionIcon, Badge, Button, Divider, LoadingOverlay, Space, Switch, TextInput, Title, Tooltip, useMantineTheme } from "@mantine/core"
 import { useEffect, useState } from "react";
 import { BsPlusLg, BsTrashFill } from "react-icons/bs"
 import { rem } from '@mantine/core';
@@ -17,6 +17,7 @@ import { ProtocolSelector } from "../../components/Firewall/ProtocolSelector";
 import { ModeSelector } from "../../components/Firewall/ModeSelector";
 import { OnOffButton } from "../../components/OnOffButton";
 import { LuArrowBigRightDash } from "react-icons/lu"
+import { ImCheckmark, ImCross } from "react-icons/im";
 
 
 export const Firewall = () => {
@@ -31,6 +32,7 @@ export const Firewall = () => {
     const [state, handlers] = useListState<Rule & {rule_id:string}>([]);
     const [enableFwModal, setEnableFwModal] = useState(false)
     const [applyChangeModal, setApplyChangeModal] = useState(false)
+    const theme = useMantineTheme();
 
     const [updateMevalueinternal, internalUpdateme] = useState(false)
     const updateMe = () => {
@@ -189,7 +191,21 @@ export const Firewall = () => {
               updateMe()
             }
 
+            const disable_style = { opacity:"0.4", cursor:"not-allowed" }
             const proto_any = item.proto == Protocol.ANY
+            const disabletab = {
+              ips:!ipFilteringEnabled,
+              port_box: proto_any,
+              src_port: !srcPortEnabled || proto_any,
+              dst_port: !dstPortEnabled || proto_any
+            }
+
+            const additionalStyle = {
+              ips:disabletab.ips?disable_style:{},
+              port_box: disabletab.port_box?disable_style:{},
+              src_port: disabletab.src_port?disable_style:{},
+              dst_port: disabletab.dst_port?disable_style:{}
+            }
 
             return <div
               ref={provided.innerRef}
@@ -202,10 +218,28 @@ export const Firewall = () => {
               <Space w="sm" />
               <div className="center-flex-row" style={{width:"100%"}}>
                 <div className="center-flex" style={{width:"97%"}}>
-                <OnOffButton value={item.active} onClick={() =>{
-                  item.active = !item.active
-                  updateMe()
-                }} size="lg" variant="filled" radius="md" />
+                <Switch
+                  checked={item.active}
+                  onChange={() =>{
+                    item.active = !item.active
+                    updateMe()
+                  }}
+                  color="teal"
+                  size="lg"
+                  thumbIcon={
+                    item.active ? (
+                      <ImCheckmark
+                        style={{ width: rem(12), height: rem(12) }}
+                        color={theme.colors.teal[6]}
+                      />
+                    ) : (
+                      <ImCross
+                        style={{ width: rem(12), height: rem(12) }}
+                        color={theme.colors.red[6]}
+                      />
+                    )
+                  }
+                />
                 <Space w="sm" />
                 <ActionIcon color="red" onClick={()=>handlers.remove(index)} size="lg" radius="md" variant="filled"><BsTrashFill size={18} /></ActionIcon>
                 <Space w="sm" />
@@ -214,7 +248,14 @@ export const Firewall = () => {
                 <Space h="sm" />
                 <div className="center-flex" style={{width:"97%"}}>
                   <div  style={{width:"100%"}}>
-                  <InterfaceInput initialCustomInterfaces={[...src_custom_int, ...customInt]} value={srcIp} onChange={v => ip_setter(item, v, {src:true})} disabled={!ipFilteringEnabled} />
+                  <InterfaceInput
+                    initialCustomInterfaces={[...src_custom_int, ...customInt]}
+                    value={srcIp}
+                    onChange={v => ip_setter(item, v, {src:true})}
+                    disabled={disabletab.ips}
+                    error={!disabletab.ips && !srcIp}
+                    style={additionalStyle.ips}
+                  />
                   <Space h="sm" />
                   <div className="center-flex" style={{width:"100%"}}>
                   <OnOffButton value={srcPortEnabled} onClick={() =>{
@@ -227,16 +268,29 @@ export const Firewall = () => {
                     }else{
                       port_range_setter(item, srcPortValue, {src:true})
                     }
-                  }} size="lg" disabled={proto_any} variant="light" />
+                  }} size="lg" disabled={disabletab.port_box} style={additionalStyle.port_box} variant="light" />
                   <Space w="xs" />
-                  <PortRangeInput onChange={v => port_range_setter(item, v.target.value, {src:true})} value={srcPortValue} disabled={!srcPortEnabled || proto_any} style={{width:"100%"}} />
+                  <PortRangeInput
+                    onChange={v => port_range_setter(item, v.target.value, {src:true})}
+                    value={srcPortValue}
+                    disabled={disabletab.src_port}
+                    error={!disabletab.src_port && !srcPortValue}
+                    style={{width:"100%", ...additionalStyle.src_port}}
+                  />
                   </div>
                   </div>
                   <Space w="lg" />
                   <LuArrowBigRightDash size={100} />
                   <Space w="lg" />
                   <div style={{width:"100%"}}>
-                  <InterfaceInput initialCustomInterfaces={[...dst_custom_int, ...customInt]} defaultValue={dstIp} onChange={v => ip_setter(item, v, {dst:true})} disabled={!ipFilteringEnabled} />
+                  <InterfaceInput
+                    initialCustomInterfaces={[...dst_custom_int, ...customInt]}
+                    defaultValue={dstIp}
+                    onChange={v => ip_setter(item, v, {dst:true})}
+                    disabled={disabletab.ips}
+                    error={!disabletab.ips && !dstIp}
+                    style={additionalStyle.ips}
+                  />
                   <Space h="sm" />
                   <div className="center-flex" style={{width:"100%"}}>
                     <OnOffButton value={dstPortEnabled} onClick={() =>{
@@ -249,9 +303,15 @@ export const Firewall = () => {
                       }else{
                         port_range_setter(item, dstPortValue, {dst:true})
                       }
-                    }} size="lg" disabled={proto_any} variant="light" />
+                    }} size="lg" disabled={disabletab.port_box} style={additionalStyle.port_box} variant="light" />
                     <Space w="xs" />
-                    <PortRangeInput onChange={v => port_range_setter(item, v.target.value, {dst:true})} value={dstPortValue} disabled={!dstPortEnabled || proto_any} style={{width:"100%"}} />
+                    <PortRangeInput
+                      onChange={v => port_range_setter(item, v.target.value, {dst:true})}
+                      value={dstPortValue}
+                      disabled={disabletab.dst_port}
+                      error={!disabletab.dst_port && !dstPortValue}
+                      style={{width:"100%", ...additionalStyle.dst_port}}
+                    />
                   </div>
                   </div>
                 </div>
@@ -260,22 +320,32 @@ export const Firewall = () => {
                   <ActionTypeSelector
                       value={item.action}
                       onChange={(value)=>{item.action = value as ActionType;updateMe()}}
+                      style={{width:"100%"}}
                     />
                     <Space h="xs" />
                   <ModeSelector
                     value={item.mode}
                     onChange={(value)=>{item.mode = value as RuleMode;updateMe()}}
+                    style={{width:"100%"}}
                   />
                   <Space h="xs" />
                   <ProtocolSelector
                       value={item.proto}
                       onChange={(value)=>{item.proto = value as Protocol;updateMe()}}
+                      style={{width:"100%"}}
                     />
                     <Space h="xs" />
 
-                  <Button size="xs" variant="light" color={ipFilteringEnabled?"lime":"red"} onClick={()=>set_filtering_ip(!ipFilteringEnabled)} >{ipFilteringEnabled?"IP Filtering ON":"IP Filtering OFF"}</Button>
+                  <Button
+                    size="xs" variant="light"
+                    color={ipFilteringEnabled?"lime":"red"}
+                    onClick={()=>set_filtering_ip(!ipFilteringEnabled)} 
+                    style={{width:"100%"}}
+                  >{ipFilteringEnabled?"IP Filtering ON":"IP Filtering OFF"}</Button>
               </div>
               </div>
+              <Space h="md" />
+              <Divider />
               <Space h="md" />
             </div>
         }}
@@ -328,6 +398,8 @@ export const Firewall = () => {
             handlers.reorder({ from: source.index, to: destination?.index || 0 })
           }
         >
+          <Divider />
+          <Space h="md" />
           <Droppable droppableId="dnd-list" direction="vertical">
             {(provided) => (
               <div {...provided.droppableProps} ref={provided.innerRef}>

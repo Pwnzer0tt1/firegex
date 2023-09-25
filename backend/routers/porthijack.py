@@ -122,11 +122,11 @@ async def service_delete(service_id: str):
 async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
-    if not form.name: return {'status': 'The name cannot be empty!'} 
+    if not form.name: raise HTTPException(status_code=400, detail="The name cannot be empty!") 
     try:
         db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
     except sqlite3.IntegrityError:
-        return {'status': 'This name is already used'}
+        raise HTTPException(status_code=400, detail="This name is already used")
     await refresh_frontend()
     return {'status': 'ok'}
 
@@ -141,14 +141,14 @@ async def service_change_destination(service_id: str, form: ChangeDestination):
     try:
         form.ip_dst = addr_parse(form.ip_dst)
     except ValueError:
-        return {"status":"Invalid address"}
+        raise HTTPException(status_code=400, detail="Invalid address")
     srv = Service.from_dict(db.query('SELECT * FROM services WHERE service_id = ?;', service_id)[0])
     if ip_family(form.ip_dst) != ip_family(srv.ip_src):
-        return {'status': 'The destination ip is not of the same family as the source ip'}
+        raise HTTPException(status_code=400, detail="The destination ip is not of the same family as the source ip")
     try:
         db.query('UPDATE services SET proxy_port=?, ip_dst=? WHERE service_id = ?;', form.proxy_port, form.ip_dst, service_id)
     except sqlite3.IntegrityError:
-        return {'status': 'Invalid proxy port or service'}
+        raise HTTPException(status_code=400, detail="Invalid proxy port or service")
     
     srv.ip_dst = form.ip_dst
     srv.proxy_port = form.proxy_port
@@ -164,12 +164,12 @@ async def add_new_service(form: ServiceAddForm):
         form.ip_src = addr_parse(form.ip_src)
         form.ip_dst = addr_parse(form.ip_dst)
     except ValueError:
-        return {"status":"Invalid address"}
+        raise HTTPException(status_code=400, detail="Invalid address")
     
     if ip_family(form.ip_dst) != ip_family(form.ip_src):
-        return  {"status":"Destination and source addresses must be of the same family"}
+        raise HTTPException(status_code=400, detail="Destination and source addresses must be of the same family")
     if form.proto not in ["tcp", "udp"]:
-        return {"status":"Invalid protocol"}
+        raise HTTPException(status_code=400, detail="Invalid protocol")
     
     srv_id = None
     try:
@@ -177,7 +177,7 @@ async def add_new_service(form: ServiceAddForm):
         db.query("INSERT INTO services (service_id, active, public_port, proxy_port, name, proto, ip_src, ip_dst) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     srv_id, False, form.public_port, form.proxy_port , form.name, form.proto, form.ip_src, form.ip_dst)
     except sqlite3.IntegrityError:
-        return {'status': 'This type of service already exists'}
+        raise HTTPException(status_code=400, detail="This type of service already exists")
 
     await firewall.reload()
     await refresh_frontend()
