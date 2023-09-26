@@ -1,14 +1,3 @@
-# 2.2.0 VERSION NEW TO IMPLEMENT
-- TODO: Need to fix mantine form validation
-1. PCRE2 ---> HyperScan Streams (VectorScan for arm64 compatibility using debian Bookworm)
-2. nfregex from c++ to rust 
-  - https://crates.io/crates/hyperscan
-  - https://docs.rs/nfqueue/latest/nfqueue/
-  - https://libtins.github.io/ (Using this lib in rust)
-3. Re-implement communication between the binary and the python webserver using json (a more simple way) (only for nfregex)
-
----
-
 <img align="left" src="./docs/FiregexLogo.png" width="130" height="130"/>
 
 # [Fi]*regex 🔥
