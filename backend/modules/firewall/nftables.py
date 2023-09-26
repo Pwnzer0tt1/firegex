@@ -28,7 +28,7 @@ class FiregexTables(NFTableManager):
     rules_chain_in = "firewall_rules_in"
     rules_chain_out = "firewall_rules_out"
     
-    def init_comands(self, policy:str="accept", policy_out:str="accept"):
+    def init_comands(self, policy:str="accept", policy_out:str="accept", allow_loopback=False, allow_established=False):
         return [
             {"add":{"chain":{
                 "family":"inet",
@@ -36,7 +36,7 @@ class FiregexTables(NFTableManager):
                 "name":self.rules_chain_in,
                 "type":"filter",
                 "hook":"prerouting",
-                "prio":-300,
+                "prio":-150,
                 "policy":policy
             }}},
             {"add":{"chain":{
@@ -45,10 +45,24 @@ class FiregexTables(NFTableManager):
                 "name":self.rules_chain_out,
                 "type":"filter",
                 "hook":"postrouting",
-                "prio":-300,
+                "prio":-150,
                 "policy":policy_out
             }}},    
-        ]
+        ] + ([
+            { "add":{ "rule": {
+                "family": "inet", "table": self.table_name, "chain": self.rules_chain_out,
+                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif"}}, "right": "lo"}},{"accept": None}]
+            }}},
+            { "add":{ "rule": {
+                "family": "inet", "table": self.table_name, "chain": self.rules_chain_in,
+                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif"}}, "right": "lo"}},{"accept": None}]
+            }}}
+        ] if allow_loopback else []) + ([
+            { "add":{ "rule": {
+                "family": "inet", "table": self.table_name, "chain": self.rules_chain_in,
+                "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established"]} }, { "accept": None }]
+            }}}
+        ] if allow_established else [])
     
     def __init__(self):
         super().__init__(self.init_comands(),[
@@ -58,52 +72,55 @@ class FiregexTables(NFTableManager):
             {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.rules_chain_out}}},
         ])
     
-    def set(self, srvs:list[Rule], policy:str="accept"):
+    def set(self, srvs:list[Rule], policy:str="accept", allow_loopback=False, allow_established=False):
         srvs = list(srvs)
         self.reset()
         if policy == "reject":
             policy = "drop"
-            srvs.extend([
-                Rule(
-                    proto="any",
-                    ip_src=iprule,
-                    ip_dst=iprule,
-                    port_src_from=1,
-                    port_dst_from=1,
-                    port_src_to=65535,
-                    port_dst_to=65535,
-                    action="reject",
-                    mode="I"
-                ) for iprule in ["0.0.0.0/0", "::/0"]
-            ])
-        self.cmd(*self.init_comands(policy))
-        for ele in srvs[::-1]: self.add(ele)
+            srvs.append(Rule(
+                proto="any",
+                ip_src="any",
+                ip_dst="any",
+                port_src_from=1,
+                port_dst_from=1,
+                port_src_to=65535,
+                port_dst_to=65535,
+                action="reject",
+                mode="I"
+            ))
+        rules = self.init_comands(policy, allow_loopback=allow_loopback, allow_established=allow_established) + self.get_rules(*srvs)
+        self.cmd(*rules)
 
-    def add(self, srv:Rule):
-        ip_filters = []
-        if srv.ip_src.lower() != "any" and srv.ip_dst.lower() != "any":
-            ip_filters = [
-                {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_src), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_src)}},
-                {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_dst), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_dst)}},
-            ]
-        
-        port_filters = []
-        if srv.proto != "any":
-            if srv.port_src_from != 1 or srv.port_src_to != 65535: #Any Port
-                port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '>=', 'right': int(srv.port_src_from)}})
-                port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '<=', 'right': int(srv.port_src_to)}})
-            if srv.port_dst_from != 1 or srv.port_dst_to != 65535: #Any Port
-                port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'op': '>=', 'right': int(srv.port_dst_from)}})
-                port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'op': '<=', 'right': int(srv.port_dst_to)}})
-            if len(port_filters) == 0:
-                port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '!=', 'right': 0}}) #filter the protocol if no port is specified
-        
-        end_rules =  [{'accept': None} if srv.action == "accept" else {'reject': {}} if (srv.action == "reject" and not srv.output_mode) else {'drop': None}]
-        
-        self.cmd({ "insert":{ "rule": {
-            "family": "inet",
-            "table": self.table_name,
-            "chain": self.rules_chain_out if srv.output_mode else self.rules_chain_in,
-            "expr": ip_filters + port_filters + end_rules
-            #If srv.output_mode is True, then the rule is in the output chain, so the reject action is not allowed
-        }}})
+    def get_rules(self,*srvs:Rule):
+        rules = []
+        for srv in srvs:
+            ip_filters = []
+            if srv.ip_src.lower() != "any" and srv.ip_dst.lower() != "any":
+                ip_filters = [
+                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_src), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_src)}},
+                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_dst), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_dst)}},
+                ]
+            
+            port_filters = []
+            if srv.proto != "any":
+                if srv.port_src_from != 1 or srv.port_src_to != 65535: #Any Port
+                    port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '>=', 'right': int(srv.port_src_from)}})
+                    port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '<=', 'right': int(srv.port_src_to)}})
+                if srv.port_dst_from != 1 or srv.port_dst_to != 65535: #Any Port
+                    port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'op': '>=', 'right': int(srv.port_dst_from)}})
+                    port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'op': '<=', 'right': int(srv.port_dst_to)}})
+                if len(port_filters) == 0:
+                    port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '!=', 'right': 0}}) #filter the protocol if no port is specified
+            
+            end_rules =  [{'accept': None} if srv.action == "accept" else {'reject': {}} if (srv.action == "reject" and not srv.output_mode) else {'drop': None}]
+            rules.append({ "add":{ "rule": {
+                "family": "inet",
+                "table": self.table_name,
+                "chain": self.rules_chain_out if srv.output_mode else self.rules_chain_in,
+                "expr": ip_filters + port_filters + end_rules
+                #If srv.output_mode is True, then the rule is in the output chain, so the reject action is not allowed
+            }}})
+        return rules
+
+    def add(self, *srvs:Rule):
+        self.cmd(*self.get_rules(*srvs))

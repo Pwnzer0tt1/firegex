@@ -119,21 +119,21 @@ async def set_settings(form: FirewallSettings):
 async def get_rule_list():
     """Get the list of existent firegex rules"""
     return {
-        "policy": db.get("POLICY", "accept"),
+        "policy": firewall.policy,
         "rules": db.query("SELECT active, name, proto, ip_src, ip_dst, port_src_from, port_dst_from, port_src_to, port_dst_to, action, mode FROM rules ORDER BY rule_id;"),
-        "enabled": db.get("ENABLED", "0") == "1"
+        "enabled": firewall.enabled
     }
 
 @app.get('/enable', response_model=StatusMessageModel)
 async def enable_firewall():
     """Request enabling the firewall"""
-    db.set("ENABLED", "1")
+    firewall.enabled = True
     return await apply_changes()
 
 @app.get('/disable', response_model=StatusMessageModel)
 async def disable_firewall():
     """Request disabling the firewall"""
-    db.set("ENABLED", "0")
+    firewall.enabled = False
     return await apply_changes()
 
 def parse_and_check_rule(rule:RuleModel):
@@ -186,7 +186,7 @@ async def add_new_service(form: RuleFormAdd):
                 ele.action, ele.mode
             ) for rid, ele in enumerate(rules)]
         )
-        db.set("POLICY", form.policy)
+        firewall.policy = form.policy
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="Error saving the rules: maybe there are duplicated rules")
     return await apply_changes()

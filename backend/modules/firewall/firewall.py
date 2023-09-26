@@ -20,16 +20,31 @@ class FirewallManager:
 
     async def reload(self):
         async with self.lock:
-            if self.db.get("ENABLED", "0") == "1":
-                additional_rules = []
-                if self.allow_loopback:
-                    pass #TODO complete rule
-                if self.allow_established:
-                    pass #TODO complete rule
-                rules = list(map(Rule.from_dict, self.db.query('SELECT * FROM rules WHERE active = 1 ORDER BY rule_id;')), policy=self.db.get('POLICY', 'accept'))
-                nft.set(additional_rules + rules)
+            if self.enabled:
+                nft.set(
+                    map(Rule.from_dict, self.db.query('SELECT * FROM rules WHERE active = 1 ORDER BY rule_id;')),
+                    policy=self.policy,
+                    allow_loopback=self.allow_loopback,
+                    allow_established=self.allow_established
+                )
             else:
                 nft.reset()
+    
+    @property
+    def policy(self):
+        return self.db.get("POLICY", "accept")
+    
+    @policy.setter
+    def policy(self, value):
+        self.db.set("POLICY", value)
+    
+    @property
+    def enabled(self):
+        return self.db.get("ENABLED", "0") == "1"
+    
+    @enabled.setter
+    def enabled(self, value):
+        self.db.set("ENABLED", "1" if value else "0")
     
     @property
     def keep_rules(self):
