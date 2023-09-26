@@ -19,12 +19,7 @@ export const regex_range_port = "^(([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0
 export const DEV_IP_BACKEND = "192.168.231.3:4444"
 
 export const queryClient = new QueryClient({ defaultOptions: { queries: {
-    staleTime: Infinity,
-    refetchInterval: 10*1000,
-    retry(failureCount, error) {
-        if (error == "Bad Request") return false;
-        return failureCount < 3;
-    },
+    staleTime: Infinity
 } }})
 
 export async function getapi(path:string):Promise<any>{
