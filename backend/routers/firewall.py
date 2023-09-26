@@ -29,9 +29,6 @@ class RuleInfo(BaseModel):
     policy: str
     enabled: bool
 
-class RuleAddResponse(BaseModel):
-    status:str|list[dict]
-
 class RenameForm(BaseModel):
     name:str
 
@@ -158,15 +155,12 @@ def parse_and_check_rule(rule:RuleModel):
         raise HTTPException(status_code=400, detail="Invalid action")
     return rule
 
-@app.post('/rules/set', response_model=RuleAddResponse)
+@app.post('/rules/set', response_model=StatusMessageModel)
 async def add_new_service(form: RuleFormAdd):
     """Add a new service"""
     if form.policy not in ["accept", "drop", "reject"]:
         raise HTTPException(status_code=400, detail="Invalid policy")
     rules = [parse_and_check_rule(ele) for ele in form.rules]
-    errors = [({"rule":i} | ele) for i, ele in enumerate(rules) if isinstance(ele, dict)]
-    if len(errors) > 0:
-        return {'status': errors}
     try:
         db.queries(["DELETE FROM rules"]+
             [("""

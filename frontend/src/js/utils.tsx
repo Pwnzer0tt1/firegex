@@ -35,7 +35,10 @@ export async function getapi(path:string):Promise<any>{
             headers: { "Authorization" : "Bearer " + window.localStorage.getItem("access_token")}
         }).then(res => {
                 if(res.status === 401) window.location.reload()
-                if(!res.ok) reject(res.statusText)
+                if(!res.ok){
+                    const errorDefault = res.statusText
+                    return res.json().then( res => reject(getErrorMessageFromServerResponse(res, errorDefault)) ).catch( _err => reject(errorDefault)) 
+                }
                 res.json().then( res => resolve(res) ).catch( err => reject(err))
             })
             .catch(err => {
@@ -58,6 +61,24 @@ export function getErrorMessage(e: any) {
 	return error;
 }
 
+
+export function getErrorMessageFromServerResponse(e: any, def:string = "Unknown error") {
+    if (e.status){
+        return e.status
+    }
+    if (e.detail){
+        if (typeof e.detail == "string")
+            return e.detail
+        if (e.detail[0] && e.detail[0].msg)
+            return e.detail[0].msg
+    }
+    if (e.error){
+        return e.error
+    }
+    return def
+}
+
+
 export async function postapi(path:string,data:any,is_form:boolean=false):Promise<any>{
     return await new Promise((resolve, reject) => {
         fetch(`${IS_DEV?`http://${DEV_IP_BACKEND}`:""}/api/${path}`, {
@@ -72,7 +93,10 @@ export async function postapi(path:string,data:any,is_form:boolean=false):Promis
         }).then(res => {
             if(res.status === 401) window.location.reload() 
             if(res.status === 406) resolve({status:"Wrong Password"})
-            if(!res.ok) reject(res.statusText)
+            if(!res.ok){
+                const errorDefault = res.statusText
+                return res.json().then( res => reject(getErrorMessageFromServerResponse(res, errorDefault)) ).catch( _err => reject(errorDefault)) 
+            }
             res.json().then( res => resolve(res) ).catch( err => reject(err))
         })
         .catch(err => {
