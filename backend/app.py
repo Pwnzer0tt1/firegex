@@ -154,7 +154,7 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
-        host="::",
+        host=None,
         port=FIREGEX_PORT,
         reload=DEBUG,
         access_log=True,
