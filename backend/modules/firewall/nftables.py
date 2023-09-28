@@ -49,6 +49,10 @@ class FiregexTables(NFTableManager):
             { "add":{ "rule": {
                 "family": "inet", "table": self.table_name, "chain": self.rules_chain_in,
                 "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established"]} }, { "accept": None }]
+            }}},
+            { "add":{ "rule": {
+                "family": "inet", "table": self.table_name, "chain": self.rules_chain_fwd,
+                "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established"]} }, { "accept": None }]
             }}}
         ] if allow_established else []) + ([
             { "add":{ "rule": {
