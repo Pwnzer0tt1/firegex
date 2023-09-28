@@ -9,7 +9,7 @@ RUN yarn build
 
 
 #Building main conteiner
-FROM debian:bookworm-slim as base
+FROM debian:stable-slim as base
 RUN apt-get update -qq && apt-get upgrade -qq
 RUN apt-get install -qq python3-pip build-essential
 RUN apt-get install -qq git libpcre2-dev libnetfilter-queue-dev
