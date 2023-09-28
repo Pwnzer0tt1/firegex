@@ -2,6 +2,7 @@ import asyncio
 from modules.firewall.nftables import FiregexTables
 from modules.firewall.models import Rule
 from utils.sqlite import SQLite
+from modules.firewall.models import Action
 
 nft = FiregexTables()
 
@@ -25,14 +26,15 @@ class FirewallManager:
                     map(Rule.from_dict, self.db.query('SELECT * FROM rules WHERE active = 1 ORDER BY rule_id;')),
                     policy=self.policy,
                     allow_loopback=self.allow_loopback,
-                    allow_established=self.allow_established
+                    allow_established=self.allow_established,
+                    allow_icmp=self.allow_icmp
                 )
             else:
                 nft.reset()
     
     @property
     def policy(self):
-        return self.db.get("POLICY", "accept")
+        return self.db.get("POLICY", Action.ACCEPT)
     
     @policy.setter
     def policy(self, value):
@@ -61,6 +63,14 @@ class FirewallManager:
     @allow_loopback.setter
     def allow_loopback(self, value):
         self.db.set("allow_loopback", "1" if value else "0")
+    
+    @property
+    def allow_icmp(self):
+        return self.db.get("allow_icmp", "1") == "1"
+    
+    @allow_icmp.setter
+    def allow_icmp(self, value):
+        self.db.set("allow_icmp", "1" if value else "0")
 
     @property
     def allow_established(self):

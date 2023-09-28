@@ -5,6 +5,7 @@ import { getapi, postapi } from "../../js/utils"
 export enum Protocol {
     TCP = "tcp",
     UDP = "udp",
+    BOTH = "both",
     ANY = "any"
 }
 
@@ -15,16 +16,17 @@ export enum ActionType {
 }
 
 export enum RuleMode {
-    OUT = "O",
-    IN = "I",
+    OUT = "out",
+    IN = "in",
+    FORWARD = "forward"
 }
 
 export type Rule = {
     active: boolean
     name:string,
     proto: Protocol,
-    ip_src: string,
-    ip_dst: string,
+    src: string,
+    dst: string,
     port_src_from: number,
     port_dst_from: number,
     port_src_to: number,
@@ -48,6 +50,7 @@ export type FirewallSettings = {
     keep_rules: boolean,
     allow_loopback: boolean,
     allow_established: boolean,
+    allow_icmp: boolean
 }
 
 
@@ -73,16 +76,6 @@ export const firewall = {
     },
     disable: async() => {
         return await getapi("firewall/disable") as ServerResponse;
-    },
-    rulenable: async (rule_id:number) => {
-        return await getapi(`firewall/rule/${rule_id}/enable`) as ServerResponse;
-    },
-    ruledisable: async (rule_id:number) => {
-        return await getapi(`firewall/rule/${rule_id}/disable`) as ServerResponse;
-    },
-    rulerename: async (rule_id:number, name: string) => {
-        const { status } = await postapi(`firewall/rule/${rule_id}/rename`,{ name }) as ServerResponse;
-        return status === "ok"?undefined:status
     },
     ruleset: async (data:RuleAddForm) => {
         return await postapi("firewall/rules/set", data) as ServerResponseListed;

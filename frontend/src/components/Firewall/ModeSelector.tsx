@@ -8,11 +8,15 @@ export const ModeSelector = (props:Omit<SegmentedControlProps, "data">) => (
         data={[
             {
                 value: RuleMode.IN,
-                label: 'Inbound',
+                label: 'IN',
+            },
+            {
+                value: RuleMode.FORWARD,
+                label: 'FWD',
             },
             {
                 value: RuleMode.OUT,
-                label: 'Outbound',
+                label: 'OUT',
             }
         ]}
         size={props.size?props.size:"xs"}

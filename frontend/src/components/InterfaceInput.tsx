@@ -14,19 +14,26 @@ interface ItemProps extends AutocompleteItem {
 }
 
 interface InterfaceInputProps extends Omit<SelectProps, "data">{
-    initialCustomInterfaces?:AutocompleteItem[]
+    initialCustomInterfaces?:AutocompleteItem[],
+    includeInterfaceNames?:boolean
 }
 
-export const InterfaceInput = (props:InterfaceInputProps) => {
-
-    const { initialCustomInterfaces, ...propeties } = props
+export const InterfaceInput = ({ initialCustomInterfaces, includeInterfaceNames, ...props }:InterfaceInputProps) => {
 
     const [customIpInterfaces, setCustomIpInterfaces] = useState<AutocompleteItem[]>(initialCustomInterfaces??[]);
     const interfacesQuery = ipInterfacesQuery()
 
-    const interfaces = (!interfacesQuery.isLoading?
-            (interfacesQuery.data!.map(item => ({netint:item.name, value:item.addr, label:item.addr})) as AutocompleteItem[]):
-        [])
+    const getInterfaces = () => {
+        if (interfacesQuery.isLoading || !interfacesQuery.data) return []
+        if(includeInterfaceNames){
+            const result = interfacesQuery.data.map(item => ({netint:"IP", value:item.addr, label:item.addr})) as AutocompleteItem[]
+            interfacesQuery.data.map(item => item.name).filter((item, index, arr) => arr.indexOf(item) === index).forEach(item => result.push({netint:"INT", value:item, label:item}))
+            return result
+        }
+        return (interfacesQuery.data.map(item => ({netint:item.name, value:item.addr, label:item.addr})) as AutocompleteItem[])
+    }
+
+    const interfaces = getInterfaces()
 
     return <Select
         placeholder="10.1.1.1"
@@ -43,6 +50,6 @@ export const InterfaceInput = (props:InterfaceInputProps) => {
             return item;
         }}
         style={props.style?{width:"100%", ...props.style}:{width:"100%"}}
-        {...propeties}
+        {...props}
     />
 }

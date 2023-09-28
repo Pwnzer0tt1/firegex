@@ -70,6 +70,13 @@ def list_files(mypath):
 def ip_parse(ip:str):
     return str(ip_interface(ip).network)
 
+def is_ip_parse(ip:str):
+    try:
+        ip_parse(ip)
+        return True
+    except Exception:
+        return False
+
 def addr_parse(ip:str):
     return str(ip_address(ip))
 

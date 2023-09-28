@@ -106,8 +106,8 @@ export const Firewall = () => {
         active: true,
         name: "Rule name",
         proto: Protocol.TCP,
-        ip_src: "any",
-        ip_dst: "any",
+        src: "",
+        dst: "",
         port_src_from: 1,
         port_dst_from: 8080,
         port_src_to: 65535,
@@ -140,18 +140,15 @@ export const Firewall = () => {
           {(provided, snapshot) => {
             const customInt = [
               { value: "0.0.0.0/0", netint: "ANY IPv4", label: "0.0.0.0/0" },
-              { value: "::/0", netint: "ANY IPv6", label: "::/0" }
+              { value: "::/0", netint: "ANY IPv6", label: "::/0" },
+              { value: "", netint: "ANY", label: "ANY" }
             ]
-            const src_custom_int = customInt.map(v => v.value).includes(item.ip_src) || item.ip_dst == "any"?[]:[{ value: item.ip_src, netint: "SELECTED", label: item.ip_src }]
-            const dst_custom_int = customInt.map(v => v.value).includes(item.ip_dst) || item.ip_dst == "any"?[]:[{ value: item.ip_dst, netint: "SELECTED", label: item.ip_dst }]
+            const src_custom_int = customInt.map(v => v.value).includes(item.src)?[]:[{ value: item.src, netint: "SELECTED", label: item.src }]
+            const dst_custom_int = customInt.map(v => v.value).includes(item.dst)?[]:[{ value: item.dst, netint: "SELECTED", label: item.dst }]
             const [srcPortEnabled, setSrcPortEnabled] = useState(item.port_src_from != 1 || item.port_src_to != 65535)
             const [dstPortEnabled, setDstPortEnabled] = useState(item.port_dst_from != 1 || item.port_dst_to != 65535)
             const [srcPortValue, setSrcPortValue] = useState(item.port_src_from==item.port_src_to?`${item.port_src_from}`:`${item.port_src_from}-${item.port_src_to}`)
             const [dstPortValue, setDstPortValue] = useState(item.port_dst_from==item.port_dst_to?`${item.port_dst_from}`:`${item.port_dst_from}-${item.port_dst_to}`)
-            const [ipFilteringEnabled, setIpFilteringEnabled] = useState(!(item.ip_dst == "any" || item.ip_src == "any"))
-
-            const [srcIp, setSrcIp] = useState(item.ip_src!="any"?item.ip_src:"")
-            const [dstIp, setDstIp] = useState(item.ip_dst!="any"?item.ip_dst:"")
 
             const port_range_setter = (rule:Rule, v:string, {src=false, dst=false}:{src?:boolean, dst?:boolean}) => {
               const elements = v.split("-")
@@ -173,39 +170,23 @@ export const Firewall = () => {
             const ip_setter = (rule:Rule, v:string|null, {src=false, dst=false}:{src?:boolean, dst?:boolean}) => {
               const values = v?v:""
               if (src){
-                rule.ip_src = values
-                setSrcIp(values)
+                rule.src = values
               }
               if (dst){
-                rule.ip_dst = values
-                setDstIp(values)
+                rule.dst = values
               }
-              updateMe()
-            }
-
-            const set_filtering_ip = (value:boolean) => {
-              if (!value){
-                item.ip_src = "any"
-                item.ip_dst = "any"
-              }else{
-                item.ip_src = srcIp
-                item.ip_dst = dstIp
-              }
-              setIpFilteringEnabled(value)
               updateMe()
             }
 
             const disable_style = { opacity:"0.4", cursor:"not-allowed" }
             const proto_any = item.proto == Protocol.ANY
             const disabletab = {
-              ips:!ipFilteringEnabled,
               port_box: proto_any,
               src_port: !srcPortEnabled || proto_any,
               dst_port: !dstPortEnabled || proto_any
             }
 
             const additionalStyle = {
-              ips:disabletab.ips?disable_style:{},
               port_box: disabletab.port_box?disable_style:{},
               src_port: disabletab.src_port?disable_style:{},
               dst_port: disabletab.dst_port?disable_style:{}
@@ -254,11 +235,9 @@ export const Firewall = () => {
                   <div  style={{width:"100%"}}>
                   <InterfaceInput
                     initialCustomInterfaces={[...src_custom_int, ...customInt]}
-                    value={srcIp}
+                    value={item.src}
                     onChange={v => ip_setter(item, v, {src:true})}
-                    disabled={disabletab.ips}
-                    error={!disabletab.ips && !srcIp}
-                    style={additionalStyle.ips}
+                    includeInterfaceNames
                   />
                   <Space h="sm" />
                   <div className="center-flex" style={{width:"100%"}}>
@@ -289,11 +268,9 @@ export const Firewall = () => {
                   <div style={{width:"100%"}}>
                   <InterfaceInput
                     initialCustomInterfaces={[...dst_custom_int, ...customInt]}
-                    defaultValue={dstIp}
+                    defaultValue={item.dst}
                     onChange={v => ip_setter(item, v, {dst:true})}
-                    disabled={disabletab.ips}
-                    error={!disabletab.ips && !dstIp}
-                    style={additionalStyle.ips}
+                    includeInterfaceNames
                   />
                   <Space h="sm" />
                   <div className="center-flex" style={{width:"100%"}}>
@@ -338,14 +315,6 @@ export const Firewall = () => {
                       onChange={(value)=>{item.proto = value as Protocol;updateMe()}}
                       style={{width:"100%"}}
                     />
-                    <Space h="xs" />
-
-                  <Button
-                    size="xs" variant="light"
-                    color={ipFilteringEnabled?"lime":"red"}
-                    onClick={()=>set_filtering_ip(!ipFilteringEnabled)} 
-                    style={{width:"100%"}}
-                  >{ipFilteringEnabled?"IP Filtering ON":"IP Filtering OFF"}</Button>
               </div>
               </div>
               <Space h="md" />

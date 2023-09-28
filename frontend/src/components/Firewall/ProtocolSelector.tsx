@@ -14,6 +14,10 @@ export const ProtocolSelector = (props:Omit<SegmentedControlProps, "data">) => (
                 label: 'UDP',
             },
             {
+                value: Protocol.BOTH,
+                label: 'BOTH',
+            },
+            {
                 value: Protocol.ANY,
                 label: 'ANY',
             }
