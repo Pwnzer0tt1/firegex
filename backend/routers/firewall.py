@@ -1,44 +1,11 @@
 import sqlite3
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
 from utils.sqlite import SQLite
-from utils import ip_parse, ip_family, socketio_emit, PortType
+from utils import ip_parse, ip_family, socketio_emit
 from utils.models import ResetRequest, StatusMessageModel
 from modules.firewall.nftables import FiregexTables
 from modules.firewall.firewall import FirewallManager
-from modules.firewall.models import Protocol, Mode, Action
-
-
-class RuleModel(BaseModel):
-    active: bool
-    name: str
-    proto: Protocol
-    src: str
-    dst: str
-    port_src_from: PortType
-    port_dst_from: PortType
-    port_src_to: PortType
-    port_dst_to: PortType
-    action: Action
-    mode:Mode
-
-class RuleFormAdd(BaseModel):
-    rules: list[RuleModel]
-    policy: Action
-    
-class RuleInfo(BaseModel):
-    rules: list[RuleModel]
-    policy: Action
-    enabled: bool
-
-class RenameForm(BaseModel):
-    name:str
-
-class FirewallSettings(BaseModel):
-    keep_rules: bool
-    allow_loopback: bool
-    allow_established: bool
-    allow_icmp: bool
+from modules.firewall.models import *
         
 db = SQLite('db/firewall-rules.db', {
     'rules': {
@@ -101,20 +68,12 @@ async def apply_changes():
 @app.get("/settings", response_model=FirewallSettings)
 async def get_settings():
     """Get the firewall settings"""
-    return {
-        "keep_rules": firewall.keep_rules,
-        "allow_loopback": firewall.allow_loopback,
-        "allow_established": firewall.allow_established,
-        "allow_icmp": firewall.allow_icmp
-    }
+    return firewall.settings
 
 @app.post("/settings/set", response_model=StatusMessageModel)
 async def set_settings(form: FirewallSettings):
     """Set the firewall settings"""
-    firewall.keep_rules = form.keep_rules
-    firewall.allow_loopback = form.allow_loopback
-    firewall.allow_established = form.allow_established
-    firewall.allow_icmp = form.allow_icmp
+    firewall.settings = form
     return await apply_changes()
 
 @app.get('/rules', response_model=RuleInfo)

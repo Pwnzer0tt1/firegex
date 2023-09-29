@@ -1,6 +1,6 @@
 import asyncio
 from modules.firewall.nftables import FiregexTables
-from modules.firewall.models import Rule
+from modules.firewall.models import *
 from utils.sqlite import SQLite
 from modules.firewall.models import Action
 
@@ -25,13 +25,31 @@ class FirewallManager:
                 nft.set(
                     map(Rule.from_dict, self.db.query('SELECT * FROM rules WHERE active = 1 ORDER BY rule_id;')),
                     policy=self.policy,
-                    allow_loopback=self.allow_loopback,
-                    allow_established=self.allow_established,
-                    allow_icmp=self.allow_icmp
+                    opt=self.settings
                 )
             else:
                 nft.reset()
     
+    @property
+    def settings(self):
+        return FirewallSettings(
+                keep_rules=self.keep_rules,
+                allow_loopback=self.allow_loopback,
+                allow_established=self.allow_established,
+                allow_icmp=self.allow_icmp,
+                multicast_dns=self.multicast_dns,
+                allow_upnp=self.allow_upnp
+            )
+    
+    @settings.setter
+    def settings(self, value:FirewallSettings):
+        self.keep_rules=value.keep_rules,
+        self.allow_loopback=value.allow_loopback,
+        self.allow_established=value.allow_established,
+        self.allow_icmp=value.allow_icmp,
+        self.multicast_dns=value.multicast_dns,
+        self.allow_upnp=value.allow_upnp
+
     @property
     def policy(self):
         return self.db.get("POLICY", Action.ACCEPT)
@@ -79,5 +97,20 @@ class FirewallManager:
     @allow_established.setter
     def allow_established(self, value):
         self.db.set("allow_established", "1" if value else "0")
+        
+    @property
+    def multicast_dns(self):
+        return self.db.get("multicast_dns", "1") == "1"
     
-
+    @multicast_dns.setter
+    def multicast_dns(self, value):
+        self.db.set("multicast_dns", "1" if value else "0")
+    
+    @property
+    def allow_upnp(self):
+        return self.db.get("allow_upnp", "1") == "1"
+    
+    @allow_upnp.setter
+    def allow_upnp(self, value):
+        self.db.set("allow_upnp", "1" if value else "0")
+    

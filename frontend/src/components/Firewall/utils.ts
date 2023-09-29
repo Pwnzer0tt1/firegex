@@ -50,7 +50,9 @@ export type FirewallSettings = {
     keep_rules: boolean,
     allow_loopback: boolean,
     allow_established: boolean,
-    allow_icmp: boolean
+    allow_icmp: boolean,
+    multicast_dns: boolean,
+    allow_upnp: boolean
 }
 
 
