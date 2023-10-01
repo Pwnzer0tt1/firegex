@@ -118,7 +118,7 @@ export function getapiobject(){
 
 export function HomeRedirector(){
     const section = sessionStorage.getItem("home_section")
-    const path = section?`/${section}`:`/firewall`
+    const path = section?`/${section}`:`/nfregex`
     return <Navigate to={path} replace/>
 }
 
