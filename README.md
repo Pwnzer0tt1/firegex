@@ -25,7 +25,7 @@ By default firegex will start in a multithread configuration using the number of
 The default port of firegex is 4444. At the startup you will choose a password, that is essential for your security.
 All the configuration at the startup is customizable in [firegex.py](./start.py) or directly in the firegex interface.
 
-![Firegex Network scheme](docs/Firegex_Screenshot.jpg)
+![Firegex Network scheme](docs/Firegex_Screenshot.png)
 
 ## Functionalities
 
