@@ -38,17 +38,19 @@ class FirewallManager:
                 allow_established=self.allow_established,
                 allow_icmp=self.allow_icmp,
                 multicast_dns=self.multicast_dns,
-                allow_upnp=self.allow_upnp
+                allow_upnp=self.allow_upnp,
+                drop_invalid=self.drop_invalid
             )
     
     @settings.setter
     def settings(self, value:FirewallSettings):
-        self.keep_rules=value.keep_rules,
-        self.allow_loopback=value.allow_loopback,
-        self.allow_established=value.allow_established,
-        self.allow_icmp=value.allow_icmp,
-        self.multicast_dns=value.multicast_dns,
+        self.keep_rules = value.keep_rules
+        self.allow_loopback=value.allow_loopback
+        self.allow_established=value.allow_established
+        self.allow_icmp=value.allow_icmp
+        self.multicast_dns=value.multicast_dns
         self.allow_upnp=value.allow_upnp
+        self.drop_invalid=value.drop_invalid
 
     @property
     def policy(self):
@@ -113,4 +115,12 @@ class FirewallManager:
     @allow_upnp.setter
     def allow_upnp(self, value):
         self.db.set("allow_upnp", "1" if value else "0")
+    
+    @property
+    def drop_invalid(self):
+        return self.db.get("drop_invalid", "1") == "1"
+    
+    @drop_invalid.setter
+    def drop_invalid(self, value):
+        self.db.set("drop_invalid", "1" if value else "0")
     

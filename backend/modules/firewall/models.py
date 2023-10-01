@@ -69,3 +69,4 @@ class FirewallSettings(BaseModel):
     allow_icmp: bool
     multicast_dns: bool
     allow_upnp: bool
+    drop_invalid: bool

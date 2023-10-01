@@ -8,8 +8,8 @@ class FiregexTables(NFTableManager):
     rules_chain_fwd = "firegex_firewall_rules_fwd"
     filter_table = "filter"
     
-    def init_comands(self, policy:str=Action.ACCEPT, opt: FirewallSettings = None):
-        return [
+    def init_comands(self, policy:str=Action.ACCEPT, opt: FirewallSettings|None = None):
+        rules = [
             {"add":{"table":{"name":self.filter_table,"family":"ip"}}},
             {"add":{"table":{"name":self.filter_table,"family":"ip6"}}},
             
@@ -26,100 +26,116 @@ class FiregexTables(NFTableManager):
             {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":self.rules_chain_out}}},
             {"add":{"chain":{"family":"ip","table":self.filter_table,"name":self.rules_chain_fwd}}},
             {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":self.rules_chain_fwd}}},
-        ] + (([
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_out,
-                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_out,
-                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
-            }}}
-        ] if opt.allow_loopback else []) + ([
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established", "related"]} }, { "accept": None }]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_fwd,
-                "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established", "related"]} }, { "accept": None }]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_out,
-                "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established", "related"]} }, { "accept": None }]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established", "related"]} }, { "accept": None }]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_fwd,
-                "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established", "related"]} }, { "accept": None }]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_out,
-                "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["established", "related"]} }, { "accept": None }]
-            }}}
-        ] if opt.allow_established else []) + ([
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "l4proto" } }, "right": "icmp"} }, { "accept": None }]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_fwd,
-                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "l4proto" } }, "right": "icmp"} }, { "accept": None }]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "l4proto" } }, "right": "ipv6-icmp"} }, { "accept": None }]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_fwd,
-                "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "l4proto" } }, "right": "ipv6-icmp"} }, { "accept": None }]
-            }}}
-        ] if opt.allow_icmp else []) + ([
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [
-                    { 'match': {'left': {'payload': {'protocol': "ip", 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json("224.0.0.251/32")} },
-                    { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 5353} },
-                    { "accept": None }
-                ]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [
-                    { 'match': {'left': {'payload': {'protocol': "ip6", 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json("ff02::fb/128")} },
-                    { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 5353} },
-                    { "accept": None }
-                ]
-            }}},
-        ] if opt.multicast_dns else []) + ([
-            { "add":{ "rule": {
-                "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [
-                    { 'match': {'left': {'payload': {'protocol': "ip", 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json("239.255.255.250/32")} },
-                    { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 1900} },
-                    { "accept": None }
-                ]
-            }}},
-            { "add":{ "rule": {
-                "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
-                "expr": [
-                    { 'match': {'left': {'payload': {'protocol': "ip6", 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json("ff02::f/128")} },
-                    { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 1900} },
-                    { "accept": None }
-                ]
-            }}},
-        ] if opt.allow_upnp else [])) if opt else []
+        ]
+        if opt is None: return rules
+        
+        if opt.allow_loopback:
+            rules.extend([
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_out,
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_out,
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
+                }}}
+            ])
+        if opt.allow_established:
+            rules.extend([
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["related", "established"]} },{ "accept": None }]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_fwd,
+                    "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["related", "established"]} },{ "accept": None }]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["related", "established"]} },{ "accept": None }]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_fwd,
+                    "expr": [{ "match": {"op": "in", "left": { "ct": { "key": "state" }},"right": ["related", "established"]} },{ "accept": None }]
+                }}}
+            ])
+        if opt.drop_invalid:
+            rules.extend([
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [{ "match": {"op": "==", "left": { "ct": { "key": "state" }},"right": "invalid"} },{ "drop": None }]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [{ "match": {"op": "==", "left": { "ct": { "key": "state" }},"right": "invalid"} },{ "drop": None }]
+                }}}
+            ])
+        if opt.allow_icmp:
+            rules.extend([
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "l4proto" } }, "right": "icmp"} },{ "accept": None }]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_fwd,
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "l4proto" } }, "right": "icmp"} },{ "accept": None }]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "l4proto" } }, "right": "ipv6-icmp"} },{ "accept": None }]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_fwd,
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "l4proto" } }, "right": "ipv6-icmp"} },{ "accept": None }]
+                }}}
+            ])
+        if opt.multicast_dns:
+            rules.extend([
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [
+                        { 'match': {'left': {'payload': {'protocol': "ip", 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json("224.0.0.251/32")} },
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 5353} },
+                        { "accept": None }
+                    ]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [
+                        { 'match': {'left': {'payload': {'protocol': "ip6", 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json("ff02::fb/128")} },
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 5353} },
+                        { "accept": None }
+                    ]
+                }}},
+            ])
+        if opt.allow_upnp:
+            rules.extend([
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [
+                        { 'match': {'left': {'payload': {'protocol': "ip", 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json("239.255.255.250/32")} },
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 1900} },
+                        { "accept": None }
+                    ]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [
+                        { 'match': {'left': {'payload': {'protocol': "ip6", 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json("ff02::f/128")} },
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 1900} },
+                        { "accept": None }
+                    ]
+                }}},
+            ])
+        return rules
     
     def __init__(self):
         super().__init__(self.init_comands(),[

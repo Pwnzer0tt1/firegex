@@ -5,7 +5,7 @@ import { FirewallSettings, firewall } from '../../components/Firewall/utils';
 
 export function SettingsModal({ opened, onClose }:{ opened:boolean, onClose:()=>void }) {
 
-    const [settings, setSettings] = useState<FirewallSettings>({keep_rules:false, allow_established:true, allow_loopback:true, allow_icmp:true, allow_upnp:true, multicast_dns:true})
+    const [settings, setSettings] = useState<FirewallSettings>({} as FirewallSettings)
 
     useEffect(()=>{
         firewall.settings().then( res => {
@@ -44,6 +44,8 @@ export function SettingsModal({ opened, onClose }:{ opened:boolean, onClose:()=>
             <Switch label="Allow multicast DNS" checked={settings.multicast_dns} onChange={v => setSettings({...settings, multicast_dns:v.target.checked})}/>
             <Space h="md" />
             <Switch label="Allow UPnP protocol" checked={settings.allow_upnp} onChange={v => setSettings({...settings, allow_upnp:v.target.checked})}/>
+            <Space h="md" />
+            <Switch label="Drop invalid packet" checked={settings.drop_invalid} onChange={v => setSettings({...settings, drop_invalid:v.target.checked})}/>
 
             <Group position="right" mt="md">
                 <Button loading={submitLoading} onClick={submitRequest}>Save Setting</Button>
