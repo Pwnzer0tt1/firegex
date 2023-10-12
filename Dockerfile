@@ -2,10 +2,10 @@ FROM node:18 AS frontend
 RUN mkdir /app
 WORKDIR /app
 ADD ./frontend/package.json .
-ADD ./frontend/yarn.lock .
-RUN yarn install --network-timeout 300000
+ADD ./frontend/package-lock.json .
+RUN npm ci
 COPY ./frontend/ .
-RUN yarn build
+RUN npm run build
 
 
 #Building main conteiner
