@@ -39,7 +39,8 @@ class FirewallManager:
                 allow_icmp=self.allow_icmp,
                 multicast_dns=self.multicast_dns,
                 allow_upnp=self.allow_upnp,
-                drop_invalid=self.drop_invalid
+                drop_invalid=self.drop_invalid,
+                allow_dhcp=self.allow_dhcp
             )
     
     @settings.setter
@@ -51,6 +52,7 @@ class FirewallManager:
         self.multicast_dns=value.multicast_dns
         self.allow_upnp=value.allow_upnp
         self.drop_invalid=value.drop_invalid
+        self.allow_dhcp=value.allow_dhcp
 
     @property
     def policy(self):
@@ -124,3 +126,10 @@ class FirewallManager:
     def drop_invalid(self, value):
         self.db.set("drop_invalid", "1" if value else "0")
     
+    @property
+    def allow_dhcp(self):
+        return self.db.get("allow_dhcp", "1") == "1"
+    
+    @drop_invalid.setter
+    def allow_dhcp(self, value):
+        self.db.set("allow_dhcp", "1" if value else "0")

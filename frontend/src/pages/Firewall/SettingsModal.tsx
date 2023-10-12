@@ -46,7 +46,8 @@ export function SettingsModal({ opened, onClose }:{ opened:boolean, onClose:()=>
             <Switch label="Allow UPnP protocol" checked={settings.allow_upnp} onChange={v => setSettings({...settings, allow_upnp:v.target.checked})}/>
             <Space h="md" />
             <Switch label="Drop invalid packet" checked={settings.drop_invalid} onChange={v => setSettings({...settings, drop_invalid:v.target.checked})}/>
-
+            <Space h="md" />
+            <Switch label="Allow DHCP" checked={settings.allow_dhcp} onChange={v => setSettings({...settings, allow_dhcp:v.target.checked})}/>
             <Group position="right" mt="md">
                 <Button loading={submitLoading} onClick={submitRequest}>Save Setting</Button>
             </Group>

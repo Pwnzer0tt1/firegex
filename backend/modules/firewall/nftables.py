@@ -135,6 +135,25 @@ class FiregexTables(NFTableManager):
                     ]
                 }}},
             ])
+        if opt.allow_dhcp:
+            rules.extend([
+                { "add":{ "rule": {
+                    "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'sport'}}, 'op': '==', 'right': 67} },
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 68} },
+                        { "accept": None }
+                    ]
+                }}},
+                { "add":{ "rule": {
+                    "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
+                    "expr": [
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'sport'}}, 'op': '==', 'right': 67} },
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 68} },
+                        { "accept": None }
+                    ]
+                }}},
+            ])
         return rules
     
     def __init__(self):

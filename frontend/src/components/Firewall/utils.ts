@@ -53,7 +53,8 @@ export type FirewallSettings = {
     allow_icmp: boolean,
     multicast_dns: boolean,
     allow_upnp: boolean,
-    drop_invalid: boolean
+    drop_invalid: boolean,
+    allow_dhcp: boolean
 }
 
 

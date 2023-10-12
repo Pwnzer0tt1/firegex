@@ -114,7 +114,7 @@ volumes:
         else:
             sep()
             puts("--- WARNING ---", color=colors.yellow)
-            puts("You are not in a linux machine, due to docker limitation on other platform, the firewall will not work in this machine. You will only see the interface of firegex.", color=colors.red)
+            puts("You are not in a linux machine, the firewall will not work in this machine.", color=colors.red)
             compose.write(f"""
 version: '3.9'
 

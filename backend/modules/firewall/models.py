@@ -70,3 +70,4 @@ class FirewallSettings(BaseModel):
     multicast_dns: bool
     allow_upnp: bool
     drop_invalid: bool
+    allow_dhcp: bool
