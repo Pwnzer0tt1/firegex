@@ -4,7 +4,7 @@ import { FaPlay, FaStop } from 'react-icons/fa';
 import { porthijack, Service } from '../utils';
 import style from "./index.module.scss";
 import YesNoModal from '../../YesNoModal';
-import { errorNotify, okNotify } from '../../../js/utils';
+import { errorNotify, isMediumScreen, okNotify } from '../../../js/utils';
 import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
@@ -23,6 +23,7 @@ function ServiceRow({ service }:{ service:Service }) {
     const [renameModal, setRenameModal] = useState(false)
     const [changeDestModal, setChangeDestModal] = useState(false)
     const portInputRef = React.createRef<HTMLInputElement>()
+    const isMedium = isMediumScreen()
 
     const form = useForm({
         initialValues: { proxy_port:service.proxy_port },
@@ -89,7 +90,7 @@ function ServiceRow({ service }:{ service:Service }) {
     }
 
     return <>
-        <div className={style.row} style={{width:"100%"}}>
+        <div className={isMedium?style.row:style.row_mobile} style={{width:"100%"}}>
             <Space w="xl" /><Space w="xl" />
             <div>
                 <div className="center-flex-row">
@@ -105,6 +106,8 @@ function ServiceRow({ service }:{ service:Service }) {
             </div>
         
             <div className='flex-spacer' />
+            {isMedium?null:<Space h="xl" />}
+            <div className='center-flex'>
             <div className="center-flex-row">
                 <Badge color="lime" radius="sm" size="md" variant="filled">
                     FROM {service.ip_src} : {service.public_port}
@@ -119,7 +122,7 @@ function ServiceRow({ service }:{ service:Service }) {
                                 size="xs"
                                 variant="unstyled"
                                 style={{
-                                    width: (6+form.values.proxy_port.toString().length*6.2) +"px"
+                                    width: (10+form.values.proxy_port.toString().length*6.2) +"px"
                                 }}
                                 className={style.portInput}
                                 onBlur={(e)=>{onChangeProxyPort({proxy_port:parseInt(e.target.value)})}}
@@ -161,10 +164,13 @@ function ServiceRow({ service }:{ service:Service }) {
                     </ActionIcon>
                 </Tooltip>
             </div>
+            </div>
+            {isMedium?null:<Space h="xl" />}
             <Space w="xl" /><Space w="xl" />
                 
         </div>
-        <hr style={{width:"100%"}}/>
+        <Divider size="sm" style={{width:"100%"}}/>
+
         <YesNoModal
             title='Are you sure to delete this service?'
             description={`You are going to delete the service '${service.public_port}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}

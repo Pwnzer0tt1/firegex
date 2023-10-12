@@ -1,10 +1,10 @@
-import { ActionIcon, Badge, Divider, Grid, MediaQuery, Menu, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Divider, Grid, Menu, Space, Title, Tooltip } from '@mantine/core';
 import { useState } from 'react';
 import { FaPause, FaPlay, FaStop } from 'react-icons/fa';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
 import style from "./ServiceRow.module.scss";
 import YesNoModal from '../../YesNoModal';
-import { errorNotify, okNotify } from '../../../js/utils';
+import { errorNotify, isMediumScreen, okNotify } from '../../../js/utils';
 import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
 import { TbNumbers } from 'react-icons/tb';
 import { BiRename } from 'react-icons/bi'
@@ -31,6 +31,8 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     const [changePortModal, setChangePortModal] = useState(false)
     const [choosePortModal, setChoosePortModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
+
+    const isMedium = isMediumScreen()
 
     const stopService = async () => {
         setButtonLoading(true)
@@ -101,44 +103,21 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     return <>
         <Grid className={style.row} justify="flex-end" style={{width:"100%"}}>
             <Grid.Col md={4} xs={12}>
-                <MediaQuery smallerThan="md" styles={{ display: 'none' }}><div>
-                    <div className="center-flex-row">
-                        <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
-                        <Badge color={status_color} size="lg" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
-                    </div>
-                </div></MediaQuery>
-                <MediaQuery largerThan="md" styles={{ display: 'none' }}><div>
-                    <div className="center-flex">
-                        <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
-                        <Space w="xl" />
-                        <Badge color={status_color} size="lg" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
-                    </div>
-                </div></MediaQuery>
-                
-                <MediaQuery largerThan="md" styles={{ display: 'none' }}>
-                    <Space h="xl" />
-                </MediaQuery>
+                <div className={isMedium?"center-flex-row":"center-flex"}>
+                    <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
+                    <Badge color={status_color} size="lg" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
+                </div>
+                {!isMedium?<Space h="xl" />:null}
             </Grid.Col>
             
             <Grid.Col className="center-flex" md={8} xs={12}>
-                <MediaQuery smallerThan="md" styles={{ display: 'none' }}>
-                    <div className='flex-spacer' />
-                </MediaQuery>
-                <MediaQuery largerThan="md" styles={{ display: 'none' }}>
-                    <><Space w="xl" /><Space w="xl" /></>
-                </MediaQuery>
-                
+                {!isMedium?<div className='flex-spacer' />:<><Space w="xl" /><Space w="xl" /></>}
                 <div className="center-flex-row">
                     <Badge style={{marginBottom:"20px"}} color={status_color} radius="sm" size="lg" variant="filled">Status: <u>{service.status}</u></Badge>
                     <Badge style={{marginBottom:"8px"}}color="violet" radius="sm" size="md" variant="filled">Regex: {service.n_regex}</Badge>
                     <Badge color="yellow" radius="sm" size="md" variant="filled">Connections Blocked: {service.n_packets}</Badge>
                 </div>
-                <MediaQuery largerThan="md" styles={{ display: 'none' }}>
-                    <div className='flex-spacer' />
-                </MediaQuery>
-                <MediaQuery smallerThan="md" styles={{ display: 'none' }}>
-                    <><Space w="xl" /><Space w="xl" /></>
-                </MediaQuery>
+                {isMedium?<div className='flex-spacer' />:<><Space w="xl" /><Space w="xl" /></>}
                 <div className="center-flex">
                     <MenuDropDownWithButton>
                         <Menu.Label><b>Rename service</b></Menu.Label>
@@ -185,9 +164,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                     <MdOutlineArrowForwardIos onClick={onClick} style={{cursor:"pointer"}} size={45} />
                     <Space w="xl" />
                 </div>:null}
-                <MediaQuery largerThan="md" styles={{ display: 'none' }}>
-                    <><Space w="xl" /><Space w="xl" /></>
-                </MediaQuery>
+                {!isMedium?<><Space w="xl" /><Space w="xl" /></>:null}
                 
             </Grid.Col>
         </Grid>
@@ -198,7 +175,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
             action={stopService}
             opened={stopModal}
         />
-        <hr style={{width:"100%"}}/>
+        <Divider size="md" style={{width:"100%"}}/>
         <YesNoModal
             title='Are you sure to delete this service?'
             description={`You are going to delete the service '${service.id}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}

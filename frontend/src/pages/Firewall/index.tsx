@@ -3,8 +3,8 @@ import { useEffect, useState } from "react";
 import { BsPlusLg, BsTrashFill } from "react-icons/bs"
 import { rem } from '@mantine/core';
 import { ActionType, Protocol, Rule, RuleMode, firewall, firewallRulesQuery } from "../../components/Firewall/utils";
-import { errorNotify, getErrorMessage, makeid, okNotify } from "../../js/utils";
-import { useListState } from '@mantine/hooks';
+import { errorNotify, getErrorMessage, isMediumScreen, makeid, okNotify } from "../../js/utils";
+import { useListState, useMediaQuery } from '@mantine/hooks';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { TbGripVertical, TbReload } from "react-icons/tb";
 import { useQueryClient } from "@tanstack/react-query";
@@ -37,6 +37,8 @@ export const Firewall = () => {
     const [applyChangeModal, setApplyChangeModal] = useState(false)
     const [settingsModal, setSettingsModal] = useState(false)
     const theme = useMantineTheme();
+    const isMedium = useMediaQuery(`(min-width: 950px)`)
+    const isSmall = useMediaQuery(`(max-width: 600px)`)
 
     const [updateMevalueinternal, internalUpdateme] = useState(false)
     const updateMe = () => {
@@ -98,6 +100,13 @@ export const Firewall = () => {
       }else{
         applyChangesRaw()
       }
+    }
+
+    const condDiv = (val:React.ReactNode, cond:boolean) => {
+      if (cond)
+        return <div>{val}</div>
+      else
+        return val
     }
 
     const emptyRuleAdd = () => {
@@ -201,6 +210,7 @@ export const Firewall = () => {
                 <TbGripVertical style={{ width: rem(30), height: rem(40) }} />
               </div>
               <Space w="sm" />
+              <div className={isMedium?"center-flex":"center-flex-row"} style={{width:"100%"}}>
               <div className="center-flex-row" style={{width:"100%"}}>
                 <div className="center-flex" style={{width:"97%"}}>
                 <Switch
@@ -232,7 +242,7 @@ export const Firewall = () => {
                 </div>
                 <Space h="sm" />
                 <div className="center-flex" style={{width:"97%"}}>
-                  <div  style={{width:"100%"}}>
+                  <div style={{width:"100%"}}>
                   <InterfaceInput
                     initialCustomInterfaces={[...src_custom_int, ...customInt]}
                     value={item.src}
@@ -297,24 +307,26 @@ export const Firewall = () => {
                   </div>
                 </div>
               </div>
-              <div className="center-flex-row">
-                  <ActionTypeSelector
-                      value={item.action}
-                      onChange={(value)=>{item.action = value as ActionType;updateMe()}}
+              {!isMedium?<Space h="sm" />:null}
+              <div className={isMedium?"center-flex-row":"center-flex"} style={isMedium?{}:{width:"100%", justifyContent:"space-around"}}>
+                  {condDiv(<>{condDiv(<ModeSelector
+                      value={item.mode}
+                      onChange={(value)=>{item.mode = value as RuleMode;updateMe()}}
                       style={{width:"100%"}}
-                    />
-                    <Space h="xs" />
-                  <ModeSelector
-                    value={item.mode}
-                    onChange={(value)=>{item.mode = value as RuleMode;updateMe()}}
-                    style={{width:"100%"}}
-                  />
+                    />, !isMedium)}
                   <Space h="xs" />
-                  <ProtocolSelector
+                  {condDiv(<ProtocolSelector
                       value={item.proto}
                       onChange={(value)=>{item.proto = value as Protocol;updateMe()}}
                       style={{width:"100%"}}
-                    />
+                    />, !isMedium)}</>, isSmall)}
+                  <Space h="xs" />
+                  {condDiv(<ActionTypeSelector
+                    value={item.action}
+                    onChange={(value)=>{item.action = value as ActionType;updateMe()}}
+                    style={{width:"100%"}}
+                  />, !isMedium)}
+              </div>
               </div>
               </div>
               <Space h="md" />
@@ -329,55 +341,59 @@ export const Firewall = () => {
     return <>
         <Space h="sm" />
         <LoadingOverlay visible={rules.isLoading} />
-        <div className='center-flex'>
+        <div className={isMedium?'center-flex':'center-flex-row'}>
             <Title order={3}>Firewall Rules</Title>
-            <div className='flex-spacer' />
-            Enabled: <Space w="sm" /> <Switch checked={fwEnabled} onChange={switchState} />
-            <Space w="sm" />
-            Policy:
-            <Space w="xs" />
-            <ActionTypeSelector
-                value={currentPolicy}
-                onChange={(value)=>setCurrentPolicy(value as ActionType)}
-            />
-            <Space w="xs" />
-            <Badge size="sm" color="green" variant="filled">Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
-            <Space w="xs" />
-            <Tooltip label="Add a new rule" position='bottom' color="blue" opened={tooltipAddOpened}>
-                <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"
-                onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-                onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
-            </Tooltip>
-            <Space w="xs" />
-            <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
-                <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["firewall"])} size="lg" radius="md" variant="filled"
-                loading={rules.isFetching}
-                onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
-                onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
-            </Tooltip>
-            <Space w="xs" />
-            <Tooltip label="Settings" position='bottom' color="cyan" opened={tooltipSettingsOpened}>
-                <ActionIcon color="cyan" onClick={()=>setSettingsModal(true)} size="lg" radius="md" variant="filled"
-                onFocus={() => setTooltipSettingsOpened(false)} onBlur={() => setTooltipSettingsOpened(false)}
-                onMouseEnter={() => setTooltipSettingsOpened(true)} onMouseLeave={() => setTooltipSettingsOpened(false)}><IoSettingsSharp size={18} /></ActionIcon>
-            </Tooltip>
-            <Space w="xs" />
-            <Tooltip label="Apply" position='bottom' color="grape" opened={tooltipApplyOpened}>
-                <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled"
-                onFocus={() => setTooltipApplyOpened(false)} onBlur={() => setTooltipApplyOpened(false)}
-                onMouseEnter={() => setTooltipApplyOpened(true)} onMouseLeave={() => setTooltipApplyOpened(false)}
-                disabled={!valuesChanged}
-                ><TiTick size={22} /></ActionIcon>
-            </Tooltip>
+            {isMedium?<div className='flex-spacer' />:<Space h="sm" />}
+            <div className='center-flex'>
+              Enabled: <Space w="sm" /> <Switch checked={fwEnabled} onChange={switchState} />
+              <Space w="sm" />
+              Policy:
+              <Space w="xs" />
+              <ActionTypeSelector
+                  value={currentPolicy}
+                  onChange={(value)=>setCurrentPolicy(value as ActionType)}
+              />
+            </div>
+            {isMedium?<div className='flex-spacer' />:<Space h="sm" />}
+            <div className='center-flex'>
+              <Space w="xs" />
+              <Badge size="sm" color="green" variant="filled">Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
+              <Space w="xs" />
+              <Tooltip label="Add a new rule" position='bottom' color="blue" opened={tooltipAddOpened}>
+                  <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"
+                  onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
+                  onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
+              </Tooltip>
+              <Space w="xs" />
+              <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
+                  <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["firewall"])} size="lg" radius="md" variant="filled"
+                  loading={rules.isFetching}
+                  onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
+                  onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
+              </Tooltip>
+              <Space w="xs" />
+              <Tooltip label="Settings" position='bottom' color="cyan" opened={tooltipSettingsOpened}>
+                  <ActionIcon color="cyan" onClick={()=>setSettingsModal(true)} size="lg" radius="md" variant="filled"
+                  onFocus={() => setTooltipSettingsOpened(false)} onBlur={() => setTooltipSettingsOpened(false)}
+                  onMouseEnter={() => setTooltipSettingsOpened(true)} onMouseLeave={() => setTooltipSettingsOpened(false)}><IoSettingsSharp size={18} /></ActionIcon>
+              </Tooltip>
+              <Space w="xs" />
+              <Tooltip label="Apply" position='bottom' color="grape" opened={tooltipApplyOpened}>
+                  <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled"
+                  onFocus={() => setTooltipApplyOpened(false)} onBlur={() => setTooltipApplyOpened(false)}
+                  onMouseEnter={() => setTooltipApplyOpened(true)} onMouseLeave={() => setTooltipApplyOpened(false)}
+                  disabled={!valuesChanged}
+                  ><TiTick size={22} /></ActionIcon>
+              </Tooltip>
+            </div>
         </div>
         <Space h="xl" />
-        
+        <Divider />
         {items.length > 0?<DragDropContext
           onDragEnd={({ destination, source }) =>
             handlers.reorder({ from: source.index, to: destination?.index || 0 })
           }
         >
-          <Divider />
           <Space h="md" />
           <Droppable droppableId="dnd-list" direction="vertical">
             {(provided) => (

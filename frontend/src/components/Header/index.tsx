@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { ActionIcon, Divider, Image, Menu, Tooltip, MediaQuery, Burger, Space, Header, Button, ThemeIcon } from '@mantine/core';
+import { ActionIcon, Divider, Image, Menu, Tooltip, Burger, Space, Header, Button, ThemeIcon } from '@mantine/core';
 import style from "./index.module.scss";
-import { errorNotify, getmainpath, logout } from '../../js/utils';
+import { errorNotify, getmainpath, isLargeScreen, logout } from '../../js/utils';
 import { AiFillHome } from "react-icons/ai"
 import { useNavigate } from 'react-router-dom';
 import { FaLock } from 'react-icons/fa';
@@ -32,10 +32,11 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
   const [resetFiregexModal, setResetFiregexModal] = useState(false);
   const [tooltipHomeOpened, setTooltipHomeOpened] = useState(false);
   const [tooltipLogoutOpened,setTooltipLogoutOpened] = useState(false);
-
+  const isLarge = isLargeScreen()
+  console.log(isLarge)
   return <Header height={100} className={style.header} {...other}>
         <Space w="lg" />
-        <MediaQuery largerThan="md" styles={{ display: 'none' }}><div>
+        {isLarge?null:<div>
           <Burger
             opened={navOpen}
             className={style.navbtn}
@@ -43,7 +44,7 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
             size="sm"
             mr="xl"
           />
-        </div></MediaQuery>
+        </div>}
         <div className={style.divlogo}>
           <Tooltip zIndex={0} label="Home" openDelay={1000}color="dark" position="right" >
             <Image src="/header-logo.png" alt="Firegex logo" onClick={()=>navigator("/")}/>

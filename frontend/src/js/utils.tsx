@@ -7,6 +7,7 @@ import { regexproxy } from "../components/RegexProxy/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 import { Buffer } from "buffer"
 import { QueryClient, useQuery } from "@tanstack/react-query";
+import { useMediaQuery } from "@mantine/hooks";
 
 export const IS_DEV = import.meta.env.DEV
 
@@ -200,4 +201,12 @@ export function b64encode(data:number[]|string){
 
 export function b64decode(regexB64:string){
     return Buffer.from(regexB64, "base64").toString()
+}
+
+export function isMediumScreen(){
+    return useMediaQuery('(min-width: 600px)');
+}
+
+export function isLargeScreen(){
+    return useMediaQuery('(min-width: 992px)');
 }

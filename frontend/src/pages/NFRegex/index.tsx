@@ -1,10 +1,10 @@
-import { ActionIcon, Badge, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Divider, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import { useNavigate, useParams } from 'react-router-dom';
 import ServiceRow from '../../components/NFRegex/ServiceRow';
 import { nfregexServiceQuery } from '../../components/NFRegex/utils';
-import { errorNotify, getErrorMessage } from '../../js/utils';
+import { errorNotify, getErrorMessage, isMediumScreen } from '../../js/utils';
 import AddNewService from '../../components/NFRegex/AddNewService';
 import AddNewRegex from '../../components/AddNewRegex';
 import { useQueryClient } from '@tanstack/react-query';
@@ -20,7 +20,7 @@ function NFRegex({ children }: { children: any }) {
     const [tooltipRefreshOpened, setTooltipRefreshOpened] = useState(false);
     const [tooltipAddServOpened, setTooltipAddServOpened] = useState(false);
     const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
-
+    const isMedium = isMediumScreen()
     const services = nfregexServiceQuery()
 
     useEffect(()=> {
@@ -32,35 +32,42 @@ function NFRegex({ children }: { children: any }) {
 
     return <>
     <Space h="sm" />
-    <div className='center-flex'>
+    <div className={isMedium?'center-flex':'center-flex-row'}>
         <Title order={4}>Netfilter Regex</Title>
-        <div className='flex-spacer' />
-        <Badge size="sm" color="green" variant="filled">Services: {services.isLoading?0:services.data?.length}</Badge>
+        {isMedium?<div className='flex-spacer' />:<Space h="sm" />}
+        <div className='center-flex' >
+            <Badge size="sm" color="green" variant="filled">Services: {services.isLoading?0:services.data?.length}</Badge>
+            <Space w="xs" />
+            <Badge size="sm" color="yellow" variant="filled">Filtered Connections: {services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_packets, 0)}</Badge>
+            <Space w="xs" />
+            <Badge size="sm" color="violet" variant="filled">Regexes: {services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_regex, 0)}</Badge>
+            <Space w="xs" />
+        </div>
+        {isMedium?null:<Space h="md" />}
+        <div className='center-flex' >
+            { srv?
+            <Tooltip label="Add a new regex" position='bottom' color="blue" opened={tooltipAddOpened}>
+                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
+                onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
+                onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
+            </Tooltip>
+            : <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
+                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
+                onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
+                onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
+            </Tooltip>
+        }
         <Space w="xs" />
-        <Badge size="sm" color="yellow" variant="filled">Filtered Connections: {services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_packets, 0)}</Badge>
-        <Space w="xs" />
-        <Badge size="sm" color="violet" variant="filled">Regexes: {services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_regex, 0)}</Badge>
-        <Space w="xs" />
-        { srv?
-          <Tooltip label="Add a new regex" position='bottom' color="blue" opened={tooltipAddOpened}>
-            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
-             onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-             onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
-          </Tooltip>
-        : <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
-            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
-             onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-             onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
-          </Tooltip>
-      }
-      <Space w="xs" />
-        <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
-            <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfregex"])} size="lg" radius="md" variant="filled"
-            loading={services.isFetching}
-            onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
-            onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
-        </Tooltip>
+            <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
+                <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfregex"])} size="lg" radius="md" variant="filled"
+                loading={services.isFetching}
+                onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
+                onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
+            </Tooltip>
+        </div>
     </div>
+    <Space h="md" />
+    <Divider size="md" style={{width:"100%"}}/>
     <div id="service-list" className="center-flex-row">
         {srv?null:<>
             <LoadingOverlay visible={services.isLoading} />

@@ -9,6 +9,11 @@
     @extend .center-flex;
 }
 
+.row-mobile{
+    @extend .row;
+    @extend .center-flex-row;
+}
+
 .name{
     font-size: 2.3em;
     font-weight: bolder;
