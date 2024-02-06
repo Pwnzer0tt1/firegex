@@ -1,4 +1,4 @@
-FROM node:18 AS frontend
+FROM --platform=$BUILDPLATFORM node:18 AS frontend
 RUN mkdir /app
 WORKDIR /app
 ADD ./frontend/package.json .
@@ -9,7 +9,7 @@ RUN npm run build
 
 
 #Building main conteiner
-FROM debian:stable-slim as base
+FROM --platform=$TARGETARCH debian:stable-slim as base
 RUN apt-get update -qq && apt-get upgrade -qq
 RUN apt-get install -qq python3-pip build-essential
 RUN apt-get install -qq git libpcre2-dev libnetfilter-queue-dev

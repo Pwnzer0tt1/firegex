@@ -30,8 +30,11 @@ All the configuration at the startup is customizable in [firegex.py](./start.py)
 ## Functionalities
 
 - Regex filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/doxygen/html/) with [nftables](https://netfilter.org/projects/nftables/) uses a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
-- TCP Proxy regex filter, create a proxy tunnel from the service internal port to a public port published by the proxy. Internally the c++ proxy filter the request with PCRE2 regexes. For mantaining the same public port you will need to open only in localhost the real services. (Available only on TCP/IPv4)
+- Create basic firewall rules to allow and deny specific traffic, like ufw or iptables but using firegex graphic interface (by using [nftable](https://netfilter.org/projects/nftables/))
 - Port Hijacking allows you to redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using the loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
+
+DEPRECATED:
+- TCP Proxy regex filter, create a proxy tunnel from the service internal port to a public port published by the proxy. Internally the c++ proxy filter the request with PCRE2 regexes. For mantaining the same public port you will need to open only in localhost the real services. (Available only on TCP/IPv4)
 
 ## Documentation
 
@@ -55,11 +58,3 @@ Initiially the project was based only on regex filters, and also now the main fu
 # Credits 
 - Copyright (c) 2007 Arash Partow (http://www.partow.net) for the base of our proxy implementation
 - Copyright (c) 2022 Pwnzer0tt1
-
-# TODO:
-
-## Next points
-
-- Add proxy script in different language to use for porthijacking to download
-- Explanation about tools in the dedicated pages making them more user-friendly
-- Adding new section with "general firewall rules" to manage "simple" TCP traffic rules graphically and through nftables
