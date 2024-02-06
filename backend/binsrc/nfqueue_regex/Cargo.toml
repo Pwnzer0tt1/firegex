@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyperscan = "0.3.2"
-nfqueue = "0.9.1"
-libtins-rs = { git = "https://github.com/Pwnzer0tt1/libtins-rs.git" }
+atomic_refcell = "0.1.13"
+nfq = "0.2.5"
+#hyperscan = "0.3.2"
