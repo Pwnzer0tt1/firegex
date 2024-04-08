@@ -1,8 +1,8 @@
-<img align="left" src="./docs/FiregexLogo.png" width="130" height="130"/>
-
-# [Fi]*regex 🔥
+<h1><img align="left" src="docs/FiregexLogo.png" width="170" /><br />[Fi]*regex 🔥</h1>
 
 <a href="https://github.com/Pwnzer0tt1/firegex/releases/latest"><img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/pwnzer0tt1/firegex?color=D62246&style=flat-square"></a> <img alt="GitHub" src="https://img.shields.io/github/license/pwnzer0tt1/firegex?style=flat-square"> <a href="https://discord.gg/79NNVJBK5Z" target="_blank"><img alt="Discord" src="https://img.shields.io/discord/860223571594051605?color=%237289DA&label=Discord&style=flat-square"></a> <img alt="GitHub top language" src="https://img.shields.io/github/languages/top/pwnzer0tt1/firegex?style=flat-square&color=44AA44">
+
+<br />
 
 ## What is Firegex?
 Firegex is a firewall that includes different functionalities, created for CTF Attack-Defence competitions that has the aim to limit or totally deny malicious traffic through the use of different kind of filters.
