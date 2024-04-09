@@ -83,7 +83,7 @@ services:
     firewall:
         restart: unless-stopped
         container_name: firegex
-        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex:2.2.5"}
+        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
         network_mode: "host"
         environment:
             - PORT={args.port}
