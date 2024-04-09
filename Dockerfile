@@ -1,11 +1,10 @@
-FROM --platform=$BUILDPLATFORM node:18 AS frontend
-RUN mkdir /app
+FROM --platform=$BUILDPLATFORM oven/bun as frontend 
 WORKDIR /app
 ADD ./frontend/package.json .
-ADD ./frontend/package-lock.json .
-RUN npm ci
+ADD ./frontend/bun.lockb .
+RUN bun install
 COPY ./frontend/ .
-RUN npm run build
+RUN bun run build
 
 
 #Building main conteiner
@@ -16,6 +15,7 @@ RUN apt-get install -qq git libpcre2-dev libnetfilter-queue-dev
 RUN apt-get install -qq libssl-dev libnfnetlink-dev libmnl-dev libcap2-bin
 RUN apt-get install -qq make cmake nftables libboost-all-dev autoconf
 RUN apt-get install -qq automake cargo libffi-dev libvectorscan-dev libtins-dev
+RUN apt-get install -qq python3-nftables
 
 WORKDIR /tmp/
 RUN git clone --single-branch --branch release https://github.com/jpcre2/jpcre2

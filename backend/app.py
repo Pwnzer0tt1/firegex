@@ -9,6 +9,7 @@ from utils.sqlite import SQLite
 from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
+from contextlib import asynccontextmanager
 
 # DB init
 db = SQLite('db/firegex.db')
@@ -22,7 +23,13 @@ sysctl = SysctlManager({
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)
 crypto = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-app = FastAPI(debug=DEBUG, redoc_url=None)
+@asynccontextmanager
+async def lifespan(app):
+    await startup_main()
+    yield
+    await shutdown_main()
+
+app = FastAPI(debug=DEBUG, redoc_url=None, lifespan=lifespan)
 utils.socketio = SocketManager(app, "/sock", socketio_path="")
 
 def APP_STATUS(): return "init" if db.get("password") is None else "run"
@@ -117,8 +124,7 @@ async def get_ip_interfaces():
 #Routers Loader
 reset, startup, shutdown = load_routers(api)
 
-@app.on_event("startup")
-async def startup_event():
+async def startup_main():
     db.init()
     if os.getenv("HEX_SET_PSW"):
         set_psw(bytes.fromhex(os.getenv("HEX_SET_PSW")).decode())
@@ -127,8 +133,7 @@ async def startup_event():
     if not JWT_SECRET(): db.put("secret", secrets.token_hex(32))
     await refresh_frontend()
 
-@app.on_event("shutdown")
-async def shutdown_event():
+async def shutdown_main():
     await shutdown()
     sysctl.reset()
     db.disconnect()

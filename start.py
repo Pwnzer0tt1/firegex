@@ -79,8 +79,6 @@ def write_compose(psw_set=None):
 
         if "linux" in sys.platform and not 'microsoft-standard' in platform.uname().release: #Check if not is a wsl also
              compose.write(f"""
-version: '3.9'
-
 services:
     firewall:
         restart: unless-stopped
@@ -116,8 +114,6 @@ volumes:
             puts("--- WARNING ---", color=colors.yellow)
             puts("You are not in a linux machine, the firewall will not work in this machine.", color=colors.red)
             compose.write(f"""
-version: '3.9'
-
 services:
     firewall:
         restart: unless-stopped
