@@ -27,4 +27,5 @@ class Regex:
         
     @classmethod
     def from_dict(cls, var: dict):
+        var['regex'] = base64.b64decode(var['regex'])
         return cls(**var)

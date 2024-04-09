@@ -1,5 +1,7 @@
 #!/bin/sh
 
+cd "$(dirname "$0")"
+
 TMP=$1
 PASSWORD=${TMP:=testpassword}
 
