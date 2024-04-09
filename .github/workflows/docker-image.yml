@@ -20,6 +20,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      - name: Build and run firegex
+        run: python3 start.py -b --psw-no-interactive testpassword
+        
+      - name: Run tests
+        run: cd tests && ./run_tests.sh
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@master
         with:
