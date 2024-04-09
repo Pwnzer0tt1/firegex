@@ -81,7 +81,7 @@ def checkRegex(regex, should_work=True, upper=False):
         if server.sendCheckData(secrets.token_bytes(200) + base64.b64decode(regex) +  secrets.token_bytes(200)):
             puts(f"The request wasn't blocked ✔", color=colors.green)
         else:
-            puts(f"Test Failed: The request was blocked when it shouldn't have", color=colors.red)
+            puts(f"Test Failed: The request was blocked when it shouldn't have", color=colors.red); exit_test(1)
 
 checkRegex(regex)
 
