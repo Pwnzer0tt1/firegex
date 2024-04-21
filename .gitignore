@@ -22,6 +22,7 @@
 /backend/modules/proxy
 docker-compose.yml
 firegex-compose.yml
+firegex-compose-tmp-file.yml
 
 # misc
 **/.DS_Store

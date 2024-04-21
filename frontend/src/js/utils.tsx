@@ -85,7 +85,7 @@ export async function postapi(path:string,data:any,is_form:boolean=false):Promis
               'Content-Type': is_form ? 'application/x-www-form-urlencoded' : 'application/json',
               "Authorization" : "Bearer " + window.localStorage.getItem("access_token")
             },
-            body: is_form ? data : JSON.stringify(data) 
+            body: is_form ? (new URLSearchParams(data)).toString() : JSON.stringify(data) 
         }).then(res => {
             if(res.status === 401) window.location.reload() 
             if(res.status === 406) resolve({status:"Wrong Password"})
@@ -157,7 +157,7 @@ export async function changepassword(data:ChangePassword) {
 }
 
 export async function login(data:PasswordSend) {
-    const from = "username=login&password=" + encodeURI(data.password);
+    const from = {username: "login", password: data.password};
     const { status, access_token } = await postapi("login",from,true) as LoginResponse;
     window.localStorage.setItem("access_token", access_token);
     return status;
