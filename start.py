@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-
+from __future__ import annotations
 import argparse, sys, platform, os, multiprocessing, subprocess, getpass
 
 pref = "\033["
 reset = f"{pref}0m"
 composefile = "firegex-compose-tmp-file.yml"
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
+
+#Terminal colors
 
 class colors:
     black = "30m"
@@ -23,7 +25,7 @@ def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
 def sep(): puts("-----------------------------------", is_bold=True)
 
 def check_if_exists(program):
-    return subprocess.call(['sh', '-c',program], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT) == 0
+    return subprocess.call(['sh', '-c', program], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT) == 0
 
 def composecmd(cmd, composefile=None):
     if composefile:
@@ -45,35 +47,60 @@ def dockercmd(cmd):
     else:
         puts("Docker not found! please install docker!", color=colors.red)
 
-def gen_args():
-    parser = argparse.ArgumentParser()
+def gen_args():                     
+    
+    #Main parser
+    parser = argparse.ArgumentParser(description="Firegex Manager")
+    if os.path.isfile("./Dockerfile"):
+        parser.add_argument('--build', "-b", dest="bef_build", required=False, action="store_true", help='Build the container from source', default=False)
 
     subcommands = parser.add_subparsers(dest="command", help="Command to execute [Default start if not running]")
     
     #Compose Command
     parser_compose = subcommands.add_parser('compose', help='Run docker compose command')
-    parser_compose.add_argument('compose_args', nargs=argparse.REMAINDER, help='Arguments to pass to docker compose', default=[])
+    parser_compose.add_argument('compose-args', nargs=argparse.REMAINDER, help='Arguments to pass to docker compose', default=[])
     
     #Start Command
     parser_start = subcommands.add_parser('start', help='Start the firewall')
     parser_start.add_argument('--threads', "-t", type=int, required=False, help='Number of threads started for each service/utility', default=-1)
-    parser_start.add_argument('--build', "-b", required=False, action="store_true", help='Build the container locally', default=False)
     parser_start.add_argument('--psw-no-interactive',type=str, required=False, help='Password for no-interactive mode', default=None)
     parser_start.add_argument('--startup-psw','-P', required=False, action="store_true", help='Insert password in the startup screen of firegex', default=False)
     parser_start.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
-    
+    if os.path.isfile("./Dockerfile"):
+        parser_start.add_argument('--build', "-b", required=False, action="store_true", help='Build the container from source', default=False)
+
+
     #Stop Command
     parser_stop = subcommands.add_parser('stop', help='Stop the firewall')
     parser_stop.add_argument('--clear', required=False, action="store_true", help='Delete docker volume associated to firegex resetting all the settings', default=False)
     
     parser_restart = subcommands.add_parser('restart', help='Restart the firewall')
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
+    args = parser.parse_args()
     
-    #General args
-    if os.path.isfile("./Dockerfile"):
-        parser.add_argument('--build', "-b", required=False, action="store_true", help='Build the container from source', default=False)
-    return parser.parse_args()
+    if args.command is None:
+        if not check_already_running() and not args.clear:
+            args.command = "start"
+    
+    if not "threads" in args or args.threads < 1:
+        args.threads = multiprocessing.cpu_count()
+    
+    if not "port" in args or args.port < 1:
+        args.port = 4444
+        
+    if not "clear" in args:
+        args.clear = False
+    
+    if not "bef_build" in args:
+        args.bef_build = False
+    
+    if not "build" in args:
+        args.build = False
+        
+    args.build = args.bef_build or args.build
+
+    return args
 
 args = gen_args()
 
@@ -173,8 +200,6 @@ def delete_volume():
 
 def main():
     
-    print(args)
-    
     if not check_if_exists("docker"):
         puts("Docker not found! please install docker and docker compose!", color=colors.red)
         exit()
@@ -186,10 +211,6 @@ def main():
         puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
         exit()
     
-    if args.command is None:
-        if not check_already_running() and not args.clear:
-            args.command = "start"
-    
     if not is_linux():
         sep()
         puts("--- WARNING ---", color=colors.yellow)
@@ -200,12 +221,6 @@ def main():
         puts("--- WARNING ---", color=colors.yellow)
         puts("The nfqueue kernel module seems not loaded, some features of firegex may not work.", color=colors.red)
         sep()
-
-    if not "threads" in args or args.threads < 1:
-        args.threads = multiprocessing.cpu_count()
-    
-    if not "port" in args or args.port < 1:
-        args.port = 4444
 
     if args.command:
         match args.command:
@@ -244,7 +259,7 @@ def main():
     
     write_compose()
     
-    if "clear" in args and args.clear:
+    if args.clear:
         if volume_exists():
             delete_volume()
         else:
