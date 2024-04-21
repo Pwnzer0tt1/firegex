@@ -23,6 +23,7 @@
 docker-compose.yml
 firegex-compose.yml
 firegex-compose-tmp-file.yml
+firegex.py
 
 # misc
 **/.DS_Store

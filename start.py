@@ -50,12 +50,13 @@ def dockercmd(cmd):
 def check_already_running():
     return check_if_exists("docker ps --filter 'name=^firegex$' --no-trunc | grep firegex")
 
-def gen_args():                     
+def gen_args(args_to_parse: list[str]|None = None):                     
     
     #Main parser
     parser = argparse.ArgumentParser(description="Firegex Manager")
     if os.path.isfile("./Dockerfile"):
         parser.add_argument('--build', "-b", dest="bef_build", required=False, action="store_true", help='Build the container from source', default=False)
+    parser.add_argument('--clear', dest="bef_clear", required=False, action="store_true", help='Delete docker volume associated to firegex resetting all the settings', default=False)
 
     subcommands = parser.add_subparsers(dest="command", help="Command to execute [Default start if not running]")
     
@@ -80,7 +81,7 @@ def gen_args():
     
     parser_restart = subcommands.add_parser('restart', help='Restart the firewall')
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
-    args = parser.parse_args()
+    args = parser.parse_args(args=args_to_parse)
     
     if not "clear" in args:
         args.clear = False
@@ -98,10 +99,11 @@ def gen_args():
         args.build = False
     
     if args.command is None:
-        if not check_already_running() and not args.clear:
-            args.command = "start"
+        if not args.clear:
+            return gen_args(["start", *sys.argv[1:]])
         
     args.build = args.bef_build or args.build
+    args.clear = args.bef_clear or args.clear
 
     return args
 
@@ -194,10 +196,36 @@ def get_password():
 def volume_exists():
     return check_if_exists('docker volume ls --filter="name=^firegex_firegex_data$" --quiet | grep firegex_firegex_data')
 
-""" not properly checked :(
 def nfqueue_exists():
-    return check_if_exists('ls /lib/modules/$(uname -r)/kernel/net/netfilter/nfnetlink_queue.*')
-"""
+    import socket, fcntl, os, time
+
+    NETLINK_NETFILTER = 12
+    SOL_NETLINK = 270
+    NETLINK_EXT_ACK = 11
+    try:
+        nfsock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_NETFILTER)
+        fcntl.fcntl(nfsock, fcntl.F_SETFL, os.O_RDONLY|os.O_NONBLOCK)
+        nfsock.setsockopt(SOL_NETLINK, NETLINK_EXT_ACK, 1)
+    except Exception as e:
+        return False
+    
+    for rev in [3,2,1,0]:
+        timestamp = int(time.time()).to_bytes(4, byteorder='big')
+        rev = rev.to_bytes(4, byteorder='big')
+        #Prepared payload to check if the nfqueue module is loaded (from iptables code "nft_compatible_revision")
+        payload = b"\x30\x00\x00\x00\x00\x0b\x05\x00"+timestamp+b"\x00\x00\x00\x00\x02\x00\x00\x00\x0c\x00\x01\x00\x4e\x46\x51\x55\x45\x55\x45\x00\x08\x00\x02\x00"+rev+b"\x08\x00\x03\x00\x00\x00\x00\x01"
+        nfsock.send(payload)
+        data = nfsock.recv(1024)
+        is_error = data[4] == 2
+        if not is_error: return True # The module exists and we have permission to use it
+        error_code = int.from_bytes(data[16:16+4], signed=True, byteorder='little')
+        if error_code == -1: return True # EPERM (the user is not root, but the module exists)
+        if error_code == -2: pass # ENOENT (the module does not exist)
+        else:
+            puts("Error while trying to check if the nfqueue module is loaded, this check will be skipped!", color=colors.yellow)
+            return True
+    return False
+
 
 def delete_volume():
     return dockercmd("volume rm firegex_firegex_data")
@@ -220,14 +248,13 @@ def main():
         puts("--- WARNING ---", color=colors.yellow)
         puts("You are not in a linux machine, the firewall will not work in this machine.", color=colors.red)
         sep()
-    
-    """
     elif not nfqueue_exists():
         sep()
         puts("--- WARNING ---", color=colors.yellow)
         puts("The nfqueue kernel module seems not loaded, some features of firegex may not work.", color=colors.red)
         sep()
-    """
+    
+    
     
     if args.command:
         match args.command:
