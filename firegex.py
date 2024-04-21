@@ -82,24 +82,24 @@ def gen_args():
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     args = parser.parse_args()
     
-    if not "clear" in args:
-        args.clear = False
+    if args.command is None:
+        if not check_already_running() and not args.clear:
+            args.command = "start"
     
     if not "threads" in args or args.threads < 1:
         args.threads = multiprocessing.cpu_count()
     
     if not "port" in args or args.port < 1:
         args.port = 4444
+        
+    if not "clear" in args:
+        args.clear = False
     
     if not "bef_build" in args:
         args.bef_build = False
     
     if not "build" in args:
         args.build = False
-    
-    if args.command is None:
-        if not check_already_running() and not args.clear:
-            args.command = "start"
         
     args.build = args.bef_build or args.build
 
