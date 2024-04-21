@@ -47,6 +47,9 @@ def dockercmd(cmd):
     else:
         puts("Docker not found! please install docker!", color=colors.red)
 
+def check_already_running():
+    return check_if_exists("docker ps --filter 'name=^firegex$' --no-trunc | grep firegex")
+
 def gen_args():                     
     
     #Main parser
@@ -164,8 +167,7 @@ volumes:
     firegex_data:
 """)
 
-def check_already_running():
-    return check_if_exists("docker ps --filter 'name=^firegex$' --no-trunc | grep firegex")
+
       
 def get_password():
     if volume_exists() or args.startup_psw:
