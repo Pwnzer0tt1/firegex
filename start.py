@@ -194,8 +194,10 @@ def get_password():
 def volume_exists():
     return check_if_exists('docker volume ls --filter="name=^firegex_firegex_data$" --quiet | grep firegex_firegex_data')
 
+""" not properly checked :(
 def nfqueue_exists():
     return check_if_exists('ls /lib/modules/$(uname -r)/kernel/net/netfilter/nfnetlink_queue.*')
+"""
 
 def delete_volume():
     return dockercmd("volume rm firegex_firegex_data")
@@ -218,12 +220,15 @@ def main():
         puts("--- WARNING ---", color=colors.yellow)
         puts("You are not in a linux machine, the firewall will not work in this machine.", color=colors.red)
         sep()
+    
+    """
     elif not nfqueue_exists():
         sep()
         puts("--- WARNING ---", color=colors.yellow)
         puts("The nfqueue kernel module seems not loaded, some features of firegex may not work.", color=colors.red)
         sep()
-
+    """
+    
     if args.command:
         match args.command:
             case "start":
