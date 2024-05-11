@@ -62,7 +62,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     
     #Compose Command
     parser_compose = subcommands.add_parser('compose', help='Run docker compose command')
-    parser_compose.add_argument('compose-args', nargs=argparse.REMAINDER, help='Arguments to pass to docker compose', default=[])
+    parser_compose.add_argument('compose_args', nargs=argparse.REMAINDER, help='Arguments to pass to docker compose', default=[])
     
     #Start Command
     parser_start = subcommands.add_parser('start', help='Start the firewall')
