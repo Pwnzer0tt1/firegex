@@ -6,9 +6,20 @@
     margin:5px;
 }
 
-.regex_text{
-    padding: 6px;
-    background-color: $third_color;
+.outer_regex_text{
     border-radius: 8px;
+    overflow: hidden;
     margin: 6px;
+}
+
+.regex_text{
+    padding: 10px;
+    background-color: $third_color;
+    overflow-x: hidden;
+    border-radius: 8px;
+}
+
+.regex_text:hover{
+    overflow-x: auto;
+    opacity: 0.8;
 }

@@ -15,4 +15,10 @@
     margin-right: 10px;
     margin-bottom: 13px;
     color:#FFF;
+    max-width: 300px;
+    overflow: hidden;
+}
+.name:hover{
+    overflow: auto;
+    transition: 0.1s;
 }

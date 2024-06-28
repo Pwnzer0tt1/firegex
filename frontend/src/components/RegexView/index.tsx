@@ -1,4 +1,4 @@
-import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip } from '@mantine/core';
+import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip, Box } from '@mantine/core';
 import { useState } from 'react';
 import { RegexFilter } from '../../js/models';
 import { b64decode, errorNotify, getapiobject, okNotify } from '../../js/utils';
@@ -7,6 +7,7 @@ import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
 import FilterTypeSelector from '../FilterTypeSelector';
 import { FaPause, FaPlay } from 'react-icons/fa';
+import { useClipboard } from '@mantine/hooks';
 
 
 function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
@@ -20,6 +21,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   const [deleteModal, setDeleteModal] = useState(false);
   const [deleteTooltipOpened, setDeleteTooltipOpened] = useState(false);
   const [statusTooltipOpened, setStatusTooltipOpened] = useState(false);
+  const clipboard = useClipboard({ timeout: 500 });
 
   const deleteRegex = () => {
     getapiobject().regexdelete(regexInfo.id).then(res => {
@@ -47,7 +49,12 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             <Title order={4}>Regex:</Title> 
           </Grid.Col>
           <Grid.Col span={8}>
-            <Text className={style.regex_text}> {regex_expr}</Text>
+            <Box className={style.outer_regex_text}>
+              <Text className={style.regex_text} onClick={()=>{
+                clipboard.copy(regex_expr)
+                okNotify("Regex copied to clipboard!",`The regex '${regex_expr}' has been copied to the clipboard!`)
+              }}>{regex_expr}</Text>
+            </Box>
           </Grid.Col>
           <Grid.Col span={2} className='center-flex'>
             <Space w="xs" />

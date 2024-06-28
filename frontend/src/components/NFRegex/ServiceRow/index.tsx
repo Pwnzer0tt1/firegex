@@ -76,7 +76,14 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
             <Grid.Col md={4} xs={12}>
 
                 <div className={isMedium?"center-flex-row":"center-flex"}>
-                    <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.port}</Badge></div>
+                    <div className="center-flex">
+                        <Title className={style.name}>
+                            {service.name}
+                        </Title>
+                        <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">
+                            :{service.port}
+                        </Badge>
+                    </div>
                     <Badge style={isMedium?{}:{marginLeft:"20px"}} color={status_color} radius="sm" size="lg" variant="filled">Status: <u>{service.status}</u></Badge>
                     {isMedium?null:<Space w="xl" />}
                 </div>
