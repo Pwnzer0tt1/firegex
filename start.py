@@ -4,9 +4,9 @@ import argparse, sys, platform, os, multiprocessing, subprocess, getpass
 
 pref = "\033["
 reset = f"{pref}0m"
-composefile = "firegex-compose-tmp-file.yml"
+class g:
+    composefile = "firegex-compose-tmp-file.yml"
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
-
 #Terminal colors
 
 class colors:
@@ -24,8 +24,10 @@ def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
 
 def sep(): puts("-----------------------------------", is_bold=True)
 
-def check_if_exists(program):
-    return subprocess.call(['sh', '-c', program], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT) == 0
+def check_if_exists(program, get_output=False):
+    if get_output:
+        return subprocess.getoutput(program)
+    return subprocess.call(program, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True) == 0
 
 def composecmd(cmd, composefile=None):
     if composefile:
@@ -47,8 +49,9 @@ def dockercmd(cmd):
     else:
         puts("Docker not found! please install docker!", color=colors.red)
 
+
 def check_already_running():
-    return check_if_exists("docker ps --filter 'name=^firegex$' --no-trunc | grep firegex")
+    return "firegex" in check_if_exists(f'docker ps --filter "name=^firegex$"', get_output=True)
 
 def gen_args(args_to_parse: list[str]|None = None):                     
     
@@ -114,7 +117,7 @@ def is_linux():
 
 def write_compose(skip_password = True):
     psw_set = get_password() if not skip_password else None
-    with open(composefile,"wt") as compose:
+    with open(g.composefile,"wt") as compose:
 
         if is_linux(): #Check if not is a wsl also
              compose.write(f"""
@@ -193,8 +196,9 @@ def get_password():
             break
     return psw_set
 
+
 def volume_exists():
-    return check_if_exists('docker volume ls --filter="name=^firegex_firegex_data$" --quiet | grep firegex_firegex_data')
+    return "firegex_firegex_data" in check_if_exists(f'docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
 
 def nfqueue_exists():
     import socket, fcntl, os, time
@@ -270,24 +274,24 @@ def main():
                         puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
                         dockercmd("pull ghcr.io/pwnzer0tt1/firegex")
                     puts("Running 'docker compose up -d --build'\n", color=colors.green)
-                    composecmd("up -d --build", composefile)
+                    composecmd("up -d --build", g.composefile)
             case "compose":
                 write_compose()
                 compose_cmd = " ".join(args.compose_args)
                 puts(f"Running 'docker compose {compose_cmd}'\n", color=colors.green)
-                composecmd(compose_cmd, composefile)
+                composecmd(compose_cmd, g.composefile)
             case "restart":
                 if check_already_running():
                     write_compose()
                     puts("Running 'docker compose restart'\n", color=colors.green)
-                    composecmd("restart", composefile)
+                    composecmd("restart", g.composefile)
                 else:
                     puts("Firegex is not running!" , color=colors.red, is_bold=True, flush=True)
             case "stop":
                 if check_already_running():
                     write_compose()
                     puts("Running 'docker compose down'\n", color=colors.green)
-                    composecmd("down", composefile)
+                    composecmd("down", g.composefile)
                 else:
                     puts("Firegex is not running!" , color=colors.red, is_bold=True, flush=True)
     
@@ -308,7 +312,7 @@ if __name__ == "__main__":
         try:
             main()
         finally:
-            if os.path.isfile(composefile):
-                os.remove(composefile)
+            if os.path.isfile(g.composefile):
+                os.remove(g.composefile)
     except KeyboardInterrupt:
         print()
