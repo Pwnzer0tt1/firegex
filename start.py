@@ -24,6 +24,33 @@ def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
 
 def sep(): puts("-----------------------------------", is_bold=True)
 
+def dict_to_yaml(data, indent_spaces:int=4, base_indent:int=0, additional_spaces:int=0, add_text_on_dict:str|None=None):
+    yaml = ''
+    spaces = ' '*((indent_spaces*base_indent)+additional_spaces)
+    if isinstance(data, dict):
+        for key, value in data.items():
+            if not add_text_on_dict is None:
+                spaces_len = len(spaces)-len(add_text_on_dict)
+                spaces = (' '*max(spaces_len, 0))+add_text_on_dict
+                add_text_on_dict = None
+            if isinstance(value, dict) or isinstance(value, list):
+                yaml += f"{spaces}{key}:\n"
+                yaml += dict_to_yaml(value, indent_spaces=indent_spaces, base_indent=base_indent+1, additional_spaces=additional_spaces)
+            else:
+                yaml += f"{spaces}{key}: {value}\n"
+            spaces = ' '*((indent_spaces*base_indent)+additional_spaces)
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                yaml += dict_to_yaml(item, indent_spaces=indent_spaces, base_indent=base_indent, additional_spaces=additional_spaces+2, add_text_on_dict="- ")
+            elif isinstance(item, list):
+                yaml += dict_to_yaml(item, indent_spaces=indent_spaces, base_indent=base_indent+1, additional_spaces=additional_spaces)
+            else:
+                yaml += f"{spaces}- {item}\n"
+    else:
+        yaml += f"{data}\n"
+    return yaml
+
 def check_if_exists(program, get_output=False):
     if get_output:
         return subprocess.getoutput(program)
@@ -120,57 +147,78 @@ def write_compose(skip_password = True):
     with open(g.composefile,"wt") as compose:
 
         if is_linux(): #Check if not is a wsl also
-             compose.write(f"""
-services:
-    firewall:
-        restart: unless-stopped
-        container_name: firegex
-        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
-        network_mode: "host"
-        environment:
-            - PORT={args.port}
-            - NTHREADS={args.threads}
-            {"- HEX_SET_PSW="+psw_set.encode().hex() if psw_set else ""}
-        volumes:
-            - firegex_data:/execute/db
-            - type: bind
-              source: /proc/sys/net/ipv4/conf/all/route_localnet
-              target: /sys_host/net.ipv4.conf.all.route_localnet
-            - type: bind
-              source: /proc/sys/net/ipv4/ip_forward
-              target: /sys_host/net.ipv4.ip_forward
-            - type: bind
-              source: /proc/sys/net/ipv4/conf/all/forwarding
-              target: /sys_host/net.ipv4.conf.all.forwarding
-            - type: bind
-              source: /proc/sys/net/ipv6/conf/all/forwarding
-              target: /sys_host/net.ipv6.conf.all.forwarding
-        cap_add:
-            - NET_ADMIN
-volumes:
-    firegex_data:
-""")
+            compose.write(dict_to_yaml({
+                "services": {
+                    "firewall": {
+                        "restart": "unless-stopped",
+                        "container_name": "firegex",
+                        "build" if args.build else "image": "." if args.build else "ghcr.io/pwnzer0tt1/firegex",
+                        "network_mode": "host",
+                        "environment": [
+                            f"PORT={args.port}",
+                            f"NTHREADS={args.threads}",
+                            f"HEX_SET_PSW={psw_set.encode().hex()}" if psw_set else ""
+                        ],
+                        "volumes": [
+                            "firegex_data:/execute/db",
+                            {
+                                "type": "bind",
+                                "source": "/proc/sys/net/ipv4/conf/all/route_localnet",
+                                "target": "/sys_host/net.ipv4.conf.all.route_localnet"
+                            },
+                            {
+                                "type": "bind",
+                                "source": "/proc/sys/net/ipv4/ip_forward",
+                                "target": "/sys_host/net.ipv4.ip_forward"
+                            },
+                            {
+                                "type": "bind",
+                                "source": "/proc/sys/net/ipv4/conf/all/forwarding",
+                                "target": "/sys_host/net.ipv4.conf.all.forwarding"
+                            },
+                            {
+                                "type": "bind",
+                                "source": "/proc/sys/net/ipv6/conf/all/forwarding",
+                                "target": "/sys_host/net.ipv6.conf.all.forwarding"
+                            }
+                        ],
+                        "cap_add": [
+                            "NET_ADMIN"
+                        ]
+                    }
+                },
+                "volumes": {
+                    "firegex_data": ""
+                }
+            }))
 
         else:
-            compose.write(f"""
-services:
-    firewall:
-        restart: unless-stopped
-        container_name: firegex
-        {"build: ." if args.build else "image: ghcr.io/pwnzer0tt1/firegex"}
-        ports:
-            - {args.port}:{args.port}
-        environment:
-            - PORT={args.port}
-            - NTHREADS={args.threads}
-            {"- HEX_SET_PSW="+psw_set.encode().hex() if psw_set else ""}
-        volumes:
-            - firegex_data:/execute/db
-        cap_add:
-            - NET_ADMIN
-volumes:
-    firegex_data:
-""")
+            compose.write(dict_to_yaml({
+                "services": {
+                    "firewall": {
+                        "restart": "unless-stopped",
+                        "container_name": "firegex",
+                        "build" if args.build else "image": "." if args.build else "ghcr.io/pwnzer0tt1/firegex",
+                        "ports": [
+                            f"{args.port}:{args.port}"
+                        ],
+                        "environment": [
+                            f"PORT={args.port}",
+                            f"NTHREADS={args.threads}",
+                            f"HEX_SET_PSW={psw_set.encode().hex()}" if psw_set else ""
+                        ],
+                        "volumes": [
+                            "firegex_data:/execute/db"
+                        ],
+                        "cap_add": [
+                            "NET_ADMIN"
+                        ]
+                    }
+                },
+                "volumes": {
+                    "firegex_data": ""
+                }
+            }))
 
 
       
