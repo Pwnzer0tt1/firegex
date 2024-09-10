@@ -157,7 +157,7 @@ def write_compose(skip_password = True):
                         "environment": [
                             f"PORT={args.port}",
                             f"NTHREADS={args.threads}",
-                            f"HEX_SET_PSW={psw_set.encode().hex()}" if psw_set else ""
+                            *([f"HEX_SET_PSW={psw_set.encode().hex()}"] if psw_set else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -191,7 +191,6 @@ def write_compose(skip_password = True):
                     "firegex_data": ""
                 }
             }))
-
         else:
             compose.write(dict_to_yaml({
                 "services": {
@@ -205,7 +204,7 @@ def write_compose(skip_password = True):
                         "environment": [
                             f"PORT={args.port}",
                             f"NTHREADS={args.threads}",
-                            f"HEX_SET_PSW={psw_set.encode().hex()}" if psw_set else ""
+                            *([f"HEX_SET_PSW={psw_set.encode().hex()}"] if psw_set else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db"
@@ -219,8 +218,6 @@ def write_compose(skip_password = True):
                     "firegex_data": ""
                 }
             }))
-
-
       
 def get_password():
     if volume_exists() or args.startup_psw:
