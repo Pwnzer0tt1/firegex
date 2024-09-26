@@ -6,7 +6,14 @@ pref = "\033["
 reset = f"{pref}0m"
 class g:
     composefile = "firegex-compose-tmp-file.yml"
+    build = False
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
+
+if os.path.isfile("./Dockerfile"):
+    with open("./Dockerfile", "rt") as dockerfile:
+        if "cf1795af-3284-4183-a888-81ad3590ad84" in dockerfile.read():
+            g.build = True
+
 #Terminal colors
 
 class colors:
@@ -84,8 +91,6 @@ def gen_args(args_to_parse: list[str]|None = None):
     
     #Main parser
     parser = argparse.ArgumentParser(description="Firegex Manager")
-    if os.path.isfile("./Dockerfile"):
-        parser.add_argument('--build', "-b", dest="bef_build", required=False, action="store_true", help='Build the container from source', default=False)
     parser.add_argument('--clear', dest="bef_clear", required=False, action="store_true", help='Delete docker volume associated to firegex resetting all the settings', default=False)
 
     subcommands = parser.add_subparsers(dest="command", help="Command to execute [Default start if not running]")
@@ -101,9 +106,6 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--startup-psw','-P', required=False, action="store_true", help='Insert password in the startup screen of firegex', default=False)
     parser_start.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
-    if os.path.isfile("./Dockerfile"):
-        parser_start.add_argument('--build', "-b", required=False, action="store_true", help='Build the container from source', default=False)
-
 
     #Stop Command
     parser_stop = subcommands.add_parser('stop', help='Stop the firewall')
@@ -122,17 +124,10 @@ def gen_args(args_to_parse: list[str]|None = None):
     if not "port" in args or args.port < 1:
         args.port = 4444
     
-    if not "bef_build" in args:
-        args.bef_build = False
-    
-    if not "build" in args:
-        args.build = False
-    
     if args.command is None:
         if not args.clear:
             return gen_args(["start", *sys.argv[1:]])
-        
-    args.build = args.bef_build or args.build
+    
     args.clear = args.bef_clear or args.clear
 
     return args
@@ -152,7 +147,7 @@ def write_compose(skip_password = True):
                     "firewall": {
                         "restart": "unless-stopped",
                         "container_name": "firegex",
-                        "build" if args.build else "image": "." if args.build else "ghcr.io/pwnzer0tt1/firegex",
+                        "build" if g.build else "image": "." if g.build else "ghcr.io/pwnzer0tt1/firegex",
                         "network_mode": "host",
                         "environment": [
                             f"PORT={args.port}",
@@ -197,7 +192,7 @@ def write_compose(skip_password = True):
                     "firewall": {
                         "restart": "unless-stopped",
                         "container_name": "firegex",
-                        "build" if args.build else "image": "." if args.build else "ghcr.io/pwnzer0tt1/firegex",
+                        "build" if g.build else "image": "." if g.build else "ghcr.io/pwnzer0tt1/firegex",
                         "ports": [
                             f"{args.port}:{args.port}"
                         ],
@@ -315,7 +310,7 @@ def main():
                     puts(" will start on port ", end="")
                     puts(f"{args.port}", color=colors.cyan)
                     write_compose(skip_password=False)
-                    if not args.build:
+                    if not g.build:
                         puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
                         dockercmd("pull ghcr.io/pwnzer0tt1/firegex")
                     puts("Running 'docker compose up -d --build'\n", color=colors.green)
