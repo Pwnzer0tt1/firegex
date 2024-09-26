@@ -4,7 +4,7 @@
 # Needed for start.py to detect the Dockerfile
 
 
-FROM --platform=$BUILDPLATFORM oven/bun as frontend 
+FROM --platform=$BUILDPLATFORM oven/bun AS frontend 
 WORKDIR /app
 ADD ./frontend/package.json .
 ADD ./frontend/bun.lockb .
@@ -14,7 +14,7 @@ RUN bun run build
 
 
 #Building main conteiner
-FROM --platform=$TARGETARCH debian:stable-slim as base
+FROM --platform=$TARGETARCH debian:stable-slim AS base
 RUN apt-get update -qq && apt-get upgrade -qq
 RUN apt-get install -qq python3-pip build-essential
 RUN apt-get install -qq git libpcre2-dev libnetfilter-queue-dev
