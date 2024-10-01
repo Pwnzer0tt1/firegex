@@ -19,8 +19,9 @@ Or, you can start in a similar way firegex, cloning this repository and executin
 ```bash
 python3 start.py
 ```
-Cloning the repository you could use the `--build` option that will build a new image of firegex, this can be usefull if you need change some code of firegex, and run it with the new code.
-Image building of firegex will require more time, so it's recommended to use the version just builded and available in the github packages
+Cloning the repository start.py will automatically build the docker image of firegex from source, and start it.
+Image building of firegex will require more time, so it's recommended to use the version just builded and available in the github packages.
+This is default behaviour if start.py is not in the firegex source root directory.
 
 By default firegex will start in a multithread configuration using the number of threads available in your system.
 The default port of firegex is 4444. At the startup you will choose a password, that is essential for your security.
