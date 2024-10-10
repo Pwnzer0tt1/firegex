@@ -58,7 +58,7 @@ def dict_to_yaml(data, indent_spaces:int=4, base_indent:int=0, additional_spaces
         yaml += f"{data}\n"
     return yaml
 
-def check_if_exists(program, get_output=False):
+def check_cmd(program, get_output=False):
     if get_output:
         return subprocess.getoutput(program)
     return subprocess.call(program, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True) == 0
@@ -66,26 +66,26 @@ def check_if_exists(program, get_output=False):
 def composecmd(cmd, composefile=None):
     if composefile:
         cmd = f"-f {composefile} {cmd}"
-    if not check_if_exists("docker ps"):
+    if not check_cmd("docker ps"):
         return puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
-    elif check_if_exists("docker compose"):
+    elif check_cmd("docker compose"):
         return os.system(f"docker compose -p firegex {cmd}")
-    elif check_if_exists("docker-compose"):
+    elif check_cmd("docker-compose"):
         return os.system(f"docker-compose -p firegex {cmd}")
     else:
         puts("Docker compose not found! please install docker compose!", color=colors.red)
 
 def dockercmd(cmd):
-    if check_if_exists("docker"):
+    if check_cmd("docker"):
         return os.system(f"docker {cmd}")
-    elif not check_if_exists("docker ps"):
+    elif not check_cmd("docker ps"):
         puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
     else:
         puts("Docker not found! please install docker!", color=colors.red)
 
 
 def check_already_running():
-    return "firegex" in check_if_exists(f'docker ps --filter "name=^firegex$"', get_output=True)
+    return "firegex" in check_cmd(f'docker ps --filter "name=^firegex$"', get_output=True)
 
 def gen_args(args_to_parse: list[str]|None = None):                     
     
@@ -238,7 +238,7 @@ def get_password():
 
 
 def volume_exists():
-    return "firegex_firegex_data" in check_if_exists(f'docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
+    return "firegex_firegex_data" in check_cmd(f'docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
 
 def nfqueue_exists():
     import socket, fcntl, os, time
@@ -276,14 +276,14 @@ def delete_volume():
 
 def main():
     
-    if not check_if_exists("docker"):
+    if not check_cmd("docker"):
         puts("Docker not found! please install docker and docker compose!", color=colors.red)
         exit()
-    elif not check_if_exists("docker-compose") and not check_if_exists("docker compose"):
-        print(check_if_exists("docker-compose"), check_if_exists("docker compose"))
+    elif not check_cmd("docker-compose") and not check_cmd("docker compose"):
+        print(check_cmd("docker-compose"), check_cmd("docker compose"))
         puts("Docker compose not found! please install docker compose!", color=colors.red)
         exit()
-    if not check_if_exists("docker ps"):
+    if not check_cmd("docker ps"):
         puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
         exit()
     
