@@ -10,6 +10,7 @@ from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, sock
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 from contextlib import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware
 
 # DB init
 db = SQLite('db/firegex.db')
@@ -31,6 +32,9 @@ async def lifespan(app):
 
 app = FastAPI(debug=DEBUG, redoc_url=None, lifespan=lifespan)
 utils.socketio = SocketManager(app, "/sock", socketio_path="")
+
+if DEBUG:
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 def APP_STATUS(): return "init" if db.get("password") is None else "run"
 def JWT_SECRET(): return db.get("secret")
@@ -158,7 +162,7 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
-        host="0.0.0.0" if DEBUG else None,
+        host="::" if DEBUG else None,
         port=FIREGEX_PORT,
         reload=DEBUG,
         access_log=True,

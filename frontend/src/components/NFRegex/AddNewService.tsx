@@ -1,4 +1,4 @@
-import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl, Box } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useState } from 'react';
 import { okNotify, regex_ipv4, regex_ipv6 } from '../../js/utils';
@@ -71,12 +71,12 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
             <PortAndInterface form={form} int_name="ip_int" port_name="port" label={"Public IP Interface and port (ipv4/ipv6 + CIDR allowed)"} />            
             <Space h="md" />
 
-            <div className='center-flex'>
+            <Box className='center-flex'>
                 <Switch
                     label="Auto-Start Service"
                     {...form.getInputProps('autostart', { type: 'checkbox' })}
                 />  
-                <div className="flex-spacer"></div>
+                <Box className="flex-spacer"></Box>
                 <SegmentedControl
                     data={[
                         { label: 'TCP', value: 'tcp' },
@@ -84,9 +84,9 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
                     ]}
                     {...form.getInputProps('proto')}
                 />
-            </div>      
+            </Box>      
 
-            <Group position="right" mt="md">
+            <Group align="right" mt="md">
                 <Button loading={submitLoading} type="submit">Add Service</Button>
             </Group>
 

@@ -2,7 +2,6 @@ import { Grid, Text, Title, Badge, Space, ActionIcon, Tooltip, Box } from '@mant
 import { useState } from 'react';
 import { RegexFilter } from '../../js/models';
 import { b64decode, errorNotify, getapiobject, okNotify } from '../../js/utils';
-import style from "./index.module.scss";
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
 import FilterTypeSelector from '../FilterTypeSelector';
@@ -43,14 +42,14 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
     }).catch( err => errorNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivation":"activation"} failed!`,`Error: ${err}`))
   }
 
-  return <div className={style.box}>
+  return <Box className="firegex__regexview__box">
         <Grid>
           <Grid.Col span={2} className="center-flex">
             <Title order={4}>Regex:</Title> 
           </Grid.Col>
           <Grid.Col span={8}>
-            <Box className={style.outer_regex_text}>
-              <Text className={style.regex_text} onClick={()=>{
+            <Box className="firegex__regexview__outer_regex_text">
+              <Text className="firegex__regexview__regex_text" onClick={()=>{
                 clipboard.copy(regex_expr)
                 okNotify("Regex copied to clipboard!",`The regex '${regex_expr}' has been copied to the clipboard!`)
               }}>{regex_expr}</Text>
@@ -74,7 +73,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
 
             </Grid.Col>
           <Grid.Col className='center-flex' span={12}>
-            <div className='center-flex-row'>
+            <Box className='center-flex-row'>
               <FilterTypeSelector 
                   size="md"
                   color="gray"
@@ -82,23 +81,23 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
                   value={regexInfo.is_blacklist?"blacklist":"whitelist"}
               />
               <Space h="md" />
-              <div className='center-flex'>
+              <Box className='center-flex'>
                 <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_id}</Badge>
                 <Space w="xs" />
                 <Badge size="md" color={regexInfo.active?"lime":"red"} variant="filled">{regexInfo.active?"ACTIVE":"DISABLED"}</Badge>
                 <Space w="xs" />
                 <Badge size="md" color="gray" variant="filled">ID: {regexInfo.id}</Badge>
                 
-              </div>
-            </div>
-            <div className='flex-spacer' />
-            <div className='center-flex-row'>
+              </Box>
+            </Box>
+            <Box className='flex-spacer' />
+            <Box className='center-flex-row'>
               <Badge size="md" color={regexInfo.is_case_sensitive?"grape":"pink"} variant="filled">Case: {regexInfo.is_case_sensitive?"SENSIIVE":"INSENSITIVE"}</Badge>
               <Space h="xs" />
               <Badge size="md" color="yellow" variant="filled">Packets filtered: {regexInfo.n_packets}</Badge>
               <Space h="xs" />
               <Badge size="md" color="blue" variant="filled">Mode: {mode_string}</Badge>
-            </div>
+            </Box>
           </Grid.Col>
         </Grid>
         <YesNoModal
@@ -109,7 +108,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             opened={deleteModal}
         />
         
-  </div>
+  </Box>
 }
 
 export default RegexView;

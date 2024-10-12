@@ -47,7 +47,7 @@ function ResetModal({ opened, onClose }:{ opened: boolean, onClose: () => void }
               {...form.getInputProps('delete_data', { type: 'checkbox' })}
           />
           <Space h="md" />
-          <Group position="right" mt="md">
+          <Group align="right" mt="md">
             <Button loading={loadingBtn} onClick={close} >Cancel</Button>
             <Button loading={loadingBtn} type="submit" color="red">Reset</Button>
           </Group>

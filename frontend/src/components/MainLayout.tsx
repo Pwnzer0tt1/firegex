@@ -1,43 +1,37 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { ActionIcon, Container, Menu, Space } from '@mantine/core';
 import { AppShell } from '@mantine/core';
 import NavBar from './NavBar';
-import FooterPage from './Footer';
 import HeaderPage from './Header';
-import { getmainpath } from '../js/utils';
+import { getMainPath } from '../js/utils';
 import { useLocation } from 'react-router-dom';
 import { RiMenu5Fill } from 'react-icons/ri';
-
-
+import { useNavbarStore } from '../js/store';
 
 
 function MainLayout({ children }:{ children:any }) {
-  const [opened, setOpened] = useState(false);
+  const { navOpened } = useNavbarStore()
   const location = useLocation()
   useEffect(()=>{
     if (location.pathname !== "/"){
-      sessionStorage.setItem('home_section', getmainpath())
+      sessionStorage.setItem('home_section', getMainPath())
     }
   },[location.pathname])
-
-
-  return <>  
-      
-  <AppShell
-    padding="md"
-    fixed
-    navbar={<NavBar closeNav={()=>setOpened(false)} opened={opened} />}
-    header={<HeaderPage navOpen={opened} setNav={setOpened} />}
-    footer={<FooterPage />}
+  return <AppShell
+    header={{ height: 70 }}
+    navbar={{ width: 300 , breakpoint: "md", collapsed: { mobile: !navOpened } }}
+    p="md"
   >
-    <Container size="lg">
-        {children}
-    </Container>
+    <HeaderPage />
+    <NavBar />
+    <AppShell.Main>
+      <Container size="lg">
+          {children}
+      </Container>
+    </AppShell.Main>
   <Space h="lg" />
 
   </AppShell>
-
-</>
 
 }
 
@@ -46,7 +40,7 @@ export default MainLayout;
 export const MenuDropDownWithButton = ({children}:{children:any}) => <Menu withArrow>
         <Menu.Target>
             <ActionIcon variant='transparent'>
-                <RiMenu5Fill size={24} />
+                <RiMenu5Fill size={24} color='#FFF'/>
             </ActionIcon>
         </Menu.Target>
         <Menu.Dropdown>

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { ActionIcon, Divider, Image, Menu, Tooltip, Burger, Space, Header, Button, ThemeIcon } from '@mantine/core';
-import style from "./index.module.scss";
-import { errorNotify, getmainpath, isLargeScreen, logout } from '../../js/utils';
+import { ActionIcon, Divider, Image, Menu, Tooltip, Burger, Space, AppShell, Box, Title } from '@mantine/core';
+import { errorNotify, getMainPath, isLargeScreen, logout } from '../../js/utils';
 import { AiFillHome } from "react-icons/ai"
 import { useNavigate } from 'react-router-dom';
 import { FaLock } from 'react-icons/fa';
@@ -10,11 +9,13 @@ import { ImExit } from 'react-icons/im';
 import ResetPasswordModal from './ResetPasswordModal';
 import ResetModal from './ResetModal';
 import { MenuDropDownWithButton } from '../MainLayout';
+import { useNavbarStore } from '../../js/store';
 
 
-function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:React.Dispatch<React.SetStateAction<boolean>>}) {
+function HeaderPage(props: any) {
   
   const navigator = useNavigate()
+  const { navOpened, toggleNav } = useNavbarStore()
   
   const logout_action = () => {
     logout().then(r => {
@@ -25,40 +26,42 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
   } 
 
   const go_to_home = () => {
-    navigator(`/${getmainpath()}`)
+    navigator(`/${getMainPath()}`)
   }
 
   const [changePasswordModal, setChangePasswordModal] = useState(false);
   const [resetFiregexModal, setResetFiregexModal] = useState(false);
   const [tooltipHomeOpened, setTooltipHomeOpened] = useState(false);
   const [tooltipLogoutOpened,setTooltipLogoutOpened] = useState(false);
-  const isLarge = isLargeScreen()
-  console.log(isLarge)
-  return <Header height={100} className={style.header} {...other}>
-        <Space w="lg" />
-        {isLarge?null:<div>
-          <Burger
-            opened={navOpen}
-            className={style.navbtn}
-            onClick={() => setNav((o) => !o)}
-            size="sm"
-            mr="xl"
-          />
-        </div>}
-        <div className={style.divlogo}>
-          <Tooltip zIndex={0} label="Home" openDelay={1000}color="dark" position="right" >
-            <Image src="/header-logo.png" alt="Firegex logo" onClick={()=>navigator("/")}/>
-          </Tooltip>
-        </div>
+  return <AppShell.Header className="firegex__header__header" {...props}>
+        <Burger
+          hiddenFrom='md'
+          ml="lg"
+          opened={navOpened}
+          className="firegex__header__navbtn"
+          onClick={toggleNav}
+          size="sm"
+        />
+        <Box style={{ display: "flex", justifyContent: "center", alignItems: "center"}} ml={5}>
+          <Box className="firegex__header__divlogo">
+            <Tooltip zIndex={0} label="Home" openDelay={1000} color="dark" position="right" >
+              <Image src="/header-logo.png" alt="Firegex logo" w={50} onClick={()=>navigator("/")}/>
+            </Tooltip>
+          </Box>
+          <Box display="flex" style={{ flexDirection: "column" }} visibleFrom='xs'>
+            <Title order={2} >[Fi]*regex</Title>
+            <p style={{margin: 0, fontSize: "70%"}}>By <a href="https://pwnzer0tt1.it">Pwnzer0tt1</a></p>
+          </Box>
+        </Box>
         
-        <div className="flex-spacer" />        
+        <Box className="flex-spacer" />        
       
         <MenuDropDownWithButton>
           <Menu.Label>Firewall Access</Menu.Label>
-          <Menu.Item icon={<FaLock size={14} />} onClick={() => setChangePasswordModal(true)}>Change Password</Menu.Item>
+          <Menu.Item leftSection={<FaLock size={14} />} onClick={() => setChangePasswordModal(true)}>Change Password</Menu.Item>
           <Divider />
           <Menu.Label>Actions</Menu.Label>
-          <Menu.Item color="red" icon={<MdOutlineSettingsBackupRestore size={18} />} onClick={() => setResetFiregexModal(true)}>Reset Firegex</Menu.Item>
+          <Menu.Item color="red" leftSection={<MdOutlineSettingsBackupRestore size={18} />} onClick={() => setResetFiregexModal(true)}>Reset Firegex</Menu.Item>
         </MenuDropDownWithButton>
         <Space w="md" />
         <Tooltip label="Home" position='bottom' color="teal" opened={tooltipHomeOpened}>
@@ -78,7 +81,7 @@ function HeaderPage({navOpen, setNav, ...other}: { navOpen: boolean, setNav:Reac
         <ResetPasswordModal opened={changePasswordModal} onClose={() => setChangePasswordModal(false)} />
         <ResetModal opened={resetFiregexModal} onClose={() => setResetFiregexModal(false)} />
         <Space w="xl" />
-  </Header>
+  </AppShell.Header>
 }
 
 export default HeaderPage;

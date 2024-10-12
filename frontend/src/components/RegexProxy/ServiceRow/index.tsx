@@ -1,8 +1,7 @@
-import { ActionIcon, Badge, Divider, Grid, Menu, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Divider, Grid, Menu, Space, Title, Tooltip } from '@mantine/core';
 import { useState } from 'react';
 import { FaPause, FaPlay, FaStop } from 'react-icons/fa';
 import { MdOutlineArrowForwardIos } from "react-icons/md"
-import style from "./ServiceRow.module.scss";
 import YesNoModal from '../../YesNoModal';
 import { errorNotify, isMediumScreen, okNotify } from '../../../js/utils';
 import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
@@ -101,34 +100,34 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     }
 
     return <>
-        <Grid className={style.row} justify="flex-end" style={{width:"100%"}}>
-            <Grid.Col md={4} xs={12}>
-                <div className={isMedium?"center-flex-row":"center-flex"}>
-                    <div className="center-flex"><Title className={style.name}>{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></div>
+        <Grid className="firegex__servicerow__row" justify="flex-end" style={{width:"100%"}}>
+            <Grid.Col span={{ md:4, xs: 12 }}>
+                <Box className={isMedium?"center-flex-row":"center-flex"}>
+                    <Box className="center-flex"><Title className="firegex__servicerow__name">{service.name}</Title> <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient">:{service.public_port}</Badge></Box>
                     <Badge color={status_color} size="lg" radius="md">{service.internal_port} {"->"} {service.public_port}</Badge>
-                </div>
+                </Box>
                 {!isMedium?<Space h="xl" />:null}
             </Grid.Col>
             
-            <Grid.Col className="center-flex" md={8} xs={12}>
-                {!isMedium?<div className='flex-spacer' />:<><Space w="xl" /><Space w="xl" /></>}
-                <div className="center-flex-row">
+            <Grid.Col className="center-flex" span={{ md:8, xs: 12 }}>
+                {!isMedium?<Box className='flex-spacer' />:<><Space w="xl" /><Space w="xl" /></>}
+                <Box className="center-flex-row">
                     <Badge style={{marginBottom:"20px"}} color={status_color} radius="sm" size="lg" variant="filled">Status: <u>{service.status}</u></Badge>
                     <Badge style={{marginBottom:"8px"}}color="violet" radius="sm" size="md" variant="filled">Regex: {service.n_regex}</Badge>
                     <Badge color="yellow" radius="sm" size="md" variant="filled">Connections Blocked: {service.n_packets}</Badge>
-                </div>
-                {isMedium?<div className='flex-spacer' />:<><Space w="xl" /><Space w="xl" /></>}
-                <div className="center-flex">
+                </Box>
+                {isMedium?<Box className='flex-spacer' />:<><Space w="xl" /><Space w="xl" /></>}
+                <Box className="center-flex">
                     <MenuDropDownWithButton>
                         <Menu.Label><b>Rename service</b></Menu.Label>
-                        <Menu.Item icon={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
+                        <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
                         <Divider />
                         <Menu.Label><b>Change ports</b></Menu.Label>
-                        <Menu.Item icon={<TbNumbers size={18} />} onClick={()=>setChoosePortModal(true)}>Change port</Menu.Item>
-                        <Menu.Item icon={<BsArrowRepeat size={18} />} onClick={()=>setChangePortModal(true)}>Regen proxy port</Menu.Item>
+                        <Menu.Item leftSection={<TbNumbers size={18} />} onClick={()=>setChoosePortModal(true)}>Change port</Menu.Item>
+                        <Menu.Item leftSection={<BsArrowRepeat size={18} />} onClick={()=>setChangePortModal(true)}>Regen proxy port</Menu.Item>
                         <Divider />
                         <Menu.Label><b>Danger zone</b></Menu.Label>
-                        <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
+                        <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
                     </MenuDropDownWithButton>
                     <Space w="md"/>
                     {["pause","wait"].includes(service.status)?
@@ -158,12 +157,12 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                             <FaPlay size="20px" />
                         </ActionIcon>
                     </Tooltip>
-                </div>
+                </Box>
                 <Space w="xl" /><Space w="xl" />
-                {onClick?<div>
+                {onClick?<Box>
                     <MdOutlineArrowForwardIos onClick={onClick} style={{cursor:"pointer"}} size={45} />
                     <Space w="xl" />
-                </div>:null}
+                </Box>:null}
                 {!isMedium?<><Space w="xl" /><Space w="xl" /></>:null}
                 
             </Grid.Col>

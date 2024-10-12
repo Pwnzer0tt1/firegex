@@ -1,8 +1,7 @@
-import { ActionIcon, Badge, Divider, Menu, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Divider, Grid, Menu, Space, Title, Tooltip } from '@mantine/core';
 import React, { useState } from 'react';
 import { FaPlay, FaStop } from 'react-icons/fa';
 import { porthijack, Service } from '../utils';
-import style from "./index.module.scss";
 import YesNoModal from '../../YesNoModal';
 import { errorNotify, isMediumScreen, okNotify } from '../../../js/utils';
 import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
@@ -90,86 +89,91 @@ function ServiceRow({ service }:{ service:Service }) {
     }
 
     return <>
-        <div className={isMedium?style.row:style.row_mobile} style={{width:"100%"}}>
-            <Space w="xl" /><Space w="xl" />
-            <div>
-                <div className="center-flex-row">
-                    <Title order={4} className={style.name}>{service.name}</Title>
-                    <div className="center-flex">
-                        <Badge color={status_color} radius="sm" size="md" variant="filled">Status: <u>{service.active?"ENABLED":"DISABLED"}</u></Badge>
-                        <Space w="sm" />
-                        <Badge color={service.proto === "tcp"?"cyan":"orange"} radius="sm" size="md" variant="filled">
-                            {service.proto}
-                        </Badge>
-                    </div>
-                </div>
-            </div>
-        
-            <div className='flex-spacer' />
-            {isMedium?null:<Space h="xl" />}
-            <div className='center-flex'>
-            <div className="center-flex-row">
-                <Badge color="lime" radius="sm" size="md" variant="filled">
-                    FROM {service.ip_src} : {service.public_port}
-                </Badge>
-                <Space h="sm" />
-                <Badge color="blue" radius="sm" size="md" variant="filled">
-                    <div className="center-flex">
-                        TO {service.ip_dst} : 
-                        <form onSubmit={form.onSubmit((v)=>portInputRef.current?.blur())}>
-                            <PortInput
-                                defaultValue={service.proxy_port}
-                                size="xs"
-                                variant="unstyled"
-                                style={{
-                                    width: (10+form.values.proxy_port.toString().length*6.2) +"px"
-                                }}
-                                className={style.portInput}
-                                onBlur={(e)=>{onChangeProxyPort({proxy_port:parseInt(e.target.value)})}}
-                                ref={portInputRef}
-                                {...form.getInputProps("proxy_port")}
-                            />
-                        </form>
-                    </div>
-                </Badge>
-            </div>
-
-            <Space w="xl" /><Space w="xl" />
-            <div className="center-flex">
-                <MenuDropDownWithButton>
-                    <Menu.Label><b>Rename service</b></Menu.Label>
-                    <Menu.Item icon={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
-                    <Menu.Label><b>Change destination</b></Menu.Label>
-                    <Menu.Item icon={<BsArrowRepeat size={18} />} onClick={()=>setChangeDestModal(true)}>Change hijacking destination</Menu.Item>
-                    <Divider />
-                    <Menu.Label><b>Danger zone</b></Menu.Label>
-                    <Menu.Item color="red" icon={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                </MenuDropDownWithButton>
-                <Space w="md"/>                        
-                <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
-                    <ActionIcon color="red" loading={buttonLoading}
-                    onClick={stopService} size="xl" radius="md" variant="filled"
-                    disabled={!service.active}
-                    aria-describedby="tooltip-stop-id"
-                    onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
-                    onMouseEnter={() => setTooltipStopOpened(true)} onMouseLeave={() => setTooltipStopOpened(false)}>
-                        <FaStop size="20px" />
-                    </ActionIcon>
-                </Tooltip>
-                <Space w="md"/>
-                <Tooltip label="Start service" zIndex={0} color="teal">
-                    <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
-                                variant="filled" disabled={service.active}>
-                        <FaPlay size="20px" />
-                    </ActionIcon>
-                </Tooltip>
-            </div>
-            </div>
-            {isMedium?null:<Space h="xl" />}
-            <Space w="xl" /><Space w="xl" />
+            <Box className='firegex__nfregex__rowbox'>
+            <Grid className="firegex__nfregex__row" justify="flex-end" style={{width:"100%"}}>
+                <Grid.Col span={{ md:4, xs: 12 }}>
+                    <Box className={"center-flex-row"}>
+                        <Title className="firegex__nfregex__name">
+                            {service.name}
+                        </Title>
+                        <Box className="center-flex" style={{ gap: 6 }}>
+                            <Badge color={status_color} radius="md" size="lg" variant="filled">Status: <u>{service.active?"ENABLED":"DISABLED"}</u></Badge>
+                            <Badge color={service.proto === "tcp"?"cyan":"orange"} radius="md" size="lg" variant="filled">
+                                {service.proto}
+                            </Badge>
+                        </Box>
+                        {isMedium?null:<Space w="xl" />}
+                    </Box>
+                </Grid.Col>
                 
-        </div>
-        <Divider size="sm" style={{width:"100%"}}/>
+                <Grid.Col className={isMedium?"center-flex":"center-flex-row"} span={{ md:8, xs: 12 }}>
+                    <Box visibleFrom='md' className='flex-spacer' />
+                    <Space hiddenFrom='md' h="md" />
+                    <Space hiddenFrom='md' w="xl" />
+                    <Space hiddenFrom='md' w="md" />
+                    
+                    <Box className="center-flex-row">
+                    <Badge color="lime" radius="sm" size="md" variant="filled">
+                        FROM {service.ip_src} : {service.public_port}
+                    </Badge>
+                    <Space h="sm" />
+                    <Badge color="blue" radius="sm" size="md" variant="filled">
+                        <Box className="center-flex">
+                            TO {service.ip_dst} : 
+                            <form onSubmit={form.onSubmit((v)=>portInputRef.current?.blur())}>
+                                <PortInput
+                                    defaultValue={service.proxy_port}
+                                    size="xs"
+                                    variant="unstyled"
+                                    style={{
+                                        width: (10+form.values.proxy_port.toString().length*6.2) +"px"
+                                    }}
+                                    className="firegex__porthijack__servicerow__portInput"
+                                    onBlur={(e)=>{onChangeProxyPort({proxy_port:parseInt(e.target.value)})}}
+                                    ref={portInputRef}
+                                    {...form.getInputProps("proxy_port")}
+                                />
+                            </form>
+                        </Box>
+                    </Badge>
+                    </Box>
+                    {isMedium?<Box className='flex-spacer' />:<Space h="xl" />}
+                    <Box className="center-flex">
+                        <MenuDropDownWithButton>
+                            <Menu.Label><b>Rename service</b></Menu.Label>
+                            <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
+                            <Menu.Label><b>Change destination</b></Menu.Label>
+                            <Menu.Item leftSection={<BsArrowRepeat size={18} />} onClick={()=>setChangeDestModal(true)}>Change hijacking destination</Menu.Item>
+                            <Divider />
+                            <Menu.Label><b>Danger zone</b></Menu.Label>
+                            <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
+                        </MenuDropDownWithButton>
+                        <Space w="md"/>                        
+                        <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
+                            <ActionIcon color="red" loading={buttonLoading}
+                            onClick={stopService} size="xl" radius="md" variant="filled"
+                            disabled={!service.active}
+                            aria-describedby="tooltip-stop-id"
+                            onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
+                            onMouseEnter={() => setTooltipStopOpened(true)} onMouseLeave={() => setTooltipStopOpened(false)}>
+                                <FaStop size="20px" />
+                            </ActionIcon>
+                        </Tooltip>
+                        <Space w="md"/>
+                        <Tooltip label="Start service" zIndex={0} color="teal">
+                            <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
+                                        variant="filled" disabled={service.active}>
+                                <FaPlay size="20px" />
+                            </ActionIcon>
+                        </Tooltip>
+                        
+                    </Box>
+                    {isMedium?<Space w="xl" />:null} 
+            
+                </Grid.Col>
+            </Grid>
+        </Box>
+       
 
         <YesNoModal
             title='Are you sure to delete this service?'

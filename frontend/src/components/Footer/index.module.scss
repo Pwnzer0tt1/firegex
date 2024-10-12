@@ -1,8 +1,0 @@
-@use "../../vars" as *;
-@use "../../index.scss" as *;
-
-.footer{
-    margin-top: 50px;
-    background-color: $primary_color;
-    @extend .center-flex;
-}

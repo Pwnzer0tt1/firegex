@@ -80,7 +80,7 @@ function ChangePortModal({ service, opened, onClose }:{ service:Service, opened:
 
             <Space h="md" />
 
-            <Group position="right" mt="md">
+            <Group align="right" mt="md">
                 <Button loading={submitLoading} disabled={
                     service.internal_port === form.values.internalPort && service.public_port === form.values.port
                     } type="submit">Change Port</Button>

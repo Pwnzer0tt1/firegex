@@ -101,14 +101,14 @@ export async function postapi(path:string,data:any,is_form:boolean=false):Promis
     });
 }
 
-export function getmainpath(){
+export function getMainPath(){
     const paths = window.location.pathname.split("/")
     if (paths.length > 1) return paths[1]
     return ""
 }
 
 export function getapiobject(){
-    switch(getmainpath()){
+    switch(getMainPath()){
         case "nfregex":
             return nfregex
         case "regexproxy":

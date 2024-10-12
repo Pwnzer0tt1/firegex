@@ -53,7 +53,7 @@ function ChangeDestination({ opened, onClose, service }:{ opened:boolean, onClos
     <form onSubmit={form.onSubmit(submitRequest)}>
             
             <PortAndInterface form={form} int_name="ip_dst" port_name="proxy_port" />
-            <Group position="right" mt="md">
+            <Group align="right" mt="md">
                 <Button loading={submitLoading} type="submit">Change</Button>
             </Group>
             <Space h="md" />
