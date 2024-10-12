@@ -1,14 +1,15 @@
-import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from "react-router-dom"
-import './index.scss';
 import App from './App';
-import { MantineProvider } from '@mantine/core';
+import { createTheme, MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import {
   QueryClientProvider,
 } from '@tanstack/react-query'
 import { queryClient } from './js/utils';
+import '@mantine/core/styles.css';
+import '@mantine/notifications/styles.css';
+import './index.css';
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
@@ -16,10 +17,10 @@ const root = ReactDOM.createRoot(
 
 root.render(
   <QueryClientProvider client={queryClient}>
-    <MantineProvider theme={{ colorScheme: 'dark' }} withGlobalStyles withNormalizeCSS>
+    <MantineProvider defaultColorScheme='dark'>
         <Notifications />
         <BrowserRouter>
-                <App />
+          <App />
         </BrowserRouter>
     </MantineProvider>
   </QueryClientProvider>

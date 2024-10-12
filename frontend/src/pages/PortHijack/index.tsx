@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Divider, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Divider, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import ServiceRow from '../../components/PortHijack/ServiceRow';
@@ -29,10 +29,10 @@ function PortHijack() {
 
     return <>
         <Space h="sm" />
-        <div className={isMedium?'center-flex':'center-flex-row'}>
+        <Box className={isMedium?'center-flex':'center-flex-row'}>
             <Title order={4}>Hijack port to proxy</Title>
-            {isMedium?<div className='flex-spacer' />:<Space h="sm" />}
-            <div className='center-flex'>
+            {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
+            <Box className='center-flex'>
                 <Badge size="sm" color="yellow" variant="filled">Services: {services.isLoading?0:services.data?.length}</Badge>
                 <Space w="xs" />
                 <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
@@ -47,25 +47,23 @@ function PortHijack() {
                     onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
                     onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
                 </Tooltip>
-            </div>
-        </div>
-        <Space h="md" /><Divider size="sm" style={{width:"100%"}}/>
-        <div id="service-list" className="center-flex-row">
+            </Box>
+        </Box>
+        <Space h="md" />
+        <Box className="center-flex-row" style={{gap: 20}}>
             <LoadingOverlay visible={services.isLoading} />
-            
             {(services.data && services.data.length > 0) ?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} />):<>
-            <Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
-                <Space h="xl" /> <Space h="xl" /> 
-                <div className='center-flex'>
+                <Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No services found! Add one clicking the "+" buttons</Title>
+                <Box className='center-flex'>
                     <Tooltip label="Add a new service" color="blue" opened={tooltipAddServOpened}>
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
                             onFocus={() => setTooltipAddServOpened(false)} onBlur={() => setTooltipAddServOpened(false)}
                             onMouseEnter={() => setTooltipAddServOpened(true)} onMouseLeave={() => setTooltipAddServOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
                     </Tooltip>
-                </div>
+                </Box>
             </>}
             <AddNewService opened={open} onClose={closeModal} />
-        </div>
+        </Box>
     </>
 }
 

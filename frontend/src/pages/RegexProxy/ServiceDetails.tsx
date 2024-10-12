@@ -1,4 +1,4 @@
-import { ActionIcon, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import { useState } from 'react';
 import { Navigate, useParams } from 'react-router-dom';
 import { BsPlusLg } from "react-icons/bs";
@@ -18,31 +18,31 @@ function ServiceDetailsProxyRegex() {
 
     if (!srv || !serviceInfo || regexesList.isError) return <Navigate to="/" replace />
 
-    return <div>
+    return <Box>
         <LoadingOverlay visible={regexesList.isLoading} />
         <ServiceRow service={serviceInfo} />
         {(!regexesList.data || regexesList.data.length == 0)?<>
                 <Space h="xl" />
-                <Title className='center-flex' align='center' order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
+                <Title className='center-flex' style={{textAlign:"center"}} order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" /> 
-                <div className='center-flex'>
+                <Box className='center-flex'>
                     <Tooltip label="Add a new regex" zIndex={0} color="blue" opened={tooltipAddRegexOpened}>
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
                          aria-describedby="tooltip-AddRegex-id"
                          onFocus={() => setTooltipAddRegexOpened(false)} onBlur={() => setTooltipAddRegexOpened(false)}
                          onMouseEnter={() => setTooltipAddRegexOpened(true)} onMouseLeave={() => setTooltipAddRegexOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
                     </Tooltip>
-                </div>
+                </Box>
             </>:
             <Grid>
-                {regexesList.data.map( (regexInfo) => <Grid.Col key={regexInfo.id} lg={6} xs={12}><RegexView regexInfo={regexInfo} /></Grid.Col>)}
+                {regexesList.data.map( (regexInfo) => <Grid.Col key={regexInfo.id} span={{ lg:6, xs: 12 }}><RegexView regexInfo={regexInfo} /></Grid.Col>)}
             </Grid>
         }
 
         {srv?<AddNewRegex opened={open} onClose={() => {setOpen(false)}} service={srv} />:null}
 
 
-    </div>
+    </Box>
 }
 
 export default ServiceDetailsProxyRegex;

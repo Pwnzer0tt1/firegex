@@ -46,7 +46,7 @@ function ResetPasswordModal({ opened, onClose }:{ opened: boolean, onClose: () =
               {...form.getInputProps('expire', { type: 'checkbox' })}
           />
           <Space h="md" />
-          <Group position="right" mt="md">
+          <Group align="right" mt="md">
             <Button loading={loadingBtn} type="submit">Change Password</Button>
           </Group>
         </form>

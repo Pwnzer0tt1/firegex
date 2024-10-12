@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import { useNavigate, useParams } from 'react-router-dom';
@@ -33,9 +33,9 @@ function RegexProxy({ children }: { children: any }) {
 
     return <>
     <Space h="sm" />
-    <div className='center-flex'>
+    <Box className='center-flex'>
         <Title order={4}>TCP Proxy Regex Filter (IPv4 Only)</Title>
-        <div className='flex-spacer' />
+        <Box className='flex-spacer' />
         <Badge size="sm" color="green" variant="filled">Services: {services.isLoading?0:services.data?.length}</Badge>
         <Space w="xs" />
         <Badge size="sm" color="yellow" variant="filled">Filtered Connections: {services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_packets, 0)}</Badge>
@@ -61,25 +61,25 @@ function RegexProxy({ children }: { children: any }) {
             onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
             onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
         </Tooltip>
-    </div>
-    <div id="service-list" className="center-flex-row">
+    </Box>
+    <Box className="center-flex-row">
         {srv?null:<>
             <LoadingOverlay visible={services.isLoading} />
             {(services.data && services.data?.length > 0)?services.data.map( srv => <ServiceRow service={srv} key={srv.id} onClick={()=>{
                 navigator("/regexproxy/"+srv.id)
-            }} />):<><Space h="xl"/> <Title className='center-flex' align='center' order={3}>No services found! Add one clicking the "+" buttons</Title>
+            }} />):<><Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No services found! Add one clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" />
-                <div className='center-flex'>
+                <Box className='center-flex'>
                     <Tooltip label="Add a new service" color="blue" opened={tooltipAddServOpened}>
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
                             onFocus={() => setTooltipAddServOpened(false)} onBlur={() => setTooltipAddServOpened(false)}
                             onMouseEnter={() => setTooltipAddServOpened(true)} onMouseLeave={() => setTooltipAddServOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
                     </Tooltip>
-                </div>
+                </Box>
             </>}
             <AddNewService opened={open} onClose={closeModal} />
         </>}
-    </div>
+    </Box>
     {srv?children:null}
     {srv?
         <AddNewRegex opened={open} onClose={closeModal} service={srv} />:

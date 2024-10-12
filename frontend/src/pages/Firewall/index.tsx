@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Button, Divider, LoadingOverlay, Space, Switch, TextInput, Title, Tooltip, useMantineTheme } from "@mantine/core"
+import { ActionIcon, Badge, Box, Button, Divider, LoadingOverlay, Space, Switch, TextInput, Title, Tooltip, useMantineTheme } from "@mantine/core"
 import { useEffect, useState } from "react";
 import { BsPlusLg, BsTrashFill } from "react-icons/bs"
 import { rem } from '@mantine/core';
@@ -37,8 +37,8 @@ export const Firewall = () => {
     const [applyChangeModal, setApplyChangeModal] = useState(false)
     const [settingsModal, setSettingsModal] = useState(false)
     const theme = useMantineTheme();
-    const isMedium = useMediaQuery(`(min-width: 950px)`)
-    const isSmall = useMediaQuery(`(max-width: 600px)`)
+    const isMedium = useMediaQuery(`(min-width: 950px)`)??true
+    const isSmall = useMediaQuery(`(max-width: 600px)`)??false
 
     const [updateMevalueinternal, internalUpdateme] = useState(false)
     const updateMe = () => {
@@ -104,7 +104,7 @@ export const Firewall = () => {
 
     const condDiv = (val:React.ReactNode, cond:boolean) => {
       if (cond)
-        return <div>{val}</div>
+        return <Box>{val}</Box>
       else
         return val
     }
@@ -201,18 +201,18 @@ export const Firewall = () => {
               dst_port: disabletab.dst_port?disable_style:{}
             }
 
-            return <div
+            return <Box
               ref={provided.innerRef}
               {...provided.draggableProps}
             >
-              <div className='center-flex' style={{width:"100%"}}>
-              <div {...provided.dragHandleProps}>
+              <Box className='center-flex' style={{width:"100%"}}>
+              <Box {...provided.dragHandleProps}>
                 <TbGripVertical style={{ width: rem(30), height: rem(40) }} />
-              </div>
+              </Box>
               <Space w="sm" />
-              <div className={isMedium?"center-flex":"center-flex-row"} style={{width:"100%"}}>
-              <div className="center-flex-row" style={{width:"100%"}}>
-                <div className="center-flex" style={{width:"97%"}}>
+              <Box className={isMedium?"center-flex":"center-flex-row"} style={{width:"100%"}}>
+              <Box className="center-flex-row" style={{width:"100%"}}>
+                <Box className="center-flex" style={{width:"97%"}}>
                 <Switch
                   checked={item.active}
                   onChange={() =>{
@@ -239,10 +239,10 @@ export const Firewall = () => {
                 <ActionIcon color="red" onClick={()=>handlers.remove(index)} size="lg" radius="md" variant="filled"><BsTrashFill size={18} /></ActionIcon>
                 <Space w="sm" />
                 <TextInput defaultValue={item.name} onChange={(v)=>{item.name = v.target.value;updateMe()}} style={{width:"100%"}}/>
-                </div>
+                </Box>
                 <Space h="sm" />
-                <div className="center-flex" style={{width:"97%"}}>
-                  <div style={{width:"100%"}}>
+                <Box className="center-flex" style={{width:"97%"}}>
+                  <Box style={{width:"100%"}}>
                   <InterfaceInput
                     initialCustomInterfaces={[...src_custom_int, ...customInt]}
                     value={item.src}
@@ -250,7 +250,7 @@ export const Firewall = () => {
                     includeInterfaceNames
                   />
                   <Space h="sm" />
-                  <div className="center-flex" style={{width:"100%"}}>
+                  <Box className="center-flex" style={{width:"100%"}}>
                   <OnOffButton value={srcPortEnabled} onClick={() =>{
                     const value = !srcPortEnabled
                     setSrcPortEnabled(value)
@@ -270,12 +270,12 @@ export const Firewall = () => {
                     error={!disabletab.src_port && !srcPortValue}
                     style={{width:"100%", ...additionalStyle.src_port}}
                   />
-                  </div>
-                  </div>
+                  </Box>
+                  </Box>
                   <Space w="lg" />
                   <LuArrowBigRightDash size={100} />
                   <Space w="lg" />
-                  <div style={{width:"100%"}}>
+                  <Box style={{width:"100%"}}>
                   <InterfaceInput
                     initialCustomInterfaces={[...dst_custom_int, ...customInt]}
                     defaultValue={item.dst}
@@ -283,7 +283,7 @@ export const Firewall = () => {
                     includeInterfaceNames
                   />
                   <Space h="sm" />
-                  <div className="center-flex" style={{width:"100%"}}>
+                  <Box className="center-flex" style={{width:"100%"}}>
                     <OnOffButton value={dstPortEnabled} onClick={() =>{
                       const value = !dstPortEnabled
                       setDstPortEnabled(value)
@@ -303,12 +303,12 @@ export const Firewall = () => {
                       error={!disabletab.dst_port && !dstPortValue}
                       style={{width:"100%", ...additionalStyle.dst_port}}
                     />
-                  </div>
-                  </div>
-                </div>
-              </div>
+                  </Box>
+                  </Box>
+                </Box>
+              </Box>
               {!isMedium?<Space h="sm" />:null}
-              <div className={isMedium?"center-flex-row":"center-flex"} style={isMedium?{}:{width:"100%", justifyContent:"space-around"}}>
+              <Box className={isMedium?"center-flex-row":"center-flex"} style={isMedium?{}:{width:"100%", justifyContent:"space-around"}}>
                   {condDiv(<>{condDiv(<ModeSelector
                       value={item.mode}
                       onChange={(value)=>{item.mode = value as RuleMode;updateMe()}}
@@ -326,13 +326,13 @@ export const Firewall = () => {
                     onChange={(value)=>{item.action = value as ActionType;updateMe()}}
                     style={{width:"100%"}}
                   />, !isMedium)}
-              </div>
-              </div>
-              </div>
+              </Box>
+              </Box>
+              </Box>
               <Space h="md" />
               <Divider />
               <Space h="md" />
-            </div>
+            </Box>
         }}
         </Draggable>
       ));
@@ -341,10 +341,10 @@ export const Firewall = () => {
     return <>
         <Space h="sm" />
         <LoadingOverlay visible={rules.isLoading} />
-        <div className={isMedium?'center-flex':'center-flex-row'}>
+        <Box className={isMedium?'center-flex':'center-flex-row'}>
             <Title order={3}>Firewall Rules</Title>
-            {isMedium?<div className='flex-spacer' />:<Space h="sm" />}
-            <div className='center-flex'>
+            {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
+            <Box className='center-flex'>
               Enabled: <Space w="sm" /> <Switch checked={fwEnabled} onChange={switchState} />
               <Space w="sm" />
               Policy:
@@ -353,9 +353,9 @@ export const Firewall = () => {
                   value={currentPolicy}
                   onChange={(value)=>setCurrentPolicy(value as ActionType)}
               />
-            </div>
-            {isMedium?<div className='flex-spacer' />:<Space h="sm" />}
-            <div className='center-flex'>
+            </Box>
+            {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
+            <Box className='center-flex'>
               <Space w="xs" />
               <Badge size="sm" color="green" variant="filled">Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
               <Space w="xs" />
@@ -385,8 +385,8 @@ export const Firewall = () => {
                   disabled={!valuesChanged}
                   ><TiTick size={22} /></ActionIcon>
               </Tooltip>
-            </div>
-        </div>
+            </Box>
+        </Box>
         <Space h="xl" />
         <Divider />
         {items.length > 0?<DragDropContext
@@ -397,22 +397,22 @@ export const Firewall = () => {
           <Space h="md" />
           <Droppable droppableId="dnd-list" direction="vertical">
             {(provided) => (
-              <div {...provided.droppableProps} ref={provided.innerRef}>
+              <Box {...provided.droppableProps} ref={provided.innerRef}>
                 {items}
                 {provided.placeholder}
-              </div>
+              </Box>
             )}
           </Droppable>
         </DragDropContext>:<>
-    <Space h="xl"/> <Title className='center-flex' align='center' order={3}>No rule found! Add one clicking the "+" buttons</Title>
+    <Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No rule found! Add one clicking the "+" buttons</Title>
     <Space h="xl" /> <Space h="xl" /> 
-    <div className='center-flex'>
+    <Box className='center-flex'>
         <Tooltip label="Add a new rule" color="blue" opened={tooltipAddRulOpened}>
             <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled"
                 onFocus={() => setTooltipAddRulOpened(false)} onBlur={() => setTooltipAddRulOpened(false)}
                 onMouseEnter={() => setTooltipAddRulOpened(true)} onMouseLeave={() => setTooltipAddRulOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
         </Tooltip>
-    </div>
+    </Box>
 </>}
 
       <YesNoModal

@@ -49,7 +49,7 @@ function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>v
                 placeholder="Awesome Service Name!"
                 {...form.getInputProps('name')}
             />
-            <Group position="right" mt="md">
+            <Group align="right" mt="md">
                 <Button loading={submitLoading} type="submit">Rename</Button>
             </Group>
 

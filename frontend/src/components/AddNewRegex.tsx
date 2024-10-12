@@ -108,7 +108,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             <Alert variant="light" color="yellow" radius="lg" title="You are using whitelists" icon={<AiFillWarning />}>
                 Using whitelist means that EVERY packet that doesn't match the regex will be DROPPED... In most cases this cause the service interruption.
             </Alert></>:null}
-            <Group position="right" mt="md">
+            <Group align="right" mt="md">
                 <Button loading={submitLoading} type="submit">Add Filter</Button>
             </Group>
 

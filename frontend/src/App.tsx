@@ -1,4 +1,4 @@
-import { Button, Group, Loader, LoadingOverlay, Notification, Space, PasswordInput, Title } from '@mantine/core';
+import { Button, Group, Loader, LoadingOverlay, Notification, Space, PasswordInput, Title, Box } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useEffect, useState } from 'react';
 import { ImCross } from 'react-icons/im';
@@ -66,15 +66,15 @@ function App() {
   if (loading){
     return <LoadingOverlay visible/>
   }else if (reqError){
-    return <div className='center-flex-row' style={{padding:"100px"}}>
-      <Title order={1} align="center">Error launching Firegex! 🔥</Title>
+    return <Box className='center-flex-row' style={{padding:"100px"}}>
+      <Title order={1} style={{textAlign:"center"}}>Error launching Firegex! 🔥</Title>
       <Space h="md" />
-      <Title order={4} align="center">Error communicating with backend</Title>
+      <Title order={4} style={{textAlign:"center"}}>Error communicating with backend</Title>
       <Space h="md" />
       Error: {reqError}
       <Space h="xl" />
       <Loader />
-    </div>
+    </Box>
   }else if (systemStatus.status === "init"){
     
     const submitRequest = async (values:PasswordSend) => {
@@ -90,8 +90,8 @@ function App() {
     }
     
 
-    return <div className='center-flex-row' style={{padding:"100px"}}>
-      <Title order={3} align="center">Setup: Choose the password for access to the firewall 🔒</Title>
+    return <Box className='center-flex-row' style={{padding:"100px"}}>
+      <Title order={3} style={{textAlign:"center"}}>Setup: Choose the password for access to the firewall 🔒</Title>
       <Space h="xl" />
       <form onSubmit={form.onSubmit(submitRequest)} style={{width:"80%"}}>
           <PasswordInput
@@ -99,7 +99,7 @@ function App() {
               placeholder="$3cr3t"
               {...form.getInputProps('password')}
           />
-          <Group position="right" mt="md">
+          <Group align="right" mt="md">
             <Button loading={loadinBtn} type="submit">Set Password</Button>
           </Group>
         </form>
@@ -108,7 +108,7 @@ function App() {
           <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
               Error: {error}
           </Notification><Space h="md" /></>:null}
-    </div>
+    </Box>
   }else if (systemStatus.status === "run" && !systemStatus.loggined){
     const submitRequest = async (values:PasswordSend) => {
         setLoadingBtn(true)
@@ -123,10 +123,10 @@ function App() {
       }
     
 
-    return <div className='center-flex-row' style={{padding:"100px"}}>
-      <Title order={2} align="center">Welcome to Firegex 🔥</Title>
+    return <Box className='center-flex-row' style={{padding:"100px"}}>
+      <Title order={2} style={{textAlign:"center"}}>Welcome to Firegex 🔥</Title>
       <Space h="xl" />
-      <Title order={2} align="center">Before you use the firewall, insert the password 🔒</Title>
+      <Title order={2} style={{textAlign:"center"}}>Before you use the firewall, insert the password 🔒</Title>
       <Space h="xl" />
       <form onSubmit={form.onSubmit(submitRequest)} style={{width:"80%"}}>
           <PasswordInput
@@ -134,7 +134,7 @@ function App() {
               placeholder="$3cr3t"
               {...form.getInputProps('password')}
           />
-          <Group position="right" mt="md">
+          <Group align="right" mt="md">
             <Button loading={loadinBtn} type="submit">Login</Button>
           </Group>
         </form>
@@ -143,7 +143,7 @@ function App() {
           <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
               Error: {error}
           </Notification><Space h="md" /></>:null}
-    </div>
+    </Box>
   }else if (systemStatus.status === "run" && systemStatus.loggined){
     return <Routes>
               <Route element={<MainLayout><Outlet /></MainLayout>}>
@@ -159,11 +159,11 @@ function App() {
               </Route>
           </Routes>
   }else{
-    return <div className='center-flex-row' style={{padding:"100px"}}>
-      <Title order={1} align="center">Error launching Firegex! 🔥</Title>
+    return <Box className='center-flex-row' style={{padding:"100px"}}>
+      <Title order={1} style={{textAlign:"center"}}>Error launching Firegex! 🔥</Title>
       <Space h="md" />
-      <Title order={4} align="center">Error communicating with backend</Title>
-    </div>
+      <Title order={4} style={{textAlign:"center"}}>Error communicating with backend</Title>
+    </Box>
   }
 }
 

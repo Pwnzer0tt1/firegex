@@ -1,5 +1,4 @@
 import { Box, Center, SegmentedControl } from "@mantine/core";
-import React from "react";
 import { FaListAlt } from "react-icons/fa";
 import { TiCancel } from "react-icons/ti";
 

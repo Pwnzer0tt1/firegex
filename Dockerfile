@@ -4,7 +4,7 @@
 # Needed for start.py to detect the Dockerfile
 
 
-FROM --platform=$BUILDPLATFORM oven/bun AS frontend 
+FROM --platform=$BUILDPLATFORM oven/bun AS frontend
 WORKDIR /app
 ADD ./frontend/package.json .
 ADD ./frontend/bun.lockb .
