@@ -3,7 +3,6 @@
   "type": "module",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "dependencies": {
     "@hello-pangea/dnd": "^16.6.0",
     "@mantine/core": "^7.13.2",
