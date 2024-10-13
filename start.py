@@ -300,7 +300,7 @@ def main():
                     write_compose(skip_password=False)
                     if not g.build:
                         puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
-                        cmd_check("docker pull ghcr.io/pwnzer0tt1/firegex")
+                        cmd_check("docker pull ghcr.io/pwnzer0tt1/firegex", print_output=True)
                     puts("Running 'docker compose up -d --build'\n", color=colors.green)
                     composecmd("up -d --build", g.composefile)
             case "compose":
