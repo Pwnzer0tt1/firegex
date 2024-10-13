@@ -58,34 +58,25 @@ def dict_to_yaml(data, indent_spaces:int=4, base_indent:int=0, additional_spaces
         yaml += f"{data}\n"
     return yaml
 
-def check_cmd(program, get_output=False):
+def cmd_check(program, get_output=False, print_output=False, no_stderr=False):
     if get_output:
         return subprocess.getoutput(program)
-    return subprocess.call(program, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, shell=True) == 0
+    if print_output:
+        return subprocess.call(program, shell=True) == 0
+    return subprocess.call(program, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL if no_stderr else subprocess.STDOUT, shell=True) == 0
 
 def composecmd(cmd, composefile=None):
     if composefile:
         cmd = f"-f {composefile} {cmd}"
-    if not check_cmd("docker ps"):
-        return puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
-    elif check_cmd("docker compose"):
+    if cmd_check("docker compose --version"):
         return os.system(f"docker compose -p firegex {cmd}")
-    elif check_cmd("docker-compose"):
+    elif cmd_check("docker-compose --version"):
         return os.system(f"docker-compose -p firegex {cmd}")
     else:
         puts("Docker compose not found! please install docker compose!", color=colors.red)
 
-def dockercmd(cmd):
-    if check_cmd("docker"):
-        return os.system(f"docker {cmd}")
-    elif not check_cmd("docker ps"):
-        puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
-    else:
-        puts("Docker not found! please install docker!", color=colors.red)
-
-
 def check_already_running():
-    return "firegex" in check_cmd(f'docker ps --filter "name=^firegex$"', get_output=True)
+    return "firegex" in cmd_check(f'docker ps --filter "name=^firegex$"', get_output=True)
 
 def gen_args(args_to_parse: list[str]|None = None):                     
     
@@ -238,7 +229,7 @@ def get_password():
 
 
 def volume_exists():
-    return "firegex_firegex_data" in check_cmd(f'docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
+    return "firegex_firegex_data" in cmd_check(f'docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
 
 def nfqueue_exists():
     import socket, fcntl, os, time
@@ -272,18 +263,17 @@ def nfqueue_exists():
 
 
 def delete_volume():
-    return dockercmd("volume rm firegex_firegex_data")
+    return cmd_check("docker volume rm firegex_firegex_data")
 
 def main():
     
-    if not check_cmd("docker"):
+    if not cmd_check("docker --version"):
         puts("Docker not found! please install docker and docker compose!", color=colors.red)
         exit()
-    elif not check_cmd("docker-compose") and not check_cmd("docker compose"):
-        print(check_cmd("docker-compose"), check_cmd("docker compose"))
+    elif not cmd_check("docker-compose --version") and not cmd_check("docker compose --version"):
         puts("Docker compose not found! please install docker compose!", color=colors.red)
         exit()
-    if not check_cmd("docker ps"):
+    if not cmd_check("docker ps"):
         puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
         exit()
     
@@ -298,8 +288,6 @@ def main():
         puts("The nfqueue kernel module seems not loaded, some features of firegex may not work.", color=colors.red)
         sep()
     
-    
-    
     if args.command:
         match args.command:
             case "start":
@@ -312,7 +300,7 @@ def main():
                     write_compose(skip_password=False)
                     if not g.build:
                         puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
-                        dockercmd("pull ghcr.io/pwnzer0tt1/firegex")
+                        cmd_check("docker pull ghcr.io/pwnzer0tt1/firegex")
                     puts("Running 'docker compose up -d --build'\n", color=colors.green)
                     composecmd("up -d --build", g.composefile)
             case "compose":
