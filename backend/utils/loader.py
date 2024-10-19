@@ -1,13 +1,11 @@
 
 import os, httpx
 from typing import Callable
-from fastapi import APIRouter, WebSocket
-import asyncio
+from fastapi import APIRouter
 from starlette.responses import StreamingResponse
 from fastapi.responses import FileResponse
 from utils import DEBUG, ON_DOCKER, ROUTERS_DIR, list_files, run_func
 from utils.models import ResetRequest
-from fastapi.middleware.cors import CORSMiddleware
 
 REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
 REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
@@ -26,15 +24,6 @@ async def react_deploy(path):
         return FileResponse(file_request)
 
 def frontend_deploy(app):
-    if DEBUG:
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-
     @app.get("/{full_path:path}", include_in_schema=False)
     async def catch_all(full_path:str):
         if DEBUG:

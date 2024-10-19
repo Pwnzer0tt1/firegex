@@ -1,8 +1,8 @@
-import { ActionIcon, Badge, Box, Button, Divider, LoadingOverlay, Space, Switch, TextInput, Title, Tooltip, useMantineTheme } from "@mantine/core"
+import { ActionIcon, Badge, Box, Divider, FloatingIndicator, LoadingOverlay, Space, Switch, Table, Tabs, TextInput, Title, Tooltip, useMantineTheme } from "@mantine/core"
 import { useEffect, useState } from "react";
 import { BsPlusLg, BsTrashFill } from "react-icons/bs"
 import { rem } from '@mantine/core';
-import { ActionType, Protocol, Rule, RuleMode, firewall, firewallRulesQuery } from "../../components/Firewall/utils";
+import { ActionType, Protocol, Rule, RuleMode, Table as NFTables, firewall, firewallRulesQuery } from "../../components/Firewall/utils";
 import { errorNotify, getErrorMessage, isMediumScreen, makeid, okNotify } from "../../js/utils";
 import { useListState, useMediaQuery } from '@mantine/hooks';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
@@ -62,6 +62,8 @@ export const Firewall = () => {
       const {rule_id, ...rest} = v
       return rest
     })) || rules.data?.policy != currentPolicy
+    const [selectedTab, setSelectedTab] = useState<NFTables>(NFTables.FILTER)
+
 
     const enableFirewall = () => {
       if (valuesChanged){
@@ -122,7 +124,8 @@ export const Firewall = () => {
         port_src_to: 65535,
         port_dst_to: 8080,
         action: ActionType.ACCEPT,
-        mode: RuleMode.IN
+        mode: RuleMode.IN,
+        table: selectedTab
       })
     }
 
@@ -145,7 +148,7 @@ export const Firewall = () => {
 
 
     const items = state.map((item, index) => (
-        <Draggable key={item.rule_id} index={index} draggableId={item.rule_id}>
+        item.table == selectedTab && <Draggable key={item.rule_id} index={index} draggableId={item.rule_id}>
           {(provided, snapshot) => {
             const customInt = [
               { value: "0.0.0.0/0", netint: "ANY IPv4", label: "0.0.0.0/0" },
@@ -313,6 +316,7 @@ export const Firewall = () => {
                       value={item.mode}
                       onChange={(value)=>{item.mode = value as RuleMode;updateMe()}}
                       style={{width:"100%"}}
+                      table={item.table}
                     />, !isMedium)}
                   <Space h="xs" />
                   {condDiv(<ProtocolSelector
@@ -335,7 +339,7 @@ export const Firewall = () => {
             </Box>
         }}
         </Draggable>
-      ));
+      )).filter(v => v);
 
 
     return <>
@@ -389,6 +393,18 @@ export const Firewall = () => {
         </Box>
         <Space h="xl" />
         <Divider />
+        <Space h="md"/> 
+        <Tabs variant="pills" value={selectedTab} onChange={(v)=>setSelectedTab(v==NFTables.MANGLE?NFTables.MANGLE:NFTables.FILTER)} style={{ display:"flex", justifyContent:"center", alignItems:"center"}}>
+          <Box mr="md">Filtering Table:</Box>
+          <Tabs.List>
+            <Tabs.Tab value={NFTables.FILTER}>
+              Filter
+            </Tabs.Tab>
+            <Tabs.Tab value={NFTables.MANGLE}>
+              Mangle
+            </Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
         {items.length > 0?<DragDropContext
           onDragEnd={({ destination, source }) =>
             handlers.reorder({ from: source.index, to: destination?.index || 0 })

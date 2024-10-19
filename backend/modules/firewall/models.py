@@ -3,7 +3,7 @@ from utils import PortType
 from pydantic import BaseModel
 
 class Rule:
-    def __init__(self, proto: str, src:str, dst:str, port_src_from:str, port_dst_from:str, port_src_to:str, port_dst_to:str, action:str, mode:str, **other):
+    def __init__(self, proto: str, src:str, dst:str, port_src_from:str, port_dst_from:str, port_src_to:str, port_dst_to:str, action:str, mode:str, table:str, **_other):
         self.proto = proto
         self.src = src
         self.dst = dst
@@ -15,6 +15,7 @@ class Rule:
         self.input_mode = mode == "in"
         self.output_mode = mode == "out"
         self.forward_mode = mode == "forward"
+        self.table = table
     
     @classmethod
     def from_dict(cls, var: dict):
@@ -31,6 +32,10 @@ class Mode(str, Enum):
     IN = "in",
     OUT = "out",
     FORWARD = "forward"
+    
+class Table(str, Enum):
+    FILTER = "filter"
+    MANGLE = "mangle"
 
 class Action(str, Enum):
     ACCEPT = "accept",
@@ -41,6 +46,7 @@ class RuleModel(BaseModel):
     active: bool
     name: str
     proto: Protocol
+    table: Table
     src: str
     dst: str
     port_src_from: PortType
@@ -48,7 +54,7 @@ class RuleModel(BaseModel):
     port_src_to: PortType
     port_dst_to: PortType
     action: Action
-    mode:Mode
+    mode: Mode
 
 class RuleFormAdd(BaseModel):
     rules: list[RuleModel]

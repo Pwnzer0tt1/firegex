@@ -1,6 +1,6 @@
 import uvicorn, secrets, utils
-import os, asyncio
-from fastapi import FastAPI, HTTPException, Depends, APIRouter
+import os, asyncio, logging
+from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from passlib.context import CryptContext
@@ -34,7 +34,14 @@ app = FastAPI(debug=DEBUG, redoc_url=None, lifespan=lifespan)
 utils.socketio = SocketManager(app, "/sock", socketio_path="")
 
 if DEBUG:
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 
 def APP_STATUS(): return "init" if db.get("password") is None else "run"
 def JWT_SECRET(): return db.get("secret")
@@ -132,7 +139,10 @@ async def startup_main():
     db.init()
     if os.getenv("HEX_SET_PSW"):
         set_psw(bytes.fromhex(os.getenv("HEX_SET_PSW")).decode())
-    sysctl.set()
+    try:
+        sysctl.set()
+    except Exception as e:
+        logging.error(f"Error setting sysctls: {e}")
     await startup()
     if not JWT_SECRET(): db.put("secret", secrets.token_hex(32))
     await refresh_frontend()
@@ -149,7 +159,10 @@ async def reset_firegex(form: ResetRequest):
         db.delete()
         db.init()
         db.put("secret", secrets.token_hex(32))
-    sysctl.set()
+    try:
+        sysctl.set()
+    except Exception as e:
+        logging.error(f"Error setting sysctls: {e}")
     await reset(form)
     await refresh_frontend()
     return {'status': 'ok'}

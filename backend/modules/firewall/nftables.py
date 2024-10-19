@@ -7,11 +7,15 @@ class FiregexTables(NFTableManager):
     rules_chain_out = "firegex_firewall_rules_out"
     rules_chain_fwd = "firegex_firewall_rules_fwd"
     filter_table = "filter"
+    mangle_table = "mangle"
     
     def init_comands(self, policy:str=Action.ACCEPT, opt: FirewallSettings|None = None):
         rules = [
             {"add":{"table":{"name":self.filter_table,"family":"ip"}}},
             {"add":{"table":{"name":self.filter_table,"family":"ip6"}}},
+            
+            {"add":{"table":{"name":self.mangle_table,"family":"ip"}}},
+            {"add":{"table":{"name":self.mangle_table,"family":"ip6"}}},
             
             {"add":{"chain":{"family":"ip","table":self.filter_table, "name":"INPUT","type":"filter","hook":"input","prio":0,"policy":policy}}},
             {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"INPUT","type":"filter","hook":"input","prio":0,"policy":policy}}},
@@ -20,12 +24,22 @@ class FiregexTables(NFTableManager):
             {"add":{"chain":{"family":"ip","table":self.filter_table,"name":"OUTPUT","type":"filter","hook":"output","prio":0,"policy":Action.ACCEPT}}},
             {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"OUTPUT","type":"filter","hook":"output","prio":0,"policy":Action.ACCEPT}}},
             
+            {"add":{"chain":{"family":"ip","table":self.mangle_table, "name":"PREROUTING","type":"filter","hook":"prerouting","prio":-150,"policy":Action.ACCEPT}}},
+            {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":"PREROUTING","type":"filter","hook":"prerouting","prio":-150,"policy":Action.ACCEPT}}},
+            {"add":{"chain":{"family":"ip","table":self.mangle_table, "name":"POSTROUTING","type":"filter","hook":"postrouting","prio":-150,"policy":Action.ACCEPT}}},
+            {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":"POSTROUTING","type":"filter","hook":"postrouting","prio":-150,"policy":Action.ACCEPT}}},
+            
             {"add":{"chain":{"family":"ip","table":self.filter_table,"name":self.rules_chain_in}}},
             {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":self.rules_chain_in}}},
             {"add":{"chain":{"family":"ip","table":self.filter_table,"name":self.rules_chain_out}}},
             {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":self.rules_chain_out}}},
             {"add":{"chain":{"family":"ip","table":self.filter_table,"name":self.rules_chain_fwd}}},
             {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":self.rules_chain_fwd}}},
+            
+            {"add":{"chain":{"family":"ip","table":self.mangle_table,"name":self.rules_chain_in}}},
+            {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":self.rules_chain_in}}},
+            {"add":{"chain":{"family":"ip","table":self.mangle_table,"name":self.rules_chain_out}}},
+            {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":self.rules_chain_out}}},
         ]
         if opt is None: return rules
         
@@ -157,43 +171,50 @@ class FiregexTables(NFTableManager):
         return rules
     
     def __init__(self):
-        super().__init__(self.init_comands(),[
-            {"add":{"chain":{"family":"ip","table":self.filter_table, "name":"INPUT","type":"filter","hook":"input","prio":0,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"INPUT","type":"filter","hook":"input","prio":0,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip","table":self.filter_table,"name":"FORWARD","type":"filter","hook":"forward","prio":0,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"FORWARD","type":"filter","hook":"forward","prio":0,"policy":Action.ACCEPT}}},
+        super().__init__(self.init_comands(),[            
             {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_in}}},
             {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_out}}},
             {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_fwd}}},
             {"flush":{"chain":{"table":self.filter_table,"family":"ip6", "name":self.rules_chain_in}}},
             {"flush":{"chain":{"table":self.filter_table,"family":"ip6", "name":self.rules_chain_out}}},
             {"flush":{"chain":{"table":self.filter_table,"family":"ip6", "name":self.rules_chain_fwd}}},
+            
+            {"flush":{"chain":{"table":self.mangle_table,"family":"ip", "name":self.rules_chain_in}}},
+            {"flush":{"chain":{"table":self.mangle_table,"family":"ip", "name":self.rules_chain_out}}},
+            {"flush":{"chain":{"table":self.mangle_table,"family":"ip6", "name":self.rules_chain_in}}},
+            {"flush":{"chain":{"table":self.mangle_table,"family":"ip6", "name":self.rules_chain_out}}}
         ])
         
-    def chain_to_firegex(self, chain:str):
-        match chain:
-            case "INPUT": return self.rules_chain_in
-            case "OUTPUT": return self.rules_chain_out
-            case "FORWARD": return self.rules_chain_fwd
+    def chain_to_firegex(self, chain:str, table:str):
+        if table == self.filter_table:
+            match chain:
+                case "INPUT": return self.rules_chain_in
+                case "OUTPUT": return self.rules_chain_out
+                case "FORWARD": return self.rules_chain_fwd
+        elif table == self.mangle_table:
+            match chain:
+                case "PREROUTING": return self.rules_chain_in
+                case "POSTROUTING": return self.rules_chain_out
         return None
         
     def insert_firegex_chains(self):
-        rules:list[dict] = list(self.list_rules(tables=[self.filter_table], chains=["INPUT", "OUTPUT", "FORWARD"]))
-        for family in ["ip", "ip6"]:
-            for chain in ["INPUT", "OUTPUT", "FORWARD"]:
-                found = False
-                rule_to_add = [{ "jump": { "target": self.chain_to_firegex(chain) }}]
-                for r in rules:
-                    if r.get("family") == family and r.get("table") == "filter" and r.get("chain") == chain and r.get("expr") == rule_to_add:
-                        found = True
-                        break
-                if found: continue
-                yield { "add":{ "rule": {
-                        "family": family,
-                        "table": self.filter_table,
-                        "chain": chain,
-                        "expr": rule_to_add
-                }}}
+        rules:list[dict] = list(self.list_rules(tables=[self.filter_table, self.mangle_table], chains=["INPUT", "OUTPUT", "FORWARD", "PREROUTING", "POSTROUTING"]))
+        for table in [self.filter_table, self.mangle_table]:
+            for family in ["ip", "ip6"]:
+                for chain in ["INPUT", "OUTPUT", "FORWARD"] if table == self.filter_table else ["PREROUTING", "POSTROUTING"]:
+                    found = False
+                    rule_to_add = [{ "jump": { "target": self.chain_to_firegex(chain, table) }}]
+                    for r in rules:
+                        if r.get("family") == family and r.get("table") == table and r.get("chain") == chain and r.get("expr") == rule_to_add:
+                            found = True
+                            break
+                    if found: continue
+                    yield { "add":{ "rule": {
+                            "family": family,
+                            "table": table,
+                            "chain": chain,
+                            "expr": rule_to_add
+                    }}}
     
     def set(self, srvs:list[Rule], policy:str=Action.ACCEPT, opt:FirewallSettings = None):
         srvs = list(srvs)
@@ -209,7 +230,8 @@ class FiregexTables(NFTableManager):
                 port_src_to=65535,
                 port_dst_to=65535,
                 action=Action.REJECT,
-                mode=Mode.IN
+                mode=Mode.IN,
+                table=Table.FILTER
             ))
         
         rules = self.init_comands(policy, opt) + list(self.insert_firegex_chains()) + self.get_rules(*srvs)
@@ -261,7 +283,7 @@ class FiregexTables(NFTableManager):
             for fam in families:
                 rules.append({ "add":{ "rule": {
                     "family": fam,
-                    "table": self.filter_table,
+                    "table": srv.table,
                     "chain": self.rules_chain_out if srv.output_mode else self.rules_chain_in if srv.input_mode else self.rules_chain_fwd,
                     "expr": ip_filters + port_filters + end_rules
                 }}})

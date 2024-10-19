@@ -12,8 +12,8 @@ socketio:SocketManager = None
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 ROUTERS_DIR = os.path.join(ROOT_DIR,"routers")
-ON_DOCKER = len(sys.argv) > 1 and sys.argv[1] == "DOCKER"
-DEBUG = len(sys.argv) > 1 and sys.argv[1] == "DEBUG"
+ON_DOCKER = "DOCKER" in sys.argv
+DEBUG = "DEBUG" in sys.argv
 FIREGEX_PORT = int(os.getenv("PORT","4444"))
 JWT_ALGORITHM: str = "HS256"
 API_VERSION = "2.2.0"
@@ -44,10 +44,11 @@ class SysctlManager:
             for name in ctl_table.keys():
                 self.old_table[name] = read_sysctl(name)
     
-    def write_table(self, table):
+    def write_table(self, table) -> bool:
         for name, value in table.items():
-            write_sysctl(name, value)
-
+            if read_sysctl(name) != value:
+                write_sysctl(name, value)
+                
     def set(self):
         self.write_table(self.new_table)
 
@@ -124,7 +125,6 @@ class NFTableManager(Singleton):
 
     def cmd(self, *cmds):
         code, out, err = self.raw_cmd(*cmds)
-
         if code == 0: return out
         else: raise Exception(err)
     

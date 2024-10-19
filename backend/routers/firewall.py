@@ -11,6 +11,7 @@ db = SQLite('db/firewall-rules.db', {
     'rules': {
         'rule_id': 'INT PRIMARY KEY CHECK (rule_id >= 0)',
         'mode': 'VARCHAR(10) NOT NULL CHECK (mode IN ("in", "out", "forward"))',
+        '`table`': 'VARCHAR(10) NOT NULL CHECK (`table` IN ("filter", "mangle", "raw"))',
         'name': 'VARCHAR(100) NOT NULL',
         'active' : 'BOOLEAN NOT NULL CHECK (active IN (0, 1))',
         'proto': 'VARCHAR(10) NOT NULL CHECK (proto IN ("tcp", "udp", "both", "any"))',
@@ -81,7 +82,7 @@ async def get_rule_list():
     """Get the list of existent firegex rules"""
     return {
         "policy": firewall.policy,
-        "rules": db.query("SELECT active, name, proto, src, dst, port_src_from, port_dst_from, port_src_to, port_dst_to, action, mode FROM rules ORDER BY rule_id;"),
+        "rules": db.query("SELECT active, name, proto, src, dst, port_src_from, port_dst_from, port_src_to, port_dst_to, action, mode, `table` FROM rules ORDER BY rule_id;"),
         "enabled": firewall.enabled
     }
 
@@ -98,6 +99,9 @@ async def disable_firewall():
     return await apply_changes()
 
 def parse_and_check_rule(rule:RuleModel):
+    
+    if rule.table == Table.MANGLE and rule.mode == Mode.FORWARD:
+        raise HTTPException(status_code=400, detail="Mangle table does not support forward mode")
     
     is_src_ip = is_dst_ip = True
     
@@ -137,14 +141,14 @@ async def add_new_service(form: RuleFormAdd):
                   src, dst,
                   port_src_from, port_dst_from,
                   port_src_to, port_dst_to,
-                  action, mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?)""",
+                  action, mode, `table`
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ? ,?, ?, ?)""",
                 rid, ele.active, ele.name,
                 ele.proto,
                 ele.src, ele.dst,
                 ele.port_src_from, ele.port_dst_from,
                 ele.port_src_to, ele.port_dst_to,
-                ele.action, ele.mode
+                ele.action, ele.mode, ele.table
             ) for rid, ele in enumerate(rules)]
         )
         firewall.policy = form.policy.value

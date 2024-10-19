@@ -21,6 +21,11 @@ export enum RuleMode {
     FORWARD = "forward"
 }
 
+export enum Table {
+    MANGLE = "mangle",
+    FILTER = "filter",
+}
+
 export type Rule = {
     active: boolean
     name:string,
@@ -33,6 +38,7 @@ export type Rule = {
     port_dst_to: number,
     action: ActionType,
     mode: RuleMode,
+    table: Table
 }
 
 export type RuleInfo = {

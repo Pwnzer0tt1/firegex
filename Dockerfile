@@ -8,20 +8,19 @@ FROM --platform=$BUILDPLATFORM oven/bun AS frontend
 WORKDIR /app
 ADD ./frontend/package.json .
 ADD ./frontend/bun.lockb .
-RUN bun install
+RUN bun i
 COPY ./frontend/ .
 RUN bun run build
 
 
 #Building main conteiner
 FROM --platform=$TARGETARCH debian:stable-slim AS base
-RUN apt-get update -qq && apt-get upgrade -qq
-RUN apt-get install -qq python3-pip build-essential
-RUN apt-get install -qq git libpcre2-dev libnetfilter-queue-dev
-RUN apt-get install -qq libssl-dev libnfnetlink-dev libmnl-dev libcap2-bin
-RUN apt-get install -qq make cmake nftables libboost-all-dev autoconf
-RUN apt-get install -qq automake cargo libffi-dev libvectorscan-dev libtins-dev
-RUN apt-get install -qq python3-nftables
+RUN apt-get update -qq && apt-get upgrade -qq && \
+    apt-get install -qq python3-pip build-essential \
+    git libpcre2-dev libnetfilter-queue-dev libssl-dev \
+    libnfnetlink-dev libmnl-dev libcap2-bin make cmake \
+    nftables libboost-all-dev autoconf automake cargo \
+    libffi-dev libvectorscan-dev libtins-dev python3-nftables
 
 WORKDIR /tmp/
 RUN git clone --single-branch --branch release https://github.com/jpcre2/jpcre2

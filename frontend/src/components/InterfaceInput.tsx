@@ -1,5 +1,5 @@
 import { Combobox, TextInput, useCombobox } from "@mantine/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ipInterfacesQuery } from "../js/utils";
 
 interface ItemProps{
@@ -38,7 +38,7 @@ export const InterfaceInput = ({ initialCustomInterfaces, includeInterfaceNames,
         },
     });
 
-    const data = [...customIpInterfaces, ...interfaces]
+    const data = [...customIpInterfaces.filter(v => !interfaces.map(v => v.value).includes(v.value)), ...interfaces]
     const [selectedValue, setSelectedValue] = useState<string | null>(null);
     const [search, setSearch] = useState('');
     
@@ -52,11 +52,16 @@ export const InterfaceInput = ({ initialCustomInterfaces, includeInterfaceNames,
         return a.value.localeCompare(b.value)
     });
 
-    const options = filteredOptions.map((item) => (
+    const options = filteredOptions.sort( (a, b) => a.value == selectedValue? -1 : b.value == selectedValue? 1: a.value.localeCompare(b.value) ).map((item) => (
         <Combobox.Option value={item.value} key={item.value}>
-          ( <b>{item.netint}</b> ) -{">"} <b>{item.value}</b>
+          ( <b>{item.value == selectedValue ? "SELECTED" : item.netint}</b> ) -{">"} <b>{item.value}</b>
         </Combobox.Option>
     ));
+
+    useEffect(() => {
+        setSelectedValue(data.find((item) => item.value === defaultValue)?.value??null)
+        setSearch(defaultValue??'')
+    }, [])
 
     return <>
     <Combobox
@@ -81,9 +86,8 @@ export const InterfaceInput = ({ initialCustomInterfaces, includeInterfaceNames,
     <Combobox.Target>
         <TextInput
           style={{width:"100%"}}
-          defaultValue={defaultValue}
           rightSection={<Combobox.Chevron />}
-          value={value??(defaultValue?undefined:search)}
+          value={value??search}
           placeholder="10.1.1.1"
           rightSectionPointerEvents="none"
             onChange={(event) => {
@@ -107,7 +111,7 @@ export const InterfaceInput = ({ initialCustomInterfaces, includeInterfaceNames,
       </Combobox.Target>
 
       <Combobox.Dropdown>
-        <Combobox.Options mah={100} style={{ overflowY: 'auto' }}>
+        <Combobox.Options mah={200} style={{ overflowY: 'auto' }}>
           {options}
           {(exactOptionMatch==null) && search.trim().length > 0 && (
             <Combobox.Option value="$create">+ Use this: {search}</Combobox.Option>
