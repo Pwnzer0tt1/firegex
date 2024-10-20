@@ -171,7 +171,13 @@ class FiregexTables(NFTableManager):
         return rules
     
     def __init__(self):
-        super().__init__(self.init_comands(),[            
+        super().__init__(self.init_comands(),[      
+            #Needed to reset to ALLOW when fireall is disabled (DO NOT REMOVE)                       
+            {"add":{"chain":{"family":"ip","table":self.filter_table, "name":"INPUT","type":"filter","hook":"input","prio":0,"policy":Action.ACCEPT}}},
+            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"INPUT","type":"filter","hook":"input","prio":0,"policy":Action.ACCEPT}}},
+            {"add":{"chain":{"family":"ip","table":self.filter_table,"name":"FORWARD","type":"filter","hook":"forward","prio":0,"policy":Action.ACCEPT}}},
+            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"FORWARD","type":"filter","hook":"forward","prio":0,"policy":Action.ACCEPT}}},
+              
             {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_in}}},
             {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_out}}},
             {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_fwd}}},
