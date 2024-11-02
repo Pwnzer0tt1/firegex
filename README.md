@@ -60,3 +60,13 @@ Initiially the project was based only on regex filters, and also now the main fu
 # Credits 
 - Copyright (c) 2007 Arash Partow (http://www.partow.net) for the base of our proxy implementation
 - Copyright (c) 2022 Pwnzer0tt1
+
+## Star History
+
+<a href="https://star-history.com/#pwnzer0tt1/firegex&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=pwnzer0tt1/firegex&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=pwnzer0tt1/firegex&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=pwnzer0tt1/firegex&type=Date" />
+ </picture>
+</a>
