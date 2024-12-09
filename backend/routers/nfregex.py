@@ -2,7 +2,7 @@ from base64 import b64decode
 import re
 import secrets
 import sqlite3
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Response, HTTPException
 from pydantic import BaseModel
 from modules.nfregex.nftables import FiregexTables
 from modules.nfregex.firewall import STATUS, FirewallManager
@@ -275,3 +275,26 @@ async def add_new_service(form: ServiceAddForm):
     await firewall.reload()
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}
+
+@app.get('/metrics', response_class = Response)
+async def metrics():
+    """Aggregate metrics"""
+    stats = db.query("""
+        SELECT
+            s.name,
+            s.status,
+            r.regex,
+            r.is_blacklist,
+            r.mode,
+            r.is_case_sensitive,
+            r.blocked_packets,
+            r.active
+        FROM regexes r LEFT JOIN services s ON s.service_id = r.service_id;
+    """)
+    metrics = []
+    sanitize = lambda s : s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+    for stat in stats:
+        props = f'service_name="{sanitize(stat["name"])}",regex="{sanitize(b64decode(stat["regex"]).decode())}",mode="{stat["mode"]}",is_case_sensitive="{stat["is_case_sensitive"]}"'
+        metrics.append(f'firegex_blocked_packets{{{props}}} {stat["blocked_packets"]}')
+        metrics.append(f'firegex_active{{{props}}} {int(stat["active"] and stat["status"] == "active")}')
+    return "\n".join(metrics)
