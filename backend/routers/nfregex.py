@@ -289,7 +289,7 @@ async def metrics():
             r.is_case_sensitive,
             r.blocked_packets,
             r.active
-        FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id;
+        FROM regexes r LEFT JOIN services s ON s.service_id = r.service_id;
     """)
     metrics = []
     sanitize = lambda s : s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
