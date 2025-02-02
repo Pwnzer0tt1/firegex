@@ -67,7 +67,7 @@ else:
 #Add new regex
 secret = bytes(secrets.token_hex(16).encode())
 regex = base64.b64encode(secret).decode()
-if firegex.nf_add_regex(service_id,regex,"B",active=True,is_blacklist=True,is_case_sensitive=True): 
+if firegex.nf_add_regex(service_id,regex,"B",active=True,is_case_sensitive=True): 
     puts(f"Sucessfully added regex {str(secret)} ✔", color=colors.green)
 else:
     puts("Test Failed: Coulnd't add the regex {str(secret)} ✗", color=colors.red)
@@ -166,7 +166,7 @@ for r in firegex.nf_get_service_regexes(service_id):
 checkRegex(regex,should_work=False)
 
 #Add case insensitive regex
-if(firegex.nf_add_regex(service_id,regex,"B",active=True,is_blacklist=True,is_case_sensitive=False)): 
+if(firegex.nf_add_regex(service_id,regex,"B",active=True, is_case_sensitive=False)): 
     puts(f"Sucessfully added case insensitive regex {str(secret)} ✔", color=colors.green)
 else:
     puts(f"Test Failed: Coulnd't add the case insensitive regex {str(secret)} ✗", color=colors.red)

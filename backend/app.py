@@ -34,7 +34,14 @@ async def lifespan(app):
     yield
     await shutdown_main()
 
-app = FastAPI(debug=DEBUG, redoc_url=None, lifespan=lifespan)
+app = FastAPI(
+    debug=DEBUG,
+    redoc_url=None,
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    title="Firegex API",
+    version=API_VERSION,
+)
 utils.socketio = SocketManager(app, "/sock", socketio_path="")
 
 if DEBUG:
@@ -183,9 +190,9 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
-        host="::" if DEBUG else None,
+        host=None, #"::" if DEBUG else None,
         port=FIREGEX_PORT,
-        reload=DEBUG,
+        reload=False,#DEBUG,
         access_log=True,
         workers=1, # Multiple workers will cause a crash due to the creation
                   # of multiple processes with separated memory

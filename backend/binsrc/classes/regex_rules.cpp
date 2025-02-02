@@ -7,7 +7,6 @@
 
 using namespace std;
 
-
 #ifndef REGEX_FILTER_HPP
 #define REGEX_FILTER_HPP
 
@@ -20,8 +19,8 @@ struct decoded_regex {
 };
 
 struct regex_ruleset {
-	hs_database_t* hs_db;
-	char** regexes;
+	hs_database_t* hs_db = nullptr;
+	char** regexes = nullptr;
 };
 
 decoded_regex decode_regex(string regex){
@@ -46,7 +45,7 @@ decoded_regex decode_regex(string regex){
 	}
 	decoded_regex ruleset{
 		regex: expr,
-		direction: regex[1] == 'C'? CTOS : STOC,
+		direction: regex[1] == 'C' ? CTOS : STOC,
 		is_case_sensitive: regex[0] == '1'
 	};
 	return ruleset;
@@ -66,9 +65,11 @@ class RegexRules{
 		void free_dbs(){
 			if (output_ruleset.hs_db != nullptr){
 				hs_free_database(output_ruleset.hs_db);
+				output_ruleset.hs_db = nullptr;
 			}
 			if (input_ruleset.hs_db != nullptr){
 				hs_free_database(input_ruleset.hs_db);
+				input_ruleset.hs_db = nullptr;
 			}
 		}
 

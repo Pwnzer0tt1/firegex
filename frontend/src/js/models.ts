@@ -36,7 +36,6 @@ export type RegexFilter = {
     id:number,
     service_id:string,
     regex:string
-    is_blacklist:boolean,
     is_case_sensitive:boolean,
     mode:string //C S B => C->S S->C BOTH
     n_packets:number,

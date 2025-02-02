@@ -19,6 +19,7 @@
 /frontend/dist/
 /frontend/dist/**
 /backend/modules/cppqueue
+/backend/binsrc/cppqueue
 /backend/modules/proxy
 docker-compose.yml
 firegex-compose.yml

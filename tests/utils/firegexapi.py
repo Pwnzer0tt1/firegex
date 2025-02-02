@@ -121,9 +121,9 @@ class FiregexAPI:
         req = self.s.get(f"{self.address}api/nfregex/regex/{regex_id}/disable")
         return verify(req)
 
-    def nf_add_regex(self, service_id: str, regex: str, mode: str, active: bool, is_blacklist: bool, is_case_sensitive: bool):
+    def nf_add_regex(self, service_id: str, regex: str, mode: str, active: bool, is_case_sensitive: bool):
         req = self.s.post(f"{self.address}api/nfregex/regexes/add", 
-            json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_blacklist": is_blacklist, "is_case_sensitive": is_case_sensitive})
+            json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_case_sensitive": is_case_sensitive})
         return verify(req)
 
     def nf_add_service(self, name: str, port: int, proto: str, ip_int: str):

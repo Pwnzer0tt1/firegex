@@ -12,7 +12,6 @@ class RegexFilter:
     def __init__(
         self, regex,
         is_case_sensitive=True,
-        is_blacklist=True,
         input_mode=False,
         output_mode=False,
         blocked_packets=0,
@@ -21,7 +20,6 @@ class RegexFilter:
     ):
         self.regex = regex
         self.is_case_sensitive = is_case_sensitive
-        self.is_blacklist = is_blacklist
         if input_mode == output_mode:
             input_mode = output_mode = True # (False, False) == (True, True)
         self.input_mode = input_mode
@@ -35,7 +33,7 @@ class RegexFilter:
     def from_regex(cls, regex:Regex, update_func = None):
         return cls(
             id=regex.id, regex=regex.regex, is_case_sensitive=regex.is_case_sensitive,
-            is_blacklist=regex.is_blacklist, blocked_packets=regex.blocked_packets,
+            blocked_packets=regex.blocked_packets,
             input_mode = regex.mode in ["C","B"], output_mode=regex.mode in ["S","B"],
             update_func = update_func
         )
@@ -47,9 +45,9 @@ class RegexFilter:
         re.compile(self.regex) # raise re.error if it's invalid!
         case_sensitive = "1" if self.is_case_sensitive else "0"
         if self.input_mode:
-            yield case_sensitive + "C" + self.regex.hex() if self.is_blacklist else case_sensitive + "c"+ self.regex.hex()
+            yield case_sensitive + "C" + self.regex.hex()
         if self.output_mode:
-            yield case_sensitive + "S" + self.regex.hex() if self.is_blacklist else case_sensitive + "s"+ self.regex.hex()
+            yield case_sensitive + "S" + self.regex.hex()
     
     async def update(self):
         if self.update_func:
