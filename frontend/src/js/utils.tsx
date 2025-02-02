@@ -3,7 +3,6 @@ import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
 import { Navigate } from "react-router-dom";
 import { nfregex } from "../components/NFRegex/utils";
-import { regexproxy } from "../components/RegexProxy/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 import { Buffer } from "buffer"
 import { QueryClient, useQuery } from "@tanstack/react-query";
@@ -111,8 +110,6 @@ export function getapiobject(){
     switch(getMainPath()){
         case "nfregex":
             return nfregex
-        case "regexproxy":
-            return regexproxy
       }
       throw new Error('No api for this tool!');
 }

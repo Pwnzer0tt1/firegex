@@ -1,7 +1,9 @@
 from modules.nfregex.nftables import FiregexTables
-from utils import ip_parse, run_func
+from utils import run_func
 from modules.nfregex.models import Service, Regex
-import re, os, asyncio
+import re
+import os
+import asyncio
 import traceback
 
 nft = FiregexTables()
@@ -20,7 +22,8 @@ class RegexFilter:
         self.regex = regex
         self.is_case_sensitive = is_case_sensitive
         self.is_blacklist = is_blacklist
-        if input_mode == output_mode: input_mode = output_mode = True # (False, False) == (True, True)
+        if input_mode == output_mode:
+            input_mode = output_mode = True # (False, False) == (True, True)
         self.input_mode = input_mode
         self.output_mode = output_mode
         self.blocked = blocked_packets
@@ -37,8 +40,10 @@ class RegexFilter:
             update_func = update_func
         )
     def compile(self):
-        if isinstance(self.regex, str): self.regex = self.regex.encode()
-        if not isinstance(self.regex, bytes): raise Exception("Invalid Regex Paramether")
+        if isinstance(self.regex, str):
+            self.regex = self.regex.encode()
+        if not isinstance(self.regex, bytes):
+            raise Exception("Invalid Regex Paramether")
         re.compile(self.regex) # raise re.error if it's invalid!
         case_sensitive = "1" if self.is_case_sensitive else "0"
         if self.input_mode:
@@ -67,9 +72,9 @@ class FiregexInterceptor:
         self.srv = srv
         self.filter_map_lock = asyncio.Lock()
         self.update_config_lock = asyncio.Lock()
-        input_range, output_range = await self._start_binary()
+        queue_range = await self._start_binary()
         self.update_task = asyncio.create_task(self.update_blocked())
-        nft.add(self.srv, input_range, output_range)
+        nft.add(self.srv, queue_range)
         return self
     
     async def _start_binary(self):
@@ -87,7 +92,7 @@ class FiregexInterceptor:
         line = line_fut.decode()
         if line.startswith("QUEUES "):
             params = line.split()
-            return (int(params[2]), int(params[3])), (int(params[5]), int(params[6]))
+            return (int(params[1]), int(params[2]))
         else:
             self.process.kill()
             raise Exception("Invalid binary output")
@@ -102,8 +107,10 @@ class FiregexInterceptor:
                         if regex_id in self.filter_map:
                             self.filter_map[regex_id].blocked+=1
                             await self.filter_map[regex_id].update()
-        except asyncio.CancelledError: pass
-        except asyncio.IncompleteReadError: pass
+        except asyncio.CancelledError:
+            pass
+        except asyncio.IncompleteReadError:
+            pass
         except Exception:
             traceback.print_exc()
 
@@ -135,6 +142,7 @@ class FiregexInterceptor:
                 raw_filters = filter_obj.compile()
                 for filter in raw_filters:
                     res[filter] = filter_obj
-            except Exception: pass
+            except Exception:
+                pass
         return res
 

@@ -1,10 +1,13 @@
 import asyncio
 from ipaddress import ip_address, ip_interface
-import os, socket, psutil, sys, nftables
+import os
+import socket
+import psutil
+import sys
+import nftables
 from fastapi_socketio import SocketManager
 from fastapi import Path
 from typing import Annotated
-import json
 
 LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
 
@@ -31,7 +34,8 @@ async def socketio_emit(elements:list[str]):
 
 def refactor_name(name:str):
     name = name.strip()
-    while "  " in name: name = name.replace("  "," ")
+    while "  " in name:
+        name = name.replace("  "," ")
     return name
 
 class SysctlManager:
@@ -125,8 +129,10 @@ class NFTableManager(Singleton):
 
     def cmd(self, *cmds):
         code, out, err = self.raw_cmd(*cmds)
-        if code == 0: return out
-        else: raise Exception(err)
+        if code == 0:
+            return out
+        else:
+            raise Exception(err)
     
     def init(self):
         self.reset()
@@ -138,8 +144,10 @@ class NFTableManager(Singleton):
 
     def list_rules(self, tables = None, chains = None):
         for filter in [ele["rule"] for ele in self.raw_list() if "rule" in ele ]:
-            if tables and filter["table"] not in tables: continue
-            if chains and filter["chain"] not in chains: continue
+            if tables and filter["table"] not in tables:
+                continue
+            if chains and filter["chain"] not in chains:
+                continue
             yield filter
     
     def raw_list(self):

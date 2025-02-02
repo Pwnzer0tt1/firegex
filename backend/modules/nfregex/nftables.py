@@ -45,36 +45,35 @@ class FiregexTables(NFTableManager):
             {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.output_chain}}},
         ])
 
-    def add(self, srv:Service, queue_range_input, queue_range_output):
+    def add(self, srv:Service, queue_range):
         
         for ele in self.get():
             if ele.__eq__(srv): return
                 
-        init, end = queue_range_output
+        init, end = queue_range
         if init > end: init, end = end, init
-        self.cmd({ "insert":{ "rule": {
-            "family": "inet",
-            "table": self.table_name,
-            "chain": self.output_chain,
-            "expr": [
-                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
-                    {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "sport"}}, "op": "==", "right": int(srv.port)}},
-                    {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
+        self.cmd(
+            { "insert":{ "rule": {
+                "family": "inet",
+                "table": self.table_name,
+                "chain": self.output_chain,
+                "expr": [
+                        {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
+                        {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "sport"}}, "op": "==", "right": int(srv.port)}},
+                        {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
-        }}})
-        
-        init, end = queue_range_input
-        if init > end: init, end = end, init
-        self.cmd({"insert":{"rule":{
-            "family": "inet",
-            "table": self.table_name,
-            "chain": self.input_chain,
-            "expr": [
-                    {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
-                    {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "dport"}}, "op": "==", "right": int(srv.port)}},
-                    {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
-                ]
-        }}})
+            }}},
+            {"insert":{"rule":{
+                "family": "inet",
+                "table": self.table_name,
+                "chain": self.input_chain,
+                "expr": [
+                        {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
+                        {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "dport"}}, "op": "==", "right": int(srv.port)}},
+                        {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
+                    ]
+            }}}
+        )
 
 
     def get(self) -> list[FiregexFilter]:

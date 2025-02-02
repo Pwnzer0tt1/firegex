@@ -147,7 +147,8 @@ async def get_service_by_id(service_id: str):
         FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
         WHERE s.service_id = ? GROUP BY s.service_id;
     """, service_id)
-    if len(res) == 0: raise HTTPException(status_code=400, detail="This service does not exists!")
+    if len(res) == 0:
+        raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
 
 @app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
@@ -177,7 +178,8 @@ async def service_delete(service_id: str):
 async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
-    if not form.name: raise HTTPException(status_code=400, detail="The name cannot be empty!") 
+    if not form.name:
+        raise HTTPException(status_code=400, detail="The name cannot be empty!") 
     try:
         db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
     except sqlite3.IntegrityError:
@@ -188,7 +190,8 @@ async def service_rename(service_id: str, form: RenameForm):
 @app.get('/service/{service_id}/regexes', response_model=list[RegexModel])
 async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
-    if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id): raise HTTPException(status_code=400, detail="This service does not exists!")
+    if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id):
+        raise HTTPException(status_code=400, detail="This service does not exists!")
     return db.query("""
         SELECT 
             regex, mode, regex_id `id`, service_id, is_blacklist,
@@ -205,7 +208,8 @@ async def get_regex_by_id(regex_id: int):
             blocked_packets n_packets, is_case_sensitive, active
         FROM regexes WHERE `id` = ?;
     """, regex_id)
-    if len(res) == 0: raise HTTPException(status_code=400, detail="This regex does not exists!")
+    if len(res) == 0:
+        raise HTTPException(status_code=400, detail="This regex does not exists!")
     return res[0]
 
 @app.get('/regex/{regex_id}/delete', response_model=StatusMessageModel)

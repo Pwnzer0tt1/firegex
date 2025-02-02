@@ -96,7 +96,8 @@ async def get_service_list():
 async def get_service_by_id(service_id: str):
     """Get info about a specific service using his id"""
     res = db.query("SELECT service_id, active, public_port, proxy_port, name, proto, ip_src, ip_dst FROM services WHERE service_id = ?;", service_id)
-    if len(res) == 0: raise HTTPException(status_code=400, detail="This service does not exists!")
+    if len(res) == 0:
+        raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
 
 @app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
@@ -125,7 +126,8 @@ async def service_delete(service_id: str):
 async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
-    if not form.name: raise HTTPException(status_code=400, detail="The name cannot be empty!") 
+    if not form.name:
+        raise HTTPException(status_code=400, detail="The name cannot be empty!") 
     try:
         db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
     except sqlite3.IntegrityError:

@@ -4,7 +4,6 @@ import { RegexFilter } from '../../js/models';
 import { b64decode, errorNotify, getapiobject, okNotify } from '../../js/utils';
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
-import FilterTypeSelector from '../FilterTypeSelector';
 import { FaPause, FaPlay } from 'react-icons/fa';
 import { useClipboard } from '@mantine/hooks';
 
@@ -74,12 +73,6 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
             </Grid.Col>
           <Grid.Col className='center-flex' span={12}>
             <Box className='center-flex-row'>
-              <FilterTypeSelector 
-                  size="md"
-                  color="gray"
-                  disabled
-                  value={regexInfo.is_blacklist?"blacklist":"whitelist"}
-              />
               <Space h="md" />
               <Box className='center-flex'>
                 <Badge size="md" color="cyan" variant="filled">Service: {regexInfo.service_id}</Badge>

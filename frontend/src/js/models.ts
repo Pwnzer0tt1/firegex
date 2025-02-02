@@ -47,7 +47,6 @@ export type RegexAddForm = {
     service_id:string,
     regex:string,
     is_case_sensitive:boolean,
-    is_blacklist:boolean,
     mode:string, // C->S S->C BOTH,
     active: boolean
 }

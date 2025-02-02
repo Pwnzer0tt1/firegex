@@ -39,11 +39,6 @@ export default function NavBar() {
             <NavBarButton navigate="nfregex" closeNav={closeNav} name="Netfilter Regex" color="lime" icon={<IoMdGitNetwork />} />
             <NavBarButton navigate="firewall" closeNav={closeNav} name="Firewall Rules" color="red" icon={<PiWallLight />} />
             <NavBarButton navigate="porthijack" closeNav={closeNav} name="Hijack Port to Proxy" color="blue" icon={<GrDirections />} />
-            <Divider my="xs" label="Advanced" labelPosition="center" />
-            <NavBarButton closeNav={closeNav} name="Deprecated options" color="gray" icon={toggle ? <MdOutlineExpandLess /> : <MdOutlineExpandMore />} onClick={()=>setToggleState(!toggle)}/>
-            <Collapse in={toggle}>
-                <NavBarButton navigate="regexproxy" closeNav={closeNav} name="TCP Proxy Regex Filter" color="grape" icon={<MdTransform />} />
-            </Collapse>
         </Box>
         
     </AppShell.Navbar>

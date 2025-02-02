@@ -1,4 +1,6 @@
-import json, sqlite3, os
+import json
+import sqlite3
+import os
 from hashlib import md5
 
 class SQLite():
@@ -15,8 +17,10 @@ class SQLite():
             self.conn = sqlite3.connect(self.db_name, check_same_thread = False)
         except Exception:
             path_name = os.path.dirname(self.db_name)
-            if not os.path.exists(path_name): os.makedirs(path_name)
-            with open(self.db_name, 'x'): pass
+            if not os.path.exists(path_name):
+                os.makedirs(path_name)
+            with open(self.db_name, 'x'):
+                pass
             self.conn = sqlite3.connect(self.db_name, check_same_thread = False)
         def dict_factory(cursor, row):
             d = {}
@@ -36,13 +40,15 @@ class SQLite():
             with open(self.db_name, "wb") as f:
                 f.write(self.__backup)
             self.__backup = None
-        if were_active: self.connect()
+        if were_active:
+            self.connect()
             
     def delete_backup(self):
         self.__backup = None
     
     def disconnect(self) -> None:
-        if self.conn: self.conn.close()
+        if self.conn:
+            self.conn.close()
         self.conn = None
 
     def create_schema(self, tables = {}) -> None:
@@ -50,9 +56,11 @@ class SQLite():
             cur = self.conn.cursor()
             cur.execute("CREATE TABLE IF NOT EXISTS main.keys_values(key VARCHAR(100) PRIMARY KEY, value VARCHAR(100) NOT NULL);")
             for t in tables:
-                if t == "QUERY": continue
+                if t == "QUERY":
+                    continue
                 cur.execute('CREATE TABLE IF NOT EXISTS main.{}({});'.format(t, ''.join([(c + ' ' + tables[t][c] + ', ') for c in tables[t]])[:-2]))
-            if "QUERY" in tables: [cur.execute(qry) for qry in tables["QUERY"]]
+            if "QUERY" in tables:
+                [cur.execute(qry) for qry in tables["QUERY"]]
             cur.close()
     
     def query(self, query, *values):
@@ -82,8 +90,10 @@ class SQLite():
             raise e
         finally:
             cur.close()
-            try: self.conn.commit()
-            except Exception: pass
+            try:
+                self.conn.commit()
+            except Exception:
+                pass
     
     def delete(self):
         self.disconnect()
@@ -92,7 +102,8 @@ class SQLite():
     def init(self):
         self.connect()
         try:
-            if self.get('DB_VERSION') != self.DB_VER: raise Exception("DB_VERSION is not correct")
+            if self.get('DB_VERSION') != self.DB_VER:
+                raise Exception("DB_VERSION is not correct")
         except Exception:
             self.delete()
             self.connect()
