@@ -7,7 +7,7 @@
 FROM --platform=$BUILDPLATFORM oven/bun AS frontend
 WORKDIR /app
 ADD ./frontend/package.json .
-ADD ./frontend/bun.lockb .
+ADD ./frontend/bun.lock .
 RUN bun i
 COPY ./frontend/ .
 RUN bun run build
@@ -16,10 +16,9 @@ RUN bun run build
 #Building main conteiner
 FROM --platform=$TARGETARCH debian:stable-slim AS base
 RUN apt-get update -qq && apt-get upgrade -qq && \
-    apt-get install -qq python3-pip build-essential \
-    git libnetfilter-queue-dev libssl-dev \
-    libnfnetlink-dev libmnl-dev libcap2-bin \
-    nftables libffi-dev libvectorscan-dev libtins-dev python3-nftables
+    apt-get install -qq python3-pip \
+    libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap2-bin\
+    nftables libvectorscan-dev libtins-dev python3-nftables
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute
