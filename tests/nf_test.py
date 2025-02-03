@@ -45,7 +45,7 @@ def exit_test(code):
 
 service_id = firegex.nf_add_service(args.service_name, args.port, args.proto , "::1" if args.ipv6 else "127.0.0.1" )
 if service_id:
-    puts("Sucessfully created service {service_id} ✔", color=colors.green)
+    puts(f"Sucessfully created service {service_id} ✔", color=colors.green)
 else:
     puts("Test Failed: Failed to create service ✗", color=colors.red)
     exit(1)
@@ -58,20 +58,25 @@ else:
 
 server.start()
 time.sleep(0.5)
-if server.sendCheckData(secrets.token_bytes(432)):
-    puts("Successfully tested first proxy with no regex ✔", color=colors.green)
-else:
-    puts("Test Failed: Data was corrupted ", color=colors.red)
+try:
+    if server.sendCheckData(secrets.token_bytes(432)):
+        puts("Successfully tested first proxy with no regex ✔", color=colors.green)
+    else:
+        puts("Test Failed: Data was corrupted ", color=colors.red)
+        exit_test(1)
+except Exception as e:
+    puts("Test Failed: Couldn't send data to the server ", color=colors.red)
     exit_test(1)
-
 #Add new regex
 secret = bytes(secrets.token_hex(16).encode())
 regex = base64.b64encode(secret).decode()
+
 if firegex.nf_add_regex(service_id,regex,"B",active=True,is_case_sensitive=True): 
     puts(f"Sucessfully added regex {str(secret)} ✔", color=colors.green)
 else:
-    puts("Test Failed: Coulnd't add the regex {str(secret)} ✗", color=colors.red)
+    puts(f"Test Failed: Couldn't add the regex {str(secret)} ✗", color=colors.red)
     exit_test(1)
+
 
 #Check if regex is present in the service
 n_blocked = 0
@@ -105,6 +110,18 @@ def checkRegex(regex, should_work=True, upper=False):
             puts("Test Failed: The request was blocked when it shouldn't have", color=colors.red)
             exit_test(1)
 
+def clear_regexes():
+    global n_blocked
+    n_blocked = 0
+    for r in firegex.nf_get_service_regexes(service_id):
+        if r["regex"] == regex:
+            if(firegex.nf_delete_regex(r["id"])): 
+                puts(f"Sucessfully deleted regex with id {r['id']} ✔", color=colors.green)
+            else: 
+                puts("Test Failed: Coulnd't delete the regex ✗", color=colors.red)
+                exit_test(1)
+            break
+
 checkRegex(regex)
 
 #Pause the proxy
@@ -128,39 +145,31 @@ checkRegex(regex)
 
 #Disable regex 
 for r in firegex.nf_get_service_regexes(service_id):
-        if r["regex"] == regex:
-            if(firegex.nf_disable_regex(r["id"])): 
-                puts(f"Sucessfully disabled regex with id {r['id']} ✔", color=colors.green)
-            else: 
-                puts("Test Failed: Coulnd't disable the regex ✗", color=colors.red)
-                exit_test(1)
-            break
+    if r["regex"] == regex:
+        if(firegex.nf_disable_regex(r["id"])): 
+            puts(f"Sucessfully disabled regex with id {r['id']} ✔", color=colors.green)
+        else: 
+            puts("Test Failed: Coulnd't disable the regex ✗", color=colors.red)
+            exit_test(1)
+        break
 
 #Check if it's actually disabled
 checkRegex(regex,should_work=False)
 
 #Enable regex
 for r in firegex.nf_get_service_regexes(service_id):
-        if r["regex"] == regex:
-            if(firegex.nf_enable_regex(r["id"])): 
-                puts(f"Sucessfully enabled regex with id {r['id']} ✔", color=colors.green)
-            else: 
-                puts("Test Failed: Coulnd't enable the regex ✗", color=colors.red)
-                exit_test(1)
-            break
+    if r["regex"] == regex:
+        if(firegex.nf_enable_regex(r["id"])): 
+            puts(f"Sucessfully enabled regex with id {r['id']} ✔", color=colors.green)
+        else: 
+            puts("Test Failed: Coulnd't enable the regex ✗", color=colors.red)
+            exit_test(1)
+        break
 
 checkRegex(regex)
 
 #Delete regex
-n_blocked = 0
-for r in firegex.nf_get_service_regexes(service_id):
-        if r["regex"] == regex:
-            if(firegex.nf_delete_regex(r["id"])): 
-                puts(f"Sucessfully deleted regex with id {r['id']} ✔", color=colors.green)
-            else: 
-                puts("Test Failed: Coulnd't delete the regex ✗", color=colors.red)
-                exit_test(1)
-            break
+clear_regexes()
 
 #Check if it's actually deleted
 checkRegex(regex,should_work=False)
@@ -172,19 +181,22 @@ else:
     puts(f"Test Failed: Coulnd't add the case insensitive regex {str(secret)} ✗", color=colors.red)
     exit_test(1)
 
-checkRegex(regex,upper=True)
+checkRegex(regex, upper=True)
 checkRegex(regex)
 
+clear_regexes()
+
+#Create Server regex and verify that should not matches
+if(firegex.nf_add_regex(service_id,regex,"S",active=True, is_case_sensitive=True)): 
+    puts(f"Sucessfully added server to client regex {str(secret)} ✔", color=colors.green)
+else:
+    puts(f"Test Failed: Coulnd't add server to client regex {str(secret)} ✗", color=colors.red)
+    exit_test(1)
+
+checkRegex(regex, should_work=False)
+
 #Delete regex
-n_blocked = 0
-for r in firegex.nf_get_service_regexes(service_id):
-        if r["regex"] == regex:
-            if(firegex.nf_delete_regex(r["id"])): 
-                puts(f"Sucessfully deleted regex with id {r['id']} ✔", color=colors.green)
-            else: 
-                puts("Test Failed: Coulnd't delete the regex ✗", color=colors.red)
-                exit_test(1)
-            break
+clear_regexes()
 
 #Rename service
 if(firegex.nf_rename_service(service_id,f"{args.service_name}2")):

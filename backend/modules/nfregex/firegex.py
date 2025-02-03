@@ -5,6 +5,7 @@ import re
 import os
 import asyncio
 import traceback
+from utils import DEBUG
 
 nft = FiregexTables()
 
@@ -99,6 +100,8 @@ class FiregexInterceptor:
         try:
             while True:
                 line = (await self.process.stdout.readuntil()).decode()
+                if DEBUG:
+                    print(line)
                 if line.startswith("BLOCKED"):
                     regex_id = line.split()[1]
                     async with self.filter_map_lock:

@@ -98,12 +98,21 @@ struct packet_info {
 typedef bool NetFilterQueueCallback(packet_info &);
 
 
-Tins::PDU * find_transport_layer(Tins::PDU* pkt){
+Tins::PDU * find_transport_layer(Tins::PDU* pkt, Tins::PDU::PDUType* type = nullptr, size_t* payload_size = nullptr){
+	Tins::PDU::PDUType fetched_type;
 	while(pkt != nullptr){
-		if (pkt->pdu_type() == Tins::PDU::TCP || pkt->pdu_type() == Tins::PDU::UDP) {
+		fetched_type = pkt->pdu_type();
+		if (fetched_type == Tins::PDU::TCP || fetched_type == Tins::PDU::UDP) {
+			if (type != nullptr){
+				*type = fetched_type;
+			}
+			if (payload_size != nullptr){
+				*payload_size = pkt->inner_pdu()->size();
+			}
 			return pkt;
 		}
 		pkt = pkt->inner_pdu();
+		
 	}
 	return nullptr;
 }
@@ -358,32 +367,40 @@ class NetfilterQueue {
 		nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(nfg->res_id));
 
 		// Check IP protocol version
-		Tins::PDU *packet;
+		Tins::PDU *packet, *transport_layer;
+		Tins::PDU::PDUType transport_layer_type;
+		size_t payload_size;
 		if ( ((payload)[0] & 0xf0) == 0x40 ){
 			Tins::IP parsed = Tins::IP(payload, plen);
 			packet = &parsed;
+			transport_layer = find_transport_layer(packet, &transport_layer_type, &payload_size);
+			
 		}else{
 			Tins::IPv6 parsed = Tins::IPv6(payload, plen);
 			packet = &parsed;
+			transport_layer = find_transport_layer(packet, &transport_layer_type, &payload_size);
 		}
-		Tins::PDU *transport_layer = find_transport_layer(packet); 
-		if(transport_layer == nullptr || transport_layer->inner_pdu() == nullptr){ 						
+		if(transport_layer == nullptr || transport_layer->inner_pdu() == nullptr){
 			nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
 		}else{
-			bool is_tcp = transport_layer->pdu_type() == Tins::PDU::TCP;
-			int size = transport_layer->inner_pdu()->size();
+			bool is_tcp = transport_layer_type == Tins::PDU::TCP;
 			packet_info pktinfo{
 				packet: string(payload, payload+plen),
-				payload: string(payload+plen - size, payload+plen),
-				stream_id: "", // TODO We need to calculate this
-				is_input: true, // TODO We need to detect this
+				payload: string(payload+plen - payload_size, payload+plen),
+				stream_id: "udp", // For udp we don't need to track the stream
+				is_input: false, // TODO We need to detect this
 				is_tcp: is_tcp,
 				sctx: sctx,
 			};
+			cerr << "PKT " << endl;
 			if (is_tcp){
+				cerr << "PORCO8888" << endl;
 				sctx->tcp_match_util.matching_has_been_called = false;
 				sctx->tcp_match_util.pkt_info = &pktinfo;
-				sctx->follower.process_packet(*packet);
+				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
+				//sctx->follower.process_packet(*packet);
+				cerr << "NOT BLOCKED BUT YES 0_0 " << (sctx->tcp_match_util.matching_has_been_called && !sctx->tcp_match_util.result) << endl;
+				/*
 				if (sctx->tcp_match_util.matching_has_been_called && !sctx->tcp_match_util.result){
 					auto tcp_layer = (Tins::TCP *)transport_layer;
 					tcp_layer->release_inner_pdu();
@@ -394,6 +411,7 @@ class NetfilterQueue {
 					nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
 					delete tcp_layer;
 				}
+				*/
 			}else if(callback_func(pktinfo)){
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
 			} else{

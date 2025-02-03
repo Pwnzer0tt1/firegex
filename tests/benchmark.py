@@ -99,7 +99,7 @@ print(f"{results[0]} MB/s")
 for i in range(1,args.num_of_regexes+1):
     regex = base64.b64encode(bytes(secrets.token_hex(16).encode())).decode()
     if not firegex.nf_add_regex(service_id,regex,"B",active=True,is_case_sensitive=False): 
-        puts("Benchmark Failed: Coulnd't add the regex ✗", color=colors.red)
+        puts("Benchmark Failed: Couldn't add the regex ✗", color=colors.red)
         exit_test(1)
     puts(f"Performance with {i} regex(s): ", color=colors.red, end='')
     results.append(getReading(args.port))

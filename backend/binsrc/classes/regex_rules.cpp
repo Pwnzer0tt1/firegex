@@ -20,7 +20,7 @@ struct decoded_regex {
 
 struct regex_ruleset {
 	hs_database_t* hs_db = nullptr;
-	char** regexes = nullptr;
+	vector<string> regexes;
 };
 
 decoded_regex decode_regex(string regex){
@@ -107,6 +107,10 @@ class RegexRules{
 				throw runtime_error( "Failed to compile hyperscan db" );
 			}
 			ruleset.hs_db = rebuilt_db;
+			ruleset.regexes = vector<string>(n_of_regex);
+			for(int i = 0; i < n_of_regex; i++){
+				ruleset.regexes[i] = decoded[i].first;
+			}
 		}
 
 	public:

@@ -32,7 +32,7 @@ void config_updater (){
 		}
 		try{
 			regex_config.reset(new RegexRules(raw_rules, regex_config->stream_mode()));
-			cerr << "[info] [updater] Config update done" << endl;
+			cerr << "[info] [updater] Config update done to ver "<< regex_config->ver() << endl;
 		}catch(...){
 			cerr << "[error] [updater] Failed to build new configuration!" << endl;
 			// TODO send a row on stdout for this error
@@ -42,7 +42,7 @@ void config_updater (){
 }
 
 void inline scratch_setup(regex_ruleset &conf, hs_scratch_t* & scratch){
-	if (scratch == nullptr){
+	if (scratch == nullptr && conf.hs_db != nullptr){
 		if (hs_alloc_scratch(conf.hs_db, &scratch) != HS_SUCCESS) {
 			throw invalid_argument("Cannot alloc scratch");
 		}
@@ -73,18 +73,21 @@ bool filter_callback(packet_info & info){
 		auto res = (matched_data*)ctx;
 		res->has_matched = true;
 		res->matched = id;
-		return 1; // Stop matching
+		return -1; // Stop matching
 	};
+	hs_stream_t* stream_match;
 	if (conf->stream_mode()){
 		matching_map match_map = info.is_input ? info.sctx->in_hs_streams : info.sctx->out_hs_streams;
 		auto stream_search = match_map.find(info.stream_id);
-		hs_stream_t* stream_match;
+		
 		if (stream_search == match_map.end()){
             if (hs_open_stream(regex_matcher, 0, &stream_match) != HS_SUCCESS) {
                 cerr << "[error] [filter_callback] Error opening the stream matcher (hs)" << endl;
                 throw invalid_argument("Cannot open stream match on hyperscan");
             }
-			match_map[info.stream_id] = stream_match;
+			if (info.is_tcp){
+				match_map[info.stream_id] = stream_match;
+			}
 		}else{
 			stream_match = stream_search->second;
 		}
@@ -98,9 +101,16 @@ bool filter_callback(packet_info & info){
 			0, scratch_space, match_func, &match_res
 		);
 	}
-	if (err != HS_SUCCESS) {
+	if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
 		cerr << "[error] [filter_callback] Error while matching the stream (hs)" << endl;
 		throw invalid_argument("Error while matching the stream with hyperscan");
+	}
+	if (
+		!info.is_tcp && conf->stream_mode() && 
+		hs_close_stream(stream_match, scratch_space, nullptr, nullptr) != HS_SUCCESS
+	){
+		cerr << "[error] [filter_callback] Error closing the stream matcher (hs)" << endl;
+		throw invalid_argument("Cannot close stream match on hyperscan");
 	}
 	if (match_res.has_matched){
 		auto rules_vector = info.is_input ? conf->input_ruleset.regexes : conf->output_ruleset.regexes;
@@ -123,7 +133,7 @@ int main(int argc, char *argv[]){
 	if (matchmode != nullptr && strcmp(matchmode, "block") == 0){
 		stream_mode = false;
 	}
-	cerr << "[info] [main] Using " << n_of_threads << " threads" << endl;
+	cerr << "[info] [main] Using " << n_of_threads << " threads, stream mode: " << stream_mode << endl;
 	regex_config.reset(new RegexRules(stream_mode));
 	
 	NFQueueSequence<filter_callback> queues(n_of_threads);

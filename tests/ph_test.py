@@ -45,7 +45,7 @@ def exit_test(code):
 #Create and start serivce
 service_id = firegex.ph_add_service(args.service_name, args.port, args.port+1, args.proto , "::1" if args.ipv6 else "127.0.0.1",  "::1" if args.ipv6 else "127.0.0.1")
 if service_id:
-    puts("Sucessfully created service {service_id} ✔", color=colors.green)
+    puts(f"Sucessfully created service {service_id} ✔", color=colors.green)
 else:
     puts("Test Failed: Failed to create service ✗", color=colors.red)
     exit(1)
