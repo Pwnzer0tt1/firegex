@@ -3,6 +3,7 @@
 #include <linux/netfilter/nfnetlink_conntrack.h>
 #include <tins/tins.h>
 #include <tins/tcp_ip/stream_follower.h>
+#include <tins/tcp_ip/stream_identifier.h>
 #include <libmnl/libmnl.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nfnetlink.h>
@@ -19,42 +20,9 @@ using namespace std;
 
 #ifndef NETFILTER_CLASSES_HPP
 #define NETFILTER_CLASSES_HPP
+typedef Tins::TCPIP::StreamIdentifier stream_id;
+typedef map<stream_id, hs_stream_t*> matching_map;
 
-string inline client_endpoint(const Stream& stream) {
-    ostringstream output;
-    // Use the IPv4 or IPv6 address depending on which protocol the 
-    // connection uses
-    if (stream.is_v6()) {
-        output << stream.client_addr_v6();
-    }
-    else {
-        output << stream.client_addr_v4();
-    }
-    output << ":" << stream.client_port();
-    return output.str();
-}
-
-// Convert the server endpoint to a readable string
-string inline server_endpoint(const Stream& stream) {
-    ostringstream output;
-    if (stream.is_v6()) {
-        output << stream.server_addr_v6();
-    }
-    else {
-        output << stream.server_addr_v4();
-    }
-    output << ":" << stream.server_port();
-    return output.str();
-}
-
-// Concat both endpoints to get a readable stream identifier
-string inline stream_identifier(const Stream& stream) {
-    ostringstream output;
-    output << client_endpoint(stream) << " - " << server_endpoint(stream);
-    return output.str();
-}
-
-typedef unordered_map<string, hs_stream_t*> matching_map;
 
 struct packet_info;
 
@@ -89,33 +57,13 @@ struct stream_ctx {
 struct packet_info {
 	string packet;
 	string payload;
-	string stream_id;
+	stream_id sid;
 	bool is_input;
 	bool is_tcp;
 	stream_ctx* sctx;
 };
 
 typedef bool NetFilterQueueCallback(packet_info &);
-
-
-Tins::PDU * find_transport_layer(Tins::PDU* pkt, Tins::PDU::PDUType* type = nullptr, size_t* payload_size = nullptr){
-	Tins::PDU::PDUType fetched_type;
-	while(pkt != nullptr){
-		fetched_type = pkt->pdu_type();
-		if (fetched_type == Tins::PDU::TCP || fetched_type == Tins::PDU::UDP) {
-			if (type != nullptr){
-				*type = fetched_type;
-			}
-			if (payload_size != nullptr){
-				*payload_size = pkt->inner_pdu()->size();
-			}
-			return pkt;
-		}
-		pkt = pkt->inner_pdu();
-		
-	}
-	return nullptr;
-}
 
 template <NetFilterQueueCallback callback_func>
 class NetfilterQueue {
@@ -194,29 +142,25 @@ class NetfilterQueue {
 	//Input data filtering
 	void on_client_data(Stream& stream) {
 		string data(stream.client_payload().begin(), stream.client_payload().end());
-		string stream_id = stream_identifier(stream);
-		this->sctx.tcp_match_util.pkt_info->is_input = true;
-		this->sctx.tcp_match_util.pkt_info->stream_id = stream_id;
-		this->sctx.tcp_match_util.matching_has_been_called = true;
+		sctx.tcp_match_util.pkt_info->is_input = true;
+		sctx.tcp_match_util.matching_has_been_called = true;
 		bool result = callback_func(*sctx.tcp_match_util.pkt_info);
 		if (result){
-			this->clean_stream_by_id(stream_id);
+			clean_stream_by_id(sctx.tcp_match_util.pkt_info->sid);
 			stream.ignore_client_data();
 			stream.ignore_server_data();
 		}
-		this->sctx.tcp_match_util.result = result;
+		sctx.tcp_match_util.result = result;
 	}
 
 	//Server data filtering
 	void on_server_data(Stream& stream) {
 		string data(stream.server_payload().begin(), stream.server_payload().end());
-		string stream_id = stream_identifier(stream);
-		this->sctx.tcp_match_util.pkt_info->is_input = false;
-		this->sctx.tcp_match_util.pkt_info->stream_id = stream_id;
-		this->sctx.tcp_match_util.matching_has_been_called = true;
+		sctx.tcp_match_util.pkt_info->is_input = false;
+		sctx.tcp_match_util.matching_has_been_called = true;
 		bool result = callback_func(*sctx.tcp_match_util.pkt_info);
 		if (result){
-			this->clean_stream_by_id(stream_id);
+			clean_stream_by_id(sctx.tcp_match_util.pkt_info->sid);
 			stream.ignore_client_data();
 			stream.ignore_server_data();
 		}
@@ -224,11 +168,10 @@ class NetfilterQueue {
 	}
 
 	void on_new_stream(Stream& stream) {
-		string stream_id = stream_identifier(stream);
 		if (stream.is_partial_stream()) {
 			return;
 		}
-		cout << "[+] New connection " << stream_id << endl;
+		cerr << "[+] New connection!" << endl;
 		stream.auto_cleanup_payloads(true);
 		stream.client_data_callback(
 			[&](auto a){this->on_client_data(a);}
@@ -238,7 +181,7 @@ class NetfilterQueue {
 		);
 	}
 
-	void clean_stream_by_id(string stream_id){
+	void clean_stream_by_id(stream_id stream_id){
 		auto stream_search = this->sctx.in_hs_streams.find(stream_id);
 		hs_stream_t* stream_match;
 		if (stream_search != this->sctx.in_hs_streams.end()){
@@ -263,8 +206,8 @@ class NetfilterQueue {
 
 	// A stream was terminated. The second argument is the reason why it was terminated
 	void on_stream_terminated(Stream& stream, StreamFollower::TerminationReason reason) {
-		string stream_id = stream_identifier(stream);
-		cout << "[+] Connection closed: " << stream_id << endl;
+		stream_id stream_id = stream_id::make_identifier(stream);
+		cerr << "[+] Connection closed: " << &stream_id << endl;
 		this->clean_stream_by_id(stream_id);
 	}
 
@@ -337,6 +280,66 @@ class NetfilterQueue {
 		}
 		sctx.out_hs_streams.clear();
 	}
+	template<typename T>
+	static void build_verdict(T packet, uint8_t *payload, uint16_t plen, nlmsghdr *nlh_verdict, nfqnl_msg_packet_hdr *ph, stream_ctx* sctx){
+		Tins::TCP* tcp = packet.template find_pdu<Tins::TCP>();
+
+		if (tcp){
+			Tins::PDU* application_layer = tcp->inner_pdu();
+			u_int16_t payload_size = 0;
+			if (application_layer != nullptr){
+				payload_size = application_layer->size();
+			}
+			packet_info pktinfo{
+				packet: string(payload, payload+plen),
+				payload: string(payload+plen - payload_size, payload+plen),
+				sid: stream_id::make_identifier(packet),
+				is_input: false, // Will be setted later in tcp stream follower
+				is_tcp: true,
+				sctx: sctx,
+			};
+			sctx->tcp_match_util.matching_has_been_called = false;
+			sctx->tcp_match_util.pkt_info = &pktinfo;
+			sctx->follower.process_packet(packet);
+			if (sctx->tcp_match_util.matching_has_been_called && !sctx->tcp_match_util.result){
+				Tins::PDU* data_layer = tcp->release_inner_pdu();
+				if (data_layer != nullptr){
+					delete data_layer;
+				}
+				tcp->set_flag(Tins::TCP::FIN,1);
+				tcp->set_flag(Tins::TCP::ACK,1);
+				tcp->set_flag(Tins::TCP::SYN,0);
+				nfq_nlmsg_verdict_put_pkt(nlh_verdict, packet.serialize().data(), packet.size());
+			}
+			nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
+		}else{
+			Tins::UDP* udp = packet.template find_pdu<Tins::UDP>();
+			if (!udp){
+				throw invalid_argument("Only TCP and UDP are supported");
+			}
+			Tins::PDU* application_layer = tcp->inner_pdu();
+			u_int16_t payload_size = 0;
+			if (application_layer != nullptr){
+				payload_size = application_layer->size();
+			}
+			if((udp->inner_pdu() == nullptr)){
+				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
+			}
+			packet_info pktinfo{
+				packet: string(payload, payload+plen),
+				payload: string(payload+plen - payload_size, payload+plen),
+				sid: stream_id::make_identifier(packet),
+				is_input: false, // TODO We need to detect this
+				is_tcp: false,
+				sctx: sctx,
+			};
+			if (callback_func(pktinfo)){
+				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
+			}else{
+				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_DROP );
+			}
+		}
+	}
 
 	static int queue_cb(const nlmsghdr *nlh, void *data_ptr)
 	{
@@ -367,66 +370,14 @@ class NetfilterQueue {
 		nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(nfg->res_id));
 
 		// Check IP protocol version
-		Tins::PDU *packet, *transport_layer;
-		Tins::PDU::PDUType transport_layer_type;
-		size_t payload_size;
-		if ( ((payload)[0] & 0xf0) == 0x40 ){
-			Tins::IP parsed = Tins::IP(payload, plen);
-			packet = &parsed;
-			transport_layer = find_transport_layer(packet, &transport_layer_type, &payload_size);
-			
+		if ( (payload[0] & 0xf0) == 0x40 ){
+			build_verdict(Tins::IP(payload, plen), payload, plen, nlh_verdict, ph, sctx);
 		}else{
-			Tins::IPv6 parsed = Tins::IPv6(payload, plen);
-			packet = &parsed;
-			transport_layer = find_transport_layer(packet, &transport_layer_type, &payload_size);
-		}
-		if(transport_layer == nullptr || transport_layer->inner_pdu() == nullptr){
-			nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
-		}else{
-			bool is_tcp = transport_layer_type == Tins::PDU::TCP;
-			packet_info pktinfo{
-				packet: string(payload, payload+plen),
-				payload: string(payload+plen - payload_size, payload+plen),
-				stream_id: "udp", // For udp we don't need to track the stream
-				is_input: false, // TODO We need to detect this
-				is_tcp: is_tcp,
-				sctx: sctx,
-			};
-			cerr << "PKT " << endl;
-			if (is_tcp){
-				cerr << "PORCO8888" << endl;
-				sctx->tcp_match_util.matching_has_been_called = false;
-				sctx->tcp_match_util.pkt_info = &pktinfo;
-				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
-				//sctx->follower.process_packet(*packet);
-				cerr << "NOT BLOCKED BUT YES 0_0 " << (sctx->tcp_match_util.matching_has_been_called && !sctx->tcp_match_util.result) << endl;
-				/*
-				if (sctx->tcp_match_util.matching_has_been_called && !sctx->tcp_match_util.result){
-					auto tcp_layer = (Tins::TCP *)transport_layer;
-					tcp_layer->release_inner_pdu();
-					tcp_layer->set_flag(Tins::TCP::FIN,1);
-					tcp_layer->set_flag(Tins::TCP::ACK,1);
-					tcp_layer->set_flag(Tins::TCP::SYN,0);
-					nfq_nlmsg_verdict_put_pkt(nlh_verdict, packet->serialize().data(), packet->size());
-					nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
-					delete tcp_layer;
-				}
-				*/
-			}else if(callback_func(pktinfo)){
-				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
-			} else{
-				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_DROP );
-			}
+			build_verdict(Tins::IPv6(payload, plen), payload, plen, nlh_verdict, ph, sctx);
 		}
 
-		/* example to set the connmark. First, start NFQA_CT section: */
 		nest = mnl_attr_nest_start(nlh_verdict, NFQA_CT);
-
-		/* then, add the connmark attribute: */
 		mnl_attr_put_u32(nlh_verdict, CTA_MARK, htonl(42));
-		/* more conntrack attributes, e.g. CTA_LABELS could be set here */
-
-		/* end conntrack section */
 		mnl_attr_nest_end(nlh_verdict, nest);
 
 		if (mnl_socket_sendto(sctx->nl, nlh_verdict, nlh_verdict->nlmsg_len) < 0) {

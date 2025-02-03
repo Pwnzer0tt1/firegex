@@ -78,7 +78,7 @@ bool filter_callback(packet_info & info){
 	hs_stream_t* stream_match;
 	if (conf->stream_mode()){
 		matching_map match_map = info.is_input ? info.sctx->in_hs_streams : info.sctx->out_hs_streams;
-		auto stream_search = match_map.find(info.stream_id);
+		auto stream_search = match_map.find(info.sid);
 		
 		if (stream_search == match_map.end()){
             if (hs_open_stream(regex_matcher, 0, &stream_match) != HS_SUCCESS) {
@@ -86,7 +86,7 @@ bool filter_callback(packet_info & info){
                 throw invalid_argument("Cannot open stream match on hyperscan");
             }
 			if (info.is_tcp){
-				match_map[info.stream_id] = stream_match;
+				match_map[info.sid] = stream_match;
 			}
 		}else{
 			stream_match = stream_search->second;
