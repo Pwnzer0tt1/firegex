@@ -80,7 +80,8 @@ class FiregexInterceptor:
         proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cppqueue")
         self.process = await asyncio.create_subprocess_exec(
             proxy_binary_path,
-            stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE
+            stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE,
+            env={"MATCH_MODE": "stream" if self.srv.proto == "tcp" else "block", "NTHREADS": os.getenv("NTHREADS","1")},
         )
         line_fut = self.process.stdout.readuntil()
         try:

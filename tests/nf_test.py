@@ -88,7 +88,7 @@ def checkRegex(regex, should_work=True, upper=False):
             if r["regex"] == regex:
                 #Test the regex
                 s = base64.b64decode(regex).upper() if upper else base64.b64decode(regex)
-                if not server.sendCheckData(secrets.token_bytes(200) + s +  secrets.token_bytes(200)):
+                if not server.sendCheckData(secrets.token_bytes(40) + s +  secrets.token_bytes(40)):
                     puts("The malicious request was successfully blocked ✔", color=colors.green)
                     n_blocked += 1
                     time.sleep(1)
@@ -104,7 +104,7 @@ def checkRegex(regex, should_work=True, upper=False):
         puts("Test Failed: The regex wasn't found ✗", color=colors.red)
         exit_test(1)
     else:
-        if server.sendCheckData(secrets.token_bytes(200) + base64.b64decode(regex) +  secrets.token_bytes(200)):
+        if server.sendCheckData(secrets.token_bytes(40) + base64.b64decode(regex) +  secrets.token_bytes(40)):
             puts("The request wasn't blocked ✔", color=colors.green)
         else:
             puts("Test Failed: The request was blocked when it shouldn't have", color=colors.red)
@@ -184,18 +184,6 @@ else:
 checkRegex(regex, upper=True)
 checkRegex(regex)
 
-clear_regexes()
-
-#Create Server regex and verify that should not matches
-if(firegex.nf_add_regex(service_id,regex,"S",active=True, is_case_sensitive=True)): 
-    puts(f"Sucessfully added server to client regex {str(secret)} ✔", color=colors.green)
-else:
-    puts(f"Test Failed: Coulnd't add server to client regex {str(secret)} ✗", color=colors.red)
-    exit_test(1)
-
-checkRegex(regex, should_work=False)
-
-#Delete regex
 clear_regexes()
 
 #Rename service

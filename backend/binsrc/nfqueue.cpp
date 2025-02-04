@@ -54,10 +54,16 @@ struct matched_data{
 	bool has_matched = false;
 };
 
-bool filter_callback(packet_info & info){
+
+bool filter_callback(packet_info& info){
 	shared_ptr<RegexRules> conf = regex_config;
-	if (conf->ver() != info.sctx->latest_config_ver){
-		info.sctx->clean_scratches();
+	auto current_version = conf->ver();
+	if (current_version != info.sctx->latest_config_ver){
+		#ifdef DEBUG
+		cerr << "[DEBUG] [filter_callback] Configuration has changed (" << current_version << "!=" << info.sctx->latest_config_ver << "), cleaning scratch spaces" << endl;
+		#endif
+		info.sctx->clean();
+		info.sctx->latest_config_ver = current_version;
 	}
 	scratch_setup(conf->input_ruleset, info.sctx->in_scratch);
 	scratch_setup(conf->output_ruleset, info.sctx->out_scratch);
@@ -66,6 +72,12 @@ bool filter_callback(packet_info & info){
 	if (regex_matcher == nullptr){
 		return true;
 	}
+
+	#ifdef DEBUG
+	cerr << "[DEBUG] [filter_callback] Matching packet with " << (info.is_input ? "input" : "output") << " ruleset" << endl;
+	cerr << "[DEBUG] [filter_callback] Packet: " << info.payload << endl;
+	#endif
+	
 	matched_data match_res;
 	hs_error_t err;
 	hs_scratch_t* scratch_space = info.is_input ? info.sctx->in_scratch: info.sctx->out_scratch;
@@ -77,25 +89,40 @@ bool filter_callback(packet_info & info){
 	};
 	hs_stream_t* stream_match;
 	if (conf->stream_mode()){
-		matching_map match_map = info.is_input ? info.sctx->in_hs_streams : info.sctx->out_hs_streams;
-		auto stream_search = match_map.find(info.sid);
+		matching_map* match_map = info.is_input ? &info.sctx->in_hs_streams : &info.sctx->out_hs_streams;
+		#ifdef DEBUG
+		cerr << "[DEBUG] [filter_callback] Dumping match_map " << match_map << endl;
+		for (auto ele: *match_map){
+			cerr << "[DEBUG] [filter_callback] " << ele.first << " -> " << ele.second << endl;
+		}
+		cerr << "[DEBUG] [filter_callback] End of match_map" << endl;
+		#endif
+		auto stream_search = match_map->find(info.sid);
 		
-		if (stream_search == match_map.end()){
+		if (stream_search == match_map->end()){
+			
+			#ifdef DEBUG
+			cerr << "[DEBUG] [filter_callback] Creating new stream matcher for " << info.sid << endl;
+			#endif
             if (hs_open_stream(regex_matcher, 0, &stream_match) != HS_SUCCESS) {
                 cerr << "[error] [filter_callback] Error opening the stream matcher (hs)" << endl;
                 throw invalid_argument("Cannot open stream match on hyperscan");
             }
-			if (info.is_tcp){
-				match_map[info.sid] = stream_match;
-			}
+			match_map->insert_or_assign(info.sid, stream_match);
 		}else{
 			stream_match = stream_search->second;
 		}
+		#ifdef DEBUG
+		cerr << "[DEBUG] [filter_callback] Matching as a stream" << endl;
+		#endif
 		err = hs_scan_stream(
 			stream_match,info.payload.c_str(), info.payload.length(),
 			0, scratch_space, match_func, &match_res
 		);
 	}else{
+		#ifdef DEBUG
+		cerr << "[DEBUG] [filter_callback] Matching as a block" << endl;
+		#endif
 		err = hs_scan(
 			regex_matcher,info.payload.c_str(), info.payload.length(),
 			0, scratch_space, match_func, &match_res
@@ -104,13 +131,6 @@ bool filter_callback(packet_info & info){
 	if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
 		cerr << "[error] [filter_callback] Error while matching the stream (hs)" << endl;
 		throw invalid_argument("Error while matching the stream with hyperscan");
-	}
-	if (
-		!info.is_tcp && conf->stream_mode() && 
-		hs_close_stream(stream_match, scratch_space, nullptr, nullptr) != HS_SUCCESS
-	){
-		cerr << "[error] [filter_callback] Error closing the stream matcher (hs)" << endl;
-		throw invalid_argument("Cannot close stream match on hyperscan");
 	}
 	if (match_res.has_matched){
 		auto rules_vector = info.is_input ? conf->input_ruleset.regexes : conf->output_ruleset.regexes;

@@ -78,9 +78,9 @@ class RegexRules{
 			if (n_of_regex == 0){
 				return;
 			}
-			const char* regex_match_rules[n_of_regex];
-			unsigned int regex_array_ids[n_of_regex];
-			unsigned int regex_flags[n_of_regex];
+			vector<const char*> regex_match_rules(n_of_regex);
+			vector<unsigned int> regex_array_ids(n_of_regex);
+			vector<unsigned int> regex_flags(n_of_regex);
 			for(int i = 0; i < n_of_regex; i++){
 				regex_match_rules[i] = decoded[i].second.regex.c_str();
 				regex_array_ids[i] = i;
@@ -89,17 +89,25 @@ class RegexRules{
 					regex_flags[i] |= HS_FLAG_CASELESS;
 				}
 			}
-
-			hs_database_t* rebuilt_db;
-			hs_compile_error_t *compile_err;
+			#ifdef DEBUG
+			cerr << "[DEBUG] [RegexRules.fill_ruleset] compiling " << n_of_regex << " regexes..." << endl;
+			for (int i = 0; i < n_of_regex; i++){
+				cerr << "[DEBUG] [RegexRules.fill_ruleset] regex[" << i << "]: " << decoded[i].first << " " << decoded[i].second.regex << endl;
+				cerr << "[DEBUG] [RegexRules.fill_ruleset] regex_match_rules[" << i << "]: " << regex_match_rules[i] << endl;
+				cerr << "[DEBUG] [RegexRules.fill_ruleset] regex_flags[" << i << "]: " << regex_flags[i] << endl;
+				cerr << "[DEBUG] [RegexRules.fill_ruleset] regex_array_ids[" << i << "]: " << regex_array_ids[i] << endl;
+			}
+			#endif
+			hs_database_t* rebuilt_db = nullptr;
+			hs_compile_error_t *compile_err = nullptr;
 			if (
 				hs_compile_multi(
-					regex_match_rules,
-					regex_flags,
-					regex_array_ids,
+					regex_match_rules.data(),
+					regex_flags.data(),
+					regex_array_ids.data(),
 					n_of_regex,
 					is_stream?HS_MODE_STREAM:HS_MODE_BLOCK,
-					nullptr,&rebuilt_db, &compile_err
+					nullptr, &rebuilt_db, &compile_err
 				) != HS_SUCCESS
 			) {
 				cerr << "[warning] [RegexRules.fill_ruleset] hs_db failed to compile: '" << compile_err->message << "' skipping..." << endl;

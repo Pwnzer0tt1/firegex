@@ -17,12 +17,42 @@ using Tins::TCPIP::Stream;
 using Tins::TCPIP::StreamFollower;
 using namespace std;
 
-
 #ifndef NETFILTER_CLASSES_HPP
 #define NETFILTER_CLASSES_HPP
 typedef Tins::TCPIP::StreamIdentifier stream_id;
 typedef map<stream_id, hs_stream_t*> matching_map;
 
+/* Considering to use unorder_map using this hash of stream_id 
+
+namespace std {
+	template<>
+	struct hash<stream_id> {
+		size_t operator()(const stream_id& sid) const
+		{
+			return std::hash<std::uint32_t>()(sid.max_address[0] + sid.max_address[1] + sid.max_address[2] + sid.max_address[3] + sid.max_address_port + sid.min_address[0] + sid.min_address[1] + sid.min_address[2] + sid.min_address[3] + sid.min_address_port);
+		}
+	};
+}
+
+*/
+
+#ifdef DEBUG
+ostream& operator<<(ostream& os, const Tins::TCPIP::StreamIdentifier::address_type &sid){
+	bool first_print = false;
+	for (auto ele: sid){
+		if (first_print || ele){
+			first_print = true;
+			os << (int)ele << ".";
+		}
+	}
+	return os;
+}
+
+ostream& operator<<(ostream& os, const stream_id &sid){
+	os << sid.max_address << ":" << sid.max_address_port << " -> " << sid.min_address << ":" << sid.min_address_port;
+	return os;
+}
+#endif
 
 struct packet_info;
 
@@ -51,6 +81,60 @@ struct stream_ctx {
 			hs_free_scratch(in_scratch);
 			in_scratch = nullptr;
 		}
+	}
+
+	void clean_stream_by_id(stream_id sid){
+		#ifdef DEBUG
+		cerr << "[DEBUG] [NetfilterQueue.clean_stream_by_id] Cleaning stream context of " << sid << endl;
+		#endif
+		auto stream_search = in_hs_streams.find(sid);
+		hs_stream_t* stream_match;
+		if (stream_search != in_hs_streams.end()){
+			stream_match = stream_search->second;
+			if (hs_close_stream(stream_match, in_scratch, nullptr, nullptr) != HS_SUCCESS) {
+                cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
+                throw invalid_argument("Cannot close stream match on hyperscan");
+            }
+			in_hs_streams.erase(stream_search);
+		}
+
+		stream_search = out_hs_streams.find(sid);
+		if (stream_search != out_hs_streams.end()){
+			stream_match = stream_search->second;
+			if (hs_close_stream(stream_match, out_scratch, nullptr, nullptr) != HS_SUCCESS) {
+                cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
+                throw invalid_argument("Cannot close stream match on hyperscan");
+            }
+			out_hs_streams.erase(stream_search);
+		}
+	}
+
+	void clean(){
+
+		#ifdef DEBUG
+		cerr << "[DEBUG] [NetfilterQueue.clean] Cleaning stream context" << endl;
+		#endif
+
+		if (in_scratch){
+			for(auto ele: in_hs_streams){
+				if (hs_close_stream(ele.second, in_scratch, nullptr, nullptr) != HS_SUCCESS) {
+					cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
+					throw invalid_argument("Cannot close stream match on hyperscan");
+				}
+			}
+			in_hs_streams.clear();
+		}
+		
+		if (out_scratch){
+			for(auto ele: out_hs_streams){
+				if (hs_close_stream(ele.second, out_scratch, nullptr, nullptr) != HS_SUCCESS) {
+					cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
+					throw invalid_argument("Cannot close stream match on hyperscan");
+				}
+			}
+			out_hs_streams.clear();
+		}
+		clean_scratches();
 	}
 };
 
@@ -139,76 +223,59 @@ class NetfilterQueue {
 
 	}
 
-	//Input data filtering
-	void on_client_data(Stream& stream) {
-		string data(stream.client_payload().begin(), stream.client_payload().end());
-		sctx.tcp_match_util.pkt_info->is_input = true;
-		sctx.tcp_match_util.matching_has_been_called = true;
-		bool result = callback_func(*sctx.tcp_match_util.pkt_info);
-		if (result){
-			clean_stream_by_id(sctx.tcp_match_util.pkt_info->sid);
+	static void on_data_recv(Stream& stream, stream_ctx* sctx, string data, bool is_input) {
+		#ifdef DEBUG
+			cerr << "[DEBUG] [NetfilterQueue.on_data_recv] data: " << data << endl;
+		#endif
+		sctx->tcp_match_util.pkt_info->is_input = is_input;
+		sctx->tcp_match_util.matching_has_been_called = true;
+		bool result = callback_func(*sctx->tcp_match_util.pkt_info);
+		#ifdef DEBUG
+			cerr << "[DEBUG] [NetfilterQueue.on_data_recv] result: " << result << endl;
+		#endif
+		if (!result){
+			#ifdef DEBUG
+				cerr << "[DEBUG] [NetfilterQueue.on_data_recv] Stream matched, removing all data about it" << endl;
+			#endif
+			sctx->clean_stream_by_id(sctx->tcp_match_util.pkt_info->sid);
 			stream.ignore_client_data();
 			stream.ignore_server_data();
 		}
-		sctx.tcp_match_util.result = result;
+		sctx->tcp_match_util.result = result;
+	}
+
+	//Input data filtering
+	static void on_client_data(Stream& stream, stream_ctx* sctx) {
+		on_data_recv(stream, sctx, string(stream.client_payload().begin(), stream.client_payload().end()), true);
 	}
 
 	//Server data filtering
-	void on_server_data(Stream& stream) {
-		string data(stream.server_payload().begin(), stream.server_payload().end());
-		sctx.tcp_match_util.pkt_info->is_input = false;
-		sctx.tcp_match_util.matching_has_been_called = true;
-		bool result = callback_func(*sctx.tcp_match_util.pkt_info);
-		if (result){
-			clean_stream_by_id(sctx.tcp_match_util.pkt_info->sid);
-			stream.ignore_client_data();
-			stream.ignore_server_data();
-		}
-		this->sctx.tcp_match_util.result = result;
+	static void on_server_data(Stream& stream, stream_ctx* sctx) {
+		on_data_recv(stream, sctx, string(stream.server_payload().begin(), stream.server_payload().end()), false);
 	}
 
-	void on_new_stream(Stream& stream) {
+	static void on_new_stream(Stream& stream, stream_ctx* sctx) {
+		#ifdef DEBUG
+			cerr << "[DEBUG] [NetfilterQueue.on_new_stream] New stream detected" << endl;
+		#endif
 		if (stream.is_partial_stream()) {
+			#ifdef DEBUG
+				cerr << "[DEBUG] [NetfilterQueue.on_new_stream] Partial stream detected, skipping" << endl;
+			#endif
 			return;
 		}
-		cerr << "[+] New connection!" << endl;
 		stream.auto_cleanup_payloads(true);
-		stream.client_data_callback(
-			[&](auto a){this->on_client_data(a);}
-		);
-		stream.server_data_callback(
-			[&](auto a){this->on_server_data(a);}
-		);
-	}
-
-	void clean_stream_by_id(stream_id stream_id){
-		auto stream_search = this->sctx.in_hs_streams.find(stream_id);
-		hs_stream_t* stream_match;
-		if (stream_search != this->sctx.in_hs_streams.end()){
-			stream_match = stream_search->second;
-			if (hs_close_stream(stream_match, sctx.in_scratch, nullptr, nullptr) != HS_SUCCESS) {
-                cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
-                throw invalid_argument("Cannot close stream match on hyperscan");
-            }
-			this->sctx.in_hs_streams.erase(stream_search);
-		}
-
-		stream_search = this->sctx.out_hs_streams.find(stream_id);
-		if (stream_search != this->sctx.out_hs_streams.end()){
-			stream_match = stream_search->second;
-			if (hs_close_stream(stream_match, sctx.out_scratch, nullptr, nullptr) != HS_SUCCESS) {
-                cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
-                throw invalid_argument("Cannot close stream match on hyperscan");
-            }
-			this->sctx.out_hs_streams.erase(stream_search);
-		}
+		stream.client_data_callback(bind(on_client_data, placeholders::_1, sctx));
+		stream.server_data_callback(bind(on_server_data, placeholders::_1, sctx));
 	}
 
 	// A stream was terminated. The second argument is the reason why it was terminated
-	void on_stream_terminated(Stream& stream, StreamFollower::TerminationReason reason) {
+	static void on_stream_terminated(Stream& stream, StreamFollower::TerminationReason reason, stream_ctx* sctx) {
 		stream_id stream_id = stream_id::make_identifier(stream);
-		cerr << "[+] Connection closed: " << &stream_id << endl;
-		this->clean_stream_by_id(stream_id);
+		#ifdef DEBUG
+			cerr << "[DEBUG] [NetfilterQueue.on_stream_terminated] Stream terminated, deleting all data" << endl;
+		#endif
+		sctx->clean_stream_by_id(stream_id);
 	}
 
 
@@ -220,12 +287,10 @@ class NetfilterQueue {
 		*/
 		int ret = 1;
 		mnl_socket_setsockopt(sctx.nl, NETLINK_NO_ENOBUFS, &ret, sizeof(int));
-		sctx.follower.new_stream_callback(
-			[&](auto a){this->on_new_stream(a);}
-		);
-		sctx.follower.stream_termination_callback(
-			[&](auto a, auto b){this->on_stream_terminated(a, b);}
-		);
+		
+		sctx.follower.new_stream_callback(bind(on_new_stream, placeholders::_1, &sctx));
+		sctx.follower.stream_termination_callback(bind(on_stream_terminated, placeholders::_1, placeholders::_2, &sctx));
+
 		for (;;) {
 			ret = recv_packet();
 			if (ret == -1) {
@@ -241,6 +306,9 @@ class NetfilterQueue {
 	
 	
 	~NetfilterQueue() {
+		#ifdef DEBUG
+			cerr << "[DEBUG] [NetfilterQueue.~NetfilterQueue] Destructor called" << endl;
+		#endif
 		send_config_cmd(NFQNL_CFG_CMD_UNBIND);
 		_clear();
 	}
@@ -263,23 +331,9 @@ class NetfilterQueue {
 		}
 		mnl_socket_close(sctx.nl);
 		sctx.nl = nullptr;
-		sctx.clean_scratches();
-
-		for(auto ele: sctx.in_hs_streams){
-			if (hs_close_stream(ele.second, sctx.in_scratch, nullptr, nullptr) != HS_SUCCESS) {
-				cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
-				throw invalid_argument("Cannot close stream match on hyperscan");
-			}
-		}
-		sctx.in_hs_streams.clear();
-		for(auto ele: sctx.out_hs_streams){
-			if (hs_close_stream(ele.second, sctx.out_scratch, nullptr, nullptr) != HS_SUCCESS) {
-				cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
-				throw invalid_argument("Cannot close stream match on hyperscan");
-			}
-		}
-		sctx.out_hs_streams.clear();
+		sctx.clean();
 	}
+
 	template<typename T>
 	static void build_verdict(T packet, uint8_t *payload, uint16_t plen, nlmsghdr *nlh_verdict, nfqnl_msg_packet_hdr *ph, stream_ctx* sctx){
 		Tins::TCP* tcp = packet.template find_pdu<Tins::TCP>();
@@ -300,7 +354,17 @@ class NetfilterQueue {
 			};
 			sctx->tcp_match_util.matching_has_been_called = false;
 			sctx->tcp_match_util.pkt_info = &pktinfo;
+			#ifdef DEBUG
+				cerr << "[DEBUG] [NetfilterQueue.build_verdict] TCP Packet received " << packet.src_addr() << ":" << tcp->sport() << " -> " << packet.dst_addr() << ":" << tcp->dport() << ", sending to libtins StreamFollower" << endl;
+			#endif
 			sctx->follower.process_packet(packet);
+			#ifdef DEBUG
+			if (sctx->tcp_match_util.matching_has_been_called){
+				cerr << "[DEBUG] [NetfilterQueue.build_verdict] StreamFollower has called matching functions" << endl;
+			}else{
+				cerr << "[DEBUG] [NetfilterQueue.build_verdict] StreamFollower has NOT called matching functions" << endl;
+			}
+			#endif
 			if (sctx->tcp_match_util.matching_has_been_called && !sctx->tcp_match_util.result){
 				Tins::PDU* data_layer = tcp->release_inner_pdu();
 				if (data_layer != nullptr){
@@ -317,7 +381,7 @@ class NetfilterQueue {
 			if (!udp){
 				throw invalid_argument("Only TCP and UDP are supported");
 			}
-			Tins::PDU* application_layer = tcp->inner_pdu();
+			Tins::PDU* application_layer = udp->inner_pdu();
 			u_int16_t payload_size = 0;
 			if (application_layer != nullptr){
 				payload_size = application_layer->size();
@@ -368,6 +432,13 @@ class NetfilterQueue {
 		struct nlattr *nest;
 
 		nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(nfg->res_id));
+
+		#ifdef DEBUG
+			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Packet received" << endl;
+			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Packet ID: " << ntohl(ph->packet_id) << endl;
+			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Payload size: " << plen << endl;
+			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Payload: " << string(payload, payload+plen) << endl;
+		#endif
 
 		// Check IP protocol version
 		if ( (payload[0] & 0xf0) == 0x40 ){
