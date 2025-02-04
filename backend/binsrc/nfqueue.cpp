@@ -72,10 +72,12 @@ bool filter_callback(packet_info& info){
 	if (regex_matcher == nullptr){
 		return true;
 	}
-
+	
 	#ifdef DEBUG
 	cerr << "[DEBUG] [filter_callback] Matching packet with " << (info.is_input ? "input" : "output") << " ruleset" << endl;
-	cerr << "[DEBUG] [filter_callback] Packet: " << info.payload << endl;
+	if (info.payload.size() <= 30){
+		cerr << "[DEBUG] [filter_callback] Packet: " << info.payload << endl;
+	}
 	#endif
 	
 	matched_data match_res;
@@ -153,14 +155,14 @@ int main(int argc, char *argv[]){
 	if (matchmode != nullptr && strcmp(matchmode, "block") == 0){
 		stream_mode = false;
 	}
-	cerr << "[info] [main] Using " << n_of_threads << " threads, stream mode: " << stream_mode << endl;
+
 	regex_config.reset(new RegexRules(stream_mode));
 	
 	NFQueueSequence<filter_callback> queues(n_of_threads);
 	queues.start();
 
 	cout << "QUEUES " << queues.init() << " " << queues.end() << endl;
-	cerr << "[info] [main] Queues: " << queues.init() << ":" << queues.end() << " threads assigned: " << n_of_threads << endl;
+	cerr << "[info] [main] Queues: " << queues.init() << ":" << queues.end() << " threads assigned: " << n_of_threads << " stream mode: " << stream_mode << endl;
 
 	config_updater();
 }

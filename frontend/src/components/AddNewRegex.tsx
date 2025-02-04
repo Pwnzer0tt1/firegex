@@ -1,4 +1,4 @@
-import { Button, Group, Space, TextInput, Notification, Switch, NativeSelect, Modal } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Switch, Modal, Select } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useState } from 'react';
 import { RegexAddForm } from '../js/models';
@@ -17,13 +17,13 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
     const form = useForm({
         initialValues: {
             regex:"",
-            mode:"C -> S",
+            mode:"C",
             is_case_insensitive:false,
             deactive:false
         },
         validate:{
             regex: (value) => value !== "" ? null : "Regex is required",
-            mode: (value) => ['C -> S', 'S -> C', 'C <-> S'].includes(value) ? null : "Invalid mode",
+            mode: (value) => ['C', 'S', 'B'].includes(value) ? null : "Invalid mode",
         }
     })
 
@@ -38,12 +38,11 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
 
     const submitRequest = (values:RegexAddInfo) => {
         setSubmitLoading(true)
-        const filter_mode = ({'C -> S':'C', 'S -> C':'S', 'C <-> S':'B'}[values.mode])
 
         const request:RegexAddForm = {
             is_case_sensitive: !values.is_case_insensitive,
             service_id: service,
-            mode: filter_mode?filter_mode:"B",
+            mode: values.mode?values.mode:"B",
             regex: b64encode(values.regex),
             active: !values.deactive
         }
@@ -86,8 +85,12 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
                 {...form.getInputProps('deactive', { type: 'checkbox' })}
             />
             <Space h="md" />
-            <NativeSelect
-                data={['C -> S', 'S -> C', 'C <-> S']}
+            <Select
+                data={[
+                    { value: 'C', label: 'Client -> Server' },
+                    { value: 'S', label: 'Server -> Client' },
+                    { value: 'B', label: 'Both (Client <-> Server)' },
+                ]}
                 label="Choose the source of the packets to filter"
                 variant="filled"
                 {...form.getInputProps('mode')}

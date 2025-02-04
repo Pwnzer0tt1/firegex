@@ -438,7 +438,6 @@ class NetfilterQueue {
 			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Packet received" << endl;
 			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Packet ID: " << ntohl(ph->packet_id) << endl;
 			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Payload size: " << plen << endl;
-			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Payload: " << string(payload, payload+plen) << endl;
 		#endif
 
 		// Check IP protocol version

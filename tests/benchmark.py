@@ -9,8 +9,6 @@ import argparse
 import base64
 import secrets
 
-
-#TODO: make it work with Proxy and not only netfilter
 parser = argparse.ArgumentParser()
 parser.add_argument("--address", "-a", type=str , required=False, help='Address of firegex backend', default="http://127.0.0.1:4444/")
 parser.add_argument("--port", "-P", type=int , required=False, help='Port of the Benchmark service', default=1337)

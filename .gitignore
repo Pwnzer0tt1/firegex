@@ -25,7 +25,7 @@ docker-compose.yml
 firegex-compose.yml
 firegex-compose-tmp-file.yml
 firegex.py
-
+/tests/benchmark.csv
 # misc
 **/.DS_Store
 **/.env.local
