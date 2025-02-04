@@ -267,13 +267,14 @@ class NetfilterQueue {
 		stream.auto_cleanup_payloads(true);
 		stream.client_data_callback(bind(on_client_data, placeholders::_1, sctx));
 		stream.server_data_callback(bind(on_server_data, placeholders::_1, sctx));
+		stream.stream_closed_callback(bind(on_stream_close, placeholders::_1, sctx));
 	}
 
 	// A stream was terminated. The second argument is the reason why it was terminated
-	static void on_stream_terminated(Stream& stream, StreamFollower::TerminationReason reason, stream_ctx* sctx) {
+	static void on_stream_close(Stream& stream, stream_ctx* sctx) {
 		stream_id stream_id = stream_id::make_identifier(stream);
 		#ifdef DEBUG
-			cerr << "[DEBUG] [NetfilterQueue.on_stream_terminated] Stream terminated, deleting all data" << endl;
+			cerr << "[DEBUG] [NetfilterQueue.on_stream_close] Stream terminated, deleting all data" << endl;
 		#endif
 		sctx->clean_stream_by_id(stream_id);
 	}
@@ -289,7 +290,7 @@ class NetfilterQueue {
 		mnl_socket_setsockopt(sctx.nl, NETLINK_NO_ENOBUFS, &ret, sizeof(int));
 		
 		sctx.follower.new_stream_callback(bind(on_new_stream, placeholders::_1, &sctx));
-		sctx.follower.stream_termination_callback(bind(on_stream_terminated, placeholders::_1, placeholders::_2, &sctx));
+		sctx.follower.stream_termination_callback(bind(on_stream_close, placeholders::_1, &sctx));
 
 		for (;;) {
 			ret = recv_packet();
