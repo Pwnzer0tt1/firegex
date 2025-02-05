@@ -17,7 +17,7 @@ parser.add_argument("--password", "-p", type=str, required=True, help='Firegex p
 parser.add_argument("--num-of-regexes", "-r", type=int, required=True, help='Number of regexes to benchmark with')
 parser.add_argument("--duration", "-d", type=int, required=False, help='Duration of the Benchmark in seconds', default=5)
 parser.add_argument("--output-file", "-o", type=str, required=False, help='Output results csv file', default="benchmark.csv")
-parser.add_argument("--num-of-streams", "-s", type=int, required=False, help='Output results csv file', default=1)
+parser.add_argument("--num-of-streams", "-s", type=int, required=False, help='Number of concurrent streams', default=1)
 
 args = parser.parse_args()
 sep()

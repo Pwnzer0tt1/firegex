@@ -2,7 +2,7 @@
 
 ## [GO BACK](../README.md)
 
-Tests are a quick and dirty way to check if your modification to the backend code dind't break anything.
+Tests are a quick and dirty way to check if your modification to the backend code didn't break anything.
 
 # Running all the tests
 If you are working on the same machine firegex is running on, you can just run run_tests.sh
@@ -66,7 +66,7 @@ options:
 --output-file OUTPUT_FILE, -o OUTPUT_FILE
                         Output results csv file
 --num-of-streams NUM_OF_STREAMS, -s NUM_OF_STREAMS
-                        Output results csv file
+                        Number of concurrent streams
 --mode {netfilter,proxy}, -m {netfilter,proxy}
                         Type of filtering
 ```
