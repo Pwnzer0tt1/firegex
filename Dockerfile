@@ -14,9 +14,9 @@ RUN bun run build
 
 
 #Building main conteiner
-FROM --platform=$TARGETARCH debian:stable-slim AS base
+FROM --platform=$TARGETARCH debian:trixie-slim AS base
 RUN apt-get update -qq && apt-get upgrade -qq && \
-    apt-get install -qq python3-pip build-essentials \
+    apt-get install -qq python3-pip build-essential \
     libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap2-bin\
     nftables libvectorscan-dev libtins-dev python3-nftables
 
