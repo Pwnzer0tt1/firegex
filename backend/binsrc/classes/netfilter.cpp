@@ -223,11 +223,10 @@ class NetfilterQueue {
 
 	}
 
-	static void on_data_recv(Stream& stream, stream_ctx* sctx, string data, bool is_input) {
+	static void on_data_recv(Stream& stream, stream_ctx* sctx, string data) {
 		#ifdef DEBUG
 			cerr << "[DEBUG] [NetfilterQueue.on_data_recv] data: " << data << endl;
 		#endif
-		sctx->tcp_match_util.pkt_info->is_input = is_input;
 		sctx->tcp_match_util.matching_has_been_called = true;
 		bool result = callback_func(*sctx->tcp_match_util.pkt_info);
 		#ifdef DEBUG
@@ -246,12 +245,12 @@ class NetfilterQueue {
 
 	//Input data filtering
 	static void on_client_data(Stream& stream, stream_ctx* sctx) {
-		on_data_recv(stream, sctx, string(stream.client_payload().begin(), stream.client_payload().end()), true);
+		on_data_recv(stream, sctx, string(stream.client_payload().begin(), stream.client_payload().end()));
 	}
 
 	//Server data filtering
 	static void on_server_data(Stream& stream, stream_ctx* sctx) {
-		on_data_recv(stream, sctx, string(stream.server_payload().begin(), stream.server_payload().end()), false);
+		on_data_recv(stream, sctx, string(stream.server_payload().begin(), stream.server_payload().end()));
 	}
 
 	static void on_new_stream(Stream& stream, stream_ctx* sctx) {
@@ -336,7 +335,7 @@ class NetfilterQueue {
 	}
 
 	template<typename T>
-	static void build_verdict(T packet, uint8_t *payload, uint16_t plen, nlmsghdr *nlh_verdict, nfqnl_msg_packet_hdr *ph, stream_ctx* sctx){
+	static void build_verdict(T packet, uint8_t *payload, uint16_t plen, nlmsghdr *nlh_verdict, nfqnl_msg_packet_hdr *ph, stream_ctx* sctx, bool is_input){
 		Tins::TCP* tcp = packet.template find_pdu<Tins::TCP>();
 
 		if (tcp){
@@ -349,7 +348,7 @@ class NetfilterQueue {
 				packet: string(payload, payload+plen),
 				payload: string(payload+plen - payload_size, payload+plen),
 				sid: stream_id::make_identifier(packet),
-				is_input: false, // Will be setted later in tcp stream follower
+				is_input: is_input,
 				is_tcp: true,
 				sctx: sctx,
 			};
@@ -394,7 +393,7 @@ class NetfilterQueue {
 				packet: string(payload, payload+plen),
 				payload: string(payload+plen - payload_size, payload+plen),
 				sid: stream_id::make_identifier(packet),
-				is_input: false, // TODO We need to detect this
+				is_input: is_input,
 				is_tcp: false,
 				sctx: sctx,
 			};
@@ -420,7 +419,11 @@ class NetfilterQueue {
 		if (attr[NFQA_PACKET_HDR] == nullptr) {
 			fputs("metaheader not set\n", stderr);
 			return MNL_CB_ERROR;
-		}	
+		}
+		if (attr[NFQA_MARK] == nullptr) {
+			fputs("mark not set\n", stderr);
+			return MNL_CB_ERROR;
+		}
 		//Get Payload
 		uint16_t plen = mnl_attr_get_payload_len(attr[NFQA_PAYLOAD]);
 		uint8_t *payload = (uint8_t *)mnl_attr_get_payload(attr[NFQA_PAYLOAD]);
@@ -434,17 +437,19 @@ class NetfilterQueue {
 
 		nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(nfg->res_id));
 
+		bool is_input = ntohl(mnl_attr_get_u32(attr[NFQA_MARK])) & 0x1; // == 0x1337 that is odd
 		#ifdef DEBUG
 			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Packet received" << endl;
 			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Packet ID: " << ntohl(ph->packet_id) << endl;
 			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Payload size: " << plen << endl;
+			cerr << "[DEBUG] [NetfilterQueue.queue_cb] Is input: " << is_input << endl;
 		#endif
-
+		
 		// Check IP protocol version
 		if ( (payload[0] & 0xf0) == 0x40 ){
-			build_verdict(Tins::IP(payload, plen), payload, plen, nlh_verdict, ph, sctx);
+			build_verdict(Tins::IP(payload, plen), payload, plen, nlh_verdict, ph, sctx, is_input);
 		}else{
-			build_verdict(Tins::IPv6(payload, plen), payload, plen, nlh_verdict, ph, sctx);
+			build_verdict(Tins::IPv6(payload, plen), payload, plen, nlh_verdict, ph, sctx, is_input);
 		}
 
 		nest = mnl_attr_nest_start(nlh_verdict, NFQA_CT);
