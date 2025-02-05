@@ -224,9 +224,6 @@ class NetfilterQueue {
 	}
 
 	static void on_data_recv(Stream& stream, stream_ctx* sctx, string data) {
-		#ifdef DEBUG
-			cerr << "[DEBUG] [NetfilterQueue.on_data_recv] data: " << data << endl;
-		#endif
 		sctx->tcp_match_util.matching_has_been_called = true;
 		bool result = callback_func(*sctx->tcp_match_util.pkt_info);
 		#ifdef DEBUG
@@ -355,7 +352,7 @@ class NetfilterQueue {
 			sctx->tcp_match_util.matching_has_been_called = false;
 			sctx->tcp_match_util.pkt_info = &pktinfo;
 			#ifdef DEBUG
-				cerr << "[DEBUG] [NetfilterQueue.build_verdict] TCP Packet received " << packet.src_addr() << ":" << tcp->sport() << " -> " << packet.dst_addr() << ":" << tcp->dport() << ", sending to libtins StreamFollower" << endl;
+				cerr << "[DEBUG] [NetfilterQueue.build_verdict] TCP Packet received " << packet.src_addr() << ":" << tcp->sport() << " -> " << packet.dst_addr() << ":" << tcp->dport() << " thr: " << this_thread::get_id() <<  ", sending to libtins StreamFollower" << endl;
 			#endif
 			sctx->follower.process_packet(packet);
 			#ifdef DEBUG

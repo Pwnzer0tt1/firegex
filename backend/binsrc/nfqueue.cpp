@@ -76,9 +76,6 @@ bool filter_callback(packet_info& info){
 	
 	#ifdef DEBUG
 	cerr << "[DEBUG] [filter_callback] Matching packet with " << (info.is_input ? "input" : "output") << " ruleset" << endl;
-	if (info.payload.size() <= 30){
-		cerr << "[DEBUG] [filter_callback] Packet: " << info.payload << endl;
-	}
 	#endif
 	
 	matched_data match_res;

@@ -78,10 +78,15 @@ You will find a new benchmark.csv file containg the results.
 # Firegex Performance Results
 
 The test was performed on:
-- Bedrock Linux 0.7.27 Poki x86_64
-- Intel i5-7200U (4) @ 3.100GHz
-- 8GB RAM DDR4 2133 MT/s
+- Macbook Air M2 16GB RAM
+- On a VM powered by OrbStack with Ubuntu 24.04.1 LTS aarch64
+- 6.12.10-orbstack-00297-gf8f6e015b993
 
 Command: `./benchmark.py -p testpassword -r 50 -d 1 -s 60`
+
+### NOTE: 8 threads performance do not change due to the fact that the source and destination ip is always the same, so the packets are sent to the same thread by the kernel.
+[https://netfilter.vger.kernel.narkive.com/sTP7613Y/meaning-of-nfqueue-s-queue-balance-option](https://netfilter.vger.kernel.narkive.com/sTP7613Y/meaning-of-nfqueue-s-queue-balance-option)
+
+Internally the kernel hashes the source and dest ip and choose the target thread based on the hash. If the source and dest ip are the same, the hash will be the same and the packets will be sent to the same thread.
 
 ![Firegex Benchmark](results/Benchmark-chart.png)
