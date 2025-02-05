@@ -89,12 +89,18 @@ async def reset(params: ResetRequest):
         db.init()
     else:
         db.restore()
-    await firewall.init()
+    try:
+        await firewall.init()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
 
 async def startup():
     db.init()
-    await firewall.init()
+    try:
+        await firewall.init()
+    except Exception as e:
+        print("WARNING cannot start firewall:", e)
 
 async def shutdown():
     db.backup()

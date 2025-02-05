@@ -6,6 +6,7 @@ import os
 import asyncio
 import traceback
 from utils import DEBUG
+from fastapi import HTTPException
 
 nft = FiregexTables()
 
@@ -64,6 +65,10 @@ class FiregexInterceptor:
         self.update_config_lock:asyncio.Lock
         self.process:asyncio.subprocess.Process
         self.update_task: asyncio.Task
+        self.ack_arrived = False
+        self.ack_status = None
+        self.ack_fail_what = ""
+        self.ack_lock = asyncio.Lock()
     
     @classmethod
     async def start(cls, srv: Service):
@@ -74,6 +79,8 @@ class FiregexInterceptor:
         queue_range = await self._start_binary()
         self.update_task = asyncio.create_task(self.update_blocked())
         nft.add(self.srv, queue_range)
+        if not self.ack_lock.locked():
+            await self.ack_lock.acquire()
         return self
     
     async def _start_binary(self):
@@ -103,12 +110,18 @@ class FiregexInterceptor:
                 line = (await self.process.stdout.readuntil()).decode()
                 if DEBUG:
                     print(line)
-                if line.startswith("BLOCKED"):
+                if line.startswith("BLOCKED "):
                     regex_id = line.split()[1]
                     async with self.filter_map_lock:
                         if regex_id in self.filter_map:
                             self.filter_map[regex_id].blocked+=1
                             await self.filter_map[regex_id].update()
+                if line.startswith("ACK "):
+                    self.ack_arrived = True
+                    self.ack_status = line.split()[1].upper() == "OK"
+                    if not self.ack_status:
+                        self.ack_fail_what = " ".join(line.split()[2:])
+                    self.ack_lock.release()
         except asyncio.CancelledError:
             pass
         except asyncio.IncompleteReadError:
@@ -125,6 +138,14 @@ class FiregexInterceptor:
         async with self.update_config_lock:
             self.process.stdin.write((" ".join(filters_codes)+"\n").encode())
             await self.process.stdin.drain()
+            try:
+                async with asyncio.timeout(3):
+                    await self.ack_lock.acquire()
+            except TimeoutError:
+                pass
+            if not self.ack_arrived or not self.ack_status:
+                raise HTTPException(status_code=500, detail=f"NFQ error: {self.ack_fail_what}")
+            
 
     async def reload(self, filters:list[RegexFilter]):
         async with self.filter_map_lock:

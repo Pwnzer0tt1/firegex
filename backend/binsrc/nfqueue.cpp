@@ -33,9 +33,10 @@ void config_updater (){
 		try{
 			regex_config.reset(new RegexRules(raw_rules, regex_config->stream_mode()));
 			cerr << "[info] [updater] Config update done to ver "<< regex_config->ver() << endl;
-		}catch(...){
+			cout << "ACK OK" << endl;
+		}catch(const std::exception& e){
 			cerr << "[error] [updater] Failed to build new configuration!" << endl;
-			// TODO send a row on stdout for this error
+			cout << "ACK FAIL " << e.what() << endl;
 		}
 	}
 	
@@ -110,7 +111,9 @@ bool filter_callback(packet_info& info){
                 cerr << "[error] [filter_callback] Error opening the stream matcher (hs)" << endl;
                 throw invalid_argument("Cannot open stream match on hyperscan");
             }
-			match_map->insert_or_assign(info.sid, stream_match);
+			if (info.is_tcp){
+				match_map->insert_or_assign(info.sid, stream_match);
+			}
 		}else{
 			stream_match = stream_search->second;
 		}
@@ -129,6 +132,13 @@ bool filter_callback(packet_info& info){
 			regex_matcher,info.payload.c_str(), info.payload.length(),
 			0, scratch_space, match_func, &match_res
 		);
+	}
+	if (
+		!info.is_tcp && conf->stream_mode() && 
+		hs_close_stream(stream_match, scratch_space, nullptr, nullptr) != HS_SUCCESS
+	){
+		cerr << "[error] [filter_callback] Error closing the stream matcher (hs)" << endl;
+		throw invalid_argument("Cannot close stream match on hyperscan");
 	}
 	if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
 		cerr << "[error] [filter_callback] Error while matching the stream (hs)" << endl;
