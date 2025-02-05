@@ -30,14 +30,15 @@ class ServiceManager:
         new_filters = set([f.id for f in regexes])
         #remove old filters
         for f in old_filters:
-            if not f in new_filters:
+            if f not in new_filters:
                 del self.filters[f]
         #add new filters
         for f in new_filters:
-            if not f in old_filters:
+            if f not in old_filters:
                 filter = [ele for ele in regexes if ele.id == f][0]
                 self.filters[f] = RegexFilter.from_regex(filter, self._stats_updater)
-        if self.interceptor: await self.interceptor.reload(self.filters.values())
+        if self.interceptor:
+            await self.interceptor.reload(self.filters.values())
     
     def __update_status_db(self, status):
         self.db.query("UPDATE services SET status = ? WHERE service_id = ?;", status, self.srv.id)
@@ -114,4 +115,5 @@ class FirewallManager:
         else:
             raise ServiceNotFoundException()
         
-class ServiceNotFoundException(Exception): pass
+class ServiceNotFoundException(Exception):
+    pass

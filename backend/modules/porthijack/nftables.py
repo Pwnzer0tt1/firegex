@@ -50,7 +50,8 @@ class FiregexTables(NFTableManager):
     def add(self, srv:Service):
         
         for ele in self.get():
-            if ele.__eq__(srv): return
+            if ele.__eq__(srv):
+                return
         
         self.cmd({ "insert":{ "rule": {
             "family": "inet",

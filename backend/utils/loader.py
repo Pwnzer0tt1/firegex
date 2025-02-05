@@ -1,5 +1,6 @@
 
-import os, httpx
+import os
+import httpx
 from typing import Callable
 from fastapi import APIRouter
 from starlette.responses import StreamingResponse
@@ -31,7 +32,8 @@ def frontend_deploy(app):
                 return await frontend_debug_proxy(full_path)
             except Exception:
                 return {"details":"Frontend not started at "+f"http://127.0.0.1:{os.getenv('F_PORT','5173')}"}
-        else: return await react_deploy(full_path)
+        else:
+            return await react_deploy(full_path)
         
 def list_routers():
     return [ele[:-3] for ele in list_files(ROUTERS_DIR) if ele != "__init__.py" and " " not in ele and ele.endswith(".py")]
@@ -79,9 +81,12 @@ def load_routers(app):
         if router.shutdown:
             shutdowns.append(router.shutdown)
     async def reset(reset_option:ResetRequest):
-        for func in resets: await run_func(func, reset_option)
+        for func in resets:
+            await run_func(func, reset_option)
     async def startup():
-        for func in startups: await run_func(func)
+        for func in startups:
+            await run_func(func)
     async def shutdown():
-        for func in shutdowns: await run_func(func)
+        for func in shutdowns:
+            await run_func(func)
     return reset, startup, shutdown

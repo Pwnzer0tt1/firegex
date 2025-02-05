@@ -1,8 +1,12 @@
 from modules.nfregex.nftables import FiregexTables
-from utils import ip_parse, run_func
+from utils import run_func
 from modules.nfregex.models import Service, Regex
-import re, os, asyncio
+import re
+import os
+import asyncio
 import traceback
+from utils import DEBUG
+from fastapi import HTTPException
 
 nft = FiregexTables()
 
@@ -10,7 +14,6 @@ class RegexFilter:
     def __init__(
         self, regex,
         is_case_sensitive=True,
-        is_blacklist=True,
         input_mode=False,
         output_mode=False,
         blocked_packets=0,
@@ -19,8 +22,8 @@ class RegexFilter:
     ):
         self.regex = regex
         self.is_case_sensitive = is_case_sensitive
-        self.is_blacklist = is_blacklist
-        if input_mode == output_mode: input_mode = output_mode = True # (False, False) == (True, True)
+        if input_mode == output_mode:
+            input_mode = output_mode = True # (False, False) == (True, True)
         self.input_mode = input_mode
         self.output_mode = output_mode
         self.blocked = blocked_packets
@@ -32,19 +35,21 @@ class RegexFilter:
     def from_regex(cls, regex:Regex, update_func = None):
         return cls(
             id=regex.id, regex=regex.regex, is_case_sensitive=regex.is_case_sensitive,
-            is_blacklist=regex.is_blacklist, blocked_packets=regex.blocked_packets,
+            blocked_packets=regex.blocked_packets,
             input_mode = regex.mode in ["C","B"], output_mode=regex.mode in ["S","B"],
             update_func = update_func
         )
     def compile(self):
-        if isinstance(self.regex, str): self.regex = self.regex.encode()
-        if not isinstance(self.regex, bytes): raise Exception("Invalid Regex Paramether")
+        if isinstance(self.regex, str):
+            self.regex = self.regex.encode()
+        if not isinstance(self.regex, bytes):
+            raise Exception("Invalid Regex Paramether")
         re.compile(self.regex) # raise re.error if it's invalid!
         case_sensitive = "1" if self.is_case_sensitive else "0"
         if self.input_mode:
-            yield case_sensitive + "C" + self.regex.hex() if self.is_blacklist else case_sensitive + "c"+ self.regex.hex()
+            yield case_sensitive + "C" + self.regex.hex()
         if self.output_mode:
-            yield case_sensitive + "S" + self.regex.hex() if self.is_blacklist else case_sensitive + "s"+ self.regex.hex()
+            yield case_sensitive + "S" + self.regex.hex()
     
     async def update(self):
         if self.update_func:
@@ -60,6 +65,10 @@ class FiregexInterceptor:
         self.update_config_lock:asyncio.Lock
         self.process:asyncio.subprocess.Process
         self.update_task: asyncio.Task
+        self.ack_arrived = False
+        self.ack_status = None
+        self.ack_fail_what = ""
+        self.ack_lock = asyncio.Lock()
     
     @classmethod
     async def start(cls, srv: Service):
@@ -67,16 +76,19 @@ class FiregexInterceptor:
         self.srv = srv
         self.filter_map_lock = asyncio.Lock()
         self.update_config_lock = asyncio.Lock()
-        input_range, output_range = await self._start_binary()
+        queue_range = await self._start_binary()
         self.update_task = asyncio.create_task(self.update_blocked())
-        nft.add(self.srv, input_range, output_range)
+        nft.add(self.srv, queue_range)
+        if not self.ack_lock.locked():
+            await self.ack_lock.acquire()
         return self
     
     async def _start_binary(self):
         proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cppqueue")
         self.process = await asyncio.create_subprocess_exec(
             proxy_binary_path,
-            stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE
+            stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE,
+            env={"MATCH_MODE": "stream" if self.srv.proto == "tcp" else "block", "NTHREADS": os.getenv("NTHREADS","1")},
         )
         line_fut = self.process.stdout.readuntil()
         try:
@@ -87,7 +99,7 @@ class FiregexInterceptor:
         line = line_fut.decode()
         if line.startswith("QUEUES "):
             params = line.split()
-            return (int(params[2]), int(params[3])), (int(params[5]), int(params[6]))
+            return (int(params[1]), int(params[2]))
         else:
             self.process.kill()
             raise Exception("Invalid binary output")
@@ -96,14 +108,24 @@ class FiregexInterceptor:
         try:
             while True:
                 line = (await self.process.stdout.readuntil()).decode()
-                if line.startswith("BLOCKED"):
+                if DEBUG:
+                    print(line)
+                if line.startswith("BLOCKED "):
                     regex_id = line.split()[1]
                     async with self.filter_map_lock:
                         if regex_id in self.filter_map:
                             self.filter_map[regex_id].blocked+=1
                             await self.filter_map[regex_id].update()
-        except asyncio.CancelledError: pass
-        except asyncio.IncompleteReadError: pass
+                if line.startswith("ACK "):
+                    self.ack_arrived = True
+                    self.ack_status = line.split()[1].upper() == "OK"
+                    if not self.ack_status:
+                        self.ack_fail_what = " ".join(line.split()[2:])
+                    self.ack_lock.release()
+        except asyncio.CancelledError:
+            pass
+        except asyncio.IncompleteReadError:
+            pass
         except Exception:
             traceback.print_exc()
 
@@ -116,6 +138,14 @@ class FiregexInterceptor:
         async with self.update_config_lock:
             self.process.stdin.write((" ".join(filters_codes)+"\n").encode())
             await self.process.stdin.drain()
+            try:
+                async with asyncio.timeout(3):
+                    await self.ack_lock.acquire()
+            except TimeoutError:
+                pass
+            if not self.ack_arrived or not self.ack_status:
+                raise HTTPException(status_code=500, detail=f"NFQ error: {self.ack_fail_what}")
+            
 
     async def reload(self, filters:list[RegexFilter]):
         async with self.filter_map_lock:
@@ -135,6 +165,7 @@ class FiregexInterceptor:
                 raw_filters = filter_obj.compile()
                 for filter in raw_filters:
                     res[filter] = filter_obj
-            except Exception: pass
+            except Exception:
+                pass
         return res
 

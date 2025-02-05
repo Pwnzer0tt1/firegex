@@ -5,7 +5,8 @@ from utils.sqlite import SQLite
 
 nft = FiregexTables()
 
-class ServiceNotFoundException(Exception): pass
+class ServiceNotFoundException(Exception):
+    pass
 
 class ServiceManager:
     def __init__(self, srv: Service, db):
@@ -29,7 +30,8 @@ class ServiceManager:
 
     async def refresh(self, srv:Service):
         self.srv = srv
-        if self.active: await self.restart()
+        if self.active:
+            await self.restart()
     
     def _set_status(self,active):
         self.active = active

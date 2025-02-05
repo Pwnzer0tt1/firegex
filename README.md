@@ -35,9 +35,6 @@ All the configuration at the startup is customizable in [firegex.py](./start.py)
 - Create basic firewall rules to allow and deny specific traffic, like ufw or iptables but using firegex graphic interface (by using [nftable](https://netfilter.org/projects/nftables/))
 - Port Hijacking allows you to redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using the loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
 
-DEPRECATED:
-- TCP Proxy regex filter, create a proxy tunnel from the service internal port to a public port published by the proxy. Internally the c++ proxy filter the request with PCRE2 regexes. For mantaining the same public port you will need to open only in localhost the real services. (Available only on TCP/IPv4)
-
 ## Documentation
 
 Find the documentation of the backend and of the frontend in the related README files
@@ -57,8 +54,7 @@ This means that firegex is projected to avoid any possibility to have the servic
 ## Why "Firegex"?
 Initiially the project was based only on regex filters, and also now the main function uses regexes, but firegex have and will have also other filtering tools. 
 
-# Credits 
-- Copyright (c) 2007 Arash Partow (http://www.partow.net) for the base of our proxy implementation
+# Credits
 - Copyright (c) 2022 Pwnzer0tt1
 
 ## Star History

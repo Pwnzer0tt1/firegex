@@ -1,6 +1,6 @@
 import asyncio
 from modules.firewall.nftables import FiregexTables
-from modules.firewall.models import *
+from modules.firewall.models import Rule, FirewallSettings
 from utils.sqlite import SQLite
 from modules.firewall.models import Action
 
@@ -131,5 +131,5 @@ class FirewallManager:
         return self.db.get("allow_dhcp", "1") == "1"
     
     @drop_invalid.setter
-    def allow_dhcp(self, value):
+    def allow_dhcp_set(self, value):
         self.db.set("allow_dhcp", "1" if value else "0")

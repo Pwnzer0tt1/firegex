@@ -3,7 +3,6 @@ import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
 import { Navigate } from "react-router-dom";
 import { nfregex } from "../components/NFRegex/utils";
-import { regexproxy } from "../components/RegexProxy/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 import { Buffer } from "buffer"
 import { QueryClient, useQuery } from "@tanstack/react-query";
@@ -17,7 +16,7 @@ export const regex_ipv4 = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.
 export const regex_ipv4_no_cidr = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
 export const regex_port = "^([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?$"
 export const regex_range_port = "^(([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(-([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?)?)?$"
-export const DEV_IP_BACKEND = "198.19.249.69:4444"
+export const DEV_IP_BACKEND = "127.0.0.1:4444"
 
 export const queryClient = new QueryClient({ defaultOptions: { queries: {
     staleTime: Infinity
@@ -111,8 +110,6 @@ export function getapiobject(){
     switch(getMainPath()){
         case "nfregex":
             return nfregex
-        case "regexproxy":
-            return regexproxy
       }
       throw new Error('No api for this tool!');
 }

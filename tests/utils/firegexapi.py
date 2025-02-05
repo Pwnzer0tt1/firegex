@@ -70,7 +70,7 @@ class FiregexAPI:
         return req.json()
 
     def reset(self, delete: bool):
-        req = self.s.post(f"{self.address}api/reset", json={"delete":delete})
+        self.s.post(f"{self.address}api/reset", json={"delete":delete})
 
     #Netfilter regex
     def nf_get_stats(self):
@@ -121,93 +121,15 @@ class FiregexAPI:
         req = self.s.get(f"{self.address}api/nfregex/regex/{regex_id}/disable")
         return verify(req)
 
-    def nf_add_regex(self, service_id: str, regex: str, mode: str, active: bool, is_blacklist: bool, is_case_sensitive: bool):
+    def nf_add_regex(self, service_id: str, regex: str, mode: str, active: bool, is_case_sensitive: bool):
         req = self.s.post(f"{self.address}api/nfregex/regexes/add", 
-            json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_blacklist": is_blacklist, "is_case_sensitive": is_case_sensitive})
+            json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_case_sensitive": is_case_sensitive})
         return verify(req)
 
     def nf_add_service(self, name: str, port: int, proto: str, ip_int: str):
         req = self.s.post(f"{self.address}api/nfregex/services/add" , 
             json={"name":name,"port":port, "proto": proto, "ip_int": ip_int})
         return req.json()["service_id"] if verify(req) else False 
-
-    #Proxy regex
-    def px_get_stats(self):
-        req = self.s.get(f"{self.address}api/regexproxy/stats")
-        return req.json() 
-
-    def px_get_services(self):
-        req = self.s.get(f"{self.address}api/regexproxy/services")
-        return req.json()
-
-    def px_get_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}")
-        return req.json()
-
-    def px_stop_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}/stop")
-        return verify(req)
-    
-    def px_pause_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}/pause")
-        return verify(req)
-
-    def px_start_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}/start")
-        return verify(req)
-
-    def px_delete_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}/delete")
-        return verify(req)
-
-    def px_regen_service_port(self,service_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}/regen-port")
-        return verify(req)
-
-    def px_change_service_port(self,service_id: str, port:int =None, internalPort:int =None):
-        payload = {}
-        if port: payload["port"] = port
-        if internalPort: payload["internalPort"] = internalPort
-        req = self.s.post(f"{self.address}api/regexproxy/service/{service_id}/change-ports", json=payload)
-        return req.json() if verify(req) else False
-
-    def px_get_service_regexes(self,service_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/service/{service_id}/regexes")
-        return req.json() 
-
-    def px_get_regex(self,regex_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/regex/{regex_id}")
-        return req.json() 
-    
-    def px_delete_regex(self,regex_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/regex/{regex_id}/delete")
-        return verify(req)
-    
-    def px_enable_regex(self,regex_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/regex/{regex_id}/enable")
-        return verify(req)
-
-    def px_disable_regex(self,regex_id: str):
-        req = self.s.get(f"{self.address}api/regexproxy/regex/{regex_id}/disable")
-        return verify(req)
-
-    def px_add_regex(self, service_id: str, regex: str, mode: str, active: bool, is_blacklist: bool, is_case_sensitive: bool):
-        req = self.s.post(f"{self.address}api/regexproxy/regexes/add", 
-            json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_blacklist": is_blacklist, "is_case_sensitive": is_case_sensitive})
-        return verify(req)
-
-    def px_rename_service(self,service_id: str, newname: str):
-        req = self.s.post(f"{self.address}api/regexproxy/service/{service_id}/rename" , json={"name":newname})
-        return verify(req)
-
-    def px_add_service(self, name: str, port: int, internalPort:int = None):
-        payload = {}
-        payload["name"] = name
-        payload["port"] = port
-        if internalPort:
-            payload["internalPort"] = internalPort
-        req = self.s.post(f"{self.address}api/regexproxy/services/add" , json=payload)
-        return req.json()["id"] if verify(req) else False 
 
     #PortHijack
     def ph_get_services(self):

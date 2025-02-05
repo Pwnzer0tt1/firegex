@@ -1,6 +1,10 @@
-import uvicorn, secrets, utils
-import os, asyncio, logging
-from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request
+import uvicorn
+import secrets
+import utils
+import os
+import asyncio
+import logging
+from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from passlib.context import CryptContext
@@ -30,7 +34,14 @@ async def lifespan(app):
     yield
     await shutdown_main()
 
-app = FastAPI(debug=DEBUG, redoc_url=None, lifespan=lifespan)
+app = FastAPI(
+    debug=DEBUG,
+    redoc_url=None,
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    title="Firegex API",
+    version=API_VERSION,
+)
 utils.socketio = SocketManager(app, "/sock", socketio_path="")
 
 if DEBUG:
@@ -94,7 +105,8 @@ async def get_app_status(auth: bool = Depends(check_login)):
 @app.post("/api/login")
 async def login_api(form: OAuth2PasswordRequestForm = Depends()):
     """Get a login token to use the firegex api"""
-    if APP_STATUS() != "run": raise HTTPException(status_code=400)
+    if APP_STATUS() != "run":
+        raise HTTPException(status_code=400)
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
     await asyncio.sleep(0.3) # No bruteforce :)
@@ -105,7 +117,8 @@ async def login_api(form: OAuth2PasswordRequestForm = Depends()):
 @app.post('/api/set-password', response_model=ChangePasswordModel)
 async def set_password(form: PasswordForm):
     """Set the password of firegex"""
-    if APP_STATUS() != "init": raise HTTPException(status_code=400)
+    if APP_STATUS() != "init":
+        raise HTTPException(status_code=400)
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
     set_psw(form.password)
@@ -115,7 +128,8 @@ async def set_password(form: PasswordForm):
 @api.post('/change-password', response_model=ChangePasswordModel)
 async def change_password(form: PasswordChangeForm):
     """Change the password of firegex"""
-    if APP_STATUS() != "run": raise HTTPException(status_code=400)
+    if APP_STATUS() != "run":
+        raise HTTPException(status_code=400)
 
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
@@ -144,7 +158,8 @@ async def startup_main():
     except Exception as e:
         logging.error(f"Error setting sysctls: {e}")
     await startup()
-    if not JWT_SECRET(): db.put("secret", secrets.token_hex(32))
+    if not JWT_SECRET():
+        db.put("secret", secrets.token_hex(32))
     await refresh_frontend()
 
 async def shutdown_main():
@@ -175,9 +190,9 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
-        host="::" if DEBUG else None,
+        host=None, #"::" if DEBUG else None,
         port=FIREGEX_PORT,
-        reload=DEBUG,
+        reload=False,#DEBUG,
         access_log=True,
         workers=1, # Multiple workers will cause a crash due to the creation
                   # of multiple processes with separated memory

@@ -15,11 +15,10 @@ class Service:
 
 
 class Regex:
-    def __init__(self, regex_id: int, regex: bytes, mode: str, service_id: str, is_blacklist: bool, blocked_packets: int, is_case_sensitive: bool, active: bool, **other):
+    def __init__(self, regex_id: int, regex: bytes, mode: str, service_id: str, blocked_packets: int, is_case_sensitive: bool, active: bool, **other):
         self.regex = regex
         self.mode = mode
         self.service_id = service_id
-        self.is_blacklist = is_blacklist
         self.blocked_packets = blocked_packets
         self.id = regex_id
         self.is_case_sensitive = is_case_sensitive

@@ -5,7 +5,7 @@ from utils import ip_parse, ip_family, socketio_emit
 from utils.models import ResetRequest, StatusMessageModel
 from modules.firewall.nftables import FiregexTables
 from modules.firewall.firewall import FirewallManager
-from modules.firewall.models import *
+from modules.firewall.models import FirewallSettings, RuleInfo, RuleModel, RuleFormAdd, Mode, Table
         
 db = SQLite('db/firewall-rules.db', {
     'rules': {

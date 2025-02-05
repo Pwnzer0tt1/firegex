@@ -18,8 +18,6 @@ echo "Running Netfilter Regex UDP ipv4"
 python3 nf_test.py -p $PASSWORD -m udp || ERROR=1
 echo "Running Netfilter Regex UDP ipv6"
 python3 nf_test.py -p $PASSWORD -m udp -6 || ERROR=1
-echo "Running Proxy Regex"
-python3 px_test.py -p $PASSWORD || ERROR=1
 echo "Running Port Hijack TCP ipv4"
 python3 ph_test.py -p $PASSWORD -m tcp || ERROR=1
 echo "Running Port Hijack TCP ipv6"

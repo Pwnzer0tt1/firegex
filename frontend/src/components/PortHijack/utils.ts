@@ -1,6 +1,6 @@
 import { ServerResponse } from "../../js/models"
 import { getapi, postapi } from "../../js/utils"
-import { UseQueryOptions, useQuery } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 
 export type GeneralStats = {
     services:number

@@ -10,7 +10,7 @@ bool unhexlify(std::string const &hex, std::string &newString) {
       for(int i=0; i< len; i+=2)
       {
          std::string byte = hex.substr(i,2);
-         char chr = (char) (int)strtol(byte.c_str(), NULL, 16);
+         char chr = (char) (int)strtol(byte.c_str(), nullptr, 16);
          newString.push_back(chr);
       }
       return true;

@@ -28,7 +28,6 @@ class RegexModel(BaseModel):
     mode:str
     id:int
     service_id:str
-    is_blacklist: bool
     n_packets:int
     is_case_sensitive:bool
     active:bool
@@ -38,7 +37,6 @@ class RegexAddForm(BaseModel):
     regex: str
     mode: str
     active: bool|None = None
-    is_blacklist: bool
     is_case_sensitive: bool
 
 class ServiceAddForm(BaseModel):
@@ -66,7 +64,6 @@ db = SQLite('db/nft-regex.db', {
         'regex': 'TEXT NOT NULL',
         'mode': 'VARCHAR(1) NOT NULL CHECK (mode IN ("C", "S", "B"))', # C = to the client, S = to the server, B = both
         'service_id': 'VARCHAR(100) NOT NULL',
-        'is_blacklist': 'BOOLEAN NOT NULL CHECK (is_blacklist IN (0, 1))',
         'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
         'regex_id': 'INTEGER PRIMARY KEY',
         'is_case_sensitive' : 'BOOLEAN NOT NULL CHECK (is_case_sensitive IN (0, 1))',
@@ -75,7 +72,7 @@ db = SQLite('db/nft-regex.db', {
     },
     'QUERY':[
         "CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (port, ip_int, proto);",
-        "CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,is_blacklist,mode,is_case_sensitive);"   
+        "CREATE UNIQUE INDEX IF NOT EXISTS unique_regex_service ON regexes (regex,service_id,mode,is_case_sensitive);"   
     ]
 })
 
@@ -92,12 +89,18 @@ async def reset(params: ResetRequest):
         db.init()
     else:
         db.restore()
-    await firewall.init()
+    try:
+        await firewall.init()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
     
 
 async def startup():
     db.init()
-    await firewall.init()
+    try:
+        await firewall.init()
+    except Exception as e:
+        print("WARNING cannot start firewall:", e)
 
 async def shutdown():
     db.backup()
@@ -147,7 +150,8 @@ async def get_service_by_id(service_id: str):
         FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
         WHERE s.service_id = ? GROUP BY s.service_id;
     """, service_id)
-    if len(res) == 0: raise HTTPException(status_code=400, detail="This service does not exists!")
+    if len(res) == 0:
+        raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
 
 @app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
@@ -177,7 +181,8 @@ async def service_delete(service_id: str):
 async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
-    if not form.name: raise HTTPException(status_code=400, detail="The name cannot be empty!") 
+    if not form.name:
+        raise HTTPException(status_code=400, detail="The name cannot be empty!") 
     try:
         db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
     except sqlite3.IntegrityError:
@@ -188,10 +193,11 @@ async def service_rename(service_id: str, form: RenameForm):
 @app.get('/service/{service_id}/regexes', response_model=list[RegexModel])
 async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
-    if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id): raise HTTPException(status_code=400, detail="This service does not exists!")
+    if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id):
+        raise HTTPException(status_code=400, detail="This service does not exists!")
     return db.query("""
         SELECT 
-            regex, mode, regex_id `id`, service_id, is_blacklist,
+            regex, mode, regex_id `id`, service_id,
             blocked_packets n_packets, is_case_sensitive, active
         FROM regexes WHERE service_id = ?;
     """, service_id)
@@ -201,11 +207,12 @@ async def get_regex_by_id(regex_id: int):
     """Get regex info using his id"""
     res = db.query("""
         SELECT 
-            regex, mode, regex_id `id`, service_id, is_blacklist,
+            regex, mode, regex_id `id`, service_id,
             blocked_packets n_packets, is_case_sensitive, active
         FROM regexes WHERE `id` = ?;
     """, regex_id)
-    if len(res) == 0: raise HTTPException(status_code=400, detail="This regex does not exists!")
+    if len(res) == 0:
+        raise HTTPException(status_code=400, detail="This regex does not exists!")
     return res[0]
 
 @app.get('/regex/{regex_id}/delete', response_model=StatusMessageModel)
@@ -247,8 +254,8 @@ async def add_new_regex(form: RegexAddForm):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid regex")
     try:
-        db.query("INSERT INTO regexes (service_id, regex, is_blacklist, mode, is_case_sensitive, active ) VALUES (?, ?, ?, ?, ?, ?);", 
-                form.service_id, form.regex, form.is_blacklist, form.mode, form.is_case_sensitive, True if form.active is None else form.active )
+        db.query("INSERT INTO regexes (service_id, regex, mode, is_case_sensitive, active ) VALUES (?, ?, ?, ?, ?);", 
+                form.service_id, form.regex, form.mode, form.is_case_sensitive, True if form.active is None else form.active )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="An identical regex already exists")
 

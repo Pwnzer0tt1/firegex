@@ -8,9 +8,7 @@ import { PasswordSend, ServerStatusResponse } from './js/models';
 import { DEV_IP_BACKEND, errorNotify, getstatus, HomeRedirector, IS_DEV, login, setpassword } from './js/utils';
 import NFRegex from './pages/NFRegex';
 import io from 'socket.io-client';
-import RegexProxy from './pages/RegexProxy';
 import ServiceDetailsNFRegex from './pages/NFRegex/ServiceDetails';
-import ServiceDetailsProxyRegex from './pages/RegexProxy/ServiceDetails';
 import PortHijack from './pages/PortHijack';
 import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
@@ -149,9 +147,6 @@ function App() {
               <Route element={<MainLayout><Outlet /></MainLayout>}>
                   <Route path="nfregex" element={<NFRegex><Outlet /></NFRegex>} >
                     <Route path=":srv" element={<ServiceDetailsNFRegex />} />
-                  </Route>
-                  <Route path="regexproxy" element={<RegexProxy><Outlet /></RegexProxy>} >
-                    <Route path=":srv" element={<ServiceDetailsProxyRegex />} />
                   </Route>
                   <Route path="firewall" element={<Firewall />} />
                   <Route path="porthijack" element={<PortHijack />} />

@@ -16,6 +16,7 @@ function ServiceDetailsNFRegex() {
     const [tooltipAddRegexOpened, setTooltipAddRegexOpened] = useState(false)
     const regexesList = nfregexServiceRegexesQuery(srv??"")
 
+    if (services.isLoading) return <LoadingOverlay visible={true} />
     if (!srv || !serviceInfo || regexesList.isError) return <Navigate to="/" replace />
 
     return <>
