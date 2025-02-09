@@ -11,7 +11,10 @@
 
 # testing
 /frontend/coverage
-
+/proxy-client/firegex.egg-info
+/proxy-client/dist
+/proxy-client/fgex-pip/fgex.egg-info
+/proxy-client/fgex-pip/dist
 /backend/db/
 /backend/db/**
 /frontend/build/
@@ -21,10 +24,10 @@
 /backend/modules/cppqueue
 /backend/binsrc/cppqueue
 /backend/modules/proxy
-docker-compose.yml
-firegex-compose.yml
-firegex-compose-tmp-file.yml
-firegex.py
+/docker-compose.yml
+/firegex-compose.yml
+/firegex-compose-tmp-file.yml
+/firegex.py
 /tests/benchmark.csv
 # misc
 **/.DS_Store

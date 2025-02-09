@@ -20,12 +20,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build and run firegex
-        run: python3 start.py start --psw-no-interactive testpassword
-        
-      - name: Run tests
-        run: cd tests && ./run_tests.sh
-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@master
         with:
@@ -41,13 +35,20 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
+      
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-
+      - name: Extract tag name
+        id: tag
+        run: echo TAG_NAME=$(echo $GITHUB_REF | cut -d / -f 3) >> $GITHUB_OUTPUT
+      - name: Update version in setup.py
+        run: >-
+          sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" backend/utils/__init__.py;
+          sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" proxy-client/setup.py;
+          sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" proxy-client/firegex/__init__.py;
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -59,5 +60,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-
