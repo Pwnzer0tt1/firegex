@@ -1,20 +1,14 @@
 #include <linux/netfilter/nfnetlink_queue.h>
 #include <libnetfilter_queue/libnetfilter_queue.h>
 #include <linux/netfilter/nfnetlink_conntrack.h>
-#include <tins/tins.h>
-#include <tins/tcp_ip/stream_follower.h>
-#include <tins/tcp_ip/stream_identifier.h>
 #include <libmnl/libmnl.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/types.h>
 #include <stdexcept>
 #include <thread>
-#include <hs.h>
 #include <iostream>
 
-using Tins::TCPIP::Stream;
-using Tins::TCPIP::StreamFollower;
 using namespace std;
 
 #ifndef NETFILTER_CLASS_CPP

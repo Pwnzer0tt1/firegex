@@ -19,11 +19,17 @@ class BearerSession():
             headers["Content-Type"] = "application/x-www-form-urlencoded"
         return self.s.post(endpoint, json=json, data=data, headers=headers)
 
+    def delete(self, endpoint, json={}):
+        return self.s.delete(endpoint, json=json, headers=self.headers)
+    
+    def put(self, endpoint, json={}):
+        return self.s.put(endpoint, json=json, headers=self.headers)
+
     def get(self, endpoint, json={}):
         return self.s.get(endpoint, json=json, headers=self.headers)
     
     def set_token(self,token):
-         self.headers = {"Authorization": f"Bearer {token}"}
+        self.headers = {"Authorization": f"Bearer {token}"}
     
     def unset_token(self):
         self.headers = {}
@@ -72,62 +78,57 @@ class FiregexAPI:
     def reset(self, delete: bool):
         self.s.post(f"{self.address}api/reset", json={"delete":delete})
 
-    #Netfilter regex
-    def nf_get_stats(self):
-        req = self.s.get(f"{self.address}api/nfregex/stats")
-        return req.json()
-
     def nf_get_services(self):
         req = self.s.get(f"{self.address}api/nfregex/services")
         return req.json() 
 
     def nf_get_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/service/{service_id}")
+        req = self.s.get(f"{self.address}api/nfregex/services/{service_id}")
         return req.json()
 
     def nf_stop_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/service/{service_id}/stop")
+        req = self.s.post(f"{self.address}api/nfregex/services/{service_id}/stop")
         return verify(req)
     
     def nf_start_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/service/{service_id}/start")
+        req = self.s.post(f"{self.address}api/nfregex/services/{service_id}/start")
         return verify(req)
 
     def nf_delete_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/service/{service_id}/delete")
+        req = self.s.delete(f"{self.address}api/nfregex/services/{service_id}")
         return verify(req)
 
     def nf_rename_service(self,service_id: str, newname: str):
-        req = self.s.post(f"{self.address}api/nfregex/service/{service_id}/rename" , json={"name":newname})
+        req = self.s.put(f"{self.address}api/nfregex/services/{service_id}/rename" , json={"name":newname})
         return verify(req)
 
     def nf_get_service_regexes(self,service_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/service/{service_id}/regexes")
+        req = self.s.get(f"{self.address}api/nfregex/services/{service_id}/regexes")
         return req.json()
 
     def nf_get_regex(self,regex_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/regex/{regex_id}")
+        req = self.s.get(f"{self.address}api/nfregex/regexes/{regex_id}")
         return req.json()
     
     def nf_delete_regex(self,regex_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/regex/{regex_id}/delete")
+        req = self.s.delete(f"{self.address}api/nfregex/regexes/{regex_id}")
         return verify(req)
     
     def nf_enable_regex(self,regex_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/regex/{regex_id}/enable")
+        req = self.s.post(f"{self.address}api/nfregex/regexes/{regex_id}/enable")
         return verify(req)
 
     def nf_disable_regex(self,regex_id: str):
-        req = self.s.get(f"{self.address}api/nfregex/regex/{regex_id}/disable")
+        req = self.s.post(f"{self.address}api/nfregex/regexes/{regex_id}/disable")
         return verify(req)
 
     def nf_add_regex(self, service_id: str, regex: str, mode: str, active: bool, is_case_sensitive: bool):
-        req = self.s.post(f"{self.address}api/nfregex/regexes/add", 
+        req = self.s.post(f"{self.address}api/nfregex/regexes", 
             json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_case_sensitive": is_case_sensitive})
         return verify(req)
 
     def nf_add_service(self, name: str, port: int, proto: str, ip_int: str):
-        req = self.s.post(f"{self.address}api/nfregex/services/add" , 
+        req = self.s.post(f"{self.address}api/nfregex/services" , 
             json={"name":name,"port":port, "proto": proto, "ip_int": ip_int})
         return req.json()["service_id"] if verify(req) else False 
 
@@ -137,30 +138,30 @@ class FiregexAPI:
         return req.json() 
 
     def ph_get_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/porthijack/service/{service_id}")
+        req = self.s.get(f"{self.address}api/porthijack/services/{service_id}")
         return req.json()
 
     def ph_stop_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/porthijack/service/{service_id}/stop")
+        req = self.s.post(f"{self.address}api/porthijack/services/{service_id}/stop")
         return verify(req)
     
     def ph_start_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/porthijack/service/{service_id}/start")
+        req = self.s.post(f"{self.address}api/porthijack/services/{service_id}/start")
         return verify(req)
 
     def ph_delete_service(self,service_id: str):
-        req = self.s.get(f"{self.address}api/porthijack/service/{service_id}/delete")
+        req = self.s.delete(f"{self.address}api/porthijack/services/{service_id}")
         return verify(req)
 
     def ph_rename_service(self,service_id: str,newname: str):
-        req = self.s.post(f"{self.address}api/porthijack/service/{service_id}/rename" , json={"name":newname})
+        req = self.s.put(f"{self.address}api/porthijack/services/{service_id}/rename" , json={"name":newname})
         return verify(req)
 
     def ph_change_destination(self,service_id: str, ip_dst:string , proxy_port: int):
-        req = self.s.post(f"{self.address}api/porthijack/service/{service_id}/change-destination", json={"ip_dst": ip_dst, "proxy_port": proxy_port})
+        req = self.s.put(f"{self.address}api/porthijack/services/{service_id}/change-destination", json={"ip_dst": ip_dst, "proxy_port": proxy_port})
         return verify(req)
 
     def ph_add_service(self, name: str, public_port: int, proxy_port: int, proto: str, ip_src: str, ip_dst: str):
-        req = self.s.post(f"{self.address}api/porthijack/services/add" , 
+        req = self.s.post(f"{self.address}api/porthijack/services" , 
             json={"name":name, "public_port": public_port, "proxy_port":proxy_port, "proto": proto, "ip_src": ip_src, "ip_dst": ip_dst})
         return req.json()["service_id"] if verify(req) else False 

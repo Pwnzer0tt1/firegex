@@ -130,6 +130,7 @@ class FirewallManager:
     def allow_dhcp(self):
         return self.db.get("allow_dhcp", "1") == "1"
     
-    @drop_invalid.setter
-    def allow_dhcp_set(self, value):
+    @allow_dhcp.setter
+    def allow_dhcp(self, value):
         self.db.set("allow_dhcp", "1" if value else "0")
+

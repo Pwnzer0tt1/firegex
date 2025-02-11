@@ -133,10 +133,6 @@ class SocketTunnelQueue: public NfQueueExecutor {
 
 	SocketTunnelQueue(int queue) : NfQueueExecutor(queue, &queue_cb) {}
 
-	~SocketTunnelQueue() {
-		// TODO
-	}
-
 };
 
 #endif // PROXY_TUNNEL_CPP

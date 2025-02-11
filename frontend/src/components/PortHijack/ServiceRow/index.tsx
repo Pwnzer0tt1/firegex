@@ -29,24 +29,6 @@ function ServiceRow({ service }:{ service:Service }) {
         validate:{ proxy_port: (value) => (value > 0 && value < 65536)? null : "Invalid proxy port" }
     })
 
-    const onChangeProxyPort = ({proxy_port}:{proxy_port:number}) => {
-        if (proxy_port === service.proxy_port) return
-        if (proxy_port > 0 && proxy_port < 65536 && proxy_port !== service.public_port){
-            porthijack.changedestination(service.service_id, service.ip_dst, proxy_port).then( res => {
-                if (res.status === "ok"){
-                    okNotify(`Service ${service.name} destination port has changed in ${ proxy_port }`, `Successfully changed destination port`)
-                }else{
-                    errorNotify(`Error while changing the destination port of ${service.name}`,`Error: ${res.status}`)
-                }
-            }).catch( err => {
-                errorNotify("Request for changing port failed!",`Error: [ ${err} ]`)
-            })
-        }else{
-            form.setFieldValue("proxy_port", service.proxy_port)
-            errorNotify(`Error while changing the destination port of ${service.name}`,`Insert a valid port number`)
-        }
-    }
-
     const stopService = async () => {
         setButtonLoading(true)
         
@@ -119,21 +101,7 @@ function ServiceRow({ service }:{ service:Service }) {
                     <Space h="sm" />
                     <Badge color="blue" radius="sm" size="md" variant="filled">
                         <Box className="center-flex">
-                            TO {service.ip_dst} : 
-                            <form onSubmit={form.onSubmit((v)=>portInputRef.current?.blur())}>
-                                <PortInput
-                                    defaultValue={service.proxy_port}
-                                    size="xs"
-                                    variant="unstyled"
-                                    style={{
-                                        width: (10+form.values.proxy_port.toString().length*6.2) +"px"
-                                    }}
-                                    className="firegex__porthijack__servicerow__portInput"
-                                    onBlur={(e)=>{onChangeProxyPort({proxy_port:parseInt(e.target.value)})}}
-                                    ref={portInputRef}
-                                    {...form.getInputProps("proxy_port")}
-                                />
-                            </form>
+                            TO {service.ip_dst} : service.proxy_port
                         </Box>
                     </Badge>
                     </Box>

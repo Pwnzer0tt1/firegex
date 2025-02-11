@@ -4,6 +4,8 @@ from modules.nfregex.nftables import FiregexTables, FiregexFilter
 from modules.nfregex.models import Regex, Service
 from utils.sqlite import SQLite
 
+#TODO copied file, review
+
 class STATUS:
     STOP = "stop"
     ACTIVE = "active"

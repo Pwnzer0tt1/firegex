@@ -14,11 +14,10 @@ RUN bun run build
 
 
 #Building main conteiner
-FROM --platform=$TARGETARCH debian:trixie-slim AS base
-RUN apt-get update -qq && apt-get upgrade -qq && \
-    apt-get install -qq python3-pip build-essential \
-    libnetfilter-queue-dev libnfnetlink-dev libmnl-dev libcap2-bin\
-    nftables libvectorscan-dev libtins-dev python3-nftables
+FROM --platform=$TARGETARCH registry.fedoraproject.org/fedora:latest
+RUN dnf -y update && dnf install -y python3-pip @development-tools gcc-c++ \
+    libnetfilter_queue-devel libnfnetlink-devel libmnl-devel libcap-ng-utils \
+    nftables vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute
@@ -28,7 +27,7 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /execute/requirements
 
 COPY ./backend/binsrc /execute/binsrc
 RUN g++ binsrc/nfqueue.cpp -o modules/cppqueue -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
-RUN g++ binsrc/nfproxy-tun.cpp -o modules/cppnfproxy -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl)
+#RUN g++ binsrc/nfproxy-tun.cpp -o modules/cppnfproxy -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl)
 
 COPY ./backend/ /execute/
 COPY --from=frontend /app/dist/ ./frontend/

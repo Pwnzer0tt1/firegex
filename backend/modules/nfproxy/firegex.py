@@ -8,6 +8,8 @@ import traceback
 from utils import DEBUG
 from fastapi import HTTPException
 
+#TODO copied file, review
+
 nft = FiregexTables()
 
 class RegexFilter:
