@@ -14,7 +14,7 @@ import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
 
 
-const socket = IS_DEV?io("ws://"+DEV_IP_BACKEND, {transports: ["websocket", "polling"], path:"/sock" }):io({transports: ["websocket", "polling"], path:"/sock"});
+const socket = IS_DEV?io("ws://"+DEV_IP_BACKEND, {transports: ["websocket"], path:"/sock/socket.io" }):io({transports: ["websocket"], path:"/sock/socket.io"});
 
 function App() {
 

@@ -8,13 +8,13 @@ from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from passlib.context import CryptContext
-from fastapi_socketio import SocketManager
 from utils.sqlite import SQLite
 from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
+import socketio
 
 # DB init
 db = SQLite('db/firegex.db')
@@ -42,7 +42,14 @@ app = FastAPI(
     title="Firegex API",
     version=API_VERSION,
 )
-utils.socketio = SocketManager(app, "/sock", socketio_path="")
+utils.socketio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins=[],
+    transports=["websocket"]
+)
+
+sio_app = socketio.ASGIApp(utils.socketio, socketio_path="/sock/socket.io", other_asgi_app=app)
+app.mount("/sock", sio_app)
 
 if DEBUG:
     app.add_middleware(

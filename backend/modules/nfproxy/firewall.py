@@ -1,17 +1,14 @@
 import asyncio
-from modules.nfregex.firegex import FiregexInterceptor, RegexFilter
-from modules.nfregex.nftables import FiregexTables, FiregexFilter
-from modules.nfregex.models import Regex, Service
+from modules.nfproxy.firegex import FiregexInterceptor
+from modules.nfproxy.nftables import FiregexTables, FiregexFilter
+from modules.nfproxy.models import Service, PyFilter
 from utils.sqlite import SQLite
-
-#TODO copied file, review
 
 class STATUS:
     STOP = "stop"
     ACTIVE = "active"
 
 nft = FiregexTables()
-
 
 class ServiceManager:
     def __init__(self, srv: Service, db):
@@ -23,13 +20,13 @@ class ServiceManager:
         self.interceptor = None
     
     async def _update_filters_from_db(self):
-        regexes = [
-            Regex.from_dict(ele) for ele in
-                self.db.query("SELECT * FROM regexes WHERE service_id = ? AND active=1;", self.srv.id)
+        pyfilters = [
+            PyFilter.from_dict(ele) for ele in
+                self.db.query("SELECT * FROM pyfilter WHERE service_id = ? AND active=1;", self.srv.id)
         ]
         #Filter check
         old_filters = set(self.filters.keys())
-        new_filters = set([f.id for f in regexes])
+        new_filters = set([f.id for f in pyfilters])
         #remove old filters
         for f in old_filters:
             if f not in new_filters:
@@ -37,8 +34,7 @@ class ServiceManager:
         #add new filters
         for f in new_filters:
             if f not in old_filters:
-                filter = [ele for ele in regexes if ele.id == f][0]
-                self.filters[f] = RegexFilter.from_regex(filter, self._stats_updater)
+                self.filters[f] = [ele for ele in pyfilters if ele.id == f][0]
         if self.interceptor:
             await self.interceptor.reload(self.filters.values())
     
@@ -54,8 +50,8 @@ class ServiceManager:
             elif (self.status, to) == (STATUS.STOP, STATUS.ACTIVE):
                 await self.restart()
 
-    def _stats_updater(self,filter:RegexFilter):
-        self.db.query("UPDATE regexes SET blocked_packets = ? WHERE regex_id = ?;", filter.blocked, filter.id)
+    def _stats_updater(self,filter:PyFilter):
+        self.db.query("UPDATE pyfilter SET blocked_packets = ?, edited_packets = ? WHERE filter_id = ?;", filter.blocked_packets, filter.edited_packets, filter.id)
 
     def _set_status(self,status):
         self.status = status
@@ -64,7 +60,7 @@ class ServiceManager:
     async def start(self):
         if not self.interceptor:
             nft.delete(self.srv)
-            self.interceptor = await FiregexInterceptor.start(self.srv)
+            self.interceptor = await FiregexInterceptor.start(self.srv, self._stats_updater)
             await self._update_filters_from_db()
             self._set_status(STATUS.ACTIVE)
 
@@ -119,3 +115,5 @@ class FirewallManager:
         
 class ServiceNotFoundException(Exception):
     pass
+
+

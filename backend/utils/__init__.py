@@ -5,13 +5,13 @@ import socket
 import psutil
 import sys
 import nftables
-from fastapi_socketio import SocketManager
+from socketio import AsyncServer
 from fastapi import Path
 from typing import Annotated
 
 LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
 
-socketio:SocketManager = None
+socketio:AsyncServer = None
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 ROUTERS_DIR = os.path.join(ROOT_DIR,"routers")
