@@ -8,11 +8,11 @@ import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
 import ChangeDestination from './ChangeDestination';
-import PortInput from '../../PortInput';
 import { useForm } from '@mantine/form';
 import { MenuDropDownWithButton } from '../../MainLayout';
+import { MdDoubleArrow } from "react-icons/md";
 
-function ServiceRow({ service }:{ service:Service }) {
+export default function ServiceRow({ service }:{ service:Service }) {
 
     let status_color = service.active ? "teal": "red"
 
@@ -72,40 +72,36 @@ function ServiceRow({ service }:{ service:Service }) {
 
     return <>
             <Box className='firegex__nfregex__rowbox'>
-            <Grid className="firegex__nfregex__row" justify="flex-end" style={{width:"100%"}}>
-                <Grid.Col span={{ md:4, xs: 12 }}>
-                    <Box className={"center-flex-row"}>
-                        <Title className="firegex__nfregex__name">
+            <Box className="firegex__nfregex__row" style={{width:"100%", flexDirection: isMedium?"row":"column"}}>
+                <Box>
+                    <Box className="center-flex" style={{ justifyContent: "flex-start" }}>
+                        <MdDoubleArrow size={30} style={{color: "white"}}/>
+                        <Title className="firegex__nfregex__name" ml="xs">
                             {service.name}
                         </Title>
-                        <Box className="center-flex" style={{ gap: 6 }}>
-                            <Badge color={status_color} radius="md" size="lg" variant="filled">Status: <u>{service.active?"ENABLED":"DISABLED"}</u></Badge>
-                            <Badge color={service.proto === "tcp"?"cyan":"orange"} radius="md" size="lg" variant="filled">
-                                {service.proto}
-                            </Badge>
-                        </Box>
-                        {isMedium?null:<Space w="xl" />}
                     </Box>
-                </Grid.Col>
+                    <Box className="center-flex" style={{ gap: 8, marginTop: 15, justifyContent: "flex-start" }}>
+                        <Badge color={status_color} radius="md" size="md" variant="filled">{service.active?"ENABLED":"DISABLED"}</Badge>
+                        <Badge color={service.proto === "tcp"?"cyan":"orange"} radius="md" size="md" variant="filled">
+                            {service.proto}
+                        </Badge>
+                    </Box>
+                    {isMedium?null:<Space w="xl" />}
+                </Box>
                 
-                <Grid.Col className={isMedium?"center-flex":"center-flex-row"} span={{ md:8, xs: 12 }}>
-                    <Box visibleFrom='md' className='flex-spacer' />
-                    <Space hiddenFrom='md' h="md" />
-                    <Space hiddenFrom='md' w="xl" />
-                    <Space hiddenFrom='md' w="md" />
-                    
+                <Box className={isMedium?"center-flex":"center-flex-row"}>                    
                     <Box className="center-flex-row">
-                    <Badge color="lime" radius="sm" size="md" variant="filled">
-                        FROM {service.ip_src} : {service.public_port}
+                    <Badge color="lime" radius="sm" size="lg" variant="filled">
+                        FROM {service.ip_src} :{service.public_port}
                     </Badge>
                     <Space h="sm" />
-                    <Badge color="blue" radius="sm" size="md" variant="filled">
+                    <Badge color="blue" radius="sm" size="lg" variant="filled">
                         <Box className="center-flex">
-                            TO {service.ip_dst} : service.proxy_port
+                            TO {service.ip_dst} :{service.proxy_port}
                         </Box>
                     </Badge>
                     </Box>
-                    {isMedium?<Box className='flex-spacer' />:<Space h="xl" />}
+                    {isMedium?<Space w="xl" />:<Space h="lg" />}
                     <Box className="center-flex">
                         <MenuDropDownWithButton>
                             <Menu.Label><b>Rename service</b></Menu.Label>
@@ -134,14 +130,10 @@ function ServiceRow({ service }:{ service:Service }) {
                                 <FaPlay size="20px" />
                             </ActionIcon>
                         </Tooltip>
-                        
                     </Box>
-                    {isMedium?<Space w="xl" />:null} 
-            
-                </Grid.Col>
-            </Grid>
+                </Box>
+            </Box>
         </Box>
-       
 
         <YesNoModal
             title='Are you sure to delete this service?'
@@ -162,5 +154,3 @@ function ServiceRow({ service }:{ service:Service }) {
         />
     </>
 }
-
-export default ServiceRow;

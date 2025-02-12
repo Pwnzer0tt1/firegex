@@ -49,16 +49,16 @@ function RenameForm({ opened, onClose, service }:{ opened:boolean, onClose:()=>v
                 placeholder="Awesome Service Name!"
                 {...form.getInputProps('name')}
             />
-            <Group align="right" mt="md">
+            <Group mt="md" justify="flex-end" mb="sm">
                 <Button loading={submitLoading} type="submit">Rename</Button>
             </Group>
 
-            <Space h="md" />
-            
             {error?<>
-            <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
-                Error: {error}
-            </Notification><Space h="md" /></>:null}
+                <Space h="md" />
+                <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
+                    Error: {error}
+                </Notification><Space h="md" />
+            </>:null}
             
         </form>
     </Modal>

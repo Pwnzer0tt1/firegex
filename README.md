@@ -55,7 +55,7 @@ This means that firegex is projected to avoid any possibility to have the servic
 Initiially the project was based only on regex filters, and also now the main function uses regexes, but firegex have and will have also other filtering tools. 
 
 # Credits
-- Copyright (c) 2022 Pwnzer0tt1
+- Copyright (c) 2022-2025 Pwnzer0tt1
 
 ## Star History
 
