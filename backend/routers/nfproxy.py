@@ -8,7 +8,6 @@ from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, socketio_emit, PortType
 from utils.models import ResetRequest, StatusMessageModel
 
-# TODO copied file, review
 class ServiceModel(BaseModel):
     service_id: str
     status: str

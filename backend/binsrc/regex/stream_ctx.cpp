@@ -51,6 +51,7 @@ struct packet_info;
 
 struct tcp_stream_tmp {
 	bool matching_has_been_called = false;
+	bool already_closed = false;
 	bool result;
 	packet_info *pkt_info;
 };
@@ -62,7 +63,7 @@ struct stream_ctx {
 	hs_scratch_t* out_scratch = nullptr;
 	u_int16_t latest_config_ver = 0;
 	StreamFollower follower;
-	tcp_stream_tmp tcp_match_util;
+	tcp_stream_tmp match_info;
 
 	void clean_scratches(){
 		if (out_scratch != nullptr){
@@ -131,12 +132,14 @@ struct stream_ctx {
 };
 
 struct packet_info {
-	string packet;
 	string payload;
 	stream_id sid;
 	bool is_input;
 	bool is_tcp;
+	bool is_ipv6;
 	stream_ctx* sctx;
+	Tins::PDU* packet_pdu;
+	Tins::PDU* layer4_pdu;
 };
 
 

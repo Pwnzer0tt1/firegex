@@ -124,17 +124,22 @@ class RegexQueue: public NfQueueExecutor {
 		}
 		if (match_res.has_matched){
 			auto rules_vector = info.is_input ? conf->input_ruleset.regexes : conf->output_ruleset.regexes;
-			stringstream msg;
-			msg << "BLOCKED " << rules_vector[match_res.matched] << "\n";
-			osyncstream(cout) << msg.str() << flush;
+			osyncstream(cout) << "BLOCKED " << rules_vector[match_res.matched] << endl;
 			return false;
 		}
 		return true;
 	}
+
+	//If the stream has already been matched, drop all data, and try to close the connection
+	static void keep_fin_packet(stream_ctx* sctx){
+		sctx->match_info.matching_has_been_called = true;
+		sctx->match_info.already_closed = true;
+	}
 	
 	static void on_data_recv(Stream& stream, stream_ctx* sctx, string data) {
-		sctx->tcp_match_util.matching_has_been_called = true;
-		bool result = filter_action(*sctx->tcp_match_util.pkt_info);
+		sctx->match_info.matching_has_been_called = true;
+		sctx->match_info.already_closed = false;
+		bool result = filter_action(*sctx->match_info.pkt_info);
 		#ifdef DEBUG
 			cerr << "[DEBUG] [NetfilterQueue.on_data_recv] result: " << result << endl;
 		#endif
@@ -142,11 +147,11 @@ class RegexQueue: public NfQueueExecutor {
 			#ifdef DEBUG
 				cerr << "[DEBUG] [NetfilterQueue.on_data_recv] Stream matched, removing all data about it" << endl;
 			#endif
-			sctx->clean_stream_by_id(sctx->tcp_match_util.pkt_info->sid);
-			stream.ignore_client_data();
-			stream.ignore_server_data();
+			sctx->clean_stream_by_id(sctx->match_info.pkt_info->sid);
+			stream.client_data_callback(bind(keep_fin_packet, sctx));
+			stream.server_data_callback(bind(keep_fin_packet, sctx));
 		}
-		sctx->tcp_match_util.result = result;
+		sctx->match_info.result = result;
 	}
 	
 	//Input data filtering
@@ -158,7 +163,6 @@ class RegexQueue: public NfQueueExecutor {
 	static void on_server_data(Stream& stream, stream_ctx* sctx) {
 		on_data_recv(stream, sctx, string(stream.server_payload().begin(), stream.server_payload().end()));
 	}
-	
 	
 	// A stream was terminated. The second argument is the reason why it was terminated
 	static void on_stream_close(Stream& stream, stream_ctx* sctx) {
@@ -176,18 +180,17 @@ class RegexQueue: public NfQueueExecutor {
 		stream.auto_cleanup_payloads(true);
 		if (stream.is_partial_stream()) {
 			#ifdef DEBUG
-				cerr << "[DEBUG] [NetfilterQueue.on_new_stream] Partial stream detected, skipping" << endl;
+				cerr << "[DEBUG] [NetfilterQueue.on_new_stream] Partial stream detected" << endl;
 			#endif
-			return;
+			stream.enable_recovery_mode(10 * 1024);
 		}
 		stream.client_data_callback(bind(on_client_data, placeholders::_1, sctx));
 		stream.server_data_callback(bind(on_server_data, placeholders::_1, sctx));
 		stream.stream_closed_callback(bind(on_stream_close, placeholders::_1, sctx));
 	}
-	
-	
+
 	template<typename T>
-	static void build_verdict(T packet, uint8_t *payload, uint16_t plen, nlmsghdr *nlh_verdict, nfqnl_msg_packet_hdr *ph, stream_ctx* sctx, bool is_input){
+	static void build_verdict(T packet, uint8_t *payload, uint16_t plen, nlmsghdr *nlh_verdict, nfqnl_msg_packet_hdr *ph, stream_ctx* sctx, bool is_input, bool is_ipv6){
 		Tins::TCP* tcp = packet.template find_pdu<Tins::TCP>();
 	
 		if (tcp){
@@ -197,15 +200,17 @@ class RegexQueue: public NfQueueExecutor {
 				payload_size = application_layer->size();
 			}
 			packet_info pktinfo{
-				packet: string(payload, payload+plen),
 				payload: string(payload+plen - payload_size, payload+plen),
 				sid: stream_id::make_identifier(packet),
 				is_input: is_input,
 				is_tcp: true,
+				is_ipv6: is_ipv6,
 				sctx: sctx,
+				packet_pdu: &packet,
+				layer4_pdu: tcp,
 			};
-			sctx->tcp_match_util.matching_has_been_called = false;
-			sctx->tcp_match_util.pkt_info = &pktinfo;
+			sctx->match_info.matching_has_been_called = false;
+			sctx->match_info.pkt_info = &pktinfo;
 			#ifdef DEBUG
 				cerr << "[DEBUG] [NetfilterQueue.build_verdict] TCP Packet received " << packet.src_addr() << ":" << tcp->sport() << " -> " << packet.dst_addr() << ":" << tcp->dport() << " thr: " << this_thread::get_id() <<  ", sending to libtins StreamFollower" << endl;
 			#endif
@@ -217,15 +222,33 @@ class RegexQueue: public NfQueueExecutor {
 				cerr << "[DEBUG] [NetfilterQueue.build_verdict] StreamFollower has NOT called matching functions" << endl;
 			}
 			#endif
-			if (sctx->tcp_match_util.matching_has_been_called && !sctx->tcp_match_util.result){
-				Tins::PDU* data_layer = tcp->release_inner_pdu();
-				if (data_layer != nullptr){
-					delete data_layer;
+			// Do an action only is an ordered packet has been received
+			if (sctx->match_info.matching_has_been_called){
+				bool empty_payload = pktinfo.payload.empty();
+				//In this 2 cases we have to remove all data about the stream
+				if (!sctx->match_info.result || sctx->match_info.already_closed){
+					#ifdef DEBUG
+						cerr << "[DEBUG] [NetfilterQueue.build_verdict] Stream matched, removing all data about it" << endl;
+					#endif
+					sctx->clean_stream_by_id(pktinfo.sid);
+					//If the packet has data, we have to remove it
+					if (!empty_payload){
+						Tins::PDU* data_layer = tcp->release_inner_pdu();
+						if (data_layer != nullptr){
+							delete data_layer;
+						}
+					}
+					//For the first matched data or only for data packets, we set FIN bit
+					//This only for client packets, because this will trigger server to close the connection
+					//Packets will be filtered anyway also if client don't send packets
+					if ((!sctx->match_info.result || !empty_payload) && is_input){
+						tcp->set_flag(Tins::TCP::FIN,1);
+						tcp->set_flag(Tins::TCP::ACK,1);
+						tcp->set_flag(Tins::TCP::SYN,0);
+					}
+					//Send the edited packet to the kernel
+					nfq_nlmsg_verdict_put_pkt(nlh_verdict, packet.serialize().data(), packet.size());
 				}
-				tcp->set_flag(Tins::TCP::FIN,1);
-				tcp->set_flag(Tins::TCP::ACK,1);
-				tcp->set_flag(Tins::TCP::SYN,0);
-				nfq_nlmsg_verdict_put_pkt(nlh_verdict, packet.serialize().data(), packet.size());
 			}
 			nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
 		}else{
@@ -242,12 +265,14 @@ class RegexQueue: public NfQueueExecutor {
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
 			}
 			packet_info pktinfo{
-				packet: string(payload, payload+plen),
 				payload: string(payload+plen - payload_size, payload+plen),
 				sid: stream_id::make_identifier(packet),
 				is_input: is_input,
 				is_tcp: false,
+				is_ipv6: is_ipv6,
 				sctx: sctx,
+				packet_pdu: &packet,
+				layer4_pdu: udp,
 			};
 			if (filter_action(pktinfo)){
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT );
@@ -298,9 +323,9 @@ class RegexQueue: public NfQueueExecutor {
 		
 		// Check IP protocol version
 		if ( (payload[0] & 0xf0) == 0x40 ){
-			build_verdict(Tins::IP(payload, plen), payload, plen, nlh_verdict, ph, sctx, is_input);
+			build_verdict(Tins::IP(payload, plen), payload, plen, nlh_verdict, ph, sctx, is_input, false);
 		}else{
-			build_verdict(Tins::IPv6(payload, plen), payload, plen, nlh_verdict, ph, sctx, is_input);
+			build_verdict(Tins::IPv6(payload, plen), payload, plen, nlh_verdict, ph, sctx, is_input, true);
 		}
 	
 		if (mnl_socket_sendto(nl, nlh_verdict, nlh_verdict->nlmsg_len) < 0) {

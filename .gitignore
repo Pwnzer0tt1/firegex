@@ -29,7 +29,6 @@
 /firegex-compose-tmp-file.yml
 /firegex.py
 /tests/benchmark.csv
-/backend/modules/nfproxy/socks/
 # misc
 **/.DS_Store
 **/.env.local
