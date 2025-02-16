@@ -4,12 +4,15 @@
 #include <iostream>
 #include <cstring>
 #include <sstream>
-#include "../utils.hpp"
+#include "../utils.cpp"
 #include <vector>
 #include <hs.h>
 #include <memory>
 
 using namespace std;
+
+namespace Firegex {
+namespace Regex {
 
 enum FilterDirection{ CTOS, STOC };
 
@@ -181,10 +184,6 @@ void inline scratch_setup(regex_ruleset &conf, hs_scratch_t* & scratch){
 	}
 }
 
-struct matched_data{
-	unsigned int matched = 0;
-	bool has_matched = false;
-};
-
+}}
 #endif // REGEX_FILTER_CPP
 

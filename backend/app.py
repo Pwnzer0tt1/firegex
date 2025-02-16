@@ -42,14 +42,6 @@ app = FastAPI(
     title="Firegex API",
     version=API_VERSION,
 )
-utils.socketio = socketio.AsyncServer(
-    async_mode="asgi",
-    cors_allowed_origins=[],
-    transports=["websocket"]
-)
-
-sio_app = socketio.ASGIApp(utils.socketio, socketio_path="/sock/socket.io", other_asgi_app=app)
-app.mount("/sock", sio_app)
 
 if DEBUG:
     app.add_middleware(
@@ -60,6 +52,15 @@ if DEBUG:
         allow_headers=["*"],
     )
 
+
+utils.socketio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins=[],
+    transports=["websocket"]
+)
+
+sio_app = socketio.ASGIApp(utils.socketio, socketio_path="/sock/socket.io", other_asgi_app=app)
+app.mount("/sock", sio_app)
 
 def APP_STATUS(): return "init" if db.get("password") is None else "run"
 def JWT_SECRET(): return db.get("secret")
@@ -197,10 +198,11 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
-        host=None, #"::" if DEBUG else None,
+        host="::" if DEBUG else None,
         port=FIREGEX_PORT,
-        reload=False,#DEBUG,
+        reload=DEBUG,
         access_log=True,
-        workers=1, # Multiple workers will cause a crash due to the creation
-                  # of multiple processes with separated memory
+        workers=1, # Firewall module can't be replicated in multiple workers
+                   # Later the firewall module will be moved to a separate process
+                   # The webserver will communicate using redis (redis is also needed for websockets)
     )

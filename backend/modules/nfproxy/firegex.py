@@ -57,9 +57,9 @@ class FiregexInterceptor:
             self.process.kill()
             raise Exception("Invalid binary output")
         line = line_fut.decode()
-        if line.startswith("QUEUES "):
+        if line.startswith("QUEUE "):
             params = line.split()
-            return (int(params[1]), int(params[2]))
+            return (int(params[1]), int(params[1]))
         else:
             self.process.kill()
             raise Exception("Invalid binary output")

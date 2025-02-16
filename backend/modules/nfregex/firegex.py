@@ -84,7 +84,7 @@ class FiregexInterceptor:
         return self
     
     async def _start_binary(self):
-        proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cppqueue")
+        proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cppregex")
         self.process = await asyncio.create_subprocess_exec(
             proxy_binary_path,
             stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE,
@@ -97,9 +97,9 @@ class FiregexInterceptor:
             self.process.kill()
             raise Exception("Invalid binary output")
         line = line_fut.decode()
-        if line.startswith("QUEUES "):
+        if line.startswith("QUEUE "):
             params = line.split()
-            return (int(params[1]), int(params[2]))
+            return (int(params[1]), int(params[1]))
         else:
             self.process.kill()
             raise Exception("Invalid binary output")

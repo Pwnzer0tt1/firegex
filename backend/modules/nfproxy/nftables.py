@@ -62,6 +62,7 @@ class FiregexTables(NFTableManager):
                 "expr": [
                         {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
                         {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "sport"}}, "op": "==", "right": int(srv.port)}},
+                        {"mangle": {"key": {"meta": {"key": "mark"}},"value": 0x1338}},
                         {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
             }}},
@@ -72,6 +73,7 @@ class FiregexTables(NFTableManager):
                 "expr": [
                         {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
                         {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "dport"}}, "op": "==", "right": int(srv.port)}},
+                        {"mangle": {"key": {"meta": {"key": "mark"}},"value": 0x1337}},
                         {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                     ]
             }}}

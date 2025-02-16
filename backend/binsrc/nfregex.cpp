@@ -5,6 +5,8 @@
 #include <iostream>
 
 using namespace std;
+using namespace Firegex::Regex;
+using Firegex::NfQueue::MultiThreadQueue;
 
 void config_updater (){
 	string line;
@@ -54,12 +56,17 @@ int main(int argc, char *argv[]){
 	}
 
 	regex_config.reset(new RegexRules(stream_mode));
+
 	
-	NFQueueSequence<RegexQueue> queues(n_of_threads);
-	queues.start();
+	MultiThreadQueue<RegexNfQueue> queue_manager(n_of_threads);
 
-	osyncstream(cout) << "QUEUES " << queues.init() << " " << queues.end() << endl;
-	cerr << "[info] [main] Queues: " << queues.init() << ":" << queues.end() << " threads assigned: " << n_of_threads << " stream mode: " << stream_mode << endl;
+	osyncstream(cout) << "QUEUE " << queue_manager.queue_num() << endl;
+	cerr << "[info] [main] Queue: " << queue_manager.queue_num() << " threads assigned: " << n_of_threads << " stream mode: " << stream_mode << endl;
 
+	thread qthr([&](){
+		queue_manager.start();
+	});
 	config_updater();
+	qthr.join();
+
 }

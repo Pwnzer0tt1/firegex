@@ -1,21 +1,17 @@
 #ifndef PROXY_TUNNEL_SETTINGS_CPP
 #define PROXY_TUNNEL_SETTINGS_CPP
 
-#include <iostream>
-#include <cstring>
-#include <sstream>
-#include "../utils.hpp"
 #include <vector>
-#include <hs.h>
 #include <memory>
 
 using namespace std;
 
 class PyCodeConfig{
 	public:
-		const string code;
+		const vector<uint8_t> code;
 	public:
-		PyCodeConfig(string pycode): code(pycode){}
+		PyCodeConfig(vector<uint8_t> pycode): code(pycode){}
+		PyCodeConfig(): code(vector<uint8_t>()){}
 		
 		~PyCodeConfig(){}
 };
