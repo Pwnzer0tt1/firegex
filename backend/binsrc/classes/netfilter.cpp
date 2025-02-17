@@ -24,8 +24,8 @@ public:
     
     void loop() {
         static_cast<Derived*>(this)->before_loop();
+        PktRequest<Derived>* pkt;
         for(;;) {
-            PktRequest<Derived>* pkt;
             queue.take(pkt);
             static_cast<Derived*>(this)->handle_next_packet(pkt);
             delete pkt;

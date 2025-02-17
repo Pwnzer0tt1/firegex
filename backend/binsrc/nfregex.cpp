@@ -8,6 +8,15 @@ using namespace std;
 using namespace Firegex::Regex;
 using Firegex::NfQueue::MultiThreadQueue;
 
+/*
+
+Compile options:
+NFQUEUE_FAIL_OPEN - enable fail-open option of nfqueueß
+---
+USE_PIPES_FOR_BLOKING_QUEUE - use pipes instead of conditional variable, queue and mutex for blocking queue
+*/
+
+
 void config_updater (){
 	string line;
 	while (true){

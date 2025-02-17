@@ -91,12 +91,12 @@ public:
 				stream_match = stream_search->second;
 			}
 			err = hs_scan_stream(
-				stream_match,pkt->data.c_str(), pkt->data.size(),
+				stream_match,pkt->data, pkt->data_size,
 				0, scratch_space, match_func, &match_res
 			);
 		}else{
 			err = hs_scan(
-				regex_matcher,pkt->data.c_str(), pkt->data.size(),
+				regex_matcher,pkt->data, pkt->data_size,
 				0, scratch_space, match_func, &match_res
 			);
 		}
@@ -120,7 +120,7 @@ public:
 	}
 
 	void handle_next_packet(NfQueue::PktRequest<RegexNfQueue>* pkt) override{
-		bool empty_payload = pkt->data.size() == 0;
+		bool empty_payload = pkt->data_size == 0;
 		if (pkt->tcp){
 			match_ctx.matching_has_been_called = false;
 			match_ctx.pkt = pkt;

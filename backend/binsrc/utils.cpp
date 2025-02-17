@@ -22,6 +22,36 @@ bool unhexlify(std::string const &hex, std::string &newString) {
    }
 }
 
+#ifdef USE_PIPES_FOR_BLOKING_QUEUE
+
+template<typename T>
+class BlockingQueue
+{
+private:
+      int pipefd[2];
+public:
+   BlockingQueue(){
+      if (pipe(pipefd) == -1) {
+         throw std::runtime_error("pipe");
+      }
+   }
+
+    void put(T new_value)
+    {
+        if (write(pipefd[1], &new_value, sizeof(T)) == -1) {
+            throw std::runtime_error("write");
+        }
+    }
+    void take(T& value)
+    {
+        if (read(pipefd[0], &value, sizeof(T)) == -1) {
+            throw std::runtime_error("read");
+        }
+    }
+};
+
+#else
+
 template<typename T, int MAX = 1024> //same of kernel nfqueue max
 class BlockingQueue
 {
@@ -32,6 +62,7 @@ private:
     std::condition_variable condNotFull;
     size_t count; // Guard with Mutex
 public:
+
     void put(T new_value)
     {
       
@@ -60,5 +91,7 @@ public:
         condNotFull.notify_one();
     }
 };
+
+#endif
 
 #endif // UTILS_CPP
