@@ -114,6 +114,13 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     args = parser.parse_args(args=args_to_parse)
     
+    if "version" in args and args.version and g.build:
+        puts("The version argument is not used when the image is built from the Dockerfile", color=colors.yellow)
+        puts("The version will be ignored", color=colors.yellow)
+    
+    if "version" not in args or not args.version:
+        args.version = "latest"
+    
     if "clear" not in args:
         args.clear = False
     
@@ -314,7 +321,7 @@ def main():
                     write_compose(skip_password=False)
                     if not g.build:
                         puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
-                        cmd_check("docker pull ghcr.io/pwnzer0tt1/firegex", print_output=True)
+                        cmd_check(f"docker pull ghcr.io/pwnzer0tt1/firegex:{args.version}", print_output=True)
                     puts("Running 'docker compose up -d --build'\n", color=colors.green)
                     composecmd("up -d --build", g.composefile)
             case "compose":
