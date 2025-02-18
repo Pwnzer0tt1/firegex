@@ -39,7 +39,7 @@ class ServiceAddResponse(BaseModel):
     status:str
     service_id: str|None = None
 
-app = APIRouter()
+#app = APIRouter() Not released in this version
 
 db = SQLite('db/nft-pyfilters.db', {
     'services': {

@@ -27,7 +27,7 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /execute/requirements
 
 COPY ./backend/binsrc /execute/binsrc
 RUN g++ binsrc/nfregex.cpp -o modules/cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
-RUN g++ binsrc/nfproxy-tun.cpp -o modules/cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3.13 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
+#RUN g++ binsrc/nfproxy.cpp -o modules/cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3.13 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
 
 COPY ./backend/ /execute/
 COPY --from=frontend /app/dist/ ./frontend/

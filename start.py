@@ -104,6 +104,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--startup-psw','-P', required=False, action="store_true", help='Insert password in the startup screen of firegex', default=False)
     parser_start.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
+    parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default="latest")
 
     #Stop Command
     parser_stop = subcommands.add_parser('stop', help='Stop the firewall')
@@ -145,7 +146,7 @@ def write_compose(skip_password = True):
                     "firewall": {
                         "restart": "unless-stopped",
                         "container_name": "firegex",
-                        "build" if g.build else "image": "." if g.build else "ghcr.io/pwnzer0tt1/firegex",
+                        "build" if g.build else "image": "." if g.build else f"ghcr.io/pwnzer0tt1/firegex:{args.version}",
                         "network_mode": "host",
                         "environment": [
                             f"PORT={args.port}",
@@ -190,7 +191,7 @@ def write_compose(skip_password = True):
                     "firewall": {
                         "restart": "unless-stopped",
                         "container_name": "firegex",
-                        "build" if g.build else "image": "." if g.build else "ghcr.io/pwnzer0tt1/firegex",
+                        "build" if g.build else "image": "." if g.build else f"ghcr.io/pwnzer0tt1/firegex:{args.version}",
                         "ports": [
                             f"{args.port}:{args.port}"
                         ],
