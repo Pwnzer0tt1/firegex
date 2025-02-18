@@ -2,7 +2,7 @@ import { ActionIcon, Badge, Box, Divider, Grid, Menu, Space, Title, Tooltip } fr
 import { useState } from 'react';
 import { FaPlay, FaStop } from 'react-icons/fa';
 import { nfregex, Service, serviceQueryKey } from '../utils';
-import { MdOutlineArrowForwardIos } from "react-icons/md"
+import { MdDoubleArrow, MdOutlineArrowForwardIos } from "react-icons/md"
 import YesNoModal from '../../YesNoModal';
 import { errorNotify, isMediumScreen, okNotify, regex_ipv4 } from '../../../js/utils';
 import { BsTrashFill } from 'react-icons/bs';
@@ -10,8 +10,12 @@ import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
 import { MenuDropDownWithButton } from '../../MainLayout';
 import { useQueryClient } from '@tanstack/react-query';
+import { FaFilter } from "react-icons/fa";
+import { VscRegex } from "react-icons/vsc";
+import { IoSettingsSharp } from 'react-icons/io5';
+import AddEditService from '../AddEditService';
 
-function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
+export default function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
     let status_color = "gray";
     switch(service.status){
@@ -24,6 +28,7 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
+    const [editModal, setEditModal] = useState(false)
     const isMedium = isMediumScreen()
 
     const stopService = async () => {
@@ -72,44 +77,43 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
 
     return <>
         <Box className='firegex__nfregex__rowbox'>
-            <Grid className="firegex__nfregex__row" justify="flex-end" style={{width:"100%"}}>
-                <Grid.Col span={{ md:4, xs: 12 }}>
-
-                    <Box className={"center-flex-row"}>
-                        <Title className="firegex__nfregex__name">
+            <Box className="firegex__nfregex__row" style={{width:"100%", flexDirection: isMedium?"row":"column"}}>
+                <Box>
+                    <Box className="center-flex" style={{ justifyContent: "flex-start" }}>
+                        <MdDoubleArrow size={30} style={{color: "white"}}/>
+                        <Title className="firegex__nfregex__name" ml="xs">
                             {service.name}
                         </Title>
-                        <Box className="center-flex" style={{ gap: 6 }}>
-                            <Badge color={status_color} radius="md" size="lg" variant="filled">Status: <u>{service.status}</u></Badge>
-                            <Badge size="lg" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient" radius="md">
-                                :{service.port}
-                            </Badge>
-                        </Box>
-                        {isMedium?null:<Space w="xl" />}
                     </Box>
-                </Grid.Col>
+                    <Box className="center-flex" style={{ gap: 8, marginTop: 15, justifyContent: "flex-start" }}>
+                        <Badge color={status_color} radius="md" size="lg" variant="filled">{service.status}</Badge>
+                        <Badge size="lg" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient" radius="md" style={{ fontSize: "110%" }}>
+                            :{service.port}
+                        </Badge>
+                    </Box>
+                    {isMedium?null:<Space w="xl" />}
+                </Box>
                 
-                <Grid.Col className={isMedium?"center-flex":"center-flex-row"} span={{ md:8, xs: 12 }}>
-                    <Box visibleFrom='md' className='flex-spacer' />
-                    <Space hiddenFrom='md' h="md" />
-                    <Space hiddenFrom='md' w="xl" />
-                    <Space hiddenFrom='md' w="md" />
+                <Box className={isMedium?"center-flex":"center-flex-row"}>
                     <Box className="center-flex-row">
-                        <Badge color="yellow" radius="sm" size="md" variant="filled">Connections Blocked: {service.n_packets}</Badge>
-                        <Space h="xs" />
-                        <Badge color="violet" radius="sm" size="md" variant="filled">Regex: {service.n_regex}</Badge>
-                        <Space h="xs" />
                         <Badge color={service.ip_int.match(regex_ipv4)?"cyan":"pink"} radius="sm" size="md" variant="filled">{service.ip_int} on {service.proto}</Badge>
+                        <Space h="xs" />
+                        <Box className='center-flex'>
+                            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2}} /> {service.n_packets}</Badge>
+                            <Space w="xs" />
+                            <Badge color="violet" radius="sm" size="md" variant="filled"><VscRegex style={{ marginBottom: -2}} size={13} /> {service.n_regex}</Badge>
+                        </Box>
                     </Box>
-                    {isMedium?<Box className='flex-spacer' />:<Space h="xl" />}
+                    {isMedium?<Space w="xl" />:<Space h="lg" />}
                     <Box className="center-flex">
                         <MenuDropDownWithButton>
-                            <Menu.Label><b>Rename service</b></Menu.Label>
+                            <Menu.Item><b>Edit service</b></Menu.Item>
+                            <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
                             <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
                             <Divider />
                             <Menu.Label><b>Danger zone</b></Menu.Label>
                             <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                        </MenuDropDownWithButton>
+                        </MenuDropDownWithButton> 
                         <Space w="md"/>                        
                         <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
                             <ActionIcon color="red" loading={buttonLoading}
@@ -129,14 +133,12 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
                             </ActionIcon>
                         </Tooltip>
                         {isMedium?<Space w="xl" />:<Space w="md" />} 
-                        {onClick?<Box style={{ backgroundColor: "var(--secondary_color)", borderRadius: "38%", width:"35px", height:"35px", display:"flex", justifyContent: "center", alignItems: "center", border:"#AAA 2px solid"}}>
+                        {onClick?<Box className='firegex__service_forward_btn'>
                             <MdOutlineArrowForwardIos onClick={onClick} style={{cursor:"pointer"}} size={25} />
                         </Box>:null}
-                        {isMedium?<Space w="xl" />:null}
                     </Box>
-            
-                </Grid.Col>
-            </Grid>
+                </Box>
+            </Box>
         </Box>
         <YesNoModal
             title='Are you sure to delete this service?'
@@ -150,7 +152,10 @@ function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void })
             opened={renameModal}
             service={service}
         />
+        <AddEditService
+            opened={editModal}
+            onClose={()=>setEditModal(false)}
+            edit={service}
+        />
     </>
 }
-
-export default ServiceRow;

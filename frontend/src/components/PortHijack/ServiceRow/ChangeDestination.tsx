@@ -53,15 +53,16 @@ function ChangeDestination({ opened, onClose, service }:{ opened:boolean, onClos
     <form onSubmit={form.onSubmit(submitRequest)}>
             
             <PortAndInterface form={form} int_name="ip_dst" port_name="proxy_port" />
-            <Group align="right" mt="md">
+            <Group justify='flex-end' mt="xl" mb="sm">
                 <Button loading={submitLoading} type="submit">Change</Button>
             </Group>
-            <Space h="md" />
             
             {error?<>
-            <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
-                Error: {error}
-            </Notification><Space h="md" /></>:null}
+                <Space h="md" />
+                <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
+                    Error: {error}
+                </Notification><Space h="md" />
+            </>:null}
             
         </form>
     </Modal>

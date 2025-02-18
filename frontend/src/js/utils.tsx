@@ -22,26 +22,6 @@ export const queryClient = new QueryClient({ defaultOptions: { queries: {
     staleTime: Infinity
 } }})
 
-export async function getapi(path:string):Promise<any>{
-
-    return await new Promise((resolve, reject) => {
-        fetch(`${IS_DEV?`http://${DEV_IP_BACKEND}`:""}/api/${path}`,{
-            credentials: "same-origin",
-            headers: { "Authorization" : "Bearer " + window.localStorage.getItem("access_token")}
-        }).then(res => {
-                if(res.status === 401) window.location.reload()
-                if(!res.ok){
-                    const errorDefault = res.statusText
-                    return res.json().then( res => reject(getErrorMessageFromServerResponse(res, errorDefault)) ).catch( _err => reject(errorDefault)) 
-                }
-                res.json().then( res => resolve(res) ).catch( err => reject(err))
-            })
-            .catch(err => {
-                reject(err)
-            })
-    });
-}
-
 export function getErrorMessage(e: any) {
 	let error = "Unknown error";
     if(typeof e == "string") return e
@@ -55,7 +35,6 @@ export function getErrorMessage(e: any) {
 	}
 	return error;
 }
-
 
 export function getErrorMessageFromServerResponse(e: any, def:string = "Unknown error") {
     if (e.status){
@@ -74,17 +53,17 @@ export function getErrorMessageFromServerResponse(e: any, def:string = "Unknown 
 }
 
 
-export async function postapi(path:string,data:any,is_form:boolean=false):Promise<any>{
+export async function genericapi(method:string,path:string,data:any = undefined, is_form:boolean=false):Promise<any>{
     return await new Promise((resolve, reject) => {
         fetch(`${IS_DEV?`http://${DEV_IP_BACKEND}`:""}/api/${path}`, {
-            method: 'POST',
+            method: method,
             credentials: "same-origin",
             cache: 'no-cache',
             headers: {
-              'Content-Type': is_form ? 'application/x-www-form-urlencoded' : 'application/json',
+              ...(data?{'Content-Type': is_form ? 'application/x-www-form-urlencoded' : 'application/json'}:{}),
               "Authorization" : "Bearer " + window.localStorage.getItem("access_token")
             },
-            body: is_form ? (new URLSearchParams(data)).toString() : JSON.stringify(data) 
+            body: data? (is_form ? (new URLSearchParams(data)).toString() : JSON.stringify(data)) : undefined
         }).then(res => {
             if(res.status === 401) window.location.reload() 
             if(res.status === 406) resolve({status:"Wrong Password"})
@@ -98,6 +77,22 @@ export async function postapi(path:string,data:any,is_form:boolean=false):Promis
             reject(err)
         })
     });
+}
+
+export async function getapi(path:string):Promise<any>{
+    return await genericapi("GET",path)
+}
+
+export async function postapi(path:string,data:any=undefined,is_form:boolean=false):Promise<any>{
+    return await genericapi("POST",path,data,is_form)
+}
+
+export async function deleteapi(path:string):Promise<any>{
+    return await genericapi("DELETE",path)
+}
+
+export async function putapi(path:string,data:any):Promise<any>{
+    return await genericapi("PUT",path,data)
 }
 
 export function getMainPath(){

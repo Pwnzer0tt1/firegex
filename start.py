@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
+
 from __future__ import annotations
-import argparse, sys, platform, os, multiprocessing, subprocess, getpass
+import argparse
+import sys
+import platform
+import os
+import multiprocessing
+import subprocess
+import getpass
 
 pref = "\033["
 reset = f"{pref}0m"
@@ -36,7 +43,7 @@ def dict_to_yaml(data, indent_spaces:int=4, base_indent:int=0, additional_spaces
     spaces = ' '*((indent_spaces*base_indent)+additional_spaces)
     if isinstance(data, dict):
         for key, value in data.items():
-            if not add_text_on_dict is None:
+            if add_text_on_dict is not None:
                 spaces_len = len(spaces)-len(add_text_on_dict)
                 spaces = (' '*max(spaces_len, 0))+add_text_on_dict
                 add_text_on_dict = None
@@ -76,7 +83,7 @@ def composecmd(cmd, composefile=None):
         puts("Docker compose not found! please install docker compose!", color=colors.red)
 
 def check_already_running():
-    return "firegex" in cmd_check(f'docker ps --filter "name=^firegex$"', get_output=True)
+    return "firegex" in cmd_check('docker ps --filter "name=^firegex$"', get_output=True)
 
 def gen_args(args_to_parse: list[str]|None = None):                     
     
@@ -97,6 +104,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--startup-psw','-P', required=False, action="store_true", help='Insert password in the startup screen of firegex', default=False)
     parser_start.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
+    parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default="latest")
 
     #Stop Command
     parser_stop = subcommands.add_parser('stop', help='Stop the firewall')
@@ -106,13 +114,13 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     args = parser.parse_args(args=args_to_parse)
     
-    if not "clear" in args:
+    if "clear" not in args:
         args.clear = False
     
-    if not "threads" in args or args.threads < 1:
+    if "threads" not in args or args.threads < 1:
         args.threads = multiprocessing.cpu_count()
     
-    if not "port" in args or args.port < 1:
+    if "port" not in args or args.port < 1:
         args.port = 4444
     
     if args.command is None:
@@ -126,7 +134,7 @@ def gen_args(args_to_parse: list[str]|None = None):
 args = gen_args()
 
 def is_linux():
-    return "linux" in sys.platform and not 'microsoft-standard' in platform.uname().release
+    return "linux" in sys.platform and 'microsoft-standard' not in platform.uname().release
 
 def write_compose(skip_password = True):
     psw_set = get_password() if not skip_password else None
@@ -138,7 +146,7 @@ def write_compose(skip_password = True):
                     "firewall": {
                         "restart": "unless-stopped",
                         "container_name": "firegex",
-                        "build" if g.build else "image": "." if g.build else "ghcr.io/pwnzer0tt1/firegex",
+                        "build" if g.build else "image": "." if g.build else f"ghcr.io/pwnzer0tt1/firegex:{args.version}",
                         "network_mode": "host",
                         "environment": [
                             f"PORT={args.port}",
@@ -183,7 +191,7 @@ def write_compose(skip_password = True):
                     "firewall": {
                         "restart": "unless-stopped",
                         "container_name": "firegex",
-                        "build" if g.build else "image": "." if g.build else "ghcr.io/pwnzer0tt1/firegex",
+                        "build" if g.build else "image": "." if g.build else f"ghcr.io/pwnzer0tt1/firegex:{args.version}",
                         "ports": [
                             f"{args.port}:{args.port}"
                         ],
@@ -229,10 +237,13 @@ def get_password():
 
 
 def volume_exists():
-    return "firegex_firegex_data" in cmd_check(f'docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
+    return "firegex_firegex_data" in cmd_check('docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
 
 def nfqueue_exists():
-    import socket, fcntl, os, time
+    import socket
+    import fcntl
+    import os
+    import time
 
     NETLINK_NETFILTER = 12
     SOL_NETLINK = 270
@@ -241,7 +252,7 @@ def nfqueue_exists():
         nfsock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_NETFILTER)
         fcntl.fcntl(nfsock, fcntl.F_SETFL, os.O_RDONLY|os.O_NONBLOCK)
         nfsock.setsockopt(SOL_NETLINK, NETLINK_EXT_ACK, 1)
-    except Exception as e:
+    except Exception:
         return False
     
     for rev in [3,2,1,0]:
@@ -252,10 +263,13 @@ def nfqueue_exists():
         nfsock.send(payload)
         data = nfsock.recv(1024)
         is_error = data[4] == 2
-        if not is_error: return True # The module exists and we have permission to use it
+        if not is_error:
+            return True # The module exists and we have permission to use it
         error_code = int.from_bytes(data[16:16+4], signed=True, byteorder='little')
-        if error_code == -1: return True # EPERM (the user is not root, but the module exists)
-        if error_code == -2: pass # ENOENT (the module does not exist)
+        if error_code == -1:
+            return True # EPERM (the user is not root, but the module exists)
+        if error_code == -2:
+            pass # ENOENT (the module does not exist)
         else:
             puts("Error while trying to check if the nfqueue module is loaded, this check will be skipped!", color=colors.yellow)
             return True
@@ -294,7 +308,7 @@ def main():
                 if check_already_running():
                     puts("Firegex is already running! use --help to see options useful to manage firegex execution", color=colors.yellow)
                 else:
-                    puts(f"Firegex", color=colors.yellow, end="")
+                    puts("Firegex", color=colors.yellow, end="")
                     puts(" will start on port ", end="")
                     puts(f"{args.port}", color=colors.cyan)
                     write_compose(skip_password=False)

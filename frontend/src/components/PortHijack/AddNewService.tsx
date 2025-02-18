@@ -94,16 +94,16 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
                 />
             </Box>      
 
-            <Group align="right" mt="md">
+            <Group justify='flex-end' mt="md" mb="sm">
                 <Button loading={submitLoading} type="submit">Add Service</Button>
             </Group>
 
-            <Space h="md" />
-            
             {error?<>
-            <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
-                Error: {error}
-            </Notification><Space h="md" /></>:null}
+                <Space h="md" />
+                <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
+                    Error: {error}
+                </Notification><Space h="md" />
+            </>:null}
             
         </form>
     </Modal>

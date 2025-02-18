@@ -1,14 +1,18 @@
+#ifndef REGEX_FILTER_CPP
+#define REGEX_FILTER_CPP
+
 #include <iostream>
 #include <cstring>
 #include <sstream>
-#include "../utils.hpp"
+#include "../utils.cpp"
 #include <vector>
 #include <hs.h>
+#include <memory>
 
 using namespace std;
 
-#ifndef REGEX_FILTER_HPP
-#define REGEX_FILTER_HPP
+namespace Firegex {
+namespace Regex {
 
 enum FilterDirection{ CTOS, STOC };
 
@@ -170,5 +174,16 @@ class RegexRules{
 		}
 };
 
-#endif // REGEX_FILTER_HPP
+shared_ptr<RegexRules> regex_config;
+
+void inline scratch_setup(regex_ruleset &conf, hs_scratch_t* & scratch){
+	if (scratch == nullptr && conf.hs_db != nullptr){
+		if (hs_alloc_scratch(conf.hs_db, &scratch) != HS_SUCCESS) {
+			throw invalid_argument("Cannot alloc scratch");
+		}
+	}
+}
+
+}}
+#endif // REGEX_FILTER_CPP
 

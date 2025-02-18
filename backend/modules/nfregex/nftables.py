@@ -48,10 +48,12 @@ class FiregexTables(NFTableManager):
     def add(self, srv:Service, queue_range):
         
         for ele in self.get():
-            if ele.__eq__(srv): return
+            if ele.__eq__(srv):
+                return
                 
         init, end = queue_range
-        if init > end: init, end = end, init
+        if init > end:
+            init, end = end, init
         self.cmd(
             { "insert":{ "rule": {
                 "family": "inet",

@@ -24,7 +24,7 @@ db = SQLite('db/firewall-rules.db', {
         'action': 'VARCHAR(10) NOT NULL CHECK (action IN ("accept", "drop", "reject"))',
     },
     'QUERY':[
-        "CREATE UNIQUE INDEX IF NOT EXISTS unique_rules ON rules (proto, src, dst, port_src_from, port_src_to, port_dst_from, port_dst_to, mode);"
+        "CREATE UNIQUE INDEX IF NOT EXISTS unique_rules ON rules (proto, src, dst, port_src_from, port_src_to, port_dst_from, port_dst_to, mode, `table`);"
     ]
 })
 
@@ -71,7 +71,7 @@ async def get_settings():
     """Get the firewall settings"""
     return firewall.settings
 
-@app.post("/settings/set", response_model=StatusMessageModel)
+@app.put("/settings", response_model=StatusMessageModel)
 async def set_settings(form: FirewallSettings):
     """Set the firewall settings"""
     firewall.settings = form
@@ -86,13 +86,13 @@ async def get_rule_list():
         "enabled": firewall.enabled
     }
 
-@app.get('/enable', response_model=StatusMessageModel)
+@app.post('/enable', response_model=StatusMessageModel)
 async def enable_firewall():
     """Request enabling the firewall"""
     firewall.enabled = True
     return await apply_changes()
 
-@app.get('/disable', response_model=StatusMessageModel)
+@app.post('/disable', response_model=StatusMessageModel)
 async def disable_firewall():
     """Request disabling the firewall"""
     firewall.enabled = False
@@ -128,9 +128,9 @@ def parse_and_check_rule(rule:RuleModel):
 
     return rule
 
-@app.post('/rules/set', response_model=StatusMessageModel)
+@app.post('/rules', response_model=StatusMessageModel)
 async def add_new_service(form: RuleFormAdd):
-    """Add a new service"""
+    """Edit rule table"""
     rules = [parse_and_check_rule(ele) for ele in form.rules]
     try:
         db.queries(["DELETE FROM rules"]+

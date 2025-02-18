@@ -1,0 +1,14 @@
+typer==0.12.3
+requests>=2.32.3
+python-dateutil==2.9.0.post0
+pydantic >= 2
+typing-extensions >= 4.7.1
+textual==0.89.1
+toml==0.10.2
+psutil==6.0.0
+dirhash==0.5.0
+requests-toolbelt==1.0.0
+python-socketio[client]==5.11.4
+orjson
+
+# TODO choose dependencies

@@ -15,7 +15,7 @@ puts(f"{args.address}", color=colors.yellow)
 firegex = FiregexAPI(args.address)
 
 #Connect to Firegex
-if firegex.status()["status"] =="init":
+if firegex.status()["status"] == "init":
     if (firegex.set_password(args.password)):
         puts(f"Sucessfully set password to {args.password} ✔", color=colors.green)
     else:

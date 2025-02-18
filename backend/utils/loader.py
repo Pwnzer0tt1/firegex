@@ -58,15 +58,18 @@ class RouterModule():
 def get_router_modules():
     res: list[RouterModule] = []
     for route in list_routers():
-        module = getattr(__import__(f"routers.{route}"), route, None)
-        if module:
-            res.append(RouterModule(
-                router=getattr(module, "app", None),
-                reset=getattr(module, "reset", None),
-                startup=getattr(module, "startup", None),
-                shutdown=getattr(module, "shutdown", None),
-                name=route
-            ))
+        try:
+            module = getattr(__import__(f"routers.{route}"), route, None)
+            if module:
+                res.append(RouterModule(
+                    router=getattr(module, "app", None),
+                    reset=getattr(module, "reset", None),
+                    startup=getattr(module, "startup", None),
+                    shutdown=getattr(module, "shutdown", None),
+                    name=route
+                ))
+        except Exception as e:
+            print(f"Router {route} failed to load: {e}")
     return res
 
 def load_routers(app):
@@ -74,6 +77,9 @@ def load_routers(app):
     for router in get_router_modules():
         if router.router:
             app.include_router(router.router, prefix=f"/{router.name}", tags=[router.name])
+        else:
+            print(f"Router {router.name} is not loaded")
+            continue
         if router.reset:
             resets.append(router.reset)
         if router.startup:

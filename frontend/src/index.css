@@ -32,14 +32,15 @@ body {
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  margin:3px;
+  width: 4px;
+  height: 4px;
+  margin:2px;
   background: #333;
-  cursor: pointer;
 }
 ::-webkit-scrollbar-thumb {
-  background: #757575;
-  border-radius: 8px;
+  width: 2px;
+  background: #777;
+  border-radius: 5px;
 }
 
 .mantine-Modal-content {
@@ -72,7 +73,7 @@ body {
 }
 
 .firegex__regexview__box{
-  padding:30px;
+  padding:10px;
   margin:5px;
 }
 
@@ -80,6 +81,7 @@ body {
   border-radius: 8px;
   overflow: hidden;
   margin: 6px;
+  width: 100%;
 }
 
 .firegex__regexview__regex_text{
@@ -131,25 +133,25 @@ body {
   text-decoration: underline;
 }
 
-
 .firegex__nfregex__row{
     width: 95%;
-    padding: 20px;
-    border-radius: 20px;
+    padding: 10px;
+    padding-left: 35px;
+    padding-right: 35px;
     display: flex;
-    justify-content: center;
+    justify-content: space-between;
     align-items: center;
 }
 
 .firegex__nfregex__name{
-    font-size: 1.8em;
+    font-size: 1.6em;
     font-weight: bolder;
-    margin-right: 10px;
-    margin-bottom: 13px;
+    text-transform: capitalize;
     color:#FFF;
     max-width: 300px;
     overflow: hidden;
-    text-align: center;
+    margin-left: -20px;
+    margin-right: 20px;
 }
 
 .firegex__nfregex__name:hover{
@@ -207,7 +209,47 @@ body {
 
 .firegex__nfregex__rowbox{
   width: 100%;
+  height: 150px;
+  align-items: center;
+  justify-content: center;
+  display: flex;
   background-color: var(--fourth_color);
-  border-radius: 20px;
+  border-radius: 10px;
   border: #444 3px solid;
+}
+
+@media (max-width: 599px) {
+  .firegex__nfregex__row{
+    margin: 0;
+    padding: 0;
+  }
+  .firegex__nfregex__row > *{
+    padding: 10px 0;
+  }
+  .firegex__nfregex__rowbox{
+    height: 100%;
+    width: 90%;
+    padding: 20px 20px;
+    margin: 0;
+  }
+  .firegex__nfregex__name{
+    padding: 0;
+    margin: 0;
+  }
+}
+
+.firegex__service_forward_btn{
+    background-color: var(--primary_color);
+    border-radius: 38%;
+    width: 35px;
+    height: 35px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border: 2px solid #DDD;
+    transition: 0.3s;
+}
+.firegex__service_forward_btn:hover{
+    opacity: 0.8;
+    transition: 0.3s;
 }

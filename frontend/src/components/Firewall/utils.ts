@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { ServerResponse } from "../../js/models"
-import { getapi, postapi } from "../../js/utils"
+import { getapi, postapi, putapi } from "../../js/utils"
 
 export enum Protocol {
     TCP = "tcp",
@@ -79,15 +79,15 @@ export const firewall = {
         return await getapi("firewall/settings") as FirewallSettings;
     },
     setsettings: async(data:FirewallSettings) => {
-        return await postapi("firewall/settings/set", data) as ServerResponse;
+        return await putapi("firewall/settings", data) as ServerResponse;
     },
     enable: async() => {
-        return await getapi("firewall/enable") as ServerResponse;
+        return await postapi("firewall/enable") as ServerResponse;
     },
     disable: async() => {
-        return await getapi("firewall/disable") as ServerResponse;
+        return await postapi("firewall/disable") as ServerResponse;
     },
     ruleset: async (data:RuleAddForm) => {
-        return await postapi("firewall/rules/set", data) as ServerResponseListed;
+        return await postapi("firewall/rules", data) as ServerResponseListed;
     }
 }

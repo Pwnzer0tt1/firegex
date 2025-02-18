@@ -5,7 +5,7 @@ function YesNoModal( { title, description, action, onClose, opened}:{ title:stri
 
     return <Modal size="xl" title={title} opened={opened} onClose={onClose} centered>
             {description}
-            <Group align="right" mt="md">
+            <Group justify='flex-end' mt="md">
                 <Button onClick={()=>{
                     onClose()
                     action()

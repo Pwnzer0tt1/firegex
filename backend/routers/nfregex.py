@@ -19,9 +19,16 @@ class ServiceModel(BaseModel):
     ip_int: str
     n_regex: int
     n_packets: int
+    fail_open: bool
 
 class RenameForm(BaseModel):
     name:str
+
+class SettingsForm(BaseModel):
+    port: PortType|None = None
+    proto: str|None = None
+    ip_int: str|None = None
+    fail_open: bool|None = None
 
 class RegexModel(BaseModel):
     regex:str
@@ -44,6 +51,7 @@ class ServiceAddForm(BaseModel):
     port: PortType
     proto: str
     ip_int: str
+    fail_open: bool = False
 
 class ServiceAddResponse(BaseModel):
     status:str
@@ -59,6 +67,7 @@ db = SQLite('db/nft-regex.db', {
         'name': 'VARCHAR(100) NOT NULL UNIQUE',
         'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "udp"))',
         'ip_int': 'VARCHAR(100) NOT NULL',
+        'fail_open': 'BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1'
     },
     'regexes': {
         'regex': 'TEXT NOT NULL',
@@ -128,13 +137,14 @@ async def get_service_list():
             s.name name,
             s.proto proto,
             s.ip_int ip_int,
+            s.fail_open fail_open,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
         GROUP BY s.service_id;
     """)
 
-@app.get('/service/{service_id}', response_model=ServiceModel)
+@app.get('/services/{service_id}', response_model=ServiceModel)
 async def get_service_by_id(service_id: str):
     """Get info about a specific service using his id"""
     res = db.query("""
@@ -145,6 +155,7 @@ async def get_service_by_id(service_id: str):
             s.name name,
             s.proto proto,
             s.ip_int ip_int,
+            s.fail_open fail_open,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
@@ -154,21 +165,21 @@ async def get_service_by_id(service_id: str):
         raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
 
-@app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
+@app.post('/services/{service_id}/stop', response_model=StatusMessageModel)
 async def service_stop(service_id: str):
     """Request the stop of a specific service"""
     await firewall.get(service_id).next(STATUS.STOP)
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/service/{service_id}/start', response_model=StatusMessageModel)
+@app.post('/services/{service_id}/start', response_model=StatusMessageModel)
 async def service_start(service_id: str):
     """Request the start of a specific service"""
     await firewall.get(service_id).next(STATUS.ACTIVE)
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/service/{service_id}/delete', response_model=StatusMessageModel)
+@app.delete('/services/{service_id}', response_model=StatusMessageModel)
 async def service_delete(service_id: str):
     """Request the deletion of a specific service"""
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
@@ -177,7 +188,7 @@ async def service_delete(service_id: str):
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.post('/service/{service_id}/rename', response_model=StatusMessageModel)
+@app.put('/services/{service_id}/rename', response_model=StatusMessageModel)
 async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
@@ -190,7 +201,46 @@ async def service_rename(service_id: str, form: RenameForm):
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/service/{service_id}/regexes', response_model=list[RegexModel])
+@app.put('/services/{service_id}/settings', response_model=StatusMessageModel)
+async def service_settings(service_id: str, form: SettingsForm):
+    """Request to change the settings of a specific service (will cause a restart)"""
+        
+    if form.proto is not None and form.proto not in ["tcp", "udp"]:
+        raise HTTPException(status_code=400, detail="Invalid protocol")
+    
+    if form.port is not None and (form.port < 1 or form.port > 65535):
+        raise HTTPException(status_code=400, detail="Invalid port")
+    
+    if form.ip_int is not None:
+        try:
+            form.ip_int = ip_parse(form.ip_int)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid address")
+    
+    keys = []
+    values = []
+    
+    for key, value in form.model_dump(exclude_none=True).items():
+        keys.append(key)
+        values.append(value)
+        
+    if len(keys) == 0:
+        raise HTTPException(status_code=400, detail="No settings to change provided")
+    
+    try:
+        db.query(f'UPDATE services SET {", ".join([f"{key}=?" for key in keys])} WHERE service_id = ?;', *values, service_id)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="A service with these settings already exists")
+    
+    old_status = firewall.get(service_id).status
+    await firewall.remove(service_id)
+    await firewall.reload()
+    await firewall.get(service_id).next(old_status)
+    
+    await refresh_frontend()
+    return {'status': 'ok'}
+
+@app.get('/services/{service_id}/regexes', response_model=list[RegexModel])
 async def get_service_regexe_list(service_id: str):
     """Get the list of the regexes of a service"""
     if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id):
@@ -202,7 +252,7 @@ async def get_service_regexe_list(service_id: str):
         FROM regexes WHERE service_id = ?;
     """, service_id)
 
-@app.get('/regex/{regex_id}', response_model=RegexModel)
+@app.get('/regexes/{regex_id}', response_model=RegexModel)
 async def get_regex_by_id(regex_id: int):
     """Get regex info using his id"""
     res = db.query("""
@@ -215,7 +265,7 @@ async def get_regex_by_id(regex_id: int):
         raise HTTPException(status_code=400, detail="This regex does not exists!")
     return res[0]
 
-@app.get('/regex/{regex_id}/delete', response_model=StatusMessageModel)
+@app.delete('/regexes/{regex_id}', response_model=StatusMessageModel)
 async def regex_delete(regex_id: int):
     """Delete a regex using his id"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
@@ -226,7 +276,7 @@ async def regex_delete(regex_id: int):
     
     return {'status': 'ok'}
 
-@app.get('/regex/{regex_id}/enable', response_model=StatusMessageModel)
+@app.post('/regexes/{regex_id}/enable', response_model=StatusMessageModel)
 async def regex_enable(regex_id: int):
     """Request the enabling of a regex"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
@@ -236,7 +286,7 @@ async def regex_enable(regex_id: int):
         await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/regex/{regex_id}/disable', response_model=StatusMessageModel)
+@app.post('/regexes/{regex_id}/disable', response_model=StatusMessageModel)
 async def regex_disable(regex_id: int):
     """Request the deactivation of a regex"""
     res = db.query('SELECT * FROM regexes WHERE regex_id = ?;', regex_id)
@@ -246,7 +296,7 @@ async def regex_disable(regex_id: int):
         await refresh_frontend()
     return {'status': 'ok'}
 
-@app.post('/regexes/add', response_model=StatusMessageModel)
+@app.post('/regexes', response_model=StatusMessageModel)
 async def add_new_regex(form: RegexAddForm):
     """Add a new regex"""
     try:
@@ -263,7 +313,7 @@ async def add_new_regex(form: RegexAddForm):
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.post('/services/add', response_model=ServiceAddResponse)
+@app.post('/services', response_model=ServiceAddResponse)
 async def add_new_service(form: ServiceAddForm):
     """Add a new service"""
     try:
@@ -275,8 +325,8 @@ async def add_new_service(form: ServiceAddForm):
     srv_id = None
     try:
         srv_id = gen_service_id()
-        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int) VALUES (?, ?, ?, ?, ?, ?)",
-                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int)
+        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int, fail_open) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int, form.fail_open)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="This type of service already exists")
     await firewall.reload()
@@ -299,7 +349,8 @@ async def metrics():
         FROM regexes r LEFT JOIN services s ON s.service_id = r.service_id;
     """)
     metrics = []
-    sanitize = lambda s : s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
+    def sanitize(s):
+        return s.replace('\\', '\\\\').replace('"', '\\"').replace('\n', '\\n')
     for stat in stats:
         props = f'service_name="{sanitize(stat["name"])}",regex="{sanitize(b64decode(stat["regex"]).decode())}",mode="{stat["mode"]}",is_case_sensitive="{stat["is_case_sensitive"]}"'
         metrics.append(f'firegex_blocked_packets{{{props}}} {stat["blocked_packets"]}')

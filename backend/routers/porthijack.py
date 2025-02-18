@@ -92,7 +92,7 @@ async def get_service_list():
     """Get the list of existent firegex services"""
     return db.query("SELECT service_id, active, public_port, proxy_port, name, proto, ip_src, ip_dst FROM services;")
 
-@app.get('/service/{service_id}', response_model=ServiceModel)
+@app.get('/services/{service_id}', response_model=ServiceModel)
 async def get_service_by_id(service_id: str):
     """Get info about a specific service using his id"""
     res = db.query("SELECT service_id, active, public_port, proxy_port, name, proto, ip_src, ip_dst FROM services WHERE service_id = ?;", service_id)
@@ -100,21 +100,21 @@ async def get_service_by_id(service_id: str):
         raise HTTPException(status_code=400, detail="This service does not exists!")
     return res[0]
 
-@app.get('/service/{service_id}/stop', response_model=StatusMessageModel)
+@app.post('/services/{service_id}/stop', response_model=StatusMessageModel)
 async def service_stop(service_id: str):
     """Request the stop of a specific service"""
     await firewall.get(service_id).disable()
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/service/{service_id}/start', response_model=StatusMessageModel)
+@app.post('/services/{service_id}/start', response_model=StatusMessageModel)
 async def service_start(service_id: str):
     """Request the start of a specific service"""
     await firewall.get(service_id).enable()
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.get('/service/{service_id}/delete', response_model=StatusMessageModel)
+@app.delete('/services/{service_id}', response_model=StatusMessageModel)
 async def service_delete(service_id: str):
     """Request the deletion of a specific service"""
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
@@ -122,7 +122,7 @@ async def service_delete(service_id: str):
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.post('/service/{service_id}/rename', response_model=StatusMessageModel)
+@app.put('/services/{service_id}/rename', response_model=StatusMessageModel)
 async def service_rename(service_id: str, form: RenameForm):
     """Request to change the name of a specific service"""
     form.name = refactor_name(form.name)
@@ -139,7 +139,7 @@ class ChangeDestination(BaseModel):
     ip_dst: str
     proxy_port: PortType
 
-@app.post('/service/{service_id}/change-destination', response_model=StatusMessageModel)
+@app.put('/services/{service_id}/change-destination', response_model=StatusMessageModel)
 async def service_change_destination(service_id: str, form: ChangeDestination):
     """Request to change the proxy destination of the service"""
     
@@ -162,7 +162,7 @@ async def service_change_destination(service_id: str, form: ChangeDestination):
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.post('/services/add', response_model=ServiceAddResponse)
+@app.post('/services', response_model=ServiceAddResponse)
 async def add_new_service(form: ServiceAddForm):
     """Add a new service"""
     try:
