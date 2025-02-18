@@ -18,9 +18,16 @@ class ServiceModel(BaseModel):
     n_filters: int
     edited_packets: int
     blocked_packets: int
+    fail_open: bool
 
 class RenameForm(BaseModel):
     name:str
+
+class SettingsForm(BaseModel):
+    port: PortType|None = None
+    proto: str|None = None
+    ip_int: str|None = None
+    fail_open: bool|None = None
 
 class PyFilterModel(BaseModel):
     filter_id: int
@@ -34,12 +41,13 @@ class ServiceAddForm(BaseModel):
     port: PortType
     proto: str
     ip_int: str
+    fail_open: bool = True
 
 class ServiceAddResponse(BaseModel):
     status:str
     service_id: str|None = None
 
-#app = APIRouter() Not released in this version
+app = APIRouter()
 
 db = SQLite('db/nft-pyfilters.db', {
     'services': {
@@ -49,6 +57,7 @@ db = SQLite('db/nft-pyfilters.db', {
         'name': 'VARCHAR(100) NOT NULL UNIQUE',
         'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "http"))',
         'ip_int': 'VARCHAR(100) NOT NULL',
+        'fail_open': 'BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1',
     },
     'pyfilter': {
         'filter_id': 'INTEGER PRIMARY KEY',
@@ -116,6 +125,7 @@ async def get_service_list():
             s.name name,
             s.proto proto,
             s.ip_int ip_int,
+            s.fail_open fail_open,
             COUNT(f.filter_id) n_filters,
             COALESCE(SUM(f.blocked_packets),0) blocked_packets,
             COALESCE(SUM(f.edited_packets),0) edited_packets
@@ -134,6 +144,7 @@ async def get_service_by_id(service_id: str):
             s.name name,
             s.proto proto,
             s.ip_int ip_int,
+            s.fail_open fail_open,
             COUNT(f.filter_id) n_filters,
             COALESCE(SUM(f.blocked_packets),0) blocked_packets,
             COALESCE(SUM(f.edited_packets),0) edited_packets
@@ -177,6 +188,45 @@ async def service_rename(service_id: str, form: RenameForm):
         db.query('UPDATE services SET name=? WHERE service_id = ?;', form.name, service_id)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="This name is already used")
+    await refresh_frontend()
+    return {'status': 'ok'}
+
+@app.put('/services/{service_id}/settings', response_model=StatusMessageModel)
+async def service_settings(service_id: str, form: SettingsForm):
+    """Request to change the settings of a specific service (will cause a restart)"""
+        
+    if form.proto is not None and form.proto not in ["tcp", "udp"]:
+        raise HTTPException(status_code=400, detail="Invalid protocol")
+    
+    if form.port is not None and (form.port < 1 or form.port > 65535):
+        raise HTTPException(status_code=400, detail="Invalid port")
+    
+    if form.ip_int is not None:
+        try:
+            form.ip_int = ip_parse(form.ip_int)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid address")
+    
+    keys = []
+    values = []
+    
+    for key, value in form.model_dump(exclude_none=True).items():
+        keys.append(key)
+        values.append(value)
+        
+    if len(keys) == 0:
+        raise HTTPException(status_code=400, detail="No settings to change provided")
+    
+    try:
+        db.query(f'UPDATE services SET {", ".join([f"{key}=?" for key in keys])} WHERE service_id = ?;', *values, service_id)
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=400, detail="A service with these settings already exists")
+    
+    old_status = firewall.get(service_id).status
+    await firewall.remove(service_id)
+    await firewall.reload()
+    await firewall.get(service_id).next(old_status)
+    
     await refresh_frontend()
     return {'status': 'ok'}
 
@@ -246,8 +296,8 @@ async def add_new_service(form: ServiceAddForm):
     srv_id = None
     try:
         srv_id = gen_service_id()
-        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int) VALUES (?, ?, ?, ?, ?, ?)",
-                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int)
+        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int, fail_open) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int, form.fail_open)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="This type of service already exists")
     await firewall.reload()

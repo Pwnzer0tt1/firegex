@@ -43,6 +43,11 @@ def exit_test(code):
             exit_test(1)        
     exit(code)
 
+srvs = firegex.nf_get_services()
+for ele in srvs:
+    if ele['name'] == args.service_name:
+        firegex.nf_delete_service(ele['service_id'])
+
 service_id = firegex.nf_add_service(args.service_name, args.port, args.proto , "::1" if args.ipv6 else "127.0.0.1" )
 if service_id:
     puts(f"Sucessfully created service {service_id} ✔", color=colors.green)
@@ -64,7 +69,7 @@ try:
     else:
         puts("Test Failed: Data was corrupted ", color=colors.red)
         exit_test(1)
-except Exception as e:
+except Exception:
     puts("Test Failed: Couldn't send data to the server ", color=colors.red)
     exit_test(1)
 #Add new regex
@@ -194,10 +199,24 @@ else:
     exit_test(1)
 
 #Check if service was renamed correctly
-for services in firegex.nf_get_services():
-    if services["name"] == f"{args.service_name}2":
-        puts("Checked that service was renamed correctly  ✔", color=colors.green)
-        exit_test(0)
+service = firegex.nf_get_service(service_id)
+if service["name"] == f"{args.service_name}2":
+    puts("Checked that service was renamed correctly  ✔", color=colors.green)
+else:
+    puts("Test Failed: Service wasn't renamed correctly ✗", color=colors.red)
+    exit_test(1)
 
-puts("Test Failed: Service wasn't renamed correctly ✗", color=colors.red)
-exit_test(1)
+#Change settings
+opposite_proto = "udp" if args.proto == "tcp" else "tcp"
+if(firegex.nf_settings_service(service_id, 1338, opposite_proto, "::dead:beef" if args.ipv6 else "123.123.123.123", True)):
+    srv_updated = firegex.nf_get_service(service_id)
+    if srv_updated["port"] == 1338 and srv_updated["proto"] == opposite_proto and ("::dead:beef" if args.ipv6 else "123.123.123.123") in srv_updated["ip_int"] and srv_updated["fail_open"]:
+        puts("Sucessfully changed service settings ✔", color=colors.green)
+    else:
+        puts("Test Failed: Service settings weren't updated correctly ✗", color=colors.red)
+        exit_test(1)
+else:
+    puts("Test Failed: Coulnd't change service settings ✗", color=colors.red)
+    exit_test(1)
+
+exit_test(0)

@@ -42,6 +42,11 @@ def exit_test(code):
             exit_test(1)        
     exit(code)
 
+srvs = firegex.ph_get_services()
+for ele in srvs:
+    if ele['name'] == args.service_name:
+        firegex.ph_delete_service(ele['service_id'])
+
 #Create and start serivce
 service_id = firegex.ph_add_service(args.service_name, args.port, args.port+1, args.proto , "::1" if args.ipv6 else "127.0.0.1",  "::1" if args.ipv6 else "127.0.0.1")
 if service_id:
