@@ -5,7 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import ServiceRow from '../../components/NFRegex/ServiceRow';
 import { nfregexServiceQuery } from '../../components/NFRegex/utils';
 import { errorNotify, getErrorMessage, isMediumScreen } from '../../js/utils';
-import AddNewService from '../../components/NFRegex/AddNewService';
+import AddEditService from '../../components/NFRegex/AddEditService';
 import AddNewRegex from '../../components/AddNewRegex';
 import { useQueryClient } from '@tanstack/react-query';
 import { TbReload } from 'react-icons/tb';
@@ -81,13 +81,12 @@ function NFRegex({ children }: { children: any }) {
                     </Tooltip>
                 </Box>
             </>}
-            <AddNewService opened={open} onClose={closeModal} />
         </>}
     </Box>
     {srv?children:null}
     {srv?
         <AddNewRegex opened={open} onClose={closeModal} service={srv} />:
-        <AddNewService opened={open} onClose={closeModal} />
+        <AddEditService opened={open} onClose={closeModal} />
     }
     </>
 }

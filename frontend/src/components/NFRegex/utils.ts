@@ -12,6 +12,7 @@ export type Service = {
     ip_int: string,
     n_packets:number,
     n_regex:number,
+    fail_open:boolean,
 }
 
 export type ServiceAddForm = {
@@ -19,6 +20,14 @@ export type ServiceAddForm = {
     port:number,
     proto:string,
     ip_int:string,
+    fail_open: boolean,
+}
+
+export type ServiceSettings = {
+    port?:number,
+    proto?:string,
+    ip_int?:string,
+    fail_open?: boolean,
 }
 
 export type ServiceAddResponse = {
@@ -79,5 +88,9 @@ export const nfregex = {
     },
     serviceregexes: async (service_id:string) => {
         return await getapi(`nfregex/services/${service_id}/regexes`) as RegexFilter[];
-    }
+    },
+    settings: async (service_id:string, data:ServiceSettings) => {
+        const { status } = await putapi(`nfregex/services/${service_id}/settings`,data) as ServerResponse;
+        return status === "ok"?undefined:status
+    },
 }

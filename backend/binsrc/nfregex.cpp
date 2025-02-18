@@ -9,10 +9,7 @@ using namespace Firegex::Regex;
 using Firegex::NfQueue::MultiThreadQueue;
 
 /*
-
 Compile options:
-NFQUEUE_FAIL_OPEN - enable fail-open option of nfqueueß
----
 USE_PIPES_FOR_BLOKING_QUEUE - use pipes instead of conditional variable, queue and mutex for blocking queue
 */
 
@@ -63,14 +60,14 @@ int main(int argc, char *argv[]){
 	if (matchmode != nullptr && strcmp(matchmode, "block") == 0){
 		stream_mode = false;
 	}
+	
+	bool fail_open = strcmp(getenv("FIREGEX_NFQUEUE_FAIL_OPEN"), "1") == 0;
 
 	regex_config.reset(new RegexRules(stream_mode));
 
-	
 	MultiThreadQueue<RegexNfQueue> queue_manager(n_of_threads);
-
 	osyncstream(cout) << "QUEUE " << queue_manager.queue_num() << endl;
-	cerr << "[info] [main] Queue: " << queue_manager.queue_num() << " threads assigned: " << n_of_threads << " stream mode: " << stream_mode << endl;
+	cerr << "[info] [main] Queue: " << queue_manager.queue_num() << " threads assigned: " << n_of_threads << " stream mode: " << stream_mode << " fail open: " << fail_open << endl;
 
 	thread qthr([&](){
 		queue_manager.start();

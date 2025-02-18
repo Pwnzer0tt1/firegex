@@ -88,7 +88,11 @@ class FiregexInterceptor:
         self.process = await asyncio.create_subprocess_exec(
             proxy_binary_path,
             stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE,
-            env={"MATCH_MODE": "stream" if self.srv.proto == "tcp" else "block", "NTHREADS": os.getenv("NTHREADS","1")},
+            env={
+                "MATCH_MODE": "stream" if self.srv.proto == "tcp" else "block",
+                "NTHREADS": os.getenv("NTHREADS","1"),
+                "FIREGEX_NFQUEUE_FAIL_OPEN": "1" if self.srv.fail_open else "0",
+            },
         )
         line_fut = self.process.stdout.readuntil()
         try:

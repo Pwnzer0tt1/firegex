@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import RegexView from '../../components/RegexView';
 import AddNewRegex from '../../components/AddNewRegex';
 import { BsPlusLg } from "react-icons/bs";
-import { nfregexServiceQuery, nfregexServiceRegexesQuery } from '../../components/NFRegex/utils';
+import { nfregexServiceQuery, nfregexServiceRegexesQuery, Service } from '../../components/NFRegex/utils';
 import { Badge, Divider, Menu } from '@mantine/core';
 import { useState } from 'react';
 import { FaFilter, FaPlay, FaStop } from 'react-icons/fa';
@@ -18,6 +18,8 @@ import { MenuDropDownWithButton } from '../../components/MainLayout';
 import { useQueryClient } from '@tanstack/react-query';
 import { FaArrowLeft } from "react-icons/fa";
 import { VscRegex } from 'react-icons/vsc';
+import { IoSettingsSharp } from 'react-icons/io5';
+import AddEditService from '../../components/NFRegex/AddEditService';
 
 export default function ServiceDetailsNFRegex() {
 
@@ -29,6 +31,7 @@ export default function ServiceDetailsNFRegex() {
     const regexesList = nfregexServiceRegexesQuery(srv??"")
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
+    const [editModal, setEditModal] = useState(false)
     const [buttonLoading, setButtonLoading] = useState(false)
     const queryClient = useQueryClient()
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
@@ -108,7 +111,8 @@ export default function ServiceDetailsNFRegex() {
                 </Badge>
 
                 <MenuDropDownWithButton>
-                    <Menu.Label><b>Rename service</b></Menu.Label>
+                    <Menu.Item><b>Edit service</b></Menu.Item>
+                    <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
                     <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
                     <Divider />
                     <Menu.Label><b>Danger zone</b></Menu.Label>
@@ -189,6 +193,11 @@ export default function ServiceDetailsNFRegex() {
             onClose={()=>setRenameModal(false)}
             opened={renameModal}
             service={serviceInfo}
+        />
+        <AddEditService
+            opened={editModal}
+            onClose={()=>setEditModal(false)}
+            edit={serviceInfo}
         />
     </>
 }

@@ -12,6 +12,8 @@ import { MenuDropDownWithButton } from '../../MainLayout';
 import { useQueryClient } from '@tanstack/react-query';
 import { FaFilter } from "react-icons/fa";
 import { VscRegex } from "react-icons/vsc";
+import { IoSettingsSharp } from 'react-icons/io5';
+import AddEditService from '../AddEditService';
 
 export default function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
@@ -26,6 +28,7 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
+    const [editModal, setEditModal] = useState(false)
     const isMedium = isMediumScreen()
 
     const stopService = async () => {
@@ -104,12 +107,13 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
                     {isMedium?<Space w="xl" />:<Space h="lg" />}
                     <Box className="center-flex">
                         <MenuDropDownWithButton>
-                            <Menu.Label><b>Rename service</b></Menu.Label>
+                            <Menu.Item><b>Edit service</b></Menu.Item>
+                            <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
                             <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
                             <Divider />
                             <Menu.Label><b>Danger zone</b></Menu.Label>
                             <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                        </MenuDropDownWithButton>
+                        </MenuDropDownWithButton> 
                         <Space w="md"/>                        
                         <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
                             <ActionIcon color="red" loading={buttonLoading}
@@ -147,6 +151,11 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
             onClose={()=>setRenameModal(false)}
             opened={renameModal}
             service={service}
+        />
+        <AddEditService
+            opened={editModal}
+            onClose={()=>setEditModal(false)}
+            edit={service}
         />
     </>
 }
