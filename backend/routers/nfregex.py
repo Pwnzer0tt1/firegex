@@ -1,5 +1,4 @@
 from base64 import b64decode
-import re
 import secrets
 import sqlite3
 from fastapi import APIRouter, Response, HTTPException
@@ -9,6 +8,7 @@ from modules.nfregex.firewall import STATUS, FirewallManager
 from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, socketio_emit, PortType
 from utils.models import ResetRequest, StatusMessageModel
+from modules.nfregex.firegex import test_regex_validity
 
 class ServiceModel(BaseModel):
     status: str
@@ -299,10 +299,9 @@ async def regex_disable(regex_id: int):
 @app.post('/regexes', response_model=StatusMessageModel)
 async def add_new_regex(form: RegexAddForm):
     """Add a new regex"""
-    try:
-        re.compile(b64decode(form.regex))
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid regex")
+    regex_correct, message = await test_regex_validity(b64decode(form.regex))
+    if not regex_correct:
+        raise HTTPException(status_code=400, detail=f"Invalid regex: {message}")
     try:
         db.query("INSERT INTO regexes (service_id, regex, mode, is_case_sensitive, active ) VALUES (?, ?, ?, ?, ?);", 
                 form.service_id, form.regex, form.mode, form.is_case_sensitive, True if form.active is None else form.active )

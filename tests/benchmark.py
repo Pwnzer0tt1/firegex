@@ -45,12 +45,21 @@ def exit_test(code):
 
 #Create new Service
 
+srvs = firegex.nf_get_services()
+for ele in srvs:
+    if ele['name'] == args.service_name:
+        firegex.nf_delete_service(ele['service_id'])
+
 service_id = firegex.nf_add_service(args.service_name, args.port, "tcp", "127.0.0.1/24")
 if service_id:
     puts(f"Sucessfully created service {service_id} ✔", color=colors.green)
 else:
     puts("Test Failed: Failed to create service ✗", color=colors.red)
     exit(1)
+
+args.port = int(args.port)
+args.duration = int(args.duration)
+args.num_of_streams = int(args.num_of_streams)
 
 #Start iperf3
 def startServer():
@@ -66,6 +75,8 @@ def getReading(port):
     client.duration = args.duration
     client.server_hostname = '127.0.0.1'
     client.port = port
+    client.zerocopy = True
+    client.verbose = False
     client.protocol = 'tcp'
     client.num_streams = args.num_of_streams
     return round(client.run().json['end']['sum_received']['bits_per_second']/8e+6 , 3)
@@ -74,6 +85,9 @@ server = Process(target=startServer)
 server.start()
 sleep(1)
 
+def gen_regex():
+    regex = secrets.token_hex(8)
+    return base64.b64encode(bytes(regex.encode())).decode()
 
 #Get baseline reading 
 puts("Baseline without proxy: ", color=colors.blue, end='')
@@ -95,7 +109,7 @@ print(f"{results[0]} MB/s")
 
 #Add all the regexs
 for i in range(1,args.num_of_regexes+1):
-    regex = base64.b64encode(bytes(secrets.token_hex(16).encode())).decode()
+    regex = gen_regex()
     if not firegex.nf_add_regex(service_id,regex,"B",active=True,is_case_sensitive=False): 
         puts("Benchmark Failed: Couldn't add the regex ✗", color=colors.red)
         exit_test(1)

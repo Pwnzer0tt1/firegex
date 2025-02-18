@@ -1,7 +1,6 @@
 from modules.nfregex.nftables import FiregexTables
 from utils import run_func
 from modules.nfregex.models import Service, Regex
-import re
 import os
 import asyncio
 import traceback
@@ -9,6 +8,20 @@ from utils import DEBUG
 from fastapi import HTTPException
 
 nft = FiregexTables()
+
+async def test_regex_validity(regex: str) -> bool:
+    proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cppregex")
+    process = await asyncio.create_subprocess_exec(
+        proxy_binary_path,
+        stdout=asyncio.subprocess.PIPE,
+        stdin=asyncio.subprocess.DEVNULL,
+        env={"FIREGEX_TEST_REGEX": regex},
+    )
+    await process.wait()
+    if process.returncode != 0:
+        message = (await process.stdout.read()).decode()
+        return False, message
+    return True, "ok"
 
 class RegexFilter:
     def __init__(
@@ -44,7 +57,6 @@ class RegexFilter:
             self.regex = self.regex.encode()
         if not isinstance(self.regex, bytes):
             raise Exception("Invalid Regex Paramether")
-        re.compile(self.regex) # raise re.error if it's invalid!
         case_sensitive = "1" if self.is_case_sensitive else "0"
         if self.input_mode:
             yield case_sensitive + "C" + self.regex.hex()
