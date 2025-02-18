@@ -39,7 +39,7 @@ jobs:
         sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" proxy-client/setup.py;
         sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" proxy-client/firegex/__init__.py;
     - name: Build package
-      run: cd client && python -m build && mv ./dist ../
+      run: cd proxy-client && python -m build && mv ./dist ../
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
       with:
