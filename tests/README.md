@@ -79,14 +79,37 @@ You will find a new benchmark.csv file containg the results.
 
 The test was performed on:
 - Macbook Air M2 16GB RAM
-- On a VM powered by OrbStack with Ubuntu 24.04.1 LTS aarch64
-- 6.12.10-orbstack-00297-gf8f6e015b993
+- On a VM powered by OrbStack with Fedora Linux 41 (Container Image) aarch64
+- Linux 6.12.13-orbstack-00304-gede1cf3337c4
 
-Command: `./benchmark.py -p testpassword -r 50 -d 1 -s 60`
+Command: `./benchmark.py -p testpassword -r 50 -d 1 -s 50`
 
-### NOTE: 8 threads performance do not change due to the fact that the source and destination ip is always the same, so the packets are sent to the same thread by the kernel.
+NOTE: 8 threads performance before 2.5.0 do not change due to the fact that the source and destination ip is always the same, so the packets are sent to the same thread by the kernel.
 [https://netfilter.vger.kernel.narkive.com/sTP7613Y/meaning-of-nfqueue-s-queue-balance-option](https://netfilter.vger.kernel.narkive.com/sTP7613Y/meaning-of-nfqueue-s-queue-balance-option)
 
 Internally the kernel hashes the source and dest ip and choose the target thread based on the hash. If the source and dest ip are the same, the hash will be the same and the packets will be sent to the same thread.
+This is a problem in a CTF, where we usually have a NAT to hide real IPs.
+
+Firegex 2.5.0 changes the way the threads are assigned to the packets, this is done userland, so we can have a better distribution of the packets between the threads.
+
+The charts are labeled as follows: `[version]-[n_thread]T` eg. `2.5.0-8T` means Firegex version 2.5.0 with 8 threads.
 
 ![Firegex Benchmark](results/Benchmark-chart.png)
+
+
+From the benchmark above we can't see the real advantage of multithreading in 2.5.1, we can better see the advantage of multithreading in the chart below where a fake load in filtering is done.
+
+The load is simulated by this code:
+```cpp
+volatile int x = 0;
+for (int i=0; i<50000; i++){
+    x+=1;
+}
+```
+
+![Firegex Benchmark](results/Benchmark-chart-with-load.png)
+
+In the chart above we can see that the 2.5.1 version with 8 threads has a better performance than the 2.5.1 version with 1 threads, and we can see it as much as the load increases.
+
+This particular advantage will be more noticeable with nfproxy module that is not implemented yet.
+
