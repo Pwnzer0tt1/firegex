@@ -59,6 +59,26 @@ class RegexRules{
 	public:
 		regex_ruleset output_ruleset, input_ruleset;
 		
+	static void compile_regex(char* regex){
+		hs_database_t* db = nullptr;
+		hs_compile_error_t *compile_err = nullptr;
+		if (
+			hs_compile(
+				regex,
+				HS_FLAG_SINGLEMATCH | HS_FLAG_ALLOWEMPTY,
+				HS_MODE_BLOCK,
+				nullptr, &db, &compile_err
+			) != HS_SUCCESS
+		) {
+			string err = string(compile_err->message);
+			hs_free_compile_error(compile_err);
+			throw runtime_error(err);
+		}else{
+			hs_free_database(db);
+		}
+		
+	}
+
 	private:
 		static inline u_int16_t glob_seq = 0;
 		u_int16_t version;
@@ -76,6 +96,8 @@ class RegexRules{
 				input_ruleset.hs_db = nullptr;
 			}
 		}
+
+
 
 		void fill_ruleset(vector<pair<string, decoded_regex>> & decoded, regex_ruleset & ruleset){
 			size_t n_of_regex = decoded.size();

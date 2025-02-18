@@ -50,6 +50,21 @@ void config_updater (){
 }
 
 int main(int argc, char *argv[]){
+
+	char * test_regex = getenv("FIREGEX_TEST_REGEX");
+	if (test_regex != nullptr){
+		cerr << "[info] [main] Testing regex: " << test_regex << endl;
+		try{
+			RegexRules::compile_regex(test_regex);
+			cerr << "[info] [main] Test passed" << endl;
+			return 0;
+		}catch(const std::exception& e){
+			cerr << "[error] [updater] Test failed" << endl;
+			cout << e.what() << flush;
+			return 1;
+		}
+	}
+
 	int n_of_threads = 1;
    	char * n_threads_str = getenv("NTHREADS");
    	if (n_threads_str != nullptr) n_of_threads = ::atoi(n_threads_str);

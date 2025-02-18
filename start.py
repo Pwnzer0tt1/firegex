@@ -100,11 +100,11 @@ def gen_args(args_to_parse: list[str]|None = None):
     #Start Command
     parser_start = subcommands.add_parser('start', help='Start the firewall')
     parser_start.add_argument('--threads', "-t", type=int, required=False, help='Number of threads started for each service/utility', default=-1)
-    parser_start.add_argument('--psw-no-interactive',type=str, required=False, help='Password for no-interactive mode', default=None)
-    parser_start.add_argument('--startup-psw','-P', required=False, action="store_true", help='Insert password in the startup screen of firegex', default=False)
+    parser_start.add_argument('--startup-psw','-P', required=False, help='Insert password in the startup screen of firegex', type=str, default=None)
+    parser_start.add_argument('--psw-on-web', required=False, help='Setup firegex password on the web interface', action="store_true", default=False)
     parser_start.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
-    parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default="latest")
+    parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default=None)
 
     #Stop Command
     parser_stop = subcommands.add_parser('stop', help='Stop the firewall')
@@ -221,10 +221,10 @@ def write_compose(skip_password = True):
             }))
       
 def get_password():
-    if volume_exists() or args.startup_psw:
+    if volume_exists() or args.psw_on_web:
         return None
-    if args.psw_no_interactive:
-        return args.psw_no_interactive
+    if args.startup_psw:
+        return args.startup_psw
     psw_set = None
     while True:
         while True:
