@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, Divider, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Divider, LoadingOverlay, Space, ThemeIcon, Title, Tooltip } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import ServiceRow from '../../components/PortHijack/ServiceRow';
@@ -7,6 +7,8 @@ import { errorNotify, getErrorMessage, isMediumScreen } from '../../js/utils';
 import AddNewService from '../../components/PortHijack/AddNewService';
 import { useQueryClient } from '@tanstack/react-query';
 import { TbReload } from 'react-icons/tb';
+import { FaServer } from 'react-icons/fa';
+import { GrDirections } from 'react-icons/gr';
 
 
 function PortHijack() {
@@ -30,10 +32,10 @@ function PortHijack() {
     return <>
         <Space h="sm" />
         <Box className={isMedium?'center-flex':'center-flex-row'}>
-            <Title order={4}>Hijack port to proxy</Title>
+            <Title order={5} className="center-flex"><ThemeIcon radius="md" size="md" variant='filled' color='blue' ><GrDirections size={20} /></ThemeIcon><Space w="xs" />Hijack port to proxy</Title>
             {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
             <Box className='center-flex'>
-                <Badge size="sm" color="yellow" variant="filled">Services: {services.isLoading?0:services.data?.length}</Badge>
+                <Badge size="md" radius="sm" color="yellow" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:services.data?.length}</Badge>
                 <Space w="xs" />
                 <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
                     <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"

@@ -36,7 +36,6 @@ export type ServiceAddResponse = {
 }
 
 export const serviceQueryKey = ["nfregex","services"]
-export const statsQueryKey = ["nfregex","stats"]
 
 export const nfregexServiceQuery = () => useQuery({queryKey:serviceQueryKey, queryFn:nfregex.services})
 export const nfregexServiceRegexesQuery = (service_id:string) => useQuery({

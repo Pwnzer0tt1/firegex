@@ -22,7 +22,7 @@ class FiregexInterceptor:
         self.update_task: asyncio.Task
         self.ack_arrived = False
         self.ack_status = None
-        self.ack_fail_what = ""
+        self.ack_fail_what = "Unknown"
         self.ack_lock = asyncio.Lock()
     
     async def _call_stats_updater_callback(self, filter: PyFilter):
@@ -79,12 +79,14 @@ class FiregexInterceptor:
                         if filter_id in self.filter_map:
                             self.filter_map[filter_id].blocked_packets+=1
                             await self.filter_map[filter_id].update()
-                if line.startswith("EDITED "):
+                if line.startswith("MANGLED "):
                     filter_id = line.split()[1]
                     async with self.filter_map_lock:
                         if filter_id in self.filter_map:
                             self.filter_map[filter_id].edited_packets+=1
                             await self.filter_map[filter_id].update()
+                if line.startswith("EXCEPTION"):
+                    print("TODO EXCEPTION HANDLING") # TODO
                 if line.startswith("ACK "):
                     self.ack_arrived = True
                     self.ack_status = line.split()[1].upper() == "OK"
@@ -103,10 +105,9 @@ class FiregexInterceptor:
         if self.process and self.process.returncode is None:
             self.process.kill()
     
-    async def _update_config(self, filters_codes):
+    async def _update_config(self, code):
         async with self.update_config_lock:
-            # TODO write compiled code correctly
-            # self.process.stdin.write((" ".join(filters_codes)+"\n").encode())
+            self.process.stdin.write(len(code).to_bytes(4, byteorder='big')+code.encode())
             await self.process.stdin.drain()
             try:
                 async with asyncio.timeout(3):
@@ -114,11 +115,22 @@ class FiregexInterceptor:
             except TimeoutError:
                 pass
             if not self.ack_arrived or not self.ack_status:
+                await self.stop()
                 raise HTTPException(status_code=500, detail=f"NFQ error: {self.ack_fail_what}")
 
     async def reload(self, filters:list[PyFilter]):
         async with self.filter_map_lock:
-            self.filter_map = self.compile_filters(filters)
-            # TODO COMPILE CODE
-            #await self._update_config(filters_codes) TODO pass the compiled code
+            if os.path.exists(f"db/nfproxy_filters/{self.srv.id}.py"):
+                with open(f"db/nfproxy_filters/{self.srv.id}.py") as f:
+                    filter_file = f.read()
+            else:
+                filter_file = ""
+            await self._update_config(
+                "global __firegex_pyfilter_enabled\n" +
+                "__firegex_pyfilter_enabled = [" + ", ".join([repr(f.name) for f in filters]) + "]\n" +
+                "__firegex_proto = " + repr(self.srv.proto) + "\n" +
+                "import firegex.nfproxy.internals\n\n" + 
+                filter_file + "\n\n" +
+                "firegex.nfproxy.internals.compile()"
+            )
 

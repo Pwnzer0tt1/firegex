@@ -12,7 +12,6 @@ RUN bun i
 COPY ./frontend/ .
 RUN bun run build
 
-
 #Building main conteiner
 FROM --platform=$TARGETARCH registry.fedoraproject.org/fedora:latest
 RUN dnf -y update && dnf install -y python3.13-devel @development-tools gcc-c++ \
@@ -24,6 +23,8 @@ WORKDIR /execute
 
 ADD ./backend/requirements.txt /execute/requirements.txt
 RUN uv pip install --no-cache --system -r /execute/requirements.txt
+COPY ./proxy-client /execute/proxy-client
+RUN uv pip install --no-cache --system ./proxy-client
 
 COPY ./backend/binsrc /execute/binsrc
 RUN g++ binsrc/nfregex.cpp -o modules/cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)

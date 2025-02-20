@@ -1,19 +1,18 @@
 import { ActionIcon, Badge, Box, LoadingOverlay, Space, ThemeIcon, Title, Tooltip } from '@mantine/core';
 import { useEffect, useState } from 'react';
-import { BsPlusLg, BsRegex } from "react-icons/bs";
+import { BsPlusLg } from "react-icons/bs";
 import { useNavigate, useParams } from 'react-router-dom';
-import ServiceRow from '../../components/NFRegex/ServiceRow';
-import { nfregexServiceQuery } from '../../components/NFRegex/utils';
+import ServiceRow from '../../components/NFProxy/ServiceRow';
 import { errorNotify, getErrorMessage, isMediumScreen } from '../../js/utils';
-import AddEditService from '../../components/NFRegex/AddEditService';
-import AddNewRegex from '../../components/AddNewRegex';
+import AddEditService from '../../components/NFProxy/AddEditService';
 import { useQueryClient } from '@tanstack/react-query';
-import { TbReload } from 'react-icons/tb';
-import { FaFilter } from 'react-icons/fa';
-import { FaServer } from "react-icons/fa6";
-import { VscRegex } from "react-icons/vsc";
+import { TbPlugConnected, TbReload } from 'react-icons/tb';
+import { nfproxyServiceQuery } from '../../components/NFProxy/utils';
+import { FaFilter, FaPencilAlt, FaServer } from 'react-icons/fa';
+import { VscRegex } from 'react-icons/vsc';
 
-function NFRegex({ children }: { children: any }) {
+
+export default function NFProxy({ children }: { children: any }) {
 
     const navigator = useNavigate()
     const [open, setOpen] = useState(false);
@@ -23,11 +22,11 @@ function NFRegex({ children }: { children: any }) {
     const [tooltipAddServOpened, setTooltipAddServOpened] = useState(false);
     const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
     const isMedium = isMediumScreen()
-    const services = nfregexServiceQuery()
+    const services = nfproxyServiceQuery()
 
     useEffect(()=> {
         if(services.isError)
-            errorNotify("NFRegex Update failed!", getErrorMessage(services.error))
+            errorNotify("NFProxy Update failed!", getErrorMessage(services.error))
     },[services.isError])
 
     const closeModal = () => {setOpen(false);}
@@ -35,26 +34,24 @@ function NFRegex({ children }: { children: any }) {
     return <>
     <Space h="sm" />
     <Box className={isMedium?'center-flex':'center-flex-row'}>
-        <Title order={5} className="center-flex"><ThemeIcon radius="md" size="md" variant='filled' color='grape' ><BsRegex size={20} /></ThemeIcon><Space w="xs" />Netfilter Regex</Title>
+        <Title order={5} className="center-flex"><ThemeIcon radius="md" size="md" variant='filled' color='lime' ><TbPlugConnected size={20} /></ThemeIcon><Space w="xs" />Netfilter Proxy</Title>
         {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
         <Box className='center-flex' >
             General stats:
             <Space w="xs" />
             <Badge size="md" radius="sm" color="green" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:services.data?.length}</Badge>
             <Space w="xs" />
-            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_packets, 0)}</Badge>
+            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.blocked_packets, 0)}</Badge>
             <Space w="xs" />
-            <Badge size="md" radius="sm" color="violet" variant="filled"><VscRegex style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_regex, 0)}</Badge>
+            <Badge color="orange" radius="sm" size="md" variant="filled"><FaPencilAlt style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.edited_packets, 0)}</Badge>
+            <Space w="xs" />
+            <Badge size="md" radius="sm" color="violet" variant="filled"><TbPlugConnected style={{ marginBottom: -2, marginRight: 4}} size={13} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_filters, 0)}</Badge>
             <Space w="xs" />
         </Box>
         {isMedium?null:<Space h="md" />}
         <Box className='center-flex' >
-            { srv?
-            <Tooltip label="Add a new regex" position='bottom' color="blue" opened={tooltipAddOpened}>
-                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
-                onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-                onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
-            </Tooltip>
+            {/* Will become the null a button to edit the source code? TODO  */}
+            { srv?null
             : <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
                 <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
                 onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
@@ -63,7 +60,7 @@ function NFRegex({ children }: { children: any }) {
         }
         <Space w="xs" />
             <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
-                <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfregex"])} size="lg" radius="md" variant="filled"
+                <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfproxy"])} size="lg" radius="md" variant="filled"
                 loading={services.isFetching}
                 onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
                 onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
@@ -75,7 +72,7 @@ function NFRegex({ children }: { children: any }) {
         {srv?null:<>
             <LoadingOverlay visible={services.isLoading} />
             {(services.data && services.data?.length > 0)?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
-                navigator("/nfregex/"+srv.service_id)
+                navigator("/nfproxy/"+srv.service_id)
             }} />):<><Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No services found! Add one clicking the "+" buttons</Title>
                 <Box className='center-flex'>
                     <Tooltip label="Add a new service" color="blue" opened={tooltipAddServOpened}>
@@ -88,11 +85,7 @@ function NFRegex({ children }: { children: any }) {
         </>}
     </Box>
     {srv?children:null}
-    {srv?
-        <AddNewRegex opened={open} onClose={closeModal} service={srv} />:
-        <AddEditService opened={open} onClose={closeModal} />
-    }
+    {!srv?<AddEditService opened={open} onClose={closeModal} />:null}
     </>
 }
 
-export default NFRegex;

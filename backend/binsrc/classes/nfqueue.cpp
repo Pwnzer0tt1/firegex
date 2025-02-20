@@ -131,6 +131,15 @@ class PktRequest {
 		}
 	}
 
+	void mangle_custom_pkt(const uint8_t* pkt, size_t pkt_size){
+		if (action == FilterAction::NOACTION){
+			action = FilterAction::MANGLE;
+			perfrom_action(pkt, pkt_size);
+		}else{
+			throw invalid_argument("Cannot mangle a packet that has already been accepted or dropped");
+		}
+	}
+
 	FilterAction get_action(){
 		return action;
 	}
@@ -141,7 +150,7 @@ class PktRequest {
 	}
 
 	private:
-	void perfrom_action(){
+	void perfrom_action(const uint8_t* custom_data = nullptr, size_t custom_data_size = 0){
 		char buf[MNL_SOCKET_BUFFER_SIZE];
 		struct nlmsghdr *nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(res_id));
 		switch (action)
@@ -153,7 +162,9 @@ class PktRequest {
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(packet_id), NF_DROP );
 				break;
 			case FilterAction::MANGLE:{
-				if (is_ipv6){
+				if (custom_data != nullptr){
+					nfq_nlmsg_verdict_put_pkt(nlh_verdict, custom_data, custom_data_size);
+				}else if (is_ipv6){
 					nfq_nlmsg_verdict_put_pkt(nlh_verdict, ipv6->serialize().data(), ipv6->size());
 				}else{
 					nfq_nlmsg_verdict_put_pkt(nlh_verdict, ipv4->serialize().data(), ipv4->size());

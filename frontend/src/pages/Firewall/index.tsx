@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, Divider, FloatingIndicator, LoadingOverlay, Space, Switch, Table, Tabs, TextInput, Title, Tooltip, useMantineTheme } from "@mantine/core"
+import { ActionIcon, Badge, Box, Divider, FloatingIndicator, LoadingOverlay, Space, Switch, Table, Tabs, TextInput, ThemeIcon, Title, Tooltip, useMantineTheme } from "@mantine/core"
 import { useEffect, useState } from "react";
 import { BsPlusLg, BsTrashFill } from "react-icons/bs"
 import { rem } from '@mantine/core';
@@ -20,7 +20,8 @@ import { LuArrowBigRightDash } from "react-icons/lu"
 import { ImCheckmark, ImCross } from "react-icons/im";
 import { IoSettingsSharp } from "react-icons/io5";
 import { SettingsModal } from "./SettingsModal";
-
+import { FaDirections } from "react-icons/fa";
+import { PiWallLight } from "react-icons/pi";
 
 export const Firewall = () => {
 
@@ -346,7 +347,7 @@ export const Firewall = () => {
         <Space h="sm" />
         <LoadingOverlay visible={rules.isLoading} />
         <Box className={isMedium?'center-flex':'center-flex-row'}>
-            <Title order={3}>Firewall Rules</Title>
+            <Title order={5} className="center-flex"><ThemeIcon radius="md" size="md" variant='filled' color='red' ><PiWallLight size={20} /></ThemeIcon><Space w="xs" />Firewall Rules</Title>
             {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
             <Box className='center-flex'>
               Enabled: <Space w="sm" /> <Switch checked={fwEnabled} onChange={switchState} />
@@ -361,8 +362,8 @@ export const Firewall = () => {
             {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
             <Box className='center-flex'>
               <Space w="xs" />
-              <Badge size="sm" color="green" variant="filled">Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
-              <Space w="xs" />
+              <Badge size="md" radius="sm" color="green" variant="filled"><FaDirections style={{ marginBottom: -1, marginRight: 4}}/>Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
+              <Space w="md" />
               <Tooltip label="Add a new rule" position='bottom' color="blue" opened={tooltipAddOpened}>
                   <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"
                   onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}

@@ -76,12 +76,11 @@ class RegexRules{
 		}else{
 			hs_free_database(db);
 		}
-		
 	}
 
 	private:
-		static inline u_int16_t glob_seq = 0;
-		u_int16_t version;
+		static inline uint16_t glob_seq = 0;
+		uint16_t version;
 		vector<pair<string, decoded_regex>> decoded_input_rules;
 		vector<pair<string, decoded_regex>> decoded_output_rules;
 		bool is_stream = true;
@@ -96,9 +95,7 @@ class RegexRules{
 				input_ruleset.hs_db = nullptr;
 			}
 		}
-
-
-
+		
 		void fill_ruleset(vector<pair<string, decoded_regex>> & decoded, regex_ruleset & ruleset){
 			size_t n_of_regex = decoded.size();
 			if (n_of_regex == 0){
@@ -150,7 +147,6 @@ class RegexRules{
 	public:
 		RegexRules(vector<string> raw_rules, bool is_stream){
 			this->is_stream = is_stream;
-			this->version = ++glob_seq; // 0 version is a invalid version (useful for some logics)
 			for(string ele : raw_rules){
 				try{
 					decoded_regex rule = decode_regex(ele);
@@ -170,6 +166,7 @@ class RegexRules{
 				free_dbs();
 				throw current_exception();
 			}
+			this->version = ++glob_seq; // 0 version is the null version
 		}
 
 		u_int16_t ver(){

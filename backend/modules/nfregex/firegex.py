@@ -79,7 +79,7 @@ class FiregexInterceptor:
         self.update_task: asyncio.Task
         self.ack_arrived = False
         self.ack_status = None
-        self.ack_fail_what = ""
+        self.ack_fail_what = "Unknown"
         self.ack_lock = asyncio.Lock()
     
     @classmethod
@@ -160,6 +160,7 @@ class FiregexInterceptor:
             except TimeoutError:
                 pass
             if not self.ack_arrived or not self.ack_status:
+                await self.stop()
                 raise HTTPException(status_code=500, detail=f"NFQ error: {self.ack_fail_what}")
             
 

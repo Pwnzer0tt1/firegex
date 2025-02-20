@@ -2,8 +2,9 @@ import { Button, Group, Space, TextInput, Notification, Switch, Modal, Select } 
 import { useForm } from '@mantine/form';
 import { useState } from 'react';
 import { RegexAddForm } from '../js/models';
-import { b64decode, b64encode, getapiobject, okNotify } from '../js/utils';
+import { b64decode, b64encode, okNotify } from '../js/utils';
 import { ImCross } from "react-icons/im"
+import { nfregex } from './NFRegex/utils';
 
 type RegexAddInfo = {
     regex:string,
@@ -47,7 +48,7 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
             active: !values.deactive
         }
         setSubmitLoading(false)
-        getapiobject().regexesadd(request).then( res => {
+        nfregex.regexesadd(request).then( res => {
             if (!res){
                 setSubmitLoading(false)
                 close();

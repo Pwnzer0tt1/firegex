@@ -9,6 +9,7 @@ import {
 import { queryClient } from './js/utils';
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
+import '@mantine/code-highlight/styles.css';
 import './index.css';
 
 const root = ReactDOM.createRoot(

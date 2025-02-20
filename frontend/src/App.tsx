@@ -12,6 +12,8 @@ import ServiceDetailsNFRegex from './pages/NFRegex/ServiceDetails';
 import PortHijack from './pages/PortHijack';
 import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
+import NFProxy from './pages/NFProxy';
+import ServiceDetailsNFProxy from './pages/NFProxy/ServiceDetails';
 
 
 const socket = IS_DEV?io("ws://"+DEV_IP_BACKEND, {transports: ["websocket"], path:"/sock/socket.io" }):io({transports: ["websocket"], path:"/sock/socket.io"});
@@ -147,6 +149,9 @@ function App() {
               <Route element={<MainLayout><Outlet /></MainLayout>}>
                   <Route path="nfregex" element={<NFRegex><Outlet /></NFRegex>} >
                     <Route path=":srv" element={<ServiceDetailsNFRegex />} />
+                  </Route>
+                  <Route path="nfproxy" element={<NFProxy><Outlet /></NFProxy>} >
+                    <Route path=":srv" element={<ServiceDetailsNFProxy />} />
                   </Route>
                   <Route path="firewall" element={<Firewall />} />
                   <Route path="porthijack" element={<PortHijack />} />

@@ -1,13 +1,14 @@
 import { Text, Title, Badge, Space, ActionIcon, Tooltip, Box } from '@mantine/core';
 import { useState } from 'react';
 import { RegexFilter } from '../../js/models';
-import { b64decode, errorNotify, getapiobject, isMediumScreen, okNotify } from '../../js/utils';
+import { b64decode, errorNotify, isMediumScreen, okNotify } from '../../js/utils';
 import { BsTrashFill } from "react-icons/bs"
 import YesNoModal from '../YesNoModal';
 import { FaPause, FaPlay } from 'react-icons/fa';
 import { useClipboard } from '@mantine/hooks';
 import { FaFilter } from "react-icons/fa";
-import { VscRegex } from "react-icons/vsc";
+
+import { nfregex } from '../NFRegex/utils';
 
 function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
 
@@ -24,7 +25,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   const isMedium = isMediumScreen();
 
   const deleteRegex = () => {
-    getapiobject().regexdelete(regexInfo.id).then(res => {
+    nfregex.regexdelete(regexInfo.id).then(res => {
       if(!res){
         okNotify(`Regex ${regex_expr} deleted successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been deleted!`)
       }else{
@@ -34,9 +35,9 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   }
 
   const changeRegexStatus = () => {
-    (regexInfo.active?getapiobject().regexdisable:getapiobject().regexenable)(regexInfo.id).then(res => {
+    (regexInfo.active?nfregex.regexdisable:nfregex.regexenable)(regexInfo.id).then(res => {
       if(!res){
-        okNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivated":"activated"} successfully!`,`Regex '${regex_expr}' ID:${regexInfo.id} has been ${regexInfo.active?"deactivated":"activated"}!`)
+        okNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivated":"activated"} successfully!`,`Regex with id '${regexInfo.id}' has been ${regexInfo.active?"deactivated":"activated"}!`)
       }else{
         errorNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivation":"activation"} failed!`,`Error: ${res}`)
       }

@@ -1,67 +1,73 @@
 import { ActionIcon, Badge, Box, Divider, Menu, Space, Title, Tooltip } from '@mantine/core';
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { FaPlay, FaStop } from 'react-icons/fa';
-import { porthijack, Service } from '../utils';
+import { nfproxy, Service, serviceQueryKey } from '../utils';
+import { MdDoubleArrow, MdOutlineArrowForwardIos } from "react-icons/md"
 import YesNoModal from '../../YesNoModal';
-import { errorNotify, isMediumScreen, okNotify } from '../../../js/utils';
-import { BsArrowRepeat, BsTrashFill } from 'react-icons/bs';
+import { errorNotify, isMediumScreen, okNotify, regex_ipv4 } from '../../../js/utils';
+import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from './RenameForm';
-import ChangeDestination from './ChangeDestination';
-import { useForm } from '@mantine/form';
 import { MenuDropDownWithButton } from '../../MainLayout';
-import { MdDoubleArrow } from "react-icons/md";
+import { useQueryClient } from '@tanstack/react-query';
+import { TbPlugConnected } from "react-icons/tb";
+import { FaFilter } from "react-icons/fa";
+import { IoSettingsSharp } from 'react-icons/io5';
+import AddEditService from '../AddEditService';
+import { FaPencilAlt } from "react-icons/fa";
 
-export default function ServiceRow({ service }:{ service:Service }) {
+export default function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
-    let status_color = service.active ? "teal": "red"
+    let status_color = "gray";
+    switch(service.status){
+        case "stop": status_color = "red"; break;
+        case "active": status_color = "teal"; break;
+    }
 
+    const queryClient = useQueryClient()
     const [buttonLoading, setButtonLoading] = useState(false)
     const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
-    const [changeDestModal, setChangeDestModal] = useState(false)
-    const portInputRef = React.createRef<HTMLInputElement>()
+    const [editModal, setEditModal] = useState(false)
     const isMedium = isMediumScreen()
-
-    const form = useForm({
-        initialValues: { proxy_port:service.proxy_port },
-        validate:{ proxy_port: (value) => (value > 0 && value < 65536)? null : "Invalid proxy port" }
-    })
 
     const stopService = async () => {
         setButtonLoading(true)
         
-        await porthijack.servicestop(service.service_id).then(res => {
+        await nfproxy.servicestop(service.service_id).then(res => {
             if(!res){
-                okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.public_port} has been stopped!`)
+                okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.port} has been stopped!`)
+                queryClient.invalidateQueries(serviceQueryKey)
             }else{
-                errorNotify(`An error as occurred during the stopping of the service ${service.public_port}`,`Error: ${res}`)
+                errorNotify(`An error as occurred during the stopping of the service ${service.port}`,`Error: ${res}`)
             }
         }).catch(err => {
-            errorNotify(`An error as occurred during the stopping of the service ${service.public_port}`,`Error: ${err}`)
+            errorNotify(`An error as occurred during the stopping of the service ${service.port}`,`Error: ${err}`)
         })
         setButtonLoading(false);
     }
 
     const startService = async () => {
         setButtonLoading(true)
-        await porthijack.servicestart(service.service_id).then(res => {
+        await nfproxy.servicestart(service.service_id).then(res => {
             if(!res){
-                okNotify(`Service ${service.name} started successfully!`,`The service on ${service.public_port} has been started!`)
+                okNotify(`Service ${service.name} started successfully!`,`The service on ${service.port} has been started!`)
+                queryClient.invalidateQueries(serviceQueryKey)
             }else{
-                errorNotify(`An error as occurred during the starting of the service ${service.public_port}`,`Error: ${res}`)
+                errorNotify(`An error as occurred during the starting of the service ${service.port}`,`Error: ${res}`)
             }
         }).catch(err => {
-            errorNotify(`An error as occurred during the starting of the service ${service.public_port}`,`Error: ${err}`)
+            errorNotify(`An error as occurred during the starting of the service ${service.port}`,`Error: ${err}`)
         })
         setButtonLoading(false)
     }
 
     const deleteService = () => {
-        porthijack.servicedelete(service.service_id).then(res => {
+        nfproxy.servicedelete(service.service_id).then(res => {
             if (!res){
                 okNotify("Service delete complete!",`The service ${service.name} has been deleted!`)
+                queryClient.invalidateQueries(serviceQueryKey)
             }else
                 errorNotify("An error occurred while deleting a service",`Error: ${res}`)
         }).catch(err => {
@@ -71,7 +77,7 @@ export default function ServiceRow({ service }:{ service:Service }) {
     }
 
     return <>
-            <Box className='firegex__nfregex__rowbox'>
+        <Box className='firegex__nfregex__rowbox'>
             <Box className="firegex__nfregex__row" style={{width:"100%", flexDirection: isMedium?"row":"column"}}>
                 <Box>
                     <Box className="center-flex" style={{ justifyContent: "flex-start" }}>
@@ -81,42 +87,41 @@ export default function ServiceRow({ service }:{ service:Service }) {
                         </Title>
                     </Box>
                     <Box className="center-flex" style={{ gap: 8, marginTop: 15, justifyContent: "flex-start" }}>
-                        <Badge color={status_color} radius="md" size="md" variant="filled">{service.active?"ENABLED":"DISABLED"}</Badge>
-                        <Badge color={service.proto === "tcp"?"cyan":"orange"} radius="md" size="md" variant="filled">
-                            {service.proto}
+                        <Badge color={status_color} radius="md" size="lg" variant="filled">{service.status}</Badge>
+                        <Badge size="lg" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient" radius="md" style={{ fontSize: "110%" }}>
+                            :{service.port}
                         </Badge>
                     </Box>
                     {isMedium?null:<Space w="xl" />}
                 </Box>
                 
-                <Box className={isMedium?"center-flex":"center-flex-row"}>                    
+                <Box className={isMedium?"center-flex":"center-flex-row"}>
                     <Box className="center-flex-row">
-                    <Badge color="lime" radius="sm" size="lg" variant="filled">
-                        FROM {service.ip_src} :{service.public_port}
-                    </Badge>
-                    <Space h="sm" />
-                    <Badge color="blue" radius="sm" size="lg" variant="filled">
-                        <Box className="center-flex">
-                            TO {service.ip_dst} :{service.proxy_port}
+                        <Badge color={service.ip_int.match(regex_ipv4)?"cyan":"pink"} radius="sm" size="md" variant="filled">{service.ip_int} on {service.proto}</Badge>
+                        <Space h="xs" />
+                        <Box className='center-flex'>
+                            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2}} /> {service.blocked_packets}</Badge>
+                            <Space w="xs" />
+                            <Badge color="orange" radius="sm" size="md" variant="filled"><FaPencilAlt style={{ marginBottom: -2}} /> {service.edited_packets}</Badge>
+                            <Space w="xs" />
+                            <Badge color="violet" radius="sm" size="md" variant="filled"><TbPlugConnected style={{ marginBottom: -2}} size={13} /> {service.n_filters}</Badge>
                         </Box>
-                    </Badge>
                     </Box>
                     {isMedium?<Space w="xl" />:<Space h="lg" />}
                     <Box className="center-flex">
                         <MenuDropDownWithButton>
-                            <Menu.Label><b>Rename service</b></Menu.Label>
+                            <Menu.Item><b>Edit service</b></Menu.Item>
+                            <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
                             <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
-                            <Menu.Label><b>Change destination</b></Menu.Label>
-                            <Menu.Item leftSection={<BsArrowRepeat size={18} />} onClick={()=>setChangeDestModal(true)}>Change hijacking destination</Menu.Item>
                             <Divider />
                             <Menu.Label><b>Danger zone</b></Menu.Label>
                             <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                        </MenuDropDownWithButton>
+                        </MenuDropDownWithButton> 
                         <Space w="md"/>                        
                         <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
                             <ActionIcon color="red" loading={buttonLoading}
                             onClick={stopService} size="xl" radius="md" variant="filled"
-                            disabled={!service.active}
+                            disabled={service.status === "stop"}
                             aria-describedby="tooltip-stop-id"
                             onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
                             onMouseEnter={() => setTooltipStopOpened(true)} onMouseLeave={() => setTooltipStopOpened(false)}>
@@ -126,18 +131,21 @@ export default function ServiceRow({ service }:{ service:Service }) {
                         <Space w="md"/>
                         <Tooltip label="Start service" zIndex={0} color="teal">
                             <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
-                                        variant="filled" disabled={service.active}>
+                                        variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
                                 <FaPlay size="20px" />
                             </ActionIcon>
                         </Tooltip>
+                        {isMedium?<Space w="xl" />:<Space w="md" />} 
+                        {onClick?<Box className='firegex__service_forward_btn'>
+                            <MdOutlineArrowForwardIos onClick={onClick} style={{cursor:"pointer"}} size={25} />
+                        </Box>:null}
                     </Box>
                 </Box>
             </Box>
         </Box>
-
         <YesNoModal
             title='Are you sure to delete this service?'
-            description={`You are going to delete the service '${service.public_port}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}
+            description={`You are going to delete the service '${service.port}', causing the stopping of the firewall and deleting all the filters associated. This will cause the shutdown of your service! ⚠️`}
             onClose={()=>setDeleteModal(false) }
             action={deleteService}
             opened={deleteModal}
@@ -147,10 +155,10 @@ export default function ServiceRow({ service }:{ service:Service }) {
             opened={renameModal}
             service={service}
         />
-        <ChangeDestination
-            onClose={()=>setChangeDestModal(false)}
-            opened={changeDestModal}
-            service={service}
+        <AddEditService
+            opened={editModal}
+            onClose={()=>setEditModal(false)}
+            edit={service}
         />
     </>
 }

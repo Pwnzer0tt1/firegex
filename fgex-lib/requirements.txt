@@ -1,0 +1,10 @@
+typer==0.15.1
+requests>=2.32.3
+pydantic>=2
+typing-extensions>=4.7.1
+fasteners==0.19
+textual==2.1.0
+python-socketio[client]==5.12.1
+fgex
+orjson
+

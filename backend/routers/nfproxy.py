@@ -7,6 +7,9 @@ from modules.nfproxy.firewall import STATUS, FirewallManager
 from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, socketio_emit, PortType
 from utils.models import ResetRequest, StatusMessageModel
+import os
+from firegex.nfproxy.internals import get_filter_names
+from fastapi.responses import PlainTextResponse
 
 class ServiceModel(BaseModel):
     service_id: str
@@ -47,6 +50,9 @@ class ServiceAddResponse(BaseModel):
     status:str
     service_id: str|None = None
 
+class SetPyFilterForm(BaseModel):
+    code: str
+
 app = APIRouter()
 
 db = SQLite('db/nft-pyfilters.db', {
@@ -70,7 +76,7 @@ db = SQLite('db/nft-pyfilters.db', {
     },
     'QUERY':[
         "CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (port, ip_int, proto);",
-        "CREATE UNIQUE INDEX IF NOT EXISTS unique_pyfilter_service ON pyfilter (name, service_id);"   
+        "CREATE UNIQUE INDEX IF NOT EXISTS unique_pyfilter_service ON pyfilter (name, service_id);"
     ]
 })
 
@@ -174,6 +180,8 @@ async def service_delete(service_id: str):
     """Request the deletion of a specific service"""
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     db.query('DELETE FROM pyfilter WHERE service_id = ?;', service_id)
+    if os.path.exists(f"db/nfproxy_filters/{service_id}.py"):
+        os.remove(f"db/nfproxy_filters/{service_id}.py")
     await firewall.remove(service_id)
     await refresh_frontend()
     return {'status': 'ok'}
@@ -253,17 +261,6 @@ async def get_pyfilter_by_id(filter_id: int):
         raise HTTPException(status_code=400, detail="This filter does not exists!")
     return res[0]
 
-@app.delete('/pyfilters/{filter_id}', response_model=StatusMessageModel)
-async def pyfilter_delete(filter_id: int):
-    """Delete a pyfilter using his id"""
-    res = db.query('SELECT * FROM pyfilter WHERE filter_id = ?;', filter_id)
-    if len(res) != 0:
-        db.query('DELETE FROM pyfilter WHERE filter_id = ?;', filter_id)
-        await firewall.get(res[0]["service_id"]).update_filters()
-        await refresh_frontend()
-    
-    return {'status': 'ok'}
-
 @app.post('/pyfilters/{filter_id}/enable', response_model=StatusMessageModel)
 async def pyfilter_enable(filter_id: int):
     """Request the enabling of a pyfilter"""
@@ -304,6 +301,49 @@ async def add_new_service(form: ServiceAddForm):
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}
 
+@app.put('/services/{service_id}/pyfilters/code', response_model=StatusMessageModel)
+async def set_pyfilters(service_id: str, form: SetPyFilterForm):
+    """Set the python filter for a service"""
+    service = db.query("SELECT service_id, proto FROM services WHERE service_id = ?;", service_id)
+    if len(service) == 0:
+        raise HTTPException(status_code=400, detail="This service does not exists!")
+    service = service[0]
+    srv_proto = service["proto"]
+    try:
+        found_filters = get_filter_names(form.code, srv_proto)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    # Remove filters that are not in the new code
+    existing_filters = db.query("SELECT filter_id FROM pyfilter WHERE service_id = ?;", service_id)
+    for filter in existing_filters:
+        if filter["name"] not in found_filters:
+            db.query("DELETE FROM pyfilter WHERE filter_id = ?;", filter["filter_id"])
+    
+    # Add filters that are in the new code but not in the database
+    for filter in found_filters:
+        if not db.query("SELECT 1 FROM pyfilter WHERE service_id = ? AND name = ?;", service_id, filter):
+            db.query("INSERT INTO pyfilter (name, service_id) VALUES (?, ?);", filter, service["service_id"])
+    
+    # Eventually edited filters will be reloaded
+    os.makedirs("db/nfproxy_filters", exist_ok=True)
+    with open(f"db/nfproxy_filters/{service_id}.py", "w") as f:
+        f.write(form.code)
+    await firewall.get(service_id).update_filters()
+    await refresh_frontend()
+    return {'status': 'ok'}
+
+@app.get('/services/{service_id}/pyfilters/code', response_class=PlainTextResponse)
+async def get_pyfilters(service_id: str):
+    """Get the python filter for a service"""
+    if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id):
+        raise HTTPException(status_code=400, detail="This service does not exists!")
+    try:
+        with open(f"db/nfproxy_filters/{service_id}.py") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
 #TODO check all the APIs and add
-# 1. API to change the python filter file
+# 1. API to change the python filter file (DONE)
 # 2. a socketio mechanism to lock the previous feature

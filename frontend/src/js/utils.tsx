@@ -7,6 +7,7 @@ import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerRespons
 import { Buffer } from "buffer"
 import { QueryClient, useQuery } from "@tanstack/react-query";
 import { useMediaQuery } from "@mantine/hooks";
+import { nfproxy } from "../components/NFProxy/utils";
 
 export const IS_DEV = import.meta.env.DEV
 
@@ -99,14 +100,6 @@ export function getMainPath(){
     const paths = window.location.pathname.split("/")
     if (paths.length > 1) return paths[1]
     return ""
-}
-
-export function getapiobject(){
-    switch(getMainPath()){
-        case "nfregex":
-            return nfregex
-      }
-      throw new Error('No api for this tool!');
 }
 
 export function HomeRedirector(){
