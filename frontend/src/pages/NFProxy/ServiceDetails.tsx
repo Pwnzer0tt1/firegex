@@ -162,22 +162,22 @@ export default function ServiceDetailsNFProxy() {
                 </Tooltip>
             </Box>
         </Box>
+        
         <Divider my="xl" />
+
         {filterCode.data?<>
             <Title order={3} style={{textAlign:"center"}} className="center-flex"><FaPython style={{ marginBottom: -3 }} size={30} /><Space w="xs" />Filter code</Title>
             <CodeHighlight code={filterCode.data} language="python" mt="lg" />
         </>: null}
-        <Space h="xl" />
+
         {(!filtersList.data || filtersList.data.length == 0)?<>
+                <Space h="xl" />
                 <Title className='center-flex' style={{textAlign:"center"}} order={3}>No filters found! Edit the proxy file</Title>
                 <Space h="xs" />
                 <Title className='center-flex' style={{textAlign:"center"}} order={3}>Install the firegex client:<Space w="xs" /><Code mb={-4} >pip install fgex</Code></Title>
                 <Space h="xs" />
                 <Title className='center-flex' style={{textAlign:"center"}} order={3}>Then run the command:<Space w="xs" /><Code mb={-4} >fgex nfproxy</Code></Title>
-            </>:
-            <Grid>
-                {filtersList.data?.map( (filterInfo) => <Grid.Col key={filterInfo.filter_id} span={{ lg:6, xs: 12 }}><PyFilterView filterInfo={filterInfo} /></Grid.Col>)}
-            </Grid>
+            </>:<>{filtersList.data?.map( (filterInfo) => <PyFilterView filterInfo={filterInfo} />)}</>
         }
         <YesNoModal
             title='Are you sure to delete this service?'

@@ -1,11 +1,23 @@
 import functools
+from firegex.nfproxy.params import RawPacket
+from enum import Enum
 
-ACCEPT = 0
-DROP = 1
-REJECT = 2
-MANGLE = 3
-EXCEPTION = 4
-INVALID = 5
+class Action(Enum):
+    ACCEPT = 0
+    DROP = 1
+    REJECT = 2
+    MANGLE = 3
+
+class FullStreamAction(Enum):
+    FLUSH = 0
+    ACCEPT = 1
+    REJECT = 2
+    DROP = 3
+
+ACCEPT = Action.ACCEPT
+DROP = Action.DROP
+REJECT = Action.REJECT
+MANGLE = Action.MANGLE
 
 def pyfilter(func):
     """
@@ -27,12 +39,14 @@ def get_pyfilters():
     """Returns the list of functions marked with @pyfilter."""
     return list(pyfilter.registry)
 
+def clear_pyfilter_registry():
+    """Clears the pyfilter registry."""
+    if hasattr(pyfilter, "registry"):
+        pyfilter.registry.clear()
 
-
-
-
-
-
-
-
-
+__all__ = [
+    "ACCEPT", "DROP", "REJECT", "MANGLE", "EXCEPTION", "INVALID",
+    "Action", "FullStreamAction",
+    "pyfilter",
+    "RawPacket"
+]

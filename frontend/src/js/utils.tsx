@@ -72,9 +72,14 @@ export async function genericapi(method:string,path:string,data:any = undefined,
                 const errorDefault = res.statusText
                 return res.json().then( res => reject(getErrorMessageFromServerResponse(res, errorDefault)) ).catch( _err => reject(errorDefault)) 
             }
-            res.json().then( res => resolve(res) ).catch( err => reject(err))
-        })
-        .catch(err => {
+            res.text().then(t => {
+                try{
+                    resolve(JSON.parse(t))
+                }catch(e){
+                    resolve(t)
+                }
+            }).catch( err => reject(err))
+        }).catch(err => {
             reject(err)
         })
     });

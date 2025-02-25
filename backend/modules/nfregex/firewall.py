@@ -45,11 +45,9 @@ class ServiceManager:
 
     async def next(self,to):
         async with self.lock:
-            if (self.status, to) == (STATUS.ACTIVE, STATUS.STOP):
+            if to == STATUS.STOP:
                 await self.stop()
-                self._set_status(to)
-            # PAUSE -> ACTIVE
-            elif (self.status, to) == (STATUS.STOP, STATUS.ACTIVE):
+            if to == STATUS.ACTIVE:
                 await self.restart()
 
     def _stats_updater(self,filter:RegexFilter):
@@ -71,6 +69,7 @@ class ServiceManager:
         if self.interceptor:
             await self.interceptor.stop()
             self.interceptor = None
+        self._set_status(STATUS.STOP)
     
     async def restart(self):
         await self.stop()

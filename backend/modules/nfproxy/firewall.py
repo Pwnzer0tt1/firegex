@@ -15,18 +15,18 @@ class ServiceManager:
         self.srv = srv
         self.db = db
         self.status = STATUS.STOP
-        self.filters: dict[int, FiregexFilter] = {}
+        self.filters: dict[str, FiregexFilter] = {}
         self.lock = asyncio.Lock()
         self.interceptor = None
     
     async def _update_filters_from_db(self):
         pyfilters = [
-            PyFilter.from_dict(ele) for ele in
+            PyFilter.from_dict(ele, self.db) for ele in
                 self.db.query("SELECT * FROM pyfilter WHERE service_id = ? AND active=1;", self.srv.id)
         ]
         #Filter check
         old_filters = set(self.filters.keys())
-        new_filters = set([f.id for f in pyfilters])
+        new_filters = set([f.name for f in pyfilters])
         #remove old filters
         for f in old_filters:
             if f not in new_filters:
@@ -34,7 +34,7 @@ class ServiceManager:
         #add new filters
         for f in new_filters:
             if f not in old_filters:
-                self.filters[f] = [ele for ele in pyfilters if ele.id == f][0]
+                self.filters[f] = [ele for ele in pyfilters if ele.name == f][0]
         if self.interceptor:
             await self.interceptor.reload(self.filters.values())
     
@@ -43,15 +43,10 @@ class ServiceManager:
 
     async def next(self,to):
         async with self.lock:
-            if (self.status, to) == (STATUS.ACTIVE, STATUS.STOP):
+            if to == STATUS.STOP:
                 await self.stop()
-                self._set_status(to)
-            # PAUSE -> ACTIVE
-            elif (self.status, to) == (STATUS.STOP, STATUS.ACTIVE):
+            if to == STATUS.ACTIVE:
                 await self.restart()
-
-    def _stats_updater(self,filter:PyFilter):
-        self.db.query("UPDATE pyfilter SET blocked_packets = ?, edited_packets = ? WHERE filter_id = ?;", filter.blocked_packets, filter.edited_packets, filter.id)
 
     def _set_status(self,status):
         self.status = status
@@ -60,7 +55,7 @@ class ServiceManager:
     async def start(self):
         if not self.interceptor:
             nft.delete(self.srv)
-            self.interceptor = await FiregexInterceptor.start(self.srv, self._stats_updater)
+            self.interceptor = await FiregexInterceptor.start(self.srv)
             await self._update_filters_from_db()
             self._set_status(STATUS.ACTIVE)
 
@@ -69,6 +64,7 @@ class ServiceManager:
         if self.interceptor:
             await self.interceptor.stop()
             self.interceptor = None
+        self._set_status(STATUS.STOP)
     
     async def restart(self):
         await self.stop()

@@ -33,7 +33,8 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	public:
 	stream_ctx sctx;
 	StreamFollower follower;
-	PyGILState_STATE gstate;
+	PyThreadState * gtstate = nullptr;
+
 	PyInterpreterConfig py_thread_config = {
 		.use_main_obmalloc = 0,
 		.allow_fork = 0,
@@ -44,24 +45,23 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		.gil = PyInterpreterConfig_OWN_GIL,
 	};
 	PyThreadState *tstate = NULL;
-	PyStatus pystatus;
-
-	struct {
-		bool matching_has_been_called = false;
-		bool already_closed = false;
-		bool rejected = true;
-		NfQueue::PktRequest<PyProxyQueue>* pkt;
-	} match_ctx;
+	NfQueue::PktRequest<PyProxyQueue>* pkt;
+	tcp_ack_seq_ctx* current_tcp_ack = nullptr;
 
     void before_loop() override {
-		// Create thred structure for python
-		gstate = PyGILState_Ensure();
+		PyStatus pystatus;
 		// Create a new interpreter for the thread
+		gtstate = PyThreadState_New(PyInterpreterState_Main());
+		PyEval_AcquireThread(gtstate);
 		pystatus = Py_NewInterpreterFromConfig(&tstate, &py_thread_config);
-		if (PyStatus_Exception(pystatus)) {
-			Py_ExitStatusException(pystatus);
+		if(tstate == nullptr){
 			cerr << "[fatal] [main] Failed to create new interpreter" << endl;
-			exit(EXIT_FAILURE);
+			throw invalid_argument("Failed to create new interpreter (null tstate)");
+		}
+		if (PyStatus_Exception(pystatus)) {
+			cerr << "[fatal] [main] Failed to create new interpreter" << endl;
+			Py_ExitStatusException(pystatus);
+			throw invalid_argument("Failed to create new interpreter (pystatus exc)");
 		}
 		// Setting callbacks for the stream follower
 		follower.new_stream_callback(bind(on_new_stream, placeholders::_1, this));
@@ -69,21 +69,24 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
     }
 
 	inline void print_blocked_reason(const string& func_name){
-		osyncstream(cout) << "BLOCKED " << func_name << endl;
+		control_socket << "BLOCKED " << func_name << endl;
 	}
 
 	inline void print_mangle_reason(const string& func_name){
-		osyncstream(cout) << "MANGLED " << func_name << endl;
+		control_socket << "MANGLED " << func_name << endl;
 	}
 
 	inline void print_exception_reason(){
-		osyncstream(cout) << "EXCEPTION" << endl;
+		control_socket << "EXCEPTION" << endl;
 	}
 
 	//If the stream has already been matched, drop all data, and try to close the connection
-	static void keep_fin_packet(PyProxyQueue* proxy_info){
-		proxy_info->match_ctx.matching_has_been_called = true;
-		proxy_info->match_ctx.already_closed = true;
+	static void keep_fin_packet(PyProxyQueue* pyq){
+		pyq->pkt->reject();// This is needed because the callback has to take the updated pkt pointer!
+	}
+
+	static void keep_dropped(PyProxyQueue* pyq){
+		pyq->pkt->drop();// This is needed because the callback has to take the updated pkt pointer!
 	}
 
 	void filter_action(NfQueue::PktRequest<PyProxyQueue>* pkt, Stream& stream){
@@ -92,36 +95,45 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		if (stream_search == sctx.streams_ctx.end()){
 			shared_ptr<PyCodeConfig> conf = config;
 			//If config is not set, ignore the stream
-			if (conf->glob == nullptr || conf->local == nullptr){
+			PyObject* compiled_code = conf->compiled_code();
+			if (compiled_code == nullptr){
 				stream.client_data_callback(nullptr);
 				stream.server_data_callback(nullptr);
 				return pkt->accept();
 			}
-			stream_match = new pyfilter_ctx(conf->glob, conf->local);
+			stream_match = new pyfilter_ctx(compiled_code);
+			Py_DECREF(compiled_code);
 			sctx.streams_ctx.insert_or_assign(pkt->sid, stream_match);
 		}else{
 			stream_match = stream_search->second;
-		}
+		}		
+
 		auto result = stream_match->handle_packet(pkt);
 		switch(result.action){
 			case PyFilterResponse::ACCEPT:
-				pkt->accept();
+				return pkt->accept();
 			case PyFilterResponse::DROP:
 				print_blocked_reason(*result.filter_match_by);
 				sctx.clean_stream_by_id(pkt->sid);
-				stream.client_data_callback(nullptr);
-				stream.server_data_callback(nullptr);
-				break;
+				stream.client_data_callback(bind(keep_dropped, this));
+				stream.server_data_callback(bind(keep_dropped, this));
+				return pkt->drop();
 			case PyFilterResponse::REJECT:
+				print_blocked_reason(*result.filter_match_by);
 				sctx.clean_stream_by_id(pkt->sid);
 				stream.client_data_callback(bind(keep_fin_packet, this));
 				stream.server_data_callback(bind(keep_fin_packet, this));
-				pkt->ctx->match_ctx.rejected = true; //Handler will take care of the rest
-				break;
+				return pkt->reject();
 			case PyFilterResponse::MANGLE:
-				print_mangle_reason(*result.filter_match_by);
-				pkt->mangle_custom_pkt((uint8_t*)result.mangled_packet->c_str(), result.mangled_packet->size());
-				break;
+				pkt->mangle_custom_pkt((uint8_t*)result.mangled_packet->data(), result.mangled_packet->size());
+				if (pkt->get_action() == NfQueue::FilterAction::DROP){
+					cerr << "[error] [filter_action] Failed to mangle: the packet sent is not serializzable... the packet was dropped" << endl;
+					print_blocked_reason(*result.filter_match_by);
+					print_exception_reason();
+				}else{
+					print_mangle_reason(*result.filter_match_by);
+				}
+				return;
 			case PyFilterResponse::EXCEPTION:
 			case PyFilterResponse::INVALID:
 				print_exception_reason();
@@ -129,16 +141,15 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 				//Free the packet data
 				stream.client_data_callback(nullptr);
 				stream.server_data_callback(nullptr);
-				pkt->accept();
-				break;
+				return pkt->accept();
 		}
 	}
 
 
 	static void on_data_recv(Stream& stream, PyProxyQueue* proxy_info, string data) {
-		proxy_info->match_ctx.matching_has_been_called = true;
-		proxy_info->match_ctx.already_closed = false;
-		proxy_info->filter_action(proxy_info->match_ctx.pkt, stream);
+		proxy_info->pkt->data = data.data();
+		proxy_info->pkt->data_size = data.size();
+		proxy_info->filter_action(proxy_info->pkt, stream);
 	}
 	
 	//Input data filtering
@@ -152,77 +163,77 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	}
 	
 	// A stream was terminated. The second argument is the reason why it was terminated
-	static void on_stream_close(Stream& stream, PyProxyQueue* proxy_info) {
+	static void on_stream_close(Stream& stream, PyProxyQueue* pyq) {
 		stream_id stream_id = stream_id::make_identifier(stream);
-		proxy_info->sctx.clean_stream_by_id(stream_id);
+		pyq->sctx.clean_stream_by_id(stream_id);
+		pyq->sctx.clean_tcp_ack_by_id(stream_id);
 	}
 	
-	static void on_new_stream(Stream& stream, PyProxyQueue* proxy_info) {
+	static void on_new_stream(Stream& stream, PyProxyQueue* pyq) {
 		stream.auto_cleanup_payloads(true);
 		if (stream.is_partial_stream()) {
 			stream.enable_recovery_mode(10 * 1024);
 		}
-		stream.client_data_callback(bind(on_client_data, placeholders::_1, proxy_info));
-		stream.server_data_callback(bind(on_server_data, placeholders::_1, proxy_info));
-		stream.stream_closed_callback(bind(on_stream_close, placeholders::_1, proxy_info));
+
+		if (pyq->current_tcp_ack != nullptr){
+			pyq->current_tcp_ack->reset();
+		}else{
+			pyq->current_tcp_ack = new tcp_ack_seq_ctx();
+			pyq->sctx.tcp_ack_ctx.insert_or_assign(pyq->pkt->sid, pyq->current_tcp_ack);
+			pyq->pkt->tcp_in_offset = &pyq->current_tcp_ack->in_tcp_offset;
+			pyq->pkt->tcp_out_offset = &pyq->current_tcp_ack->out_tcp_offset;
+		}
+
+		//Should not happen, but with this we can be sure about this
+		auto tcp_ack_search = pyq->sctx.tcp_ack_ctx.find(pyq->pkt->sid);
+		if (tcp_ack_search != pyq->sctx.tcp_ack_ctx.end()){
+			tcp_ack_search->second->reset();
+		}
+		
+		stream.client_data_callback(bind(on_client_data, placeholders::_1, pyq));
+		stream.server_data_callback(bind(on_server_data, placeholders::_1, pyq));
+		stream.stream_closed_callback(bind(on_stream_close, placeholders::_1, pyq));
 	}
 
+	void handle_next_packet(NfQueue::PktRequest<PyProxyQueue>* _pkt) override{
+		pkt = _pkt; // Setting packet context
 
-	void handle_next_packet(NfQueue::PktRequest<PyProxyQueue>* pkt) override{
 		if (pkt->l4_proto != NfQueue::L4Proto::TCP){
 			throw invalid_argument("Only TCP and UDP are supported");
 		}
-		Tins::PDU* application_layer = pkt->tcp->inner_pdu();
-		u_int16_t payload_size = 0;
-		if (application_layer != nullptr){
-			payload_size = application_layer->size();
+
+		auto tcp_ack_search = sctx.tcp_ack_ctx.find(pkt->sid);
+		if (tcp_ack_search != sctx.tcp_ack_ctx.end()){
+			current_tcp_ack = tcp_ack_search->second;
+			pkt->tcp_in_offset = &current_tcp_ack->in_tcp_offset;
+			pkt->tcp_out_offset = &current_tcp_ack->out_tcp_offset;
+		}else{
+			current_tcp_ack = nullptr;
+			//If necessary will be created by libtis new_stream callback
 		}
-		match_ctx.matching_has_been_called = false;
-		match_ctx.pkt = pkt;
+
 		if (pkt->is_ipv6){
+			pkt->fix_tcp_ack();
 			follower.process_packet(*pkt->ipv6);
 		}else{
+			pkt->fix_tcp_ack();
 			follower.process_packet(*pkt->ipv4);
 		}
-		// Do an action only is an ordered packet has been received
-		if (match_ctx.matching_has_been_called){
-			bool empty_payload = payload_size == 0;
-			//In this 2 cases we have to remove all data about the stream
-			if (!match_ctx.rejected || match_ctx.already_closed){
-				sctx.clean_stream_by_id(pkt->sid);
-				//If the packet has data, we have to remove it
-				if (!empty_payload){
-					Tins::PDU* data_layer = pkt->tcp->release_inner_pdu();
-					if (data_layer != nullptr){
-						delete data_layer;
-					}
-				}
-				//For the first matched data or only for data packets, we set FIN bit
-				//This only for client packets, because this will trigger server to close the connection
-				//Packets will be filtered anyway also if client don't send packets
-				if ((!match_ctx.rejected || !empty_payload) && pkt->is_input){
-					pkt->tcp->set_flag(Tins::TCP::FIN,1);
-					pkt->tcp->set_flag(Tins::TCP::ACK,1);
-					pkt->tcp->set_flag(Tins::TCP::SYN,0);
-				}
-				//Send the edited packet to the kernel
-				return pkt->mangle();
-			}else{
-				//Fallback to the default action
-				if (pkt->get_action() == NfQueue::FilterAction::NOACTION){
-					return pkt->accept();
-				}
-			}
-		}else{
+
+		//Fallback to the default action
+		if (pkt->get_action() == NfQueue::FilterAction::NOACTION){
 			return pkt->accept();
 		}
 	}
 
 	~PyProxyQueue() {
 		// Closing first the interpreter
+		
 		Py_EndInterpreter(tstate);
-		// Releasing the GIL and the thread data structure
-		PyGILState_Release(gstate);
+		PyEval_ReleaseThread(tstate);
+		PyThreadState_Clear(tstate);
+		PyThreadState_Delete(tstate);
+	
 		sctx.clean();
 	}
 

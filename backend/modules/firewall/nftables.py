@@ -1,4 +1,4 @@
-from modules.firewall.models import *
+from modules.firewall.models import FirewallSettings, Action, Rule, Protocol, Mode, Table
 from utils import nftables_int_to_json, ip_family, NFTableManager, is_ip_parse
 import copy
 
@@ -9,7 +9,8 @@ class FiregexTables(NFTableManager):
     filter_table = "filter"
     mangle_table = "mangle"
     
-    def init_comands(self, policy:str=Action.ACCEPT, opt: FirewallSettings|None = None):
+    def init_comands(self, policy:str=Action.ACCEPT, opt:
+        FirewallSettings|None = None):
         rules = [
             {"add":{"table":{"name":self.filter_table,"family":"ip"}}},
             {"add":{"table":{"name":self.filter_table,"family":"ip6"}}},
@@ -41,7 +42,8 @@ class FiregexTables(NFTableManager):
             {"add":{"chain":{"family":"ip","table":self.mangle_table,"name":self.rules_chain_out}}},
             {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":self.rules_chain_out}}},
         ]
-        if opt is None: return rules
+        if opt is None:
+            return rules
         
         if opt.allow_loopback:
             rules.extend([
@@ -194,13 +196,18 @@ class FiregexTables(NFTableManager):
     def chain_to_firegex(self, chain:str, table:str):
         if table == self.filter_table:
             match chain:
-                case "INPUT": return self.rules_chain_in
-                case "OUTPUT": return self.rules_chain_out
-                case "FORWARD": return self.rules_chain_fwd
+                case "INPUT":
+                    return self.rules_chain_in
+                case "OUTPUT":
+                    return self.rules_chain_out
+                case "FORWARD":
+                    return self.rules_chain_fwd
         elif table == self.mangle_table:
             match chain:
-                case "PREROUTING": return self.rules_chain_in
-                case "POSTROUTING": return self.rules_chain_out
+                case "PREROUTING":
+                    return self.rules_chain_in
+                case "POSTROUTING":
+                    return self.rules_chain_out
         return None
         
     def insert_firegex_chains(self):
@@ -214,7 +221,8 @@ class FiregexTables(NFTableManager):
                         if r.get("family") == family and r.get("table") == table and r.get("chain") == chain and r.get("expr") == rule_to_add:
                             found = True
                             break
-                    if found: continue
+                    if found:
+                        continue
                     yield { "add":{ "rule": {
                             "family": family,
                             "table": table,
@@ -274,7 +282,7 @@ class FiregexTables(NFTableManager):
                     ip_filters.append({"match": { "op": "==", "left": { "meta": { "key": "oifname" } }, "right": srv.dst} })
                 
             port_filters = []
-            if not srv.proto in [Protocol.ANY, Protocol.BOTH]:
+            if srv.proto not in [Protocol.ANY, Protocol.BOTH]:
                 if srv.port_src_from != 1 or srv.port_src_to != 65535: #Any Port
                     port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '>=', 'right': int(srv.port_src_from)}})
                     port_filters.append({'match': {'left': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'op': '<=', 'right': int(srv.port_src_to)}})

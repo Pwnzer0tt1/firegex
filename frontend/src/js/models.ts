@@ -51,7 +51,6 @@ export type RegexAddForm = {
 }
 
 export type PyFilter = {
-    filter_id:number,
     name:string,
     blocked_packets:number,
     edited_packets:number,

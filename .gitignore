@@ -13,6 +13,7 @@
 /frontend/coverage
 /fgex-lib/firegex.egg-info
 /fgex-lib/dist
+/fgex-lib/build
 /fgex-lib/fgex-pip/fgex.egg-info
 /fgex-lib/fgex-pip/dist
 /backend/db/

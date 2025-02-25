@@ -37,13 +37,7 @@ public:
 	stream_ctx sctx;
 	u_int16_t latest_config_ver = 0;
 	StreamFollower follower;
-	struct {
-		bool matching_has_been_called = false;
-		bool already_closed = false;
-		bool result;
-		NfQueue::PktRequest<RegexNfQueue>* pkt;
-	} match_ctx;
-	
+	NfQueue::PktRequest<RegexNfQueue>* pkt;
 
 	bool filter_action(NfQueue::PktRequest<RegexNfQueue>* pkt){
 		shared_ptr<RegexRules> conf = regex_config;
@@ -119,49 +113,23 @@ public:
 		return true;
 	}
 
-	void handle_next_packet(NfQueue::PktRequest<RegexNfQueue>* pkt) override{
-		bool empty_payload = pkt->data_size == 0;
+	void handle_next_packet(NfQueue::PktRequest<RegexNfQueue>* _pkt) override{
+        pkt = _pkt; // Setting packet context
 		if (pkt->tcp){
-			match_ctx.matching_has_been_called = false;
-			match_ctx.pkt = pkt;
-
 			if (pkt->ipv4){
 				follower.process_packet(*pkt->ipv4);
 			}else{
 				follower.process_packet(*pkt->ipv6);
 			}
-	
-			// Do an action only is an ordered packet has been received
-			if (match_ctx.matching_has_been_called){
-	
-				//In this 2 cases we have to remove all data about the stream
-				if (!match_ctx.result || match_ctx.already_closed){
-					sctx.clean_stream_by_id(pkt->sid);
-					//If the packet has data, we have to remove it
-					if (!empty_payload){
-						Tins::PDU* data_layer = pkt->tcp->release_inner_pdu();
-						if (data_layer != nullptr){
-							delete data_layer;
-						}
-					}
-					//For the first matched data or only for data packets, we set FIN bit
-					//This only for client packets, because this will trigger server to close the connection
-					//Packets will be filtered anyway also if client don't send packets
-					if ((!match_ctx.result || !empty_payload) && pkt->is_input){
-						pkt->tcp->set_flag(Tins::TCP::FIN,1);
-						pkt->tcp->set_flag(Tins::TCP::ACK,1);
-						pkt->tcp->set_flag(Tins::TCP::SYN,0);
-					}
-					//Send the edited packet to the kernel
-					return pkt->mangle();
-				}
+			//Fallback to the default action
+			if (pkt->get_action() == NfQueue::FilterAction::NOACTION){
+				return pkt->accept();
 			}
-			return pkt->accept();
 		}else{
 			if (!pkt->udp){
 				throw invalid_argument("Only TCP and UDP are supported");
 			}
-			if(empty_payload){
+			if(pkt->data_size == 0){
 				return pkt->accept();
 			}else if (filter_action(pkt)){
 				return pkt->accept();
@@ -170,22 +138,21 @@ public:
 			}
 		}
 	}
+
 	//If the stream has already been matched, drop all data, and try to close the connection
 	static void keep_fin_packet(RegexNfQueue* nfq){
-		nfq->match_ctx.matching_has_been_called = true;
-		nfq->match_ctx.already_closed = true;
+        nfq->pkt->reject();// This is needed because the callback has to take the updated pkt pointer!
 	}
 
 	static void on_data_recv(Stream& stream, RegexNfQueue* nfq, string data) {
-		nfq->match_ctx.matching_has_been_called = true;
-		nfq->match_ctx.already_closed = false;
-		bool result = nfq->filter_action(nfq->match_ctx.pkt);
-		if (!result){
-			nfq->sctx.clean_stream_by_id(nfq->match_ctx.pkt->sid);
+		nfq->pkt->data = data.data();
+		nfq->pkt->data_size = data.size();
+		if (!nfq->filter_action(nfq->pkt)){
+			nfq->sctx.clean_stream_by_id(nfq->pkt->sid);
 			stream.client_data_callback(bind(keep_fin_packet, nfq));
 			stream.server_data_callback(bind(keep_fin_packet, nfq));
+			nfq->pkt->reject();
 		}
-		nfq->match_ctx.result = result;
 	}
 
 	//Input data filtering

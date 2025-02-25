@@ -15,8 +15,21 @@ import { useQueryClient } from '@tanstack/react-query';
 import NFProxy from './pages/NFProxy';
 import ServiceDetailsNFProxy from './pages/NFProxy/ServiceDetails';
 
-
-const socket = IS_DEV?io("ws://"+DEV_IP_BACKEND, {transports: ["websocket"], path:"/sock/socket.io" }):io({transports: ["websocket"], path:"/sock/socket.io"});
+export const socket = import.meta.env.DEV?
+    io("ws://"+DEV_IP_BACKEND, {
+        path:"/sock/socket.io",
+        transports: ['websocket'],
+        auth: {
+            token: localStorage.getItem("access_token")
+        }
+    }):
+    io({
+        path:"/sock/socket.io",
+        transports: ['websocket'],
+        auth: {
+            token: localStorage.getItem("access_token")
+        }
+    })
 
 function App() {
 
@@ -25,33 +38,20 @@ function App() {
   const [reqError, setReqError] = useState<undefined|string>()
   const [error, setError] = useState<string|null>()
   const [loadinBtn, setLoadingBtn] = useState(false);
-  const queryClient = useQueryClient()
+  
 
   const getStatus = () =>{
-      getstatus().then( res =>{
-        setSystemStatus(res)
-        setReqError(undefined)
-        setLoading(false)
-      }).catch(err=>{
-        setReqError(err.toString())
-        setLoading(false)
-        setTimeout(getStatus, 500)
-      })
+    getstatus().then( res =>{
+      setSystemStatus(res)
+      setReqError(undefined)
+    }).catch(err=>{
+      setReqError(err.toString())
+      setTimeout(getStatus, 500)
+    }).finally( ()=>setLoading(false) )
   }
 
   useEffect(()=>{
     getStatus()
-    socket.on("update", (data) => {
-      queryClient.invalidateQueries({ queryKey: data  })
-    })
-    socket.on("connect_error", (err) => {
-      errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
-      getStatus()
-    });
-    return () => {
-      socket.off("update")
-      socket.off("connect_error")
-    }
   },[])
 
   const form = useForm({
@@ -145,19 +145,7 @@ function App() {
           </Notification><Space h="md" /></>:null}
     </Box>
   }else if (systemStatus.status === "run" && systemStatus.loggined){
-    return <Routes>
-              <Route element={<MainLayout><Outlet /></MainLayout>}>
-                  <Route path="nfregex" element={<NFRegex><Outlet /></NFRegex>} >
-                    <Route path=":srv" element={<ServiceDetailsNFRegex />} />
-                  </Route>
-                  <Route path="nfproxy" element={<NFProxy><Outlet /></NFProxy>} >
-                    <Route path=":srv" element={<ServiceDetailsNFProxy />} />
-                  </Route>
-                  <Route path="firewall" element={<Firewall />} />
-                  <Route path="porthijack" element={<PortHijack />} />
-                <Route path="*" element={<HomeRedirector />} />
-              </Route>
-          </Routes>
+    return <PageRouting getStatus={getStatus} />
   }else{
     return <Box className='center-flex-row' style={{padding:"100px"}}>
       <Title order={1} style={{textAlign:"center"}}>Error launching Firegex! 🔥</Title>
@@ -166,5 +154,42 @@ function App() {
     </Box>
   }
 }
+
+const PageRouting = ({ getStatus }:{ getStatus:()=>void }) => {
+
+  const queryClient = useQueryClient()
+
+
+  useEffect(()=>{
+    getStatus()
+    socket.on("update", (data) => {
+      queryClient.invalidateQueries({ queryKey: data  })
+    })
+    socket.on("connect_error", (err) => {
+      errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
+      getStatus()
+    });
+  return () => {
+    socket.off("update")
+    socket.off("connect_error")
+  }
+},[])
+
+  return <Routes>
+  <Route element={<MainLayout><Outlet /></MainLayout>}>
+      <Route path="nfregex" element={<NFRegex><Outlet /></NFRegex>} >
+        <Route path=":srv" element={<ServiceDetailsNFRegex />} />
+      </Route>
+      <Route path="nfproxy" element={<NFProxy><Outlet /></NFProxy>} >
+        <Route path=":srv" element={<ServiceDetailsNFProxy />} />
+      </Route>
+      <Route path="firewall" element={<Firewall />} />
+      <Route path="porthijack" element={<PortHijack />} />
+    <Route path="*" element={<HomeRedirector />} />
+  </Route>
+</Routes>
+}
+
+
 
 export default App;

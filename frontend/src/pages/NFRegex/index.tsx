@@ -38,7 +38,7 @@ function NFRegex({ children }: { children: any }) {
         <Title order={5} className="center-flex"><ThemeIcon radius="md" size="md" variant='filled' color='grape' ><BsRegex size={20} /></ThemeIcon><Space w="xs" />Netfilter Regex</Title>
         {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
         <Box className='center-flex' >
-            General stats:
+            {isMedium?"General stats:":null}
             <Space w="xs" />
             <Badge size="md" radius="sm" color="green" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:services.data?.length}</Badge>
             <Space w="xs" />

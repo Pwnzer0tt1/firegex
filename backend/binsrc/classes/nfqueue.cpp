@@ -17,6 +17,7 @@ enum class FilterAction{ DROP, ACCEPT, MANGLE, NOACTION };
 enum class L4Proto { TCP, UDP, RAW };
 typedef Tins::TCPIP::StreamIdentifier stream_id;
 
+//TODO DUBBIO: I PACCHETTI INVIATI A PYTHON SONO GIA' FIXATI?
 
 template<typename T>
 class PktRequest {
@@ -25,6 +26,9 @@ class PktRequest {
 	mnl_socket* nl = nullptr;
 	uint16_t res_id;
 	uint32_t packet_id;
+	size_t _original_size;
+	size_t _data_original_size;
+	bool need_tcp_fixing = false;
 	public:
 	bool is_ipv6;
 	Tins::IP* ipv4 = nullptr;
@@ -39,17 +43,27 @@ class PktRequest {
 	size_t data_size;
 	stream_id sid;
 
+	int64_t* tcp_in_offset = nullptr;
+	int64_t* tcp_out_offset = nullptr;
+
 	T* ctx;
 
 	private:
 
-	inline void fetch_data_size(Tins::PDU* pdu){
+	static size_t inner_data_size(Tins::PDU* pdu){
+		if (pdu == nullptr){
+			return 0;
+		}
 		auto inner = pdu->inner_pdu();
 		if (inner == nullptr){
-			data_size = 0;
-		}else{
-			data_size = inner->size();
+			return 0;
 		}
+		return inner->size();
+	}
+
+	inline void fetch_data_size(Tins::PDU* pdu){
+		data_size = inner_data_size(pdu);
+		_data_original_size = data_size;
 	}
 
 	L4Proto fill_l4_info(){
@@ -86,23 +100,92 @@ class PktRequest {
 		}
 	}
 
+	bool need_tcp_fix(){
+		return (tcp_in_offset != nullptr && *tcp_in_offset != 0) || (tcp_out_offset != nullptr && *tcp_out_offset != 0);
+	}
+
+	Tins::PDU::serialization_type reserialize_raw_data(const uint8_t* data, const size_t& data_size){
+		if (is_ipv6){
+			Tins::IPv6 ipv6_new = Tins::IPv6(data, data_size);
+			if (tcp){
+				Tins::TCP* tcp_new = ipv6_new.find_pdu<Tins::TCP>();
+			}
+			return ipv6_new.serialize();
+		}else{
+			Tins::IP ipv4_new = Tins::IP(data, data_size);
+			if (tcp){
+				Tins::TCP* tcp_new = ipv4_new.find_pdu<Tins::TCP>();
+			}
+			return ipv4_new.serialize();
+		}
+	}
+
+	void _fix_ack_seq_tcp(Tins::TCP* this_tcp){
+		need_tcp_fixing = need_tcp_fix();
+		#ifdef DEBUG
+		if (need_tcp_fixing){
+			cerr << "[DEBUG] Fixing ack_seq with offsets " << *tcp_in_offset << " " << *tcp_out_offset << endl;
+		}
+		#endif
+		if(this_tcp == nullptr){
+			return;
+		}
+		if (is_input){
+			if (tcp_in_offset != nullptr){
+				this_tcp->seq(this_tcp->seq() + *tcp_in_offset);
+			}
+			if (tcp_out_offset != nullptr){
+				this_tcp->ack_seq(this_tcp->ack_seq() - *tcp_out_offset);
+			}
+		}else{
+			if (tcp_in_offset != nullptr){
+				this_tcp->ack_seq(this_tcp->ack_seq() - *tcp_in_offset);
+			}
+			if (tcp_out_offset != nullptr){
+				this_tcp->seq(this_tcp->seq() + *tcp_out_offset);
+			}	
+		}
+		#ifdef DEBUG
+		if (need_tcp_fixing){
+			size_t new_size = inner_data_size(this_tcp);
+			cerr << "[DEBUG] FIXED PKT  " << (is_input?"-> IN ":"<- OUT") << " [SEQ: " << this_tcp->seq() << "] \t[ACK: " << this_tcp->ack_seq() << "] \t[SIZE: " << new_size << "]" << endl;
+		}
+		#endif
+	}
+
+
 	public:
 
 	PktRequest(const char* payload, size_t plen, T* ctx, mnl_socket* nl, nfgenmsg *nfg, nfqnl_msg_packet_hdr *ph, bool is_input):
 		ctx(ctx), nl(nl), res_id(nfg->res_id),
 		packet_id(ph->packet_id), is_input(is_input),
 		packet(string(payload, plen)),
-		is_ipv6((payload[0] & 0xf0) == 0x60){
-			if (is_ipv6){
-				ipv6 = new Tins::IPv6((uint8_t*)packet.c_str(), plen);
-				sid = stream_id::make_identifier(*ipv6);
-			}else{
-				ipv4 = new Tins::IP((uint8_t*)packet.c_str(), plen);
-				sid = stream_id::make_identifier(*ipv4);
-			}
-			l4_proto = fill_l4_info();
-			data = packet.data()+(plen-data_size);
+		action(FilterAction::NOACTION),
+		is_ipv6((payload[0] & 0xf0) == 0x60)
+	{
+		if (is_ipv6){
+			ipv6 = new Tins::IPv6((uint8_t*)packet.c_str(), plen);
+			sid = stream_id::make_identifier(*ipv6);
+			_original_size = ipv6->size();
+		}else{
+			ipv4 = new Tins::IP((uint8_t*)packet.data(), plen);
+			sid = stream_id::make_identifier(*ipv4);
+			_original_size = ipv4->size();
 		}
+		l4_proto = fill_l4_info();
+		data = packet.data()+(plen-data_size);
+		#ifdef DEBUG
+		if (tcp){			
+			cerr << "[DEBUG] NEW_PACKET " << (is_input?"-> IN ":"<- OUT") << " [SEQ: " << tcp->seq() << "] \t[ACK: " << tcp->ack_seq() << "] \t[SIZE: " << data_size << "]" << endl;
+		}
+		#endif
+	}
+
+	void fix_tcp_ack(){
+		if (tcp){
+			_fix_ack_seq_tcp(tcp);
+		}
+	}
 		
 	void drop(){
 		if (action == FilterAction::NOACTION){
@@ -111,6 +194,14 @@ class PktRequest {
 		}else{
 			throw invalid_argument("Cannot drop a packet that has already been dropped or accepted");
 		}
+	}
+
+	size_t data_original_size(){
+		return _data_original_size;
+	}
+
+	size_t original_size(){
+		return _original_size;
 	}
 
 	void accept(){
@@ -131,7 +222,26 @@ class PktRequest {
 		}
 	}
 
-	void mangle_custom_pkt(const uint8_t* pkt, size_t pkt_size){
+	void reject(){
+		if (tcp){
+			//If the packet has data, we have to remove it
+			delete tcp->release_inner_pdu();
+			//For the first matched data or only for data packets, we set FIN bit
+			//This only for client packets, because this will trigger server to close the connection
+			//Packets will be filtered anyway also if client don't send packets
+			if (_data_original_size != 0 && is_input){
+				tcp->set_flag(Tins::TCP::FIN,1);
+				tcp->set_flag(Tins::TCP::ACK,1);
+				tcp->set_flag(Tins::TCP::SYN,0);
+			}
+			//Send the edited packet to the kernel
+			mangle();
+		}else{
+			drop();
+		}
+	}
+
+	void mangle_custom_pkt(uint8_t* pkt, const size_t& pkt_size){
 		if (action == FilterAction::NOACTION){
 			action = FilterAction::MANGLE;
 			perfrom_action(pkt, pkt_size);
@@ -149,26 +259,58 @@ class PktRequest {
         delete ipv6;
 	}
 
+	inline Tins::PDU::serialization_type serialize(){
+		if (is_ipv6){
+			return ipv6->serialize();
+		}else{
+			return ipv4->serialize();
+		}
+	}
+
 	private:
-	void perfrom_action(const uint8_t* custom_data = nullptr, size_t custom_data_size = 0){
+	void perfrom_action(uint8_t* custom_data = nullptr, size_t custom_data_size = 0){
 		char buf[MNL_SOCKET_BUFFER_SIZE];
 		struct nlmsghdr *nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(res_id));
 		switch (action)
 		{
 			case FilterAction::ACCEPT:
+				if (need_tcp_fixing){
+					Tins::PDU::serialization_type data = serialize();
+					nfq_nlmsg_verdict_put_pkt(nlh_verdict, data.data(), data.size());					
+				}
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(packet_id), NF_ACCEPT );
 				break;
 			case FilterAction::DROP:
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(packet_id), NF_DROP );
 				break;
 			case FilterAction::MANGLE:{
-				if (custom_data != nullptr){
-					nfq_nlmsg_verdict_put_pkt(nlh_verdict, custom_data, custom_data_size);
-				}else if (is_ipv6){
-					nfq_nlmsg_verdict_put_pkt(nlh_verdict, ipv6->serialize().data(), ipv6->size());
+				//If not custom data, use the data in the packets
+				Tins::PDU::serialization_type data;
+				if (custom_data == nullptr){
+					data = serialize();
 				}else{
-					nfq_nlmsg_verdict_put_pkt(nlh_verdict, ipv4->serialize().data(), ipv4->size());
+					try{
+						data = reserialize_raw_data(custom_data, custom_data_size);
+					}catch(...){
+						nfq_nlmsg_verdict_put(nlh_verdict, ntohl(packet_id), NF_DROP );
+						action = FilterAction::DROP;
+						break;
+					}
 				}
+				#ifdef DEBUG
+				size_t new_size = _data_original_size+((int64_t)custom_data_size) - ((int64_t)_original_size);
+				cerr << "[DEBUG] MANGLEDPKT " << (is_input?"-> IN ":"<- OUT") << " [SIZE: " << new_size << "]" << endl;
+				#endif
+				if (tcp && custom_data_size != _original_size){
+					int64_t delta = ((int64_t)custom_data_size) - ((int64_t)_original_size);
+
+					if (is_input && tcp_in_offset != nullptr){
+						*tcp_in_offset += delta;
+					}else if (!is_input && tcp_out_offset != nullptr){
+						*tcp_out_offset += delta;
+					}
+				}
+				nfq_nlmsg_verdict_put_pkt(nlh_verdict, data.data(), data.size());
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(packet_id), NF_ACCEPT );
 				break;
 			}

@@ -26,7 +26,7 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
         validate:{
             name: (value) => edit? null : value !== "" ? null : "Service name is required",
             port: (value) => (value>0 && value<65536) ? null : "Invalid port",
-            proto: (value) => ["tcp","udp"].includes(value) ? null : "Invalid protocol",
+            proto: (value) => ["tcp","http"].includes(value) ? null : "Invalid protocol",
             ip_int: (value) => (value.match(regex_ipv6) || value.match(regex_ipv4)) ? null : "Invalid IP address",
         }
     })
@@ -50,7 +50,7 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
     const submitRequest = ({ name, port, autostart, proto, ip_int, fail_open }:ServiceAddForm) =>{
         setSubmitLoading(true)
         if (edit){
-            nfproxy.settings(edit.service_id, { port, proto, ip_int, fail_open }).then( res => {
+            nfproxy.settings(edit.service_id, { port, ip_int, fail_open }).then( res => {
                 if (!res){
                     setSubmitLoading(false)
                     close();
@@ -111,13 +111,13 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
                     />
                 </Box>
                 <Box className="flex-spacer"></Box>
-                <SegmentedControl
+                {edit?null:<SegmentedControl
                     data={[
                         { label: 'TCP', value: 'tcp' },
-                        { label: 'UDP', value: 'udp' },
+                        { label: 'HTTP', value: 'http' },
                     ]}
                     {...form.getInputProps('proto')}
-                />
+                />}
             </Box>      
 
             <Group justify='flex-end' mt="md" mb="sm">

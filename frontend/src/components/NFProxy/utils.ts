@@ -25,7 +25,6 @@ export type ServiceAddForm = {
 
 export type ServiceSettings = {
     port?:number,
-    proto?:string,
     ip_int?:string,
     fail_open?: boolean,
 }
@@ -55,12 +54,12 @@ export const nfproxy = {
     serviceinfo: async (service_id:string) => {
         return await getapi(`nfproxy/services/${service_id}`) as Service;
     },
-    pyfilterenable: async (regex_id:number) => {
-        const { status } = await postapi(`nfproxy/pyfilters/${regex_id}/enable`) as ServerResponse;
+    pyfilterenable: async (filter_name:string) => {
+        const { status } = await postapi(`nfproxy/pyfilters/${filter_name}/enable`) as ServerResponse;
         return status === "ok"?undefined:status
     },
-    pyfilterdisable: async (regex_id:number) => {
-        const { status } = await postapi(`nfproxy/pyfilters/${regex_id}/disable`) as ServerResponse;
+    pyfilterdisable: async (filter_name:string) => {
+        const { status } = await postapi(`nfproxy/pyfilters/${filter_name}/disable`) as ServerResponse;
         return status === "ok"?undefined:status
     },
     servicestart: async (service_id:string) => {

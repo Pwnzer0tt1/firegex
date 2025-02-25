@@ -16,7 +16,7 @@ RUN bun run build
 FROM --platform=$TARGETARCH registry.fedoraproject.org/fedora:latest
 RUN dnf -y update && dnf install -y python3.13-devel @development-tools gcc-c++ \
     libnetfilter_queue-devel libnfnetlink-devel libmnl-devel libcap-ng-utils nftables \
-    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel uv
+    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel uv redis
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute
