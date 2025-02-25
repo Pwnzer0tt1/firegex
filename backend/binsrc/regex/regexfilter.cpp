@@ -179,6 +179,8 @@ public:
 	static void on_data_recv(Stream& stream, RegexNfQueue* nfq, string data) {
 		nfq->match_ctx.matching_has_been_called = true;
 		nfq->match_ctx.already_closed = false;
+    nfq->match_ctx.pkt->data = data.data();
+		nfq->match_ctx.pkt->data_size = data.size();
 		bool result = nfq->filter_action(nfq->match_ctx.pkt);
 		if (!result){
 			nfq->sctx.clean_stream_by_id(nfq->match_ctx.pkt->sid);
