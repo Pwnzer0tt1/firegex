@@ -16,6 +16,7 @@
 #include <syncstream>
 #include <iostream>
 #include "../classes/netfilter.cpp"
+#include "../classes/nfqueue.cpp"
 #include "stream_ctx.cpp"
 #include "settings.cpp"
 #include <Python.h>
@@ -46,7 +47,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	};
 	PyThreadState *tstate = NULL;
 	NfQueue::PktRequest<PyProxyQueue>* pkt;
-	tcp_ack_seq_ctx* current_tcp_ack = nullptr;
+	NfQueue::tcp_ack_seq_ctx* current_tcp_ack = nullptr;
 
     void before_loop() override {
 		PyStatus pystatus;
@@ -89,7 +90,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		pyq->pkt->drop();// This is needed because the callback has to take the updated pkt pointer!
 	}
 
-	void filter_action(NfQueue::PktRequest<PyProxyQueue>* pkt, Stream& stream){
+	void filter_action(NfQueue::PktRequest<PyProxyQueue>* pkt, Stream& stream, const string& data){
 		auto stream_search = sctx.streams_ctx.find(pkt->sid);
 		pyfilter_ctx* stream_match;
 		if (stream_search == sctx.streams_ctx.end()){
@@ -108,7 +109,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 			stream_match = stream_search->second;
 		}		
 
-		auto result = stream_match->handle_packet(pkt);
+		auto result = stream_match->handle_packet(pkt, data);
 		switch(result.action){
 			case PyFilterResponse::ACCEPT:
 				return pkt->accept();
@@ -125,7 +126,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 				stream.server_data_callback(bind(keep_fin_packet, this));
 				return pkt->reject();
 			case PyFilterResponse::MANGLE:
-				pkt->mangle_custom_pkt((uint8_t*)result.mangled_packet->data(), result.mangled_packet->size());
+				pkt->mangle_custom_pkt(result.mangled_packet->c_str(), result.mangled_packet->size());
 				if (pkt->get_action() == NfQueue::FilterAction::DROP){
 					cerr << "[error] [filter_action] Failed to mangle: the packet sent is not serializzable... the packet was dropped" << endl;
 					print_blocked_reason(*result.filter_match_by);
@@ -146,20 +147,21 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	}
 
 
-	static void on_data_recv(Stream& stream, PyProxyQueue* proxy_info, string data) {
-		proxy_info->pkt->data = data.data();
-		proxy_info->pkt->data_size = data.size();
-		proxy_info->filter_action(proxy_info->pkt, stream);
+	static void on_data_recv(Stream& stream, PyProxyQueue* pyq, const string& data) {
+		pyq->pkt->fix_data_payload();
+		pyq->filter_action(pyq->pkt, stream, data); //Only here the rebuilt_tcp_data is set
 	}
 	
 	//Input data filtering
-	static void on_client_data(Stream& stream, PyProxyQueue* proxy_info) {
-		on_data_recv(stream, proxy_info, string(stream.client_payload().begin(), stream.client_payload().end()));
+	static void on_client_data(Stream& stream, PyProxyQueue* pyq) {
+		auto data = stream.client_payload();
+		on_data_recv(stream, pyq, string((char*)data.data(), data.size()));
 	}
 	
 	//Server data filtering
-	static void on_server_data(Stream& stream, PyProxyQueue* proxy_info) {
-		on_data_recv(stream, proxy_info, string(stream.server_payload().begin(), stream.server_payload().end()));
+	static void on_server_data(Stream& stream, PyProxyQueue* pyq) {
+		auto data = stream.server_payload();
+		on_data_recv(stream, pyq, string((char*)data.data(), data.size()));
 	}
 	
 	// A stream was terminated. The second argument is the reason why it was terminated
@@ -178,10 +180,9 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		if (pyq->current_tcp_ack != nullptr){
 			pyq->current_tcp_ack->reset();
 		}else{
-			pyq->current_tcp_ack = new tcp_ack_seq_ctx();
+			pyq->current_tcp_ack = new NfQueue::tcp_ack_seq_ctx();
 			pyq->sctx.tcp_ack_ctx.insert_or_assign(pyq->pkt->sid, pyq->current_tcp_ack);
-			pyq->pkt->tcp_in_offset = &pyq->current_tcp_ack->in_tcp_offset;
-			pyq->pkt->tcp_out_offset = &pyq->current_tcp_ack->out_tcp_offset;
+			pyq->pkt->ack_seq_offset = pyq->current_tcp_ack; // Set ack context
 		}
 
 		//Should not happen, but with this we can be sure about this
@@ -205,18 +206,17 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		auto tcp_ack_search = sctx.tcp_ack_ctx.find(pkt->sid);
 		if (tcp_ack_search != sctx.tcp_ack_ctx.end()){
 			current_tcp_ack = tcp_ack_search->second;
-			pkt->tcp_in_offset = &current_tcp_ack->in_tcp_offset;
-			pkt->tcp_out_offset = &current_tcp_ack->out_tcp_offset;
+			pkt->ack_seq_offset = current_tcp_ack;
 		}else{
 			current_tcp_ack = nullptr;
 			//If necessary will be created by libtis new_stream callback
 		}
 
+		pkt->fix_tcp_ack();
+
 		if (pkt->is_ipv6){
-			pkt->fix_tcp_ack();
 			follower.process_packet(*pkt->ipv6);
 		}else{
-			pkt->fix_tcp_ack();
 			follower.process_packet(*pkt->ipv4);
 		}
 

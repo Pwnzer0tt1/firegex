@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 from utils import DEBUG, ON_DOCKER, ROUTERS_DIR, list_files, run_func
 from utils.models import ResetRequest
 import asyncio
+import traceback
 
 REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
 REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
@@ -70,6 +71,7 @@ def get_router_modules():
                     name=route
                 ))
         except Exception as e:
+            traceback.print_exc()
             print(f"Router {route} failed to load: {e}")
     return res
 

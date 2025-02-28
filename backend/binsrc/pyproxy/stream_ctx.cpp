@@ -7,7 +7,9 @@
 #include <map>
 #include <Python.h>
 #include "../classes/netfilter.cpp"
+#include "../classes/nfqueue.cpp"
 #include "settings.cpp"
+#include "../utils.cpp"
 
 using namespace std;
 
@@ -49,17 +51,6 @@ struct py_filter_response {
 };
 
 typedef Tins::TCPIP::StreamIdentifier stream_id;
-
-struct tcp_ack_seq_ctx{
-	//Can be negative, so we use int64_t (for a uint64_t value)
-	int64_t in_tcp_offset = 0;
-	int64_t out_tcp_offset = 0;
-	tcp_ack_seq_ctx(){}
-	void reset(){
-		in_tcp_offset = 0;
-		out_tcp_offset = 0;
-	}
-};
 
 struct pyfilter_ctx {
 
@@ -105,12 +96,14 @@ struct pyfilter_ctx {
 	}
 
 	py_filter_response handle_packet(
-		NfQueue::PktRequest<PyProxyQueue>* pkt
+		NfQueue::PktRequest<PyProxyQueue>* pkt,
+		const string& data
 	){
 		PyObject * packet_info = PyDict_New();
-
-		set_item_to_dict(packet_info, "data", PyBytes_FromStringAndSize(pkt->data, pkt->data_size));
-		set_item_to_dict(packet_info, "l4_size", PyLong_FromLong(pkt->data_original_size()));
+		
+		pkt->reserialize();
+		set_item_to_dict(packet_info, "data", PyBytes_FromStringAndSize(data.c_str(), data.size()));
+		set_item_to_dict(packet_info, "l4_size", PyLong_FromLong(pkt->data_size()));
 		set_item_to_dict(packet_info, "raw_packet", PyBytes_FromStringAndSize(pkt->packet.c_str(), pkt->packet.size()));
 		set_item_to_dict(packet_info, "is_input", PyBool_FromLong(pkt->is_input));
 		set_item_to_dict(packet_info, "is_ipv6", PyBool_FromLong(pkt->is_ipv6));
@@ -129,8 +122,7 @@ struct pyfilter_ctx {
 			#endif
 			return py_filter_response(PyFilterResponse::EXCEPTION);
 		}
-		
-		
+			
 		Py_DECREF(result);
 
 		result = get_item_from_glob("__firegex_pyfilter_result");
@@ -235,11 +227,12 @@ struct pyfilter_ctx {
 };
 
 typedef map<stream_id, pyfilter_ctx*> matching_map;
-typedef map<stream_id, tcp_ack_seq_ctx*> tcp_ack_map;
+
 
 struct stream_ctx {
+
 	matching_map streams_ctx;
-	tcp_ack_map tcp_ack_ctx;
+	NfQueue::tcp_ack_map tcp_ack_ctx;
 
 	void clean_stream_by_id(stream_id sid){
 		auto stream_search = streams_ctx.find(sid);

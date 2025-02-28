@@ -15,6 +15,7 @@ import { FaFilter } from "react-icons/fa";
 import { IoSettingsSharp } from 'react-icons/io5';
 import AddEditService from '../AddEditService';
 import { FaPencilAlt } from "react-icons/fa";
+import { ExceptionWarning } from '../ExceptionWarning';
 
 export default function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
@@ -26,7 +27,6 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
 
     const queryClient = useQueryClient()
     const [buttonLoading, setButtonLoading] = useState(false)
-    const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
     const [editModal, setEditModal] = useState(false)
@@ -109,6 +109,8 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
                     </Box>
                     {isMedium?<Space w="xl" />:<Space h="lg" />}
                     <Box className="center-flex">
+                        <ExceptionWarning service_id={service.service_id} />
+                        <Space w="sm"/>
                         <MenuDropDownWithButton>
                             <Menu.Item><b>Edit service</b></Menu.Item>
                             <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
@@ -118,13 +120,11 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
                             <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
                         </MenuDropDownWithButton> 
                         <Space w="md"/>                        
-                        <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
+                        <Tooltip label="Stop service" zIndex={0} color="red">
                             <ActionIcon color="red" loading={buttonLoading}
                             onClick={stopService} size="xl" radius="md" variant="filled"
                             disabled={service.status === "stop"}
-                            aria-describedby="tooltip-stop-id"
-                            onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
-                            onMouseEnter={() => setTooltipStopOpened(true)} onMouseLeave={() => setTooltipStopOpened(false)}>
+                            aria-describedby="tooltip-stop-id">
                                 <FaStop size="20px" />
                             </ActionIcon>
                         </Tooltip>

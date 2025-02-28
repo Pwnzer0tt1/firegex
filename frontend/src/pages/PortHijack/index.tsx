@@ -14,10 +14,7 @@ import { GrDirections } from 'react-icons/gr';
 function PortHijack() {
 
     const [open, setOpen] = useState(false);
-    const [tooltipAddServOpened, setTooltipAddServOpened] = useState(false);
-    const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
     const queryClient = useQueryClient()
-    const [tooltipRefreshOpened, setTooltipRefreshOpened] = useState(false);
     const isMedium = isMediumScreen()
 
     const services = porthijackServiceQuery()
@@ -37,17 +34,13 @@ function PortHijack() {
             <Box className='center-flex'>
                 <Badge size="md" radius="sm" color="yellow" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:services.data?.length}</Badge>
                 <Space w="xs" />
-                <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
-                    <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
-                        onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-                        onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
+                <Tooltip label="Add a new service" position='bottom' color="blue">
+                    <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"><BsPlusLg size={18} /></ActionIcon>
                 </Tooltip>
                 <Space w="xs" />
-                <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
+                <Tooltip label="Refresh" position='bottom' color="indigo">
                     <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["porthijack"])} size="lg" radius="md" variant="filled"
-                    loading={services.isFetching}
-                    onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
-                    onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
+                    loading={services.isFetching}><TbReload size={18} /></ActionIcon>
                 </Tooltip>
             </Box>
         </Box>
@@ -57,10 +50,8 @@ function PortHijack() {
             {(services.data && services.data.length > 0) ?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} />):<>
                 <Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No services found! Add one clicking the "+" buttons</Title>
                 <Box className='center-flex'>
-                    <Tooltip label="Add a new service" color="blue" opened={tooltipAddServOpened}>
-                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
-                            onFocus={() => setTooltipAddServOpened(false)} onBlur={() => setTooltipAddServOpened(false)}
-                            onMouseEnter={() => setTooltipAddServOpened(true)} onMouseLeave={() => setTooltipAddServOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
+                    <Tooltip label="Add a new service" color="blue">
+                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
                     </Tooltip>
                 </Box>
             </>}

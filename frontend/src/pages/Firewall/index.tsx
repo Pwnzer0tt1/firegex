@@ -25,12 +25,7 @@ import { PiWallLight } from "react-icons/pi";
 
 export const Firewall = () => {
 
-    const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
-    const [tooltipRefreshOpened, setTooltipRefreshOpened] = useState(false);
-    const [tooltipApplyOpened, setTooltipApplyOpened] = useState(false);
-    const [tooltipSettingsOpened, setTooltipSettingsOpened] = useState(false);
     const [currentPolicy, setCurrentPolicy] = useState<ActionType>(ActionType.ACCEPT)
-    const [tooltipAddRulOpened, setTooltipAddRulOpened] = useState(false)
     const queryClient = useQueryClient()
     const rules = firewallRulesQuery()
     const [state, handlers] = useListState<Rule & {rule_id:string}>([]);
@@ -364,31 +359,22 @@ export const Firewall = () => {
               <Space w="xs" />
               <Badge size="md" radius="sm" color="green" variant="filled"><FaDirections style={{ marginBottom: -1, marginRight: 4}}/>Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
               <Space w="md" />
-              <Tooltip label="Add a new rule" position='bottom' color="blue" opened={tooltipAddOpened}>
-                  <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"
-                  onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-                  onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
+              <Tooltip label="Add a new rule" position='bottom' color="blue">
+                  <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"><BsPlusLg size={18} /></ActionIcon>
               </Tooltip>
               <Space w="xs" />
-              <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
+              <Tooltip label="Refresh" position='bottom' color="indigo">
                   <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["firewall"])} size="lg" radius="md" variant="filled"
-                  loading={rules.isFetching}
-                  onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
-                  onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
+                  loading={rules.isFetching}><TbReload size={18} /></ActionIcon>
               </Tooltip>
               <Space w="xs" />
-              <Tooltip label="Settings" position='bottom' color="cyan" opened={tooltipSettingsOpened}>
-                  <ActionIcon color="cyan" onClick={()=>setSettingsModal(true)} size="lg" radius="md" variant="filled"
-                  onFocus={() => setTooltipSettingsOpened(false)} onBlur={() => setTooltipSettingsOpened(false)}
-                  onMouseEnter={() => setTooltipSettingsOpened(true)} onMouseLeave={() => setTooltipSettingsOpened(false)}><IoSettingsSharp size={18} /></ActionIcon>
+              <Tooltip label="Settings" position='bottom' color="cyan">
+                  <ActionIcon color="cyan" onClick={()=>setSettingsModal(true)} size="lg" radius="md" variant="filled"><IoSettingsSharp size={18} /></ActionIcon>
               </Tooltip>
               <Space w="xs" />
-              <Tooltip label="Apply" position='bottom' color="grape" opened={tooltipApplyOpened}>
-                  <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled"
-                  onFocus={() => setTooltipApplyOpened(false)} onBlur={() => setTooltipApplyOpened(false)}
-                  onMouseEnter={() => setTooltipApplyOpened(true)} onMouseLeave={() => setTooltipApplyOpened(false)}
-                  disabled={!valuesChanged}
-                  ><TiTick size={22} /></ActionIcon>
+              <Tooltip label="Apply" position='bottom' color="grape">
+                  <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled" disabled={!valuesChanged}>
+                    <TiTick size={22} /></ActionIcon>
               </Tooltip>
             </Box>
         </Box>
@@ -424,10 +410,9 @@ export const Firewall = () => {
     <Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No rule found! Add one clicking the "+" buttons</Title>
     <Space h="xl" /> <Space h="xl" /> 
     <Box className='center-flex'>
-        <Tooltip label="Add a new rule" color="blue" opened={tooltipAddRulOpened}>
-            <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled"
-                onFocus={() => setTooltipAddRulOpened(false)} onBlur={() => setTooltipAddRulOpened(false)}
-                onMouseEnter={() => setTooltipAddRulOpened(true)} onMouseLeave={() => setTooltipAddRulOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
+        <Tooltip label="Add a new rule" color="blue">
+            <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled">
+              <BsPlusLg size="20px" /></ActionIcon>
         </Tooltip>
     </Box>
 </>}

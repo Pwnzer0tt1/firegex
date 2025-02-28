@@ -14,6 +14,7 @@ from modules.nfproxy.nftables import convert_protocol_to_l4
 import asyncio
 import traceback
 from utils import DEBUG
+import utils
 
 class ServiceModel(BaseModel):
     service_id: str
@@ -107,6 +108,10 @@ async def startup():
         await firewall.init()
     except Exception as e:
         print("WARNING cannot start firewall:", e)
+    utils.socketio.on("nfproxy-outstream-join", join_outstream)
+    utils.socketio.on("nfproxy-outstream-leave", leave_outstream)
+    utils.socketio.on("nfproxy-exception-join", join_exception)
+    utils.socketio.on("nfproxy-exception-leave", leave_exception)
 
 async def shutdown():
     db.backup()
@@ -121,7 +126,13 @@ def gen_service_id():
             break
     return res
 
-firewall = FirewallManager(db)
+async def outstream_func(service_id, data):
+    await utils.socketio.emit(f"nfproxy-outstream-{service_id}", data, room=f"nfproxy-outstream-{service_id}")
+    
+async def exception_func(service_id, timestamp):
+    await utils.socketio.emit(f"nfproxy-exception-{service_id}", timestamp, room=f"nfproxy-exception-{service_id}")
+
+firewall = FirewallManager(db, outstream_func=outstream_func, exception_func=exception_func)
 
 @app.get('/services', response_model=list[ServiceModel])
 async def get_service_list():
@@ -355,3 +366,33 @@ async def get_pyfilters(service_id: str):
             return f.read()
     except FileNotFoundError:
         return ""
+
+#Socket io events
+async def join_outstream(sid, data):
+    """Client joins a room."""
+    srv = data.get("service")
+    if srv:
+        room = f"nfproxy-outstream-{srv}"
+        await utils.socketio.enter_room(sid, room)
+        await utils.socketio.emit(room, firewall.get(srv).read_outstrem_buffer(), room=sid)
+
+async def leave_outstream(sid, data):
+    """Client leaves a room."""
+    srv = data.get("service")
+    if srv:
+        await utils.socketio.leave_room(sid, f"nfproxy-outstream-{srv}")
+
+async def join_exception(sid, data):
+    """Client joins a room."""
+    srv = data.get("service")
+    if srv:
+        room = f"nfproxy-exception-{srv}"
+        await utils.socketio.enter_room(sid, room)
+        await utils.socketio.emit(room, firewall.get(srv).last_exception_time, room=sid)
+
+async def leave_exception(sid, data):
+    """Client leaves a room."""
+    srv = data.get("service")
+    if srv:
+        await utils.socketio.leave_room(sid, f"nfproxy-exception-{srv}")
+

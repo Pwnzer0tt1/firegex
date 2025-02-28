@@ -219,7 +219,7 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
-        host="::" if DEBUG else None,
+        host="0.0.0.0" if DEBUG else None,
         port=FIREGEX_PORT,
         reload=DEBUG and not NORELOAD,
         access_log=True,

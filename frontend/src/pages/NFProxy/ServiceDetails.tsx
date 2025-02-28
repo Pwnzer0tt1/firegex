@@ -1,12 +1,12 @@
 import { ActionIcon, Box, Code, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Badge, Divider, Menu } from '@mantine/core';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FaFilter, FaPencilAlt, FaPlay, FaStop } from 'react-icons/fa';
 import { nfproxy, nfproxyServiceFilterCodeQuery, nfproxyServicePyfiltersQuery, nfproxyServiceQuery, serviceQueryKey } from '../../components/NFProxy/utils';
 import { MdDoubleArrow } from "react-icons/md"
 import YesNoModal from '../../components/YesNoModal';
-import { errorNotify, isMediumScreen, okNotify, regex_ipv4 } from '../../js/utils';
+import { errorNotify, isMediumScreen, okNotify, regex_ipv4, socketio } from '../../js/utils';
 import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from '../../components/NFProxy/ServiceRow/RenameForm';
@@ -19,6 +19,10 @@ import PyFilterView from '../../components/PyFilterView';
 import { TbPlugConnected } from 'react-icons/tb';
 import { CodeHighlight } from '@mantine/code-highlight';
 import { FaPython } from "react-icons/fa";
+import { FiFileText } from "react-icons/fi";
+import { ModalLog } from '../../components/ModalLog';
+import { useListState } from '@mantine/hooks';
+import { ExceptionWarning } from '../../components/NFProxy/ExceptionWarning';
 
 export default function ServiceDetailsNFProxy() {
 
@@ -31,11 +35,30 @@ export default function ServiceDetailsNFProxy() {
     const [editModal, setEditModal] = useState(false)
     const [buttonLoading, setButtonLoading] = useState(false)
     const queryClient = useQueryClient()
-    const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
-    const [tooltipBackOpened, setTooltipBackOpened] = useState(false);
     const filterCode = nfproxyServiceFilterCodeQuery(srv??"")
     const navigate = useNavigate()
     const isMedium = isMediumScreen()
+    const [openLogModal, setOpenLogModal] = useState(false)
+    const [logData, logDataSetters] = useListState<string>([]);
+    
+
+    useEffect(()=>{
+        if (srv){
+            if (openLogModal){
+                socketio.emit("nfproxy-outstream-join", { service: srv });
+                socketio.on(`nfproxy-outstream-${srv}`, (data) => {
+                    logDataSetters.append(data)
+                });
+            }else{
+                logDataSetters.setState([])
+                socketio.emit("nfproxy-outstream-leave", { service: srv });
+            }
+            return () => {
+                logDataSetters.setState([])
+                socketio.emit("nfproxy-outstream-leave", { service: srv });
+            }
+        }
+    }, [openLogModal, srv])
 
     if (services.isLoading) return <LoadingOverlay visible={true} />
     if (!srv || !serviceInfo || filtersList.isError) return <Navigate to="/" replace />
@@ -101,6 +124,8 @@ export default function ServiceDetailsNFProxy() {
             </Box>
             {isMedium?null:<Space h="md" />}
             <Box className='center-flex'>
+                <ExceptionWarning service_id={srv} />
+                <Space w="sm" />
                 <Badge color={status_color} radius="md" size="xl" variant="filled" mr="sm">
                     {serviceInfo.status}
                 </Badge>
@@ -115,7 +140,13 @@ export default function ServiceDetailsNFProxy() {
                     <Divider />
                     <Menu.Label><b>Danger zone</b></Menu.Label>
                     <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                </MenuDropDownWithButton>   
+                </MenuDropDownWithButton>
+                <Space w="md"/>
+                <Tooltip label="Show logs" zIndex={0} color="cyan">
+                    <ActionIcon color="cyan" size="lg" radius="md" onClick={()=>setOpenLogModal(true)} loading={buttonLoading} variant="filled">
+                        <FiFileText size="20px" />
+                    </ActionIcon>
+                </Tooltip>
             </Box>
         </Box>
         {isMedium?null:<Space h="md" />}
@@ -133,23 +164,19 @@ export default function ServiceDetailsNFProxy() {
             </Box>
             {isMedium?null:<Space h="xl" />}
             <Box className='center-flex'>
-                <Tooltip label="Go back" zIndex={0} color="cyan" opened={tooltipBackOpened}>
+                <Tooltip label="Go back" zIndex={0} color="cyan">
                     <ActionIcon color="cyan"
                     onClick={() => navigate("/")} size="xl" radius="md" variant="filled"
-                    aria-describedby="tooltip-back-id"
-                    onFocus={() => setTooltipBackOpened(false)} onBlur={() => setTooltipBackOpened(false)}
-                    onMouseEnter={() => setTooltipBackOpened(true)} onMouseLeave={() => setTooltipBackOpened(false)}>
+                    aria-describedby="tooltip-back-id">
                         <FaArrowLeft size="25px" />
                     </ActionIcon>
                 </Tooltip>
                 <Space w="md"/>
-                <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
+                <Tooltip label="Stop service" zIndex={0} color="red">
                     <ActionIcon color="red" loading={buttonLoading}
                     onClick={stopService} size="xl" radius="md" variant="filled"
                     disabled={serviceInfo.status === "stop"}
-                    aria-describedby="tooltip-stop-id"
-                    onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
-                    onMouseEnter={() => setTooltipStopOpened(true)} onMouseLeave={() => setTooltipStopOpened(false)}>
+                    aria-describedby="tooltip-stop-id">
                         <FaStop size="20px" />
                     </ActionIcon>
                 </Tooltip>
@@ -177,7 +204,7 @@ export default function ServiceDetailsNFProxy() {
                 <Title className='center-flex' style={{textAlign:"center"}} order={3}>Install the firegex client:<Space w="xs" /><Code mb={-4} >pip install fgex</Code></Title>
                 <Space h="xs" />
                 <Title className='center-flex' style={{textAlign:"center"}} order={3}>Then run the command:<Space w="xs" /><Code mb={-4} >fgex nfproxy</Code></Title>
-            </>:<>{filtersList.data?.map( (filterInfo) => <PyFilterView filterInfo={filterInfo} />)}</>
+            </>:<>{filtersList.data?.map( (filterInfo) => <PyFilterView filterInfo={filterInfo} key={filterInfo.name}/>)}</>
         }
         <YesNoModal
             title='Are you sure to delete this service?'
@@ -195,6 +222,12 @@ export default function ServiceDetailsNFProxy() {
             opened={editModal}
             onClose={()=>setEditModal(false)}
             edit={serviceInfo}
+        />
+        <ModalLog
+            opened={openLogModal}
+            close={()=>setOpenLogModal(false)}
+            title={`Logs for service ${serviceInfo.name}`}
+            data={logData.join("")}
         />
     </>
 }

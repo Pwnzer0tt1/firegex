@@ -3,6 +3,7 @@ from modules.nfproxy.firegex import FiregexInterceptor
 from modules.nfproxy.nftables import FiregexTables, FiregexFilter
 from modules.nfproxy.models import Service, PyFilter
 from utils.sqlite import SQLite
+from utils import run_func
 
 class STATUS:
     STOP = "stop"
@@ -11,13 +12,20 @@ class STATUS:
 nft = FiregexTables()
 
 class ServiceManager:
-    def __init__(self, srv: Service, db):
+    def __init__(self, srv: Service, db, outstream_func=None, exception_func=None):
         self.srv = srv
         self.db = db
         self.status = STATUS.STOP
         self.filters: dict[str, FiregexFilter] = {}
         self.lock = asyncio.Lock()
         self.interceptor = None
+        self.outstream_function = outstream_func
+        self.last_exception_time = 0
+        async def excep_internal_handler(srv, exc_time):
+            self.last_exception_time = exc_time
+            if exception_func:
+                await run_func(exception_func, srv, exc_time)
+        self.exception_function = excep_internal_handler
     
     async def _update_filters_from_db(self):
         pyfilters = [
@@ -52,10 +60,16 @@ class ServiceManager:
         self.status = status
         self.__update_status_db(status)
 
+    def read_outstrem_buffer(self):
+        if self.interceptor:
+            return self.interceptor.outstrem_buffer
+        else:
+            return ""
+
     async def start(self):
         if not self.interceptor:
             nft.delete(self.srv)
-            self.interceptor = await FiregexInterceptor.start(self.srv)
+            self.interceptor = await FiregexInterceptor.start(self.srv, outstream_func=self.outstream_function, exception_func=self.exception_function)
             await self._update_filters_from_db()
             self._set_status(STATUS.ACTIVE)
 
@@ -75,10 +89,12 @@ class ServiceManager:
             await self._update_filters_from_db()
 
 class FirewallManager:
-    def __init__(self, db:SQLite):
+    def __init__(self, db:SQLite, outstream_func=None, exception_func=None):
         self.db = db
         self.service_table: dict[str, ServiceManager] = {}
         self.lock = asyncio.Lock()
+        self.outstream_function = outstream_func
+        self.exception_function = exception_func
 
     async def close(self):
         for key in list(self.service_table.keys()):
@@ -100,7 +116,7 @@ class FirewallManager:
                 srv = Service.from_dict(srv)
                 if srv.id in self.service_table:
                     continue
-                self.service_table[srv.id] = ServiceManager(srv, self.db)
+                self.service_table[srv.id] = ServiceManager(srv, self.db, outstream_func=self.outstream_function, exception_func=self.exception_function)
                 await self.service_table[srv.id].next(srv.status)
 
     def get(self,srv_id) -> ServiceManager:

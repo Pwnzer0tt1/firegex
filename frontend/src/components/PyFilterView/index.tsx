@@ -9,7 +9,6 @@ import { FaPencilAlt } from 'react-icons/fa';
 
 export default function PyFilterView({ filterInfo }:{ filterInfo:PyFilter }) {
 
-  const [statusTooltipOpened, setStatusTooltipOpened] = useState(false);
   const isMedium = isMediumScreen()
 
   const changeRegexStatus = () => {
@@ -24,24 +23,22 @@ export default function PyFilterView({ filterInfo }:{ filterInfo:PyFilter }) {
 
   return <Box my="sm" display="flex" style={{alignItems:"center"}}>
       
-      <Text className="firegex__regexview__pyfilter_text" style={{ width: "100%", alignItems: "center"}} display="flex" >
-      <Badge size="sm" radius="lg" mr="sm" color={filterInfo.active?"lime":"red"} variant="filled" />
-        {filterInfo.name}
-        <Box className='flex-spacer' />
-        <Space w="xs" />
-        {isMedium?<>
-          <Badge size="md" radius="md" color="yellow" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 2}} /> {filterInfo.blocked_packets}</Badge>
+      <Box className="firegex__regexview__pyfilter_text" style={{ width: "100%", alignItems: "center"}} display="flex" >
+        <Badge size="sm" radius="lg" mr="sm" color={filterInfo.active?"lime":"red"} variant="filled" />
+          {filterInfo.name}
+          <Box className='flex-spacer' />
           <Space w="xs" />
-          <Badge size="md" radius="md" color="orange" variant="filled"><FaPencilAlt style={{ marginBottom: -1, marginRight: 2}} /> {filterInfo.edited_packets}</Badge>
-          <Space w="lg" />
-        </>:null}
-        <Tooltip label={filterInfo.active?"Deactivate":"Activate"} zIndex={0} color={filterInfo.active?"orange":"teal"} opened={statusTooltipOpened}>
-          <ActionIcon color={filterInfo.active?"orange":"teal"} onClick={changeRegexStatus} size="lg" radius="md" variant="filled"
-          onFocus={() => setStatusTooltipOpened(false)} onBlur={() => setStatusTooltipOpened(false)}
-          onMouseEnter={() => setStatusTooltipOpened(true)} onMouseLeave={() => setStatusTooltipOpened(false)}
-          >{filterInfo.active?<FaPause size="20px" />:<FaPlay size="20px" />}</ActionIcon>
-        </Tooltip>
-      </Text>
+          {isMedium?<>
+            <Badge size="md" radius="md" color="yellow" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 2}} /> {filterInfo.blocked_packets}</Badge>
+            <Space w="xs" />
+            <Badge size="md" radius="md" color="orange" variant="filled"><FaPencilAlt style={{ marginBottom: -1, marginRight: 2}} /> {filterInfo.edited_packets}</Badge>
+            <Space w="lg" />
+          </>:null}
+          <Tooltip label={filterInfo.active?"Deactivate":"Activate"} zIndex={0} color={filterInfo.active?"orange":"teal"}>
+            <ActionIcon color={filterInfo.active?"orange":"teal"} onClick={changeRegexStatus} size="lg" radius="md" variant="filled">
+              {filterInfo.active?<FaPause size="20px" />:<FaPlay size="20px" />}</ActionIcon>
+          </Tooltip>
+      </Box>
 
   </Box>
 }

@@ -5,8 +5,11 @@ import asyncio
 import traceback
 from fastapi import HTTPException
 import time
+from utils import run_func
 
 nft = FiregexTables()
+
+OUTSTREAM_BUFFER_SIZE = 1024*10
 
 class FiregexInterceptor:
     
@@ -28,14 +31,20 @@ class FiregexInterceptor:
         self.sock_writer:asyncio.StreamWriter = None
         self.sock_conn_lock:asyncio.Lock
         self.last_time_exception = 0
+        self.outstrem_function = None
+        self.expection_function = None
+        self.outstrem_task: asyncio.Task
+        self.outstrem_buffer = ""
     
     @classmethod
-    async def start(cls, srv: Service):
+    async def start(cls, srv: Service, outstream_func=None, exception_func=None):
         self = cls()
         self.srv = srv
         self.filter_map_lock = asyncio.Lock()
         self.update_config_lock = asyncio.Lock()
         self.sock_conn_lock = asyncio.Lock()
+        self.outstrem_function = outstream_func
+        self.expection_function = exception_func
         if not self.sock_conn_lock.locked():
             await self.sock_conn_lock.acquire()
         self.sock_path = f"/tmp/firegex_nfproxy_{srv.id}.sock"
@@ -50,16 +59,37 @@ class FiregexInterceptor:
             await self.ack_lock.acquire()
         return self
     
+    async def _stream_handler(self):
+        while True:
+            try:
+                line = (await self.process.stdout.readuntil()).decode(errors="ignore")
+                print(line, end="")
+            except Exception as e:
+                self.ack_arrived = False
+                self.ack_status = False
+                self.ack_fail_what = "Can't read from nfq client"
+                self.ack_lock.release()
+                await self.stop()
+                raise HTTPException(status_code=500, detail="Can't read from nfq client") from e
+            self.outstrem_buffer+=line
+            if len(self.outstrem_buffer) > OUTSTREAM_BUFFER_SIZE:
+                self.outstrem_buffer = self.outstrem_buffer[-OUTSTREAM_BUFFER_SIZE:]+"\n"
+            if self.outstrem_function:
+                await run_func(self.outstrem_function, self.srv.id, line)
+    
     async def _start_binary(self):
         proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cpproxy")
         self.process = await asyncio.create_subprocess_exec(
             proxy_binary_path, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
             env={
                 "NTHREADS": os.getenv("NTHREADS","1"),
                 "FIREGEX_NFQUEUE_FAIL_OPEN": "1" if self.srv.fail_open else "0",
                 "FIREGEX_NFPROXY_SOCK": self.sock_path
             },
         )
+        self.outstrem_task = asyncio.create_task(self._stream_handler())
         try:
             async with asyncio.timeout(3):
                 await self.sock_conn_lock.acquire()
@@ -101,9 +131,7 @@ class FiregexInterceptor:
                     filter_name = line.split()[1]
                     print("BLOCKED", filter_name)
                     async with self.filter_map_lock:
-                        print("LOCKED MAP LOCK")
                         if filter_name in self.filter_map:
-                            print("ADDING BLOCKED PACKET")
                             self.filter_map[filter_name].blocked_packets+=1
                             await self.filter_map[filter_name].update()  
                 if line.startswith("MANGLED "):
@@ -113,8 +141,9 @@ class FiregexInterceptor:
                             self.filter_map[filter_name].edited_packets+=1
                             await self.filter_map[filter_name].update()
                 if line.startswith("EXCEPTION"):
-                    self.last_time_exception = time.time()
-                    print("TODO EXCEPTION HANDLING") # TODO
+                    self.last_time_exception = int(time.time()*1000) #ms timestamp
+                    if self.expection_function:
+                        await run_func(self.expection_function, self.srv.id, self.last_time_exception)
                 if line.startswith("ACK "):
                     self.ack_arrived = True
                     self.ack_status = line.split()[1].upper() == "OK"
@@ -132,6 +161,7 @@ class FiregexInterceptor:
         self.server_task.cancel()
         self.update_task.cancel()
         self.unix_sock.close()
+        self.outstrem_task.cancel()
         if os.path.exists(self.sock_path):
             os.remove(self.sock_path)
         if self.process and self.process.returncode is None:

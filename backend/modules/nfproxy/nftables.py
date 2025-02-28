@@ -28,22 +28,22 @@ class FiregexTables(NFTableManager):
     
     def __init__(self):
         super().__init__([
-            {"add":{"chain":{
+            {"add":{"chain":{ #Input chain attached before conntrack see it
                 "family":"inet",
                 "table":self.table_name,
                 "name":self.input_chain,
                 "type":"filter",
                 "hook":"prerouting",
-                "prio":-150,
+                "prio":-301, 
                 "policy":"accept"
             }}},
-            {"add":{"chain":{
+            {"add":{"chain":{ #Output chain attached after conntrack saw it
                 "family":"inet",
                 "table":self.table_name,
                 "name":self.output_chain,
                 "type":"filter",
                 "hook":"postrouting",
-                "prio":-150,
+                "prio":-290,
                 "policy":"accept"
             }}}
         ],[

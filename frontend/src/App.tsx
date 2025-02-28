@@ -5,31 +5,14 @@ import { ImCross } from 'react-icons/im';
 import { Outlet, Route, Routes } from 'react-router-dom';
 import MainLayout from './components/MainLayout';
 import { PasswordSend, ServerStatusResponse } from './js/models';
-import { DEV_IP_BACKEND, errorNotify, getstatus, HomeRedirector, IS_DEV, login, setpassword } from './js/utils';
+import { errorNotify, getstatus, HomeRedirector, IS_DEV, login, setpassword, socketio } from './js/utils';
 import NFRegex from './pages/NFRegex';
-import io from 'socket.io-client';
 import ServiceDetailsNFRegex from './pages/NFRegex/ServiceDetails';
 import PortHijack from './pages/PortHijack';
 import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
 import NFProxy from './pages/NFProxy';
 import ServiceDetailsNFProxy from './pages/NFProxy/ServiceDetails';
-
-export const socket = import.meta.env.DEV?
-    io("ws://"+DEV_IP_BACKEND, {
-        path:"/sock/socket.io",
-        transports: ['websocket'],
-        auth: {
-            token: localStorage.getItem("access_token")
-        }
-    }):
-    io({
-        path:"/sock/socket.io",
-        transports: ['websocket'],
-        auth: {
-            token: localStorage.getItem("access_token")
-        }
-    })
 
 function App() {
 
@@ -162,16 +145,16 @@ const PageRouting = ({ getStatus }:{ getStatus:()=>void }) => {
 
   useEffect(()=>{
     getStatus()
-    socket.on("update", (data) => {
+    socketio.on("update", (data) => {
       queryClient.invalidateQueries({ queryKey: data  })
     })
-    socket.on("connect_error", (err) => {
+    socketio.on("connect_error", (err) => {
       errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
       getStatus()
     });
   return () => {
-    socket.off("update")
-    socket.off("connect_error")
+    socketio.off("update")
+    socketio.off("connect_error")
   }
 },[])
 

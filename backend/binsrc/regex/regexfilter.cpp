@@ -20,6 +20,7 @@
 #include "../classes/netfilter.cpp"
 #include "stream_ctx.cpp"
 #include "regex_rules.cpp"
+#include "../utils.cpp"
 
 using namespace std;
 
@@ -30,8 +31,6 @@ namespace Regex {
 using Tins::TCPIP::Stream;
 using Tins::TCPIP::StreamFollower;
 
-
-
 class RegexNfQueue : public NfQueue::ThreadNfQueue<RegexNfQueue> {
 public:
 	stream_ctx sctx;
@@ -39,7 +38,7 @@ public:
 	StreamFollower follower;
 	NfQueue::PktRequest<RegexNfQueue>* pkt;
 
-	bool filter_action(NfQueue::PktRequest<RegexNfQueue>* pkt){
+	bool filter_action(NfQueue::PktRequest<RegexNfQueue>* pkt, const string& data){
 		shared_ptr<RegexRules> conf = regex_config;
 
 		auto current_version = conf->ver();
@@ -85,12 +84,12 @@ public:
 				stream_match = stream_search->second;
 			}
 			err = hs_scan_stream(
-				stream_match,pkt->data, pkt->data_size,
+				stream_match, data.c_str(), data.size(),
 				0, scratch_space, match_func, &match_res
 			);
 		}else{
 			err = hs_scan(
-				regex_matcher,pkt->data, pkt->data_size,
+				regex_matcher, data.c_str(), data.size(),
 				0, scratch_space, match_func, &match_res
 			);
 		}
@@ -102,7 +101,7 @@ public:
 			throw invalid_argument("Cannot close stream match on hyperscan");
 		}
 		if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
-			cerr << "[error] [filter_callback] Error while matching the stream (hs)" << endl;
+			cerr << "[error] [filter_callback] Error while matching the stream (hs) " << err << endl;
 			throw invalid_argument("Error while matching the stream with hyperscan");
 		}
 		if (match_res.has_matched){
@@ -111,6 +110,48 @@ public:
 			return false;
 		}
 		return true;
+	}
+
+	//If the stream has already been matched, drop all data, and try to close the connection
+	static void keep_fin_packet(RegexNfQueue* nfq){
+        nfq->pkt->reject(); // This is needed because the callback has to take the updated pkt pointer!
+	}
+
+	static void on_data_recv(Stream& stream, RegexNfQueue* nfq, const string& data) {
+		if (!nfq->filter_action(nfq->pkt, data)){
+			nfq->sctx.clean_stream_by_id(nfq->pkt->sid);
+			stream.client_data_callback(bind(keep_fin_packet, nfq));
+			stream.server_data_callback(bind(keep_fin_packet, nfq));
+			nfq->pkt->reject();
+		}
+	}
+
+	//Input data filtering
+	static void on_client_data(Stream& stream, RegexNfQueue* nfq) {
+		auto data = stream.client_payload();
+		on_data_recv(stream, nfq, string((char*)data.data(), data.size()));
+	}
+
+	//Server data filtering
+	static void on_server_data(Stream& stream, RegexNfQueue* nfq) {
+		auto data = stream.server_payload();
+		on_data_recv(stream, nfq, string((char*)data.data(), data.size()));
+	}
+
+	// A stream was terminated. The second argument is the reason why it was terminated
+	static void on_stream_close(Stream& stream, RegexNfQueue* nfq) {
+		stream_id stream_id = stream_id::make_identifier(stream);
+		nfq->sctx.clean_stream_by_id(stream_id);
+	}
+
+	static void on_new_stream(Stream& stream, RegexNfQueue* nfq) {
+		stream.auto_cleanup_payloads(true);
+		if (stream.is_partial_stream()) {
+			stream.enable_recovery_mode(10 * 1024);
+		}
+		stream.client_data_callback(bind(on_client_data, placeholders::_1, nfq));
+		stream.server_data_callback(bind(on_server_data, placeholders::_1, nfq));
+		stream.stream_closed_callback(bind(on_stream_close, placeholders::_1, nfq));
 	}
 
 	void handle_next_packet(NfQueue::PktRequest<RegexNfQueue>* _pkt) override{
@@ -129,56 +170,14 @@ public:
 			if (!pkt->udp){
 				throw invalid_argument("Only TCP and UDP are supported");
 			}
-			if(pkt->data_size == 0){
+			if(pkt->data_size() == 0){
 				return pkt->accept();
-			}else if (filter_action(pkt)){
+			}else if (filter_action(pkt, string(pkt->data(), pkt->data_size()))){
 				return pkt->accept();
 			}else{
 				return pkt->drop();
 			}
 		}
-	}
-
-	//If the stream has already been matched, drop all data, and try to close the connection
-	static void keep_fin_packet(RegexNfQueue* nfq){
-        nfq->pkt->reject();// This is needed because the callback has to take the updated pkt pointer!
-	}
-
-	static void on_data_recv(Stream& stream, RegexNfQueue* nfq, string data) {
-		nfq->pkt->data = data.data();
-		nfq->pkt->data_size = data.size();
-		if (!nfq->filter_action(nfq->pkt)){
-			nfq->sctx.clean_stream_by_id(nfq->pkt->sid);
-			stream.client_data_callback(bind(keep_fin_packet, nfq));
-			stream.server_data_callback(bind(keep_fin_packet, nfq));
-			nfq->pkt->reject();
-		}
-	}
-
-	//Input data filtering
-	static void on_client_data(Stream& stream, RegexNfQueue* nfq) {
-		on_data_recv(stream, nfq, string(stream.client_payload().begin(), stream.client_payload().end()));
-	}
-
-	//Server data filtering
-	static void on_server_data(Stream& stream, RegexNfQueue* nfq) {
-		on_data_recv(stream, nfq, string(stream.server_payload().begin(), stream.server_payload().end()));
-	}
-
-	// A stream was terminated. The second argument is the reason why it was terminated
-	static void on_stream_close(Stream& stream, RegexNfQueue* nfq) {
-		stream_id stream_id = stream_id::make_identifier(stream);
-		nfq->sctx.clean_stream_by_id(stream_id);
-	}
-
-	static void on_new_stream(Stream& stream, RegexNfQueue* nfq) {
-		stream.auto_cleanup_payloads(true);
-		if (stream.is_partial_stream()) {
-			stream.enable_recovery_mode(10 * 1024);
-		}
-		stream.client_data_callback(bind(on_client_data, placeholders::_1, nfq));
-		stream.server_data_callback(bind(on_server_data, placeholders::_1, nfq));
-		stream.stream_closed_callback(bind(on_stream_close, placeholders::_1, nfq));
 	}
 
 	void before_loop() override{

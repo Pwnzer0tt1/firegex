@@ -19,10 +19,7 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
   let regex_expr = b64decode(regexInfo.regex);
 
   const [deleteModal, setDeleteModal] = useState(false);
-  const [deleteTooltipOpened, setDeleteTooltipOpened] = useState(false);
-  const [statusTooltipOpened, setStatusTooltipOpened] = useState(false);
   const clipboard = useClipboard({ timeout: 500 });
-  const isMedium = isMediumScreen();
 
   const deleteRegex = () => {
     nfregex.regexdelete(regexInfo.id).then(res => {
@@ -54,18 +51,14 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
               }}>{regex_expr}</Text>
             </Box>
             <Space w="xs" />
-            <Tooltip label={regexInfo.active?"Deactivate":"Activate"} zIndex={0} color={regexInfo.active?"orange":"teal"} opened={statusTooltipOpened}>
+            <Tooltip label={regexInfo.active?"Deactivate":"Activate"} zIndex={0} color={regexInfo.active?"orange":"teal"}>
               <ActionIcon color={regexInfo.active?"orange":"teal"} onClick={changeRegexStatus} size="xl" radius="md" variant="filled"
-              onFocus={() => setStatusTooltipOpened(false)} onBlur={() => setStatusTooltipOpened(false)}
-              onMouseEnter={() => setStatusTooltipOpened(true)} onMouseLeave={() => setStatusTooltipOpened(false)}
               >{regexInfo.active?<FaPause size="20px" />:<FaPlay size="20px" />}</ActionIcon>
             </Tooltip>
             <Space w="xs" />
-            <Tooltip label="Delete regex" zIndex={0} color="red" opened={deleteTooltipOpened} >
-              <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled"
-              onFocus={() => setDeleteTooltipOpened(false)} onBlur={() => setDeleteTooltipOpened(false)}
-              onMouseEnter={() => setDeleteTooltipOpened(true)} onMouseLeave={() => setDeleteTooltipOpened(false)}
-              ><BsTrashFill size={22} /></ActionIcon>
+            <Tooltip label="Delete regex" zIndex={0} color="red" >
+              <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled">
+                <BsTrashFill size={22} /></ActionIcon>
             </Tooltip>
           </Box>
           <Box display="flex" mt="sm" ml="xs">

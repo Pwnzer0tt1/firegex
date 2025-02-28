@@ -19,9 +19,6 @@ function NFRegex({ children }: { children: any }) {
     const [open, setOpen] = useState(false);
     const {srv} = useParams()
     const queryClient = useQueryClient()
-    const [tooltipRefreshOpened, setTooltipRefreshOpened] = useState(false);
-    const [tooltipAddServOpened, setTooltipAddServOpened] = useState(false);
-    const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
     const isMedium = isMediumScreen()
     const services = nfregexServiceQuery()
 
@@ -50,23 +47,17 @@ function NFRegex({ children }: { children: any }) {
         {isMedium?null:<Space h="md" />}
         <Box className='center-flex' >
             { srv?
-            <Tooltip label="Add a new regex" position='bottom' color="blue" opened={tooltipAddOpened}>
-                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
-                onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-                onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
+            <Tooltip label="Add a new regex" position='bottom' color="blue">
+                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"><BsPlusLg size={18} /></ActionIcon>
             </Tooltip>
-            : <Tooltip label="Add a new service" position='bottom' color="blue" opened={tooltipAddOpened}>
-                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"
-                onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-                onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
+            : <Tooltip label="Add a new service" position='bottom' color="blue">
+                <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"><BsPlusLg size={18} /></ActionIcon>
             </Tooltip>
         }
         <Space w="xs" />
-            <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
+            <Tooltip label="Refresh" position='bottom' color="indigo">
                 <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfregex"])} size="lg" radius="md" variant="filled"
-                loading={services.isFetching}
-                onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
-                onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
+                loading={services.isFetching}><TbReload size={18} /></ActionIcon>
             </Tooltip>
         </Box>
     </Box>
@@ -78,10 +69,8 @@ function NFRegex({ children }: { children: any }) {
                 navigator("/nfregex/"+srv.service_id)
             }} />):<><Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No services found! Add one clicking the "+" buttons</Title>
                 <Box className='center-flex'>
-                    <Tooltip label="Add a new service" color="blue" opened={tooltipAddServOpened}>
-                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
-                            onFocus={() => setTooltipAddServOpened(false)} onBlur={() => setTooltipAddServOpened(false)}
-                            onMouseEnter={() => setTooltipAddServOpened(true)} onMouseLeave={() => setTooltipAddServOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
+                    <Tooltip label="Add a new service" color="blue">
+                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
                     </Tooltip>
                 </Box>
             </>}

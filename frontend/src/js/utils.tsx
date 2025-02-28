@@ -2,12 +2,11 @@ import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
 import { Navigate } from "react-router-dom";
-import { nfregex } from "../components/NFRegex/utils";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 import { Buffer } from "buffer"
 import { QueryClient, useQuery } from "@tanstack/react-query";
 import { useMediaQuery } from "@mantine/hooks";
-import { nfproxy } from "../components/NFProxy/utils";
+import { io } from "socket.io-client";
 
 export const IS_DEV = import.meta.env.DEV
 
@@ -18,6 +17,24 @@ export const regex_ipv4_no_cidr = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[
 export const regex_port = "^([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?$"
 export const regex_range_port = "^(([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(-([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?)?)?$"
 export const DEV_IP_BACKEND = "127.0.0.1:4444"
+
+export const WARNING_NFPROXY_TIME_LIMIT = 1000*60*10 // 10 minutes
+
+export const socketio = import.meta.env.DEV?
+    io("ws://"+DEV_IP_BACKEND, {
+        path:"/sock/socket.io",
+        transports: ['websocket'],
+        auth: {
+            token: localStorage.getItem("access_token")
+        }
+    }):
+    io({
+        path:"/sock/socket.io",
+        transports: ['websocket'],
+        auth: {
+            token: localStorage.getItem("access_token")
+        }
+    })
 
 export const queryClient = new QueryClient({ defaultOptions: { queries: {
     staleTime: Infinity
