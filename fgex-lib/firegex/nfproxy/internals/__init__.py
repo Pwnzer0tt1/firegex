@@ -3,7 +3,7 @@ from firegex.nfproxy.internals.models import Action, FullStreamAction
 from firegex.nfproxy.internals.models import FilterHandler, PacketHandlerResult
 import functools
 from firegex.nfproxy.internals.data import DataStreamCtx
-from firegex.nfproxy.internals.exceptions import NotReadyToRun
+from firegex.nfproxy.internals.exceptions import NotReadyToRun, StreamFullReject, DropPacket, RejectConnection, StreamFullDrop
 from firegex.nfproxy.internals.data import RawPacket
 
 def context_call(glob, func, *args, **kargs):
@@ -76,31 +76,7 @@ def handle_packet(glob: dict) -> None:
     cache_call[RawPacket] = pkt_info
     
     final_result = Action.ACCEPT
-    data_size = len(pkt_info.data)
-    
     result = PacketHandlerResult(glob)
-    
-    if internal_data.stream_size+data_size > internal_data.stream_max_size:
-        match internal_data.full_stream_action:
-            case FullStreamAction.FLUSH:
-                internal_data.stream = []
-                internal_data.stream_size = 0
-                for func in internal_data.flush_action_set:
-                    func()
-            case FullStreamAction.ACCEPT:
-                result.action = Action.ACCEPT
-                return result.set_result()
-            case FullStreamAction.REJECT:
-                result.action = Action.REJECT
-                result.matched_by = "@MAX_STREAM_SIZE_REACHED"
-                return result.set_result()
-            case FullStreamAction.REJECT:
-                result.action = Action.DROP
-                result.matched_by = "@MAX_STREAM_SIZE_REACHED"
-                return result.set_result()
-    
-    internal_data.stream.append(pkt_info)
-    internal_data.stream_size += data_size
     
     func_name = None
     mangled_packet = None
@@ -115,6 +91,22 @@ def handle_packet(glob: dict) -> None:
                     cache_call[data_type] = None
                     skip_call = True
                     break
+                except StreamFullDrop:
+                    result.action = Action.DROP
+                    result.matched_by = "@MAX_STREAM_SIZE_REACHED"
+                    return result.set_result()
+                except StreamFullReject:
+                    result.action = Action.REJECT
+                    result.matched_by = "@MAX_STREAM_SIZE_REACHED"
+                    return result.set_result()
+                except DropPacket:
+                    result.action = Action.DROP
+                    result.matched_by = filter.name
+                    return result.set_result()
+                except RejectConnection:
+                    result.action = Action.REJECT
+                    result.matched_by = filter.name
+                    return result.set_result()
             final_params.append(cache_call[data_type])
         if skip_call:
             continue

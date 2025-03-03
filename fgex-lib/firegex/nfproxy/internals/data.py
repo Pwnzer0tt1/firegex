@@ -1,5 +1,5 @@
 from firegex.nfproxy.internals.models import FilterHandler
-from typing import Callable
+from firegex.nfproxy.internals.models import FullStreamAction
 
 class RawPacket:
     """
@@ -110,26 +110,6 @@ class DataStreamCtx:
         self.__data["filter_call_info"] = v
     
     @property
-    def stream(self) -> list[RawPacket]:
-        if "stream" not in self.__data.keys():
-            self.__data["stream"] = []
-        return self.__data.get("stream")
-    
-    @stream.setter
-    def stream(self, v: list[RawPacket]):
-        self.__data["stream"] = v
-    
-    @property
-    def stream_size(self) -> int:
-        if "stream_size" not in self.__data.keys():
-            self.__data["stream_size"] = 0
-        return self.__data.get("stream_size")
-    
-    @stream_size.setter
-    def stream_size(self, v: int):
-        self.__data["stream_size"] = v
-    
-    @property
     def stream_max_size(self) -> int:
         if "stream_max_size" not in self.__data.keys():
             self.__data["stream_max_size"] = 1*8e20
@@ -140,13 +120,13 @@ class DataStreamCtx:
         self.__data["stream_max_size"] = v
     
     @property
-    def full_stream_action(self) -> str:
+    def full_stream_action(self) -> FullStreamAction:
         if "full_stream_action" not in self.__data.keys():
             self.__data["full_stream_action"] = "flush"
         return self.__data.get("full_stream_action")
     
     @full_stream_action.setter
-    def full_stream_action(self, v: str):
+    def full_stream_action(self, v: FullStreamAction):
         self.__data["full_stream_action"] = v
         
     @property
@@ -158,14 +138,14 @@ class DataStreamCtx:
         self.__data["current_pkt"] = v
     
     @property
-    def http_data_objects(self) -> dict:
-        if "http_data_objects" not in self.__data.keys():
-            self.__data["http_data_objects"] = {}
-        return self.__data.get("http_data_objects")
+    def data_handler_context(self) -> dict:
+        if "data_handler_context" not in self.__data.keys():
+            self.__data["data_handler_context"] = {}
+        return self.__data.get("data_handler_context")
     
-    @http_data_objects.setter
-    def http_data_objects(self, v: dict):
-        self.__data["http_data_objects"] = v
+    @data_handler_context.setter
+    def data_handler_context(self, v: dict):
+        self.__data["data_handler_context"] = v
     
     @property
     def save_http_data_in_streams(self) -> bool:
@@ -177,14 +157,5 @@ class DataStreamCtx:
     def save_http_data_in_streams(self, v: bool):
         self.__data["save_http_data_in_streams"] = v
     
-    @property
-    def flush_action_set(self) -> set[Callable]:
-        if "flush_action_set" not in self.__data.keys():
-            self.__data["flush_action_set"] = set()
-        return self.__data.get("flush_action_set")
-    
-    @flush_action_set.setter
-    def flush_action_set(self, v: set[Callable]):
-        self.__data["flush_action_set"] = v
-    
+
 

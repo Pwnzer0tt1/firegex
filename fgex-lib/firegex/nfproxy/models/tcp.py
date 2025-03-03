@@ -1,61 +1,15 @@
 from firegex.nfproxy.internals.data import DataStreamCtx
-from firegex.nfproxy.internals.exceptions import NotReadyToRun
+from firegex.nfproxy.internals.exceptions import NotReadyToRun, StreamFullDrop, StreamFullReject
+from firegex.nfproxy.internals.models import FullStreamAction
 
-class TCPStreams:
-    """
-    This datamodel will assemble the TCP streams from the input and output data.
-    The function that use this data model will be handled when:
-    - The packet is TCP
-    - At least 1 packet has been sent
-    """
-    
-    def __init__(self,
-        input_data: bytes,
-        output_data: bytes,
-        is_ipv6: bool,
-    ):
-        self.__input_data = bytes(input_data)
-        self.__output_data = bytes(output_data)
-        self.__is_ipv6 = bool(is_ipv6)
-    
-    @property
-    def input_data(self) -> bytes:
-        return self.__input_data
-    
-    @property
-    def output_data(self) -> bytes:
-        return self.__output_data
-    
-    @property
-    def is_ipv6(self) -> bool:
-        return self.__is_ipv6
-    
-    @classmethod
-    def _fetch_packet(cls, internal_data:DataStreamCtx):
-
-        if internal_data.current_pkt is None or internal_data.current_pkt.is_tcp is False:
-            raise NotReadyToRun()
-        return cls(
-            input_data=b"".join([ele.data for ele in internal_data.stream if ele.is_input]),
-            output_data=b"".join([ele.data for ele in internal_data.stream if not ele.is_input]),
-            is_ipv6=internal_data.current_pkt.is_ipv6,
-        )
-
-
-class TCPInputStream:
-    """
-    This datamodel will assemble the TCP input stream from the client sent data.
-    The function that use this data model will be handled when:
-    - The packet is TCP
-    - At least 1 packet has been sent
-    - A new client packet has been received
-    """
+class InternalTCPStream:
     def __init__(self,
         data: bytes,
         is_ipv6: bool,
     ):
         self.__data = bytes(data)
         self.__is_ipv6 = bool(is_ipv6)
+        self.__total_stream_size = len(data)
 
     @property
     def data(self) -> bool:
@@ -65,14 +19,52 @@ class TCPInputStream:
     def is_ipv6(self) -> bool:
         return self.__is_ipv6
     
+    @property
+    def total_stream_size(self) -> int:
+        return self.__total_stream_size
+    
+    def _push_new_data(self, data: bytes):
+        self.__data += data
+        self.__total_stream_size += len(data)
+    
+    @classmethod
+    def _fetch_packet(cls, internal_data:DataStreamCtx, is_input:bool=False):
+        if internal_data.current_pkt is None or internal_data.current_pkt.is_tcp is False:
+            raise NotReadyToRun()
+        if internal_data.current_pkt.is_input != is_input:
+            raise NotReadyToRun()
+        datahandler: TCPInputStream = internal_data.data_handler_context.get(cls, None)
+        if datahandler is None:
+            datahandler = cls(internal_data.current_pkt.data, internal_data.current_pkt.is_ipv6)
+            internal_data.data_handler_context[cls] = datahandler
+        else:
+            if datahandler.total_stream_size+len(internal_data.current_pkt.data) > internal_data.stream_max_size:
+                match internal_data.full_stream_action:
+                    case FullStreamAction.FLUSH:
+                        datahandler = cls(internal_data.current_pkt.data, internal_data.current_pkt.is_ipv6)
+                        internal_data.data_handler_context[cls] = datahandler
+                    case FullStreamAction.REJECT:
+                        raise StreamFullReject()
+                    case FullStreamAction.DROP:
+                        raise StreamFullDrop()
+                    case FullStreamAction.ACCEPT:
+                        raise NotReadyToRun()
+            else:
+                datahandler._push_new_data(internal_data.current_pkt.data)
+        return datahandler
+
+class TCPInputStream(InternalTCPStream):
+    """
+    This datamodel will assemble the TCP input stream from the client sent data.
+    The function that use this data model will be handled when:
+    - The packet is TCP
+    - At least 1 packet has been sent
+    - A new client packet has been received
+    """
+
     @classmethod
     def _fetch_packet(cls, internal_data:DataStreamCtx):
-        if internal_data.current_pkt is None or internal_data.current_pkt.is_tcp is False or internal_data.current_pkt.is_input is False:
-            raise NotReadyToRun()
-        return cls(
-            data=internal_data.current_pkt.get_related_raw_stream(),
-            is_ipv6=internal_data.current_pkt.is_ipv6,
-        )
+        return super()._fetch_packet(internal_data, is_input=True)
 
 TCPClientStream = TCPInputStream
 
@@ -85,29 +77,8 @@ class TCPOutputStream:
     - A new server packet has been sent
     """
     
-    
-    def __init__(self,
-        data: bytes,
-        is_ipv6: bool,
-    ):
-        self.__data = bytes(data)
-        self.__is_ipv6 = bool(is_ipv6)
-
-    @property
-    def data(self) -> bool:
-        return self.__data
-    
-    @property
-    def is_ipv6(self) -> bool:
-        return self.__is_ipv6
-    
     @classmethod
     def _fetch_packet(cls, internal_data:DataStreamCtx):
-        if internal_data.current_pkt is None or internal_data.current_pkt.is_tcp is False or internal_data.current_pkt.is_input is True:
-            raise NotReadyToRun()
-        return cls(
-            data=internal_data.current_pkt.get_related_raw_stream(),
-            is_ipv6=internal_data.current_pkt.is_ipv6,
-        )
+        return super()._fetch_packet(internal_data, is_input=False)
 
 TCPServerStream = TCPOutputStream

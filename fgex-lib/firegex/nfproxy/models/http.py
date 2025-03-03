@@ -1,6 +1,8 @@
 import pyllhttp         
 from firegex.nfproxy.internals.exceptions import NotReadyToRun
 from firegex.nfproxy.internals.data import DataStreamCtx
+from firegex.nfproxy.internals.exceptions import StreamFullDrop, StreamFullReject
+from firegex.nfproxy.internals.models import FullStreamAction
 
 class InternalCallbackHandler():
     
@@ -15,14 +17,16 @@ class InternalCallbackHandler():
     message_complete: bool = False
     status: str|None = None
     _status_buffer: bytes = b""
-    current_header_field = None
-    current_header_value = None
+    _current_header_field = b""
+    _current_header_value = b""
     _save_body = True
+    total_size = 0
 
     def on_message_begin(self):
         self.has_begun = True
     
     def on_url(self, url):
+        self.total_size += len(url)
         self._url_buffer += url
     
     def on_url_complete(self):
@@ -30,35 +34,32 @@ class InternalCallbackHandler():
         self._url_buffer = None
     
     def on_header_field(self, field):
-        if self.current_header_field is None:
-            self.current_header_field = bytearray(field)
-        else:
-            self.current_header_field += field
+        self.total_size += len(field)
+        self._current_header_field += field
 
     def on_header_field_complete(self):
-        self.current_header_field = self.current_header_field
+        self._current_header_field = self._current_header_field
         
     def on_header_value(self, value):
-        if self.current_header_value is None:
-            self.current_header_value = bytearray(value)
-        else:
-            self.current_header_value += value
+        self.total_size += len(value)
+        self._current_header_value += value
 
     def on_header_value_complete(self):
-        if self.current_header_value is not None and self.current_header_field is not None:
-            self._header_fields[self.current_header_field.decode(errors="ignore")] = self.current_header_value.decode(errors="ignore")
-        self.current_header_field = None
-        self.current_header_value = None
+        if self._current_header_value is not None and self._current_header_field is not None:
+            self._header_fields[self._current_header_field.decode(errors="ignore")] = self._current_header_value.decode(errors="ignore")
+        self._current_header_field = b""
+        self._current_header_value = b""
     
     def on_headers_complete(self):
         self.headers_complete = True
         self.headers = self._header_fields
         self._header_fields = {}
-        self.current_header_field = None
-        self.current_header_value = None
+        self._current_header_field = None
+        self._current_header_value = None
 
     def on_body(self, body: bytes):
         if self._save_body:
+            self.total_size += len(body)
             self._body_buffer += body
 
     def on_message_complete(self):
@@ -67,6 +68,7 @@ class InternalCallbackHandler():
         self.message_complete = True
     
     def on_status(self, status: bytes):
+        self.total_size += len(status)
         self._status_buffer += status
     
     def on_status_complete(self):
@@ -111,6 +113,10 @@ class InternalBasicHttpMetaClass:
         self._headers_were_set = False
         self.stream = b""
         self.raised_error = False
+    
+    @property
+    def total_size(self) -> int:
+        return self._parser.total_size
     
     @property
     def url(self) -> str|None:
@@ -187,14 +193,29 @@ class InternalBasicHttpMetaClass:
         if internal_data.current_pkt is None or internal_data.current_pkt.is_tcp is False:
             raise NotReadyToRun()
         
-        datahandler:InternalBasicHttpMetaClass = internal_data.http_data_objects.get(cls, None)
+        datahandler:InternalBasicHttpMetaClass = internal_data.data_handler_context.get(cls, None)
         if datahandler is None or datahandler.raised_error:
             datahandler = cls()
-            internal_data.http_data_objects[cls] = datahandler
+            internal_data.data_handler_context[cls] = datahandler
         
         if not datahandler._before_fetch_callable_checks(internal_data):
             raise NotReadyToRun()
+
+        # Memory size managment
+        if datahandler.total_size+len(internal_data.current_pkt.data) > internal_data.stream_max_size:
+            match internal_data.full_stream_action:
+                case FullStreamAction.FLUSH:
+                    datahandler = cls()
+                    internal_data.data_handler_context[cls] = datahandler
+                case FullStreamAction.REJECT:
+                    raise StreamFullReject()
+                case FullStreamAction.DROP:
+                    raise StreamFullDrop()
+                case FullStreamAction.ACCEPT:
+                    raise NotReadyToRun()
+        
         datahandler._fetch_current_packet(internal_data)
+
         if not datahandler._callable_checks(internal_data):
             raise NotReadyToRun()
         
@@ -202,8 +223,8 @@ class InternalBasicHttpMetaClass:
             internal_data.save_http_data_in_streams = True
         
         if datahandler._trigger_remove_data(internal_data):
-            if internal_data.http_data_objects.get(cls):
-                del internal_data.http_data_objects[cls]
+            if internal_data.data_handler_context.get(cls):
+                del internal_data.data_handler_context[cls]
         
         return datahandler
 
@@ -262,124 +283,3 @@ class HttpResponseHeader(HttpResponse):
             return True
         return False
 
-"""
-#TODO include this?
-
-import codecs
-
-# Null bytes; no need to recreate these on each call to guess_json_utf
-_null = "\x00".encode("ascii")  # encoding to ASCII for Python 3
-_null2 = _null * 2
-_null3 = _null * 3
-
-def guess_json_utf(data):
-    ""
-    :rtype: str
-    ""
-    # JSON always starts with two ASCII characters, so detection is as
-    # easy as counting the nulls and from their location and count
-    # determine the encoding. Also detect a BOM, if present.
-    sample = data[:4]
-    if sample in (codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE):
-        return "utf-32"  # BOM included
-    if sample[:3] == codecs.BOM_UTF8:
-        return "utf-8-sig"  # BOM included, MS style (discouraged)
-    if sample[:2] in (codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE):
-        return "utf-16"  # BOM included
-    nullcount = sample.count(_null)
-    if nullcount == 0:
-        return "utf-8"
-    if nullcount == 2:
-        if sample[::2] == _null2:  # 1st and 3rd are null
-            return "utf-16-be"
-        if sample[1::2] == _null2:  # 2nd and 4th are null
-            return "utf-16-le"
-        # Did not detect 2 valid UTF-16 ascii-range characters
-    if nullcount == 3:
-        if sample[:3] == _null3:
-            return "utf-32-be"
-        if sample[1:] == _null3:
-            return "utf-32-le"
-        # Did not detect a valid UTF-32 ascii-range character
-    return None
-
-from http_parser.pyparser import HttpParser
-import json
-from urllib.parse import parse_qsl
-from dataclasses import dataclass
-
-@dataclass
-class HttpMessage():
-    fragment: str
-    headers: dict
-    method: str
-    parameters: dict
-    path: str
-    query_string: str
-    raw_body: bytes
-    status_code: int
-    url: str
-    version: str
-
-class HttpMessageParser(HttpParser):
-    def __init__(self, data:bytes, decompress_body=True):
-        super().__init__(decompress = decompress_body)
-        self.execute(data, len(data))
-        self._parameters = {}
-        try:
-            self._parse_parameters()
-        except Exception as e:
-            print("Error in parameters parsing:", data)
-            print("Exception:", str(e))
-
-    def get_raw_body(self):
-        return b"\r\n".join(self._body)
-    
-    def _parse_query_string(self, raw_string):
-        parameters = parse_qsl(raw_string)
-        for key,value in parameters:
-            try:
-                key = key.decode()
-                value = value.decode()
-            except:
-                pass
-            if self._parameters.get(key):
-                if isinstance(self._parameters[key], list):
-                    self._parameters[key].append(value)
-                else:
-                    self._parameters[key] = [self._parameters[key], value]
-            else:
-                self._parameters[key] = value
-
-    def _parse_parameters(self):
-        if self._method == "POST":
-            body = self.get_raw_body()
-            if len(body) == 0:
-                return
-            content_type = self.get_headers().get("Content-Type")
-            if not content_type or "x-www-form-urlencoded" in content_type:
-                try:
-                    self._parse_query_string(body.decode())
-                except:
-                    pass
-            elif "json" in content_type:
-                self._parameters = json.loads(body)
-        elif self._method == "GET":
-            self._parse_query_string(self._query_string)
-        
-    def get_parameters(self):
-        ""returns parameters parsed from query string or body""
-        return self._parameters
-    
-    def get_version(self):
-        if self._version:
-            return ".".join([str(x) for x in self._version])
-        return None
-
-    def to_message(self):
-        return HttpMessage(self._fragment, self._headers, self._method,
-                           self._parameters, self._path, self._query_string,
-                           self.get_raw_body(), self._status_code,
-                           self._url, self.get_version()
-                           )
-"""
