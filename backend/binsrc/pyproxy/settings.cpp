@@ -16,8 +16,12 @@ namespace PyProxy {
 class PyCodeConfig;
 
 shared_ptr<PyCodeConfig> config;
-PyObject* py_handle_packet_code = nullptr;
 UnixClientConnection control_socket;
+
+PyObject* unmarshal_code(string encoded_code){
+	if (encoded_code.empty()) return nullptr;
+	return PyMarshal_ReadObjectFromString(encoded_code.c_str(), encoded_code.size());
+}
 
 class PyCodeConfig{
 	public:
@@ -32,22 +36,24 @@ class PyCodeConfig{
 			PyObject* glob = PyDict_New();
 			PyObject* result = PyEval_EvalCode(compiled_code, glob, glob);
 			Py_DECREF(glob);
-			if (!result){
+			if (PyErr_Occurred()){
 				PyErr_Print();
 				Py_DECREF(compiled_code);
 				std::cerr << "[fatal] [main] Failed to execute the code" << endl;
 				throw invalid_argument("Failed to execute the code, maybe an invalid filter code has been provided");
 			}
-			Py_DECREF(result);
+			Py_XDECREF(result);
 			PyObject* code_dump = PyMarshal_WriteObjectToString(compiled_code, 4);
 			Py_DECREF(compiled_code);
 			if (code_dump == nullptr){
-				PyErr_Print();
+				if (PyErr_Occurred())
+					PyErr_Print();
 				std::cerr << "[fatal] [main] Failed to dump the code" << endl;
 				throw invalid_argument("Failed to dump the code");
 			}
 			if (!PyBytes_Check(code_dump)){
 				std::cerr << "[fatal] [main] Failed to dump the code" << endl;
+				Py_DECREF(code_dump);
 				throw invalid_argument("Failed to dump the code");
 			}
 			encoded_code = string(PyBytes_AsString(code_dump), PyBytes_Size(code_dump));
@@ -55,8 +61,7 @@ class PyCodeConfig{
 		}
 
 		PyObject* compiled_code(){
-			if (encoded_code.empty()) return nullptr;
-			return PyMarshal_ReadObjectFromString(encoded_code.c_str(), encoded_code.size());
+			return unmarshal_code(encoded_code);
 		}
 
 		PyCodeConfig(){}
@@ -69,16 +74,27 @@ void init_control_socket(){
 	control_socket = UnixClientConnection(socket_path);
 }
 
+string py_handle_packet_code;
 
 void init_handle_packet_code(){
-	py_handle_packet_code = Py_CompileStringExFlags(
-		"firegex.nfproxy.internals.handle_packet()\n", "<pyfilter>",
+	PyObject* compiled_code = Py_CompileStringExFlags(
+		"firegex.nfproxy.internals.handle_packet(globals())\n", "<pyfilter>",
 	Py_file_input, NULL, 2);
-
-	if (py_handle_packet_code == nullptr){
-		std::cerr << "[fatal] [main] Failed to compile the utility python code (strange behaviour, probably a bug)" << endl;
-		throw invalid_argument("Failed to compile the code");
+	PyObject* code_dump = PyMarshal_WriteObjectToString(compiled_code, 4);
+	Py_DECREF(compiled_code);
+	if (code_dump == nullptr){
+		if (PyErr_Occurred())
+			PyErr_Print();
+		std::cerr << "[fatal] [main] Failed to dump the code" << endl;
+		throw invalid_argument("Failed to dump the code");
 	}
+	if (!PyBytes_Check(code_dump)){
+		std::cerr << "[fatal] [main] Failed to dump the code" << endl;
+		Py_DECREF(code_dump);
+		throw invalid_argument("Failed to dump the code");
+	}
+	py_handle_packet_code = string(PyBytes_AsString(code_dump), PyBytes_Size(code_dump));
+	Py_DECREF(code_dump);
 }
 
 }}

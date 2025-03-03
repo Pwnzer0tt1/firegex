@@ -37,9 +37,14 @@ export default function NavBar() {
         <Divider my="xs" />
         <Box style={{flexGrow: 1}} component={ScrollArea} px="xs" mt="xs">
             <NavBarButton navigate="nfregex" closeNav={closeNav} name="Netfilter Regex" color="grape" icon={<BsRegex size={19} />} />
-            <NavBarButton navigate="nfproxy" closeNav={closeNav} name="Netfilter Proxy" color="lime" icon={<TbPlugConnected size={19} />} />
             <NavBarButton navigate="firewall" closeNav={closeNav} name="Firewall Rules" color="red" icon={<PiWallLight size={19} />} />
             <NavBarButton navigate="porthijack" closeNav={closeNav} name="Hijack Port to Proxy" color="blue" icon={<GrDirections size={19} />} />
+            <Box px="xs" mt="lg">
+                <Title order={5}>Experimental Features 🧪</Title>
+            </Box>
+            <Text></Text>
+            <Divider my="xs" />
+            <NavBarButton navigate="nfproxy" closeNav={closeNav} name="Netfilter Proxy" color="lime" icon={<TbPlugConnected size={19} />} />
         </Box>
         
     </AppShell.Navbar>

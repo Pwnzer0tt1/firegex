@@ -78,7 +78,7 @@ class FiregexInterceptor:
                 await run_func(self.outstrem_function, self.srv.id, line)
     
     async def _start_binary(self):
-        proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cpproxy")
+        proxy_binary_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../cpproxy"))
         self.process = await asyncio.create_subprocess_exec(
             proxy_binary_path, stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,

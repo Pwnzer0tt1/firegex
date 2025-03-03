@@ -34,7 +34,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	public:
 	stream_ctx sctx;
 	StreamFollower follower;
-	PyThreadState * gtstate = nullptr;
+	PyThreadState * tstate = nullptr;
 
 	PyInterpreterConfig py_thread_config = {
 		.use_main_obmalloc = 0,
@@ -45,15 +45,16 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		.check_multi_interp_extensions = 1,
 		.gil = PyInterpreterConfig_OWN_GIL,
 	};
-	PyThreadState *tstate = NULL;
 	NfQueue::PktRequest<PyProxyQueue>* pkt;
 	NfQueue::tcp_ack_seq_ctx* current_tcp_ack = nullptr;
+
+	PyObject* handle_packet_code = nullptr;
 
     void before_loop() override {
 		PyStatus pystatus;
 		// Create a new interpreter for the thread
-		gtstate = PyThreadState_New(PyInterpreterState_Main());
-		PyEval_AcquireThread(gtstate);
+		tstate = PyThreadState_New(PyInterpreterState_Main());
+		PyEval_AcquireThread(tstate);
 		pystatus = Py_NewInterpreterFromConfig(&tstate, &py_thread_config);
 		if(tstate == nullptr){
 			cerr << "[fatal] [main] Failed to create new interpreter" << endl;
@@ -64,6 +65,12 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 			Py_ExitStatusException(pystatus);
 			throw invalid_argument("Failed to create new interpreter (pystatus exc)");
 		}
+
+		if(!PyGC_IsEnabled()){
+			PyGC_Enable();
+		}
+
+		handle_packet_code = unmarshal_code(py_handle_packet_code);
 		// Setting callbacks for the stream follower
 		follower.new_stream_callback(bind(on_new_stream, placeholders::_1, this));
 		follower.stream_termination_callback(bind(on_stream_close, placeholders::_1, this));
@@ -100,11 +107,24 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 			if (compiled_code == nullptr){
 				stream.client_data_callback(nullptr);
 				stream.server_data_callback(nullptr);
+				stream.ignore_client_data();
+				stream.ignore_server_data();
 				return pkt->accept();
+			}else{
+				try{
+					stream_match = new pyfilter_ctx(compiled_code, handle_packet_code);
+				}catch(invalid_argument& e){
+					cerr << "[error] [filter_action] Failed to create the filter context" << endl;
+					print_exception_reason();
+					sctx.clean_stream_by_id(pkt->sid);
+					stream.client_data_callback(nullptr);
+					stream.server_data_callback(nullptr);
+					stream.ignore_client_data();
+					stream.ignore_server_data();
+					return pkt->accept();
+				}
+				sctx.streams_ctx.insert_or_assign(pkt->sid, stream_match);
 			}
-			stream_match = new pyfilter_ctx(compiled_code);
-			Py_DECREF(compiled_code);
-			sctx.streams_ctx.insert_or_assign(pkt->sid, stream_match);
 		}else{
 			stream_match = stream_search->second;
 		}		
@@ -140,6 +160,8 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 				print_exception_reason();
 				sctx.clean_stream_by_id(pkt->sid);
 				//Free the packet data
+				stream.ignore_client_data();
+				stream.ignore_server_data();
 				stream.client_data_callback(nullptr);
 				stream.server_data_callback(nullptr);
 				return pkt->accept();
@@ -233,6 +255,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		PyEval_ReleaseThread(tstate);
 		PyThreadState_Clear(tstate);
 		PyThreadState_Delete(tstate);
+		Py_DECREF(handle_packet_code);
 	
 		sctx.clean();
 	}

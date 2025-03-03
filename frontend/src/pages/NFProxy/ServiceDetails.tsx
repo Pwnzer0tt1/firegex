@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Badge, Divider, Menu } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { FaFilter, FaPencilAlt, FaPlay, FaStop } from 'react-icons/fa';
-import { nfproxy, nfproxyServiceFilterCodeQuery, nfproxyServicePyfiltersQuery, nfproxyServiceQuery, serviceQueryKey } from '../../components/NFProxy/utils';
+import { EXAMPLE_PYFILTER, nfproxy, nfproxyServiceFilterCodeQuery, nfproxyServicePyfiltersQuery, nfproxyServiceQuery, serviceQueryKey } from '../../components/NFProxy/utils';
 import { MdDoubleArrow } from "react-icons/md"
 import YesNoModal from '../../components/YesNoModal';
 import { errorNotify, isMediumScreen, okNotify, regex_ipv4, socketio } from '../../js/utils';
@@ -45,17 +45,20 @@ export default function ServiceDetailsNFProxy() {
     useEffect(()=>{
         if (srv){
             if (openLogModal){
+                logDataSetters.setState([])
                 socketio.emit("nfproxy-outstream-join", { service: srv });
                 socketio.on(`nfproxy-outstream-${srv}`, (data) => {
                     logDataSetters.append(data)
                 });
             }else{
-                logDataSetters.setState([])
                 socketio.emit("nfproxy-outstream-leave", { service: srv });
+                socketio.off(`nfproxy-outstream-${srv}`);
+                logDataSetters.setState([])
             }
             return () => {
-                logDataSetters.setState([])
                 socketio.emit("nfproxy-outstream-leave", { service: srv });
+                socketio.off(`nfproxy-outstream-${srv}`);
+                logDataSetters.setState([])
             }
         }
     }, [openLogModal, srv])
@@ -199,11 +202,13 @@ export default function ServiceDetailsNFProxy() {
 
         {(!filtersList.data || filtersList.data.length == 0)?<>
                 <Space h="xl" />
-                <Title className='center-flex' style={{textAlign:"center"}} order={3}>No filters found! Edit the proxy file</Title>
+                <Title className='center-flex' style={{textAlign:"center"}} order={3}>No filters found! Edit the proxy file, install the firegex client:<Space w="xs" /><Code mb={-4} >pip install fgex</Code></Title>
                 <Space h="xs" />
-                <Title className='center-flex' style={{textAlign:"center"}} order={3}>Install the firegex client:<Space w="xs" /><Code mb={-4} >pip install fgex</Code></Title>
+                <Title className='center-flex' style={{textAlign:"center"}} order={3}>Then create a new filter file with the following syntax and upload it here (using the button above)</Title>
                 <Space h="xs" />
-                <Title className='center-flex' style={{textAlign:"center"}} order={3}>Then run the command:<Space w="xs" /><Code mb={-4} >fgex nfproxy</Code></Title>
+                <Title className='center-flex' style={{textAlign:"center"}} order={3}>Before upload the filter you can test it using the fgex command installed by the python lib</Title>
+                <Space h="lg" />
+                <CodeHighlight code={EXAMPLE_PYFILTER} language="python" />
             </>:<>{filtersList.data?.map( (filterInfo) => <PyFilterView filterInfo={filterInfo} key={filterInfo.name}/>)}</>
         }
         <YesNoModal

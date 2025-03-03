@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, FileButton, LoadingOverlay, Space, ThemeIcon, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Code, LoadingOverlay, Space, ThemeIcon, Title, Tooltip } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
 import { useNavigate, useParams } from 'react-router-dom';
@@ -7,11 +7,12 @@ import { errorNotify, getErrorMessage, isMediumScreen } from '../../js/utils';
 import AddEditService from '../../components/NFProxy/AddEditService';
 import { useQueryClient } from '@tanstack/react-query';
 import { TbPlugConnected, TbReload } from 'react-icons/tb';
-import { nfproxy, nfproxyServiceQuery } from '../../components/NFProxy/utils';
+import { EXAMPLE_PYFILTER, nfproxy, nfproxyServiceQuery } from '../../components/NFProxy/utils';
 import { FaFilter, FaPencilAlt, FaServer } from 'react-icons/fa';
 import { MdUploadFile } from "react-icons/md";
 import { notifications } from '@mantine/notifications';
 import { useFileDialog } from '@mantine/hooks';
+import { CodeHighlight } from '@mantine/code-highlight';
 
 
 export default function NFProxy({ children }: { children: any }) {
@@ -138,13 +139,27 @@ export default function NFProxy({ children }: { children: any }) {
             <LoadingOverlay visible={services.isLoading} />
             {(services.data && services.data?.length > 0)?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
                 navigator("/nfproxy/"+srv.service_id)
-            }} />):<><Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No services found! Add one clicking the "+" buttons</Title>
-                <Box className='center-flex'>
+            }} />):<>
+                <Box className='center-flex-row'>
+                    <Space h="xl" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={3}>Netfilter proxy is a simulated proxy written using python with a c++ core</Title>
+                    <Space h="xs" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>Filters are created using a simple python syntax, infact the first you need to do is to install the firegex lib:<Space w="xs" /><Code mb={-4} >pip install firegex</Code></Title>
+                    <Space h="xs" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>Then you can create a new service and write custom filters for the service</Title>
+                    <Space h="xs" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>Below there is a description and example about how a pyfilter has to be composed (this example is replicated in every empty service)</Title>
+                    <Space h="lg" />
+                    <CodeHighlight code={EXAMPLE_PYFILTER} language="python" />
+                    <Space h="lg" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={3}>Add your first service</Title>
+                    <Space h="lg" />
                     <Tooltip label="Add a new service" color="blue">
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled">
                             <BsPlusLg size="20px" />
                         </ActionIcon>
                     </Tooltip>
+
                 </Box>
             </>}
         </>}

@@ -364,9 +364,9 @@ class PktRequest {
 				#endif
 				if (tcp && ack_seq_offset && packet.size() != _original_size){
 					if (is_input){
-						ack_seq_offset->in += packet.size() - _original_size;
+						ack_seq_offset->in += data_size() - _data_original_size;
 					}else{
-						ack_seq_offset->out += packet.size() - _original_size;
+						ack_seq_offset->out += data_size() - _data_original_size;
 					}
 				}
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(packet_id), NF_ACCEPT );

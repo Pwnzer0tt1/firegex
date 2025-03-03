@@ -55,11 +55,15 @@ typedef Tins::TCPIP::StreamIdentifier stream_id;
 struct pyfilter_ctx {
 
 	PyObject * glob = nullptr;
+	PyObject * py_handle_packet = nullptr;
 	
-	pyfilter_ctx(PyObject * compiled_code){
+	pyfilter_ctx(PyObject * compiled_code, PyObject * handle_packet_code){
+		py_handle_packet = handle_packet_code;
+		Py_INCREF(py_handle_packet);
 		glob = PyDict_New();
 		PyObject* result = PyEval_EvalCode(compiled_code, glob, glob);
-		if (!result){
+		Py_XDECREF(compiled_code);
+		if (PyErr_Occurred()){
 			PyErr_Print();
 			Py_XDECREF(glob);
 			std::cerr << "[fatal] [main] Failed to compile the code" << endl;
@@ -69,7 +73,10 @@ struct pyfilter_ctx {
 	}
 
 	~pyfilter_ctx(){
+		cerr << "[info] [pyfilter_ctx] Cleaning pyfilter_ctx" << endl;
 		Py_DECREF(glob);
+		Py_DECREF(py_handle_packet);
+		PyGC_Collect();
 	}
 
 	inline void set_item_to_glob(const char* key, PyObject* value){
@@ -82,14 +89,16 @@ struct pyfilter_ctx {
 
 	void del_item_from_glob(const char* key){
 		if (PyDict_DelItemString(glob, key) != 0){
-			PyErr_Print();
+			if (PyErr_Occurred())
+				PyErr_Print();
 			throw invalid_argument("Failed to delete item from dict");
 		}
 	}
 
 	inline void set_item_to_dict(PyObject* dict, const char* key, PyObject* value){
 		if (PyDict_SetItemString(dict, key, value) != 0){
-			PyErr_Print();
+			if (PyErr_Occurred())
+				PyErr_Print();
 			throw invalid_argument("Failed to set item to dict");
 		}
 		Py_DECREF(value);
@@ -111,11 +120,18 @@ struct pyfilter_ctx {
 
 		// Set packet info to the global context
 		set_item_to_glob("__firegex_packet_info", packet_info);
-		PyObject * result = PyEval_EvalCode(py_handle_packet_code, glob, glob);
+		#ifdef DEBUG
+		cerr << "[DEBUG] [handle_packet] Calling python with a data of " << data.size() << endl;
+		#endif
+		PyObject * result = PyEval_EvalCode(py_handle_packet, glob, glob);
+		PyGC_Collect();
+		#ifdef DEBUG
+		cerr << "[DEBUG] [handle_packet] End of python call" << endl;
+		#endif
 		del_item_from_glob("__firegex_packet_info");
 
-		Py_DECREF(packet_info);
-		if (!result){
+		if (PyErr_Occurred()){
+			cerr << "[error] [handle_packet] Failed to execute the code " << result << endl;
 			PyErr_Print();
 			#ifdef DEBUG
 			cerr << "[DEBUG] [handle_packet] Exception raised" << endl;
@@ -134,7 +150,9 @@ struct pyfilter_ctx {
 		}
 
 		if (!PyDict_Check(result)){
-			PyErr_Print();
+			if (PyErr_Occurred()){
+				PyErr_Print();
+			}
 			#ifdef DEBUG
 			cerr << "[DEBUG] [handle_packet] Result is not a dict" << endl;
 			#endif

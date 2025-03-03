@@ -1,23 +1,11 @@
 import functools
-from firegex.nfproxy.params import RawPacket
-from enum import Enum
-
-class Action(Enum):
-    ACCEPT = 0
-    DROP = 1
-    REJECT = 2
-    MANGLE = 3
-
-class FullStreamAction(Enum):
-    FLUSH = 0
-    ACCEPT = 1
-    REJECT = 2
-    DROP = 3
+from firegex.nfproxy.models import RawPacket, TCPInputStream, TCPOutputStream, TCPClientStream, TCPServerStream, TCPStreams
+from firegex.nfproxy.internals.models import Action, FullStreamAction
 
 ACCEPT = Action.ACCEPT
 DROP = Action.DROP
 REJECT = Action.REJECT
-MANGLE = Action.MANGLE
+UNSTABLE_MANGLE = Action.MANGLE
 
 def pyfilter(func):
     """
@@ -45,8 +33,7 @@ def clear_pyfilter_registry():
         pyfilter.registry.clear()
 
 __all__ = [
-    "ACCEPT", "DROP", "REJECT", "MANGLE", "EXCEPTION", "INVALID",
-    "Action", "FullStreamAction",
-    "pyfilter",
-    "RawPacket"
+    "ACCEPT", "DROP", "REJECT", "UNSTABLE_MANGLE"
+    "Action", "FullStreamAction", "pyfilter",
+    "RawPacket", "TCPInputStream", "TCPOutputStream", "TCPClientStream", "TCPServerStream", "TCPStreams"
 ]

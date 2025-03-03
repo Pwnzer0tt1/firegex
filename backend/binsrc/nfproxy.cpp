@@ -72,7 +72,7 @@ PyFilterResponse {
 
 Every time a packet is received, the packet handler will execute the following code:
 ```python
-firegex.nfproxy.internals.handle_packet()
+firegex.nfproxy.internals.handle_packet(globals())
 ````
 
 The TCP stream is sorted by libtins using c++ code, but the c++ code is not responsabile di buffer the stream, but only to sort those

@@ -7,4 +7,5 @@ textual==2.1.0
 python-socketio[client]==5.12.1
 fgex
 orjson
-
+httptools
+pyllhttp

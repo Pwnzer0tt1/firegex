@@ -1,60 +1,23 @@
 from inspect import signature
-from firegex.nfproxy.params import RawPacket, NotReadyToRun
-from firegex.nfproxy import Action, FullStreamAction
-from dataclasses import dataclass, field
+from firegex.nfproxy.internals.models import Action, FullStreamAction
+from firegex.nfproxy.internals.models import FilterHandler, PacketHandlerResult
+import functools
+from firegex.nfproxy.internals.data import DataStreamCtx
+from firegex.nfproxy.internals.exceptions import NotReadyToRun
+from firegex.nfproxy.internals.data import RawPacket
 
-type_annotations_associations = {
-    "tcp": {
-        RawPacket: RawPacket.fetch_from_global
-    },
-    "http": {
-        RawPacket: RawPacket.fetch_from_global
-    }
-}
-
-@dataclass
-class FilterHandler:
-    func: callable
-    name: str
-    params: dict[type, callable]
-    proto: str
-
-class internal_data:
-    filter_call_info: list[FilterHandler] = []
-    stream: list[RawPacket] = []
-    stream_size: int = 0
-    stream_max_size: int = 1*8e20
-    full_stream_action: str = "flush"
-    filter_glob: dict = {}
-
-@dataclass
-class PacketHandlerResult:
-    glob: dict = field(repr=False)
-    action: Action = Action.ACCEPT
-    matched_by: str = None
-    mangled_packet: bytes = None        
-    
-    def set_result(self) -> None:
-        self.glob["__firegex_pyfilter_result"] = {
-            "action": self.action.value,
-            "matched_by": self.matched_by,
-            "mangled_packet": self.mangled_packet
-        }
-    
-    def reset_result(self) -> None:
-        self.glob["__firegex_pyfilter_result"] = None
-
-def context_call(func, *args, **kargs):
-    internal_data.filter_glob["__firegex_tmp_args"] = args
-    internal_data.filter_glob["__firegex_tmp_kargs"] = kargs
-    internal_data.filter_glob["__firege_tmp_call"] = func
-    res = eval("__firege_tmp_call(*__firegex_tmp_args, **__firegex_tmp_kargs)", internal_data.filter_glob, internal_data.filter_glob)
-    del internal_data.filter_glob["__firegex_tmp_args"]
-    del internal_data.filter_glob["__firegex_tmp_kargs"]
-    del internal_data.filter_glob["__firege_tmp_call"]
+def context_call(glob, func, *args, **kargs):
+    glob["__firegex_tmp_args"] = args
+    glob["__firegex_tmp_kargs"] = kargs
+    glob["__firege_tmp_call"] = func
+    res = eval("__firege_tmp_call(*__firegex_tmp_args, **__firegex_tmp_kargs)", glob, glob)
+    del glob["__firegex_tmp_args"]
+    del glob["__firegex_tmp_kargs"]
+    del glob["__firege_tmp_call"]
     return res
 
 def generate_filter_structure(filters: list[str], proto:str, glob:dict) -> list[FilterHandler]:
+    from firegex.nfproxy.models import type_annotations_associations
     if proto not in type_annotations_associations.keys():
         raise Exception("Invalid protocol")
     res = []
@@ -103,22 +66,27 @@ def get_filters_info(code:str, proto:str) -> list[FilterHandler]:
 def get_filter_names(code:str, proto:str) -> list[str]:
     return [ele.name for ele in get_filters_info(code, proto)]    
 
-def handle_packet() -> None:
+def handle_packet(glob: dict) -> None:
+    internal_data = DataStreamCtx(glob)
+    print("I'm here", flush=True)
     cache_call = {} # Cache of the data handler calls
     
-    pkt_info = RawPacket.fetch_from_global(internal_data.filter_glob)
+    pkt_info = RawPacket._fetch_packet(internal_data)
+    internal_data.current_pkt = pkt_info
     cache_call[RawPacket] = pkt_info
     
     final_result = Action.ACCEPT
     data_size = len(pkt_info.data)
     
-    result = PacketHandlerResult(internal_data.filter_glob)
+    result = PacketHandlerResult(glob)
     
     if internal_data.stream_size+data_size > internal_data.stream_max_size:
         match internal_data.full_stream_action:
             case FullStreamAction.FLUSH:
                 internal_data.stream = []
                 internal_data.stream_size = 0
+                for func in internal_data.flush_action_set:
+                    func()
             case FullStreamAction.ACCEPT:
                 result.action = Action.ACCEPT
                 return result.set_result()
@@ -138,17 +106,19 @@ def handle_packet() -> None:
     mangled_packet = None
     for filter in internal_data.filter_call_info:
         final_params = []
+        skip_call = False
         for data_type, data_func in filter.params.items():
             if data_type not in cache_call.keys():
                 try:
-                    cache_call[data_type] = data_func(internal_data.filter_glob)
+                    cache_call[data_type] = data_func(internal_data)
                 except NotReadyToRun:
                     cache_call[data_type] = None
-            if cache_call[data_type] is None:
-                continue # Parsing raised NotReadyToRun, skip filter
+                    skip_call = True
+                    break
             final_params.append(cache_call[data_type])
-        
-        res = context_call(filter.func, *final_params)
+        if skip_call:
+            continue
+        res = context_call(glob, filter.func, *final_params)
         
         if res is None:
             continue #ACCEPTED
@@ -168,8 +138,10 @@ def handle_packet() -> None:
     return result.set_result()
 
 
-def compile(glob:dict) -> None:    
-    internal_data.filter_glob = glob
+def compile(glob:dict) -> None:
+    internal_data = DataStreamCtx(glob)
+
+    glob["print"] = functools.partial(print, flush = True)
     
     filters = glob["__firegex_pyfilter_enabled"]
     proto = glob["__firegex_proto"]
@@ -187,3 +159,4 @@ def compile(glob:dict) -> None:
         internal_data.full_stream_action = FullStreamAction.FLUSH
     
     PacketHandlerResult(glob).reset_result()
+
