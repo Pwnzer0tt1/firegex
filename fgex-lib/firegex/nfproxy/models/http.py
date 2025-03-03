@@ -54,8 +54,8 @@ class InternalCallbackHandler():
         self.headers_complete = True
         self.headers = self._header_fields
         self._header_fields = {}
-        self._current_header_field = None
-        self._current_header_value = None
+        self._current_header_field = b""
+        self._current_header_value = b""
 
     def on_body(self, body: bytes):
         if self._save_body:
@@ -98,14 +98,14 @@ class InternalCallbackHandler():
 
 class InternalHttpRequest(InternalCallbackHandler, pyllhttp.Request):
     def __init__(self):
-        super(pyllhttp.Request, self).__init__()
         super(InternalCallbackHandler, self).__init__()
-
+        super(pyllhttp.Request, self).__init__()
+        
 class InternalHttpResponse(InternalCallbackHandler, pyllhttp.Response):
     def __init__(self):
-        super(pyllhttp.Response, self).__init__()
         super(InternalCallbackHandler, self).__init__()
-
+        super(pyllhttp.Response, self).__init__()
+        
 class InternalBasicHttpMetaClass:
     
     def __init__(self):
@@ -162,9 +162,12 @@ class InternalBasicHttpMetaClass:
     def method(self) -> str|None:
         return self._parser.method_parsed
     
+    def _packet_to_stream(self, internal_data: DataStreamCtx):
+        return self.should_upgrade and self._parser._save_body
+    
     def _fetch_current_packet(self, internal_data: DataStreamCtx):
-        # TODO: if an error is triggered should I reject the connection?
-        if internal_data.save_http_data_in_streams: # This is a websocket upgrade!
+        if self._packet_to_stream(internal_data): # This is a websocket upgrade!
+            self._parser.total_size += len(internal_data.current_pkt.data)
             self.stream += internal_data.current_pkt.data
         else:
             try:
@@ -173,20 +176,21 @@ class InternalBasicHttpMetaClass:
                     self._parser.on_message_complete()
             except Exception as e:
                 self.raised_error = True
+                print(f"Error parsing HTTP packet: {e} {internal_data.current_pkt}", self, flush=True)
                 raise e
 
     #It's called the first time if the headers are complete, and second time with body complete
-    def _callable_checks(self, internal_data: DataStreamCtx):
+    def _after_fetch_callable_checks(self, internal_data: DataStreamCtx):
         if self._parser.headers_complete and not self._headers_were_set:
             self._headers_were_set = True
             return True
-        return self._parser.message_complete or internal_data.save_http_data_in_streams
+        return self._parser.message_complete or self.should_upgrade
     
     def _before_fetch_callable_checks(self, internal_data: DataStreamCtx):
         return True
 
     def _trigger_remove_data(self, internal_data: DataStreamCtx):
-        return self.message_complete
+        return self.message_complete and not self.should_upgrade
     
     @classmethod
     def _fetch_packet(cls, internal_data: DataStreamCtx):
@@ -216,11 +220,8 @@ class InternalBasicHttpMetaClass:
         
         datahandler._fetch_current_packet(internal_data)
 
-        if not datahandler._callable_checks(internal_data):
+        if not datahandler._after_fetch_callable_checks(internal_data):
             raise NotReadyToRun()
-        
-        if datahandler.should_upgrade:
-            internal_data.save_http_data_in_streams = True
         
         if datahandler._trigger_remove_data(internal_data):
             if internal_data.data_handler_context.get(cls):
@@ -266,7 +267,10 @@ class HttpRequestHeader(HttpRequest):
         super().__init__()
         self._parser._save_body = False
     
-    def _callable_checks(self, internal_data: DataStreamCtx):
+    def _before_fetch_callable_checks(self, internal_data: DataStreamCtx):
+        return internal_data.current_pkt.is_input and not self._headers_were_set
+    
+    def _after_fetch_callable_checks(self, internal_data: DataStreamCtx):
         if self._parser.headers_complete and not self._headers_were_set:
             self._headers_were_set = True
             return True
@@ -277,9 +281,11 @@ class HttpResponseHeader(HttpResponse):
         super().__init__()
         self._parser._save_body = False
     
-    def _callable_checks(self, internal_data: DataStreamCtx):
+    def _before_fetch_callable_checks(self, internal_data: DataStreamCtx):
+        return not internal_data.current_pkt.is_input and not self._headers_were_set
+    
+    def _after_fetch_callable_checks(self, internal_data: DataStreamCtx):
         if self._parser.headers_complete and not self._headers_were_set:
             self._headers_were_set = True
             return True
         return False
-

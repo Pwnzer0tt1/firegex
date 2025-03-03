@@ -7,13 +7,9 @@ class InternalTCPStream:
         data: bytes,
         is_ipv6: bool,
     ):
-        self.__data = bytes(data)
+        self.data = bytes(data)
         self.__is_ipv6 = bool(is_ipv6)
         self.__total_stream_size = len(data)
-
-    @property
-    def data(self) -> bool:
-        return self.__data
     
     @property
     def is_ipv6(self) -> bool:
@@ -24,7 +20,7 @@ class InternalTCPStream:
         return self.__total_stream_size
     
     def _push_new_data(self, data: bytes):
-        self.__data += data
+        self.data += data
         self.__total_stream_size += len(data)
     
     @classmethod

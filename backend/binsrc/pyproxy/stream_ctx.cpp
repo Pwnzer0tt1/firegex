@@ -73,7 +73,6 @@ struct pyfilter_ctx {
 	}
 
 	~pyfilter_ctx(){
-		cerr << "[info] [pyfilter_ctx] Cleaning pyfilter_ctx" << endl;
 		Py_DECREF(glob);
 		Py_DECREF(py_handle_packet);
 		PyGC_Collect();
@@ -120,14 +119,8 @@ struct pyfilter_ctx {
 
 		// Set packet info to the global context
 		set_item_to_glob("__firegex_packet_info", packet_info);
-		#ifdef DEBUG
-		cerr << "[DEBUG] [handle_packet] Calling python with a data of " << data.size() << endl;
-		#endif
 		PyObject * result = PyEval_EvalCode(py_handle_packet, glob, glob);
 		PyGC_Collect();
-		#ifdef DEBUG
-		cerr << "[DEBUG] [handle_packet] End of python call" << endl;
-		#endif
 		del_item_from_glob("__firegex_packet_info");
 
 		if (PyErr_Occurred()){

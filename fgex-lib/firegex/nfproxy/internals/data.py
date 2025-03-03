@@ -75,8 +75,7 @@ class RawPacket:
         self.__l4_size = len(v)-self.raw_packet_header_len
 
     @classmethod
-    def _fetch_packet(cls, internal_data):
-        from firegex.nfproxy.internals.data import DataStreamCtx
+    def _fetch_packet(cls, internal_data:"DataStreamCtx"):
         if not isinstance(internal_data, DataStreamCtx):
             if isinstance(internal_data, dict):
                 internal_data = DataStreamCtx(internal_data)
@@ -93,11 +92,12 @@ class RawPacket:
 
 class DataStreamCtx:
     
-    def __init__(self, glob: dict):
+    def __init__(self, glob: dict, init_pkt: bool = True):
         if "__firegex_pyfilter_ctx" not in glob.keys():
             glob["__firegex_pyfilter_ctx"] = {}
         self.__data = glob["__firegex_pyfilter_ctx"]
         self.filter_glob = glob
+        self.current_pkt = RawPacket._fetch_packet(self) if init_pkt else None
     
     @property
     def filter_call_info(self) -> list[FilterHandler]:
@@ -128,14 +128,6 @@ class DataStreamCtx:
     @full_stream_action.setter
     def full_stream_action(self, v: FullStreamAction):
         self.__data["full_stream_action"] = v
-        
-    @property
-    def current_pkt(self) -> RawPacket:
-        return self.__data.get("current_pkt", None)
-    
-    @current_pkt.setter
-    def current_pkt(self, v: RawPacket):
-        self.__data["current_pkt"] = v
     
     @property
     def data_handler_context(self) -> dict:
@@ -146,16 +138,4 @@ class DataStreamCtx:
     @data_handler_context.setter
     def data_handler_context(self, v: dict):
         self.__data["data_handler_context"] = v
-    
-    @property
-    def save_http_data_in_streams(self) -> bool:
-        if "save_http_data_in_streams" not in self.__data.keys():
-            self.__data["save_http_data_in_streams"] = False
-        return self.__data.get("save_http_data_in_streams")
-    
-    @save_http_data_in_streams.setter
-    def save_http_data_in_streams(self, v: bool):
-        self.__data["save_http_data_in_streams"] = v
-    
-
 

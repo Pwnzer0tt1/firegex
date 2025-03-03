@@ -6,6 +6,7 @@ import traceback
 from fastapi import HTTPException
 import time
 from utils import run_func
+from utils import DEBUG
 
 nft = FiregexTables()
 
@@ -62,20 +63,25 @@ class FiregexInterceptor:
     async def _stream_handler(self):
         while True:
             try:
-                line = (await self.process.stdout.readuntil()).decode(errors="ignore")
-                print(line, end="")
+                out_data = (await self.process.stdout.read(1024*10)).decode(errors="ignore")
+                if DEBUG:
+                    print(out_data, end="")
+            except asyncio.exceptions.LimitOverrunError:
+                self.outstrem_buffer = ""
+                continue
             except Exception as e:
                 self.ack_arrived = False
                 self.ack_status = False
                 self.ack_fail_what = "Can't read from nfq client"
                 self.ack_lock.release()
                 await self.stop()
+                traceback.print_exc() # Python can't print it alone? nope it's python... wasted 1 day :)
                 raise HTTPException(status_code=500, detail="Can't read from nfq client") from e
-            self.outstrem_buffer+=line
+            self.outstrem_buffer+=out_data
             if len(self.outstrem_buffer) > OUTSTREAM_BUFFER_SIZE:
                 self.outstrem_buffer = self.outstrem_buffer[-OUTSTREAM_BUFFER_SIZE:]+"\n"
             if self.outstrem_function:
-                await run_func(self.outstrem_function, self.srv.id, line)
+                await run_func(self.outstrem_function, self.srv.id, out_data)
     
     async def _start_binary(self):
         proxy_binary_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../cpproxy"))

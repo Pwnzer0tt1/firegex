@@ -68,12 +68,9 @@ def get_filter_names(code:str, proto:str) -> list[str]:
 
 def handle_packet(glob: dict) -> None:
     internal_data = DataStreamCtx(glob)
-    print("I'm here", flush=True)
-    cache_call = {} # Cache of the data handler calls
     
-    pkt_info = RawPacket._fetch_packet(internal_data)
-    internal_data.current_pkt = pkt_info
-    cache_call[RawPacket] = pkt_info
+    cache_call = {} # Cache of the data handler calls
+    cache_call[RawPacket] = internal_data.current_pkt
     
     final_result = Action.ACCEPT
     result = PacketHandlerResult(glob)
@@ -108,8 +105,10 @@ def handle_packet(glob: dict) -> None:
                     result.matched_by = filter.name
                     return result.set_result()
             final_params.append(cache_call[data_type])
+            
         if skip_call:
             continue
+        
         res = context_call(glob, filter.func, *final_params)
         
         if res is None:
@@ -117,7 +116,7 @@ def handle_packet(glob: dict) -> None:
         if not isinstance(res, Action):
             raise Exception(f"Invalid return type {type(res)} for function {filter.name}")
         if res == Action.MANGLE:
-            mangled_packet = pkt_info.raw_packet
+            mangled_packet = internal_data.current_pkt.raw_packet
         if res != Action.ACCEPT:
             func_name = filter.name
             final_result = res
@@ -131,7 +130,7 @@ def handle_packet(glob: dict) -> None:
 
 
 def compile(glob:dict) -> None:
-    internal_data = DataStreamCtx(glob)
+    internal_data = DataStreamCtx(glob, init_pkt=False)
 
     glob["print"] = functools.partial(print, flush = True)
     
