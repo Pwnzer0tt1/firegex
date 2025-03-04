@@ -5,11 +5,11 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setuptools.setup(
     name="fgex",
-    version="0.0.0",
+    version="0.0.1",
     author="Pwnzer0tt1",
     author_email="pwnzer0tt1@poliba.it",
     py_modules=["fgex"],
-    install_requires=["fgex"],
+    install_requires=["firegex"],
     include_package_data=True,
     description="Firegex client",
     long_description=long_description,

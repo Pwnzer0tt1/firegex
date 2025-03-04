@@ -262,12 +262,15 @@ def run_proxy_simulation(filter_file:str, proto:str, target_ip:str, target_port:
     
     if os.path.isfile(filter_file) is False:
         raise Exception(f"\\[nfproxy]\\[init] Filter file {filter_file} not found")
+    else:
+        filter_file = os.path.abspath(filter_file)
     
     proxy_process:Process|None = None
     
     def reload_proxy_proc():
         nonlocal proxy_process
         if proxy_process is not None:
+            log_print("RELOADING", "Proxy reload triggered", level=LogLevels.WARNING)
             proxy_process.kill()
             proxy_process.join()
             proxy_process = None

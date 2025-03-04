@@ -57,8 +57,9 @@ def generate_filter_structure(filters: list[str], proto:str, glob:dict) -> list[
 
 def get_filters_info(code:str, proto:str) -> list[FilterHandler]:
     glob = {}
-    exec(code, glob, glob)
     exec("import firegex.nfproxy", glob, glob)
+    exec("firegex.nfproxy.clear_pyfilter_registry()", glob, glob)
+    exec(code, glob, glob)
     filters = eval("firegex.nfproxy.get_pyfilters()", glob, glob)
     try:
         return generate_filter_structure(filters, proto, glob)
