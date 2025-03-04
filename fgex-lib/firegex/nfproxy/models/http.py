@@ -9,6 +9,7 @@ class InternalCallbackHandler():
     url: str|None = None
     _url_buffer: bytes = b""
     headers: dict[str, str] = {}
+    lheaders: dict[str, str] = {} # Lowercase headers
     _header_fields: dict[bytes, bytes] = {}
     has_begun: bool = False
     body: bytes = None
@@ -53,6 +54,7 @@ class InternalCallbackHandler():
     def on_headers_complete(self):
         self.headers_complete = True
         self.headers = self._header_fields
+        self.lheaders = {k.lower(): v for k, v in self._header_fields.items()}
         self._header_fields = {}
         self._current_header_field = b""
         self._current_header_value = b""
@@ -65,6 +67,14 @@ class InternalCallbackHandler():
     def on_message_complete(self):
         self.body = self._body_buffer
         self._body_buffer = b""
+        try:
+            if "gzip" in self.content_encoding.lower():
+                import gzip
+                import io
+                with gzip.GzipFile(fileobj=io.BytesIO(self.body)) as f:
+                    self.body = f.read()
+        except Exception as e:
+            print(f"Error decompressing gzip: {e}: skipping", flush=True)
         self.message_complete = True
     
     def on_status(self, status: bytes):
@@ -75,6 +85,18 @@ class InternalCallbackHandler():
         self.status = self._status_buffer.decode(errors="ignore")
         self._status_buffer = b""
     
+    @property
+    def user_agent(self) -> str:
+        return self.lheaders.get("user-agent", "")
+    
+    @property
+    def content_encoding(self) -> str:
+        return self.lheaders.get("content-encoding", "")
+    
+    @property
+    def content_type(self) -> str:
+        return self.lheaders.get("content-type", "")
+
     @property
     def keep_alive(self) -> bool:
         return self.should_keep_alive
@@ -127,6 +149,14 @@ class InternalBasicHttpMetaClass:
         return self._parser.headers
     
     @property
+    def user_agent(self) -> str:
+        return self._parser.user_agent
+    
+    @property
+    def content_encoding(self) -> str:
+        return self._parser.content_encoding
+    
+    @property
     def has_begun(self) -> bool:
         return self._parser.has_begun
     
@@ -162,6 +192,9 @@ class InternalBasicHttpMetaClass:
     def method(self) -> str|None:
         return self._parser.method_parsed
     
+    def get_header(self, header: str, default=None) -> str:
+        return self._parser.lheaders.get(header.lower(), default)
+    
     def _packet_to_stream(self, internal_data: DataStreamCtx):
         return self.should_upgrade and self._parser._save_body
     
@@ -172,7 +205,7 @@ class InternalBasicHttpMetaClass:
         else:
             try:
                 self._parser.execute(internal_data.current_pkt.data)
-                if self._parser.headers_complete and len(self._parser._body_buffer) == self._parser.content_length_parsed:
+                if not self._parser.message_complete and self._parser.headers_complete and len(self._parser._body_buffer) == self._parser.content_length_parsed:
                     self._parser.on_message_complete()
             except Exception as e:
                 self.raised_error = True

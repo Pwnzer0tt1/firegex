@@ -104,6 +104,9 @@ def handle_packet(glob: dict) -> None:
                     result.action = Action.REJECT
                     result.matched_by = filter.name
                     return result.set_result()
+            if cache_call[data_type] is None:
+                skip_call = True
+                break
             final_params.append(cache_call[data_type])
             
         if skip_call:
