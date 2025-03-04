@@ -1,6 +1,6 @@
 typer==0.15.1
 pydantic>=2
 typing-extensions>=4.7.1
-watchdog>=6.0.0
+watchfiles
 fgex
 pyllhttp
