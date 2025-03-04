@@ -198,7 +198,6 @@ class FiregexInterceptor:
                 filter_file = ""
             self.filter_map = {ele.name: ele for ele in filters}
             await self._update_config(
-
                 filter_file + "\n\n" +
                 "__firegex_pyfilter_enabled = [" + ", ".join([repr(f.name) for f in filters]) + "]\n" +
                 "__firegex_proto = " + repr(self.srv.proto) + "\n" +

@@ -1,6 +1,7 @@
 from firegex.nfproxy.models.tcp import TCPInputStream, TCPOutputStream, TCPClientStream, TCPServerStream
 from firegex.nfproxy.models.http import HttpRequest, HttpResponse, HttpRequestHeader, HttpResponseHeader
 from firegex.nfproxy.internals.data import RawPacket
+from enum import Enum
 
 type_annotations_associations = {
     "tcp": {
@@ -19,8 +20,12 @@ type_annotations_associations = {
     }
 }
 
+class Protocols(Enum):
+    TCP = "tcp"
+    HTTP = "http"
+
 __all__ = [
     "RawPacket",
     "TCPInputStream", "TCPOutputStream", "TCPClientStream", "TCPServerStream",
-    "HttpRequest", "HttpResponse", "HttpRequestHeader", "HttpResponseHeader",
+    "HttpRequest", "HttpResponse", "HttpRequestHeader", "HttpResponseHeader", "Protocols"
 ]

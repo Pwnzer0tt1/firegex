@@ -11,9 +11,12 @@ def context_call(glob, func, *args, **kargs):
     glob["__firegex_tmp_kargs"] = kargs
     glob["__firege_tmp_call"] = func
     res = eval("__firege_tmp_call(*__firegex_tmp_args, **__firegex_tmp_kargs)", glob, glob)
-    del glob["__firegex_tmp_args"]
-    del glob["__firegex_tmp_kargs"]
-    del glob["__firege_tmp_call"]
+    if "__firegex_tmp_args" in glob.keys():
+        del glob["__firegex_tmp_args"]
+    if "__firegex_tmp_kargs" in glob.keys():
+        del glob["__firegex_tmp_kargs"]
+    if "__firege_tmp_call" in glob.keys():
+        del glob["__firege_tmp_call"]
     return res
 
 def generate_filter_structure(filters: list[str], proto:str, glob:dict) -> list[FilterHandler]:
