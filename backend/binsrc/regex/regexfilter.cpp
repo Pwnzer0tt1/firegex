@@ -20,6 +20,7 @@
 #include "../classes/netfilter.cpp"
 #include "stream_ctx.cpp"
 #include "regex_rules.cpp"
+#include "../utils.cpp"
 
 using namespace std;
 
@@ -30,22 +31,14 @@ namespace Regex {
 using Tins::TCPIP::Stream;
 using Tins::TCPIP::StreamFollower;
 
-
-
 class RegexNfQueue : public NfQueue::ThreadNfQueue<RegexNfQueue> {
 public:
 	stream_ctx sctx;
 	u_int16_t latest_config_ver = 0;
 	StreamFollower follower;
-	struct {
-		bool matching_has_been_called = false;
-		bool already_closed = false;
-		bool result;
-		NfQueue::PktRequest<RegexNfQueue>* pkt;
-	} match_ctx;
-	
+	NfQueue::PktRequest<RegexNfQueue>* pkt;
 
-	bool filter_action(NfQueue::PktRequest<RegexNfQueue>* pkt){
+	bool filter_action(NfQueue::PktRequest<RegexNfQueue>* pkt, const string& data){
 		shared_ptr<RegexRules> conf = regex_config;
 
 		auto current_version = conf->ver();
@@ -91,12 +84,12 @@ public:
 				stream_match = stream_search->second;
 			}
 			err = hs_scan_stream(
-				stream_match,pkt->data, pkt->data_size,
+				stream_match, data.c_str(), data.size(),
 				0, scratch_space, match_func, &match_res
 			);
 		}else{
 			err = hs_scan(
-				regex_matcher,pkt->data, pkt->data_size,
+				regex_matcher, data.c_str(), data.size(),
 				0, scratch_space, match_func, &match_res
 			);
 		}
@@ -108,7 +101,7 @@ public:
 			throw invalid_argument("Cannot close stream match on hyperscan");
 		}
 		if (err != HS_SUCCESS && err != HS_SCAN_TERMINATED) {
-			cerr << "[error] [filter_callback] Error while matching the stream (hs)" << endl;
+			cerr << "[error] [filter_callback] Error while matching the stream (hs) " << err << endl;
 			throw invalid_argument("Error while matching the stream with hyperscan");
 		}
 		if (match_res.has_matched){
@@ -119,85 +112,30 @@ public:
 		return true;
 	}
 
-	void handle_next_packet(NfQueue::PktRequest<RegexNfQueue>* pkt) override{
-		bool empty_payload = pkt->data_size == 0;
-		if (pkt->tcp){
-			match_ctx.matching_has_been_called = false;
-			match_ctx.pkt = pkt;
-
-			if (pkt->ipv4){
-				follower.process_packet(*pkt->ipv4);
-			}else{
-				follower.process_packet(*pkt->ipv6);
-			}
-	
-			// Do an action only is an ordered packet has been received
-			if (match_ctx.matching_has_been_called){
-	
-				//In this 2 cases we have to remove all data about the stream
-				if (!match_ctx.result || match_ctx.already_closed){
-					sctx.clean_stream_by_id(pkt->sid);
-					//If the packet has data, we have to remove it
-					if (!empty_payload){
-						Tins::PDU* data_layer = pkt->tcp->release_inner_pdu();
-						if (data_layer != nullptr){
-							delete data_layer;
-						}
-					}
-					//For the first matched data or only for data packets, we set FIN bit
-					//This only for client packets, because this will trigger server to close the connection
-					//Packets will be filtered anyway also if client don't send packets
-					if ((!match_ctx.result || !empty_payload) && pkt->is_input){
-						pkt->tcp->set_flag(Tins::TCP::FIN,1);
-						pkt->tcp->set_flag(Tins::TCP::ACK,1);
-						pkt->tcp->set_flag(Tins::TCP::SYN,0);
-					}
-					//Send the edited packet to the kernel
-					return pkt->mangle();
-				}
-			}
-			return pkt->accept();
-		}else{
-			if (!pkt->udp){
-				throw invalid_argument("Only TCP and UDP are supported");
-			}
-			if(empty_payload){
-				return pkt->accept();
-			}else if (filter_action(pkt)){
-				return pkt->accept();
-			}else{
-				return pkt->drop();
-			}
-		}
-	}
 	//If the stream has already been matched, drop all data, and try to close the connection
 	static void keep_fin_packet(RegexNfQueue* nfq){
-		nfq->match_ctx.matching_has_been_called = true;
-		nfq->match_ctx.already_closed = true;
+        nfq->pkt->reject(); // This is needed because the callback has to take the updated pkt pointer!
 	}
 
-	static void on_data_recv(Stream& stream, RegexNfQueue* nfq, string data) {
-		nfq->match_ctx.matching_has_been_called = true;
-		nfq->match_ctx.already_closed = false;
-    nfq->match_ctx.pkt->data = data.data();
-		nfq->match_ctx.pkt->data_size = data.size();
-		bool result = nfq->filter_action(nfq->match_ctx.pkt);
-		if (!result){
-			nfq->sctx.clean_stream_by_id(nfq->match_ctx.pkt->sid);
+	static void on_data_recv(Stream& stream, RegexNfQueue* nfq, const string& data) {
+		if (!nfq->filter_action(nfq->pkt, data)){
+			nfq->sctx.clean_stream_by_id(nfq->pkt->sid);
 			stream.client_data_callback(bind(keep_fin_packet, nfq));
 			stream.server_data_callback(bind(keep_fin_packet, nfq));
+			nfq->pkt->reject();
 		}
-		nfq->match_ctx.result = result;
 	}
 
 	//Input data filtering
 	static void on_client_data(Stream& stream, RegexNfQueue* nfq) {
-		on_data_recv(stream, nfq, string(stream.client_payload().begin(), stream.client_payload().end()));
+		auto data = stream.client_payload();
+		on_data_recv(stream, nfq, string((char*)data.data(), data.size()));
 	}
 
 	//Server data filtering
 	static void on_server_data(Stream& stream, RegexNfQueue* nfq) {
-		on_data_recv(stream, nfq, string(stream.server_payload().begin(), stream.server_payload().end()));
+		auto data = stream.server_payload();
+		on_data_recv(stream, nfq, string((char*)data.data(), data.size()));
 	}
 
 	// A stream was terminated. The second argument is the reason why it was terminated
@@ -214,6 +152,32 @@ public:
 		stream.client_data_callback(bind(on_client_data, placeholders::_1, nfq));
 		stream.server_data_callback(bind(on_server_data, placeholders::_1, nfq));
 		stream.stream_closed_callback(bind(on_stream_close, placeholders::_1, nfq));
+	}
+
+	void handle_next_packet(NfQueue::PktRequest<RegexNfQueue>* _pkt) override{
+        pkt = _pkt; // Setting packet context
+		if (pkt->tcp){
+			if (pkt->ipv4){
+				follower.process_packet(*pkt->ipv4);
+			}else{
+				follower.process_packet(*pkt->ipv6);
+			}
+			//Fallback to the default action
+			if (pkt->get_action() == NfQueue::FilterAction::NOACTION){
+				return pkt->accept();
+			}
+		}else{
+			if (!pkt->udp){
+				throw invalid_argument("Only TCP and UDP are supported");
+			}
+			if(pkt->data_size() == 0){
+				return pkt->accept();
+			}else if (filter_action(pkt, string(pkt->data(), pkt->data_size()))){
+				return pkt->accept();
+			}else{
+				return pkt->drop();
+			}
+		}
 	}
 
 	void before_loop() override{
