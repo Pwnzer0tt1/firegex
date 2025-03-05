@@ -13,6 +13,7 @@ import { MdUploadFile } from "react-icons/md";
 import { notifications } from '@mantine/notifications';
 import { useFileDialog } from '@mantine/hooks';
 import { CodeHighlight } from '@mantine/code-highlight';
+import { DocsButton } from '../../components/DocsButton';
 
 
 export default function NFProxy({ children }: { children: any }) {
@@ -131,6 +132,8 @@ export default function NFProxy({ children }: { children: any }) {
                     <TbReload size={18} />
                 </ActionIcon>
             </Tooltip>
+            <Space w="xs" />
+            <DocsButton doc="nfproxy" />
         </Box>
     </Box>
     <Space h="md" />

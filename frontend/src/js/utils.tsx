@@ -20,6 +20,13 @@ export const DEV_IP_BACKEND = "127.0.0.1:4444"
 
 export const WARNING_NFPROXY_TIME_LIMIT = 1000*60*10 // 10 minutes
 
+export type EnumToPrimitiveUnion<T> = `${T & string}` | ParseNumber<`${T & number}`>;
+type ParseNumber<T> = T extends `${infer U extends number}` ? U : never;
+
+export function typeCastEnum<E>(value: EnumToPrimitiveUnion<E>): E {
+  return value as E;
+}
+
 export const socketio = import.meta.env.DEV?
     io("ws://"+DEV_IP_BACKEND, {
         path:"/sock/socket.io",

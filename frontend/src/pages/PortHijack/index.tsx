@@ -9,6 +9,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { TbReload } from 'react-icons/tb';
 import { FaServer } from 'react-icons/fa';
 import { GrDirections } from 'react-icons/gr';
+import { DocsButton } from '../../components/DocsButton';
 
 
 function PortHijack() {
@@ -42,6 +43,8 @@ function PortHijack() {
                     <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["porthijack"])} size="lg" radius="md" variant="filled"
                     loading={services.isFetching}><TbReload size={18} /></ActionIcon>
                 </Tooltip>
+                <Space w="xs" />
+                <DocsButton doc="porthijack" />
             </Box>
         </Box>
         <Space h="md" />

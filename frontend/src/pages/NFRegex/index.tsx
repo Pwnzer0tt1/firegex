@@ -12,6 +12,7 @@ import { TbReload } from 'react-icons/tb';
 import { FaFilter } from 'react-icons/fa';
 import { FaServer } from "react-icons/fa6";
 import { VscRegex } from "react-icons/vsc";
+import { DocsButton } from '../../components/DocsButton';
 
 function NFRegex({ children }: { children: any }) {
 
@@ -59,6 +60,8 @@ function NFRegex({ children }: { children: any }) {
                 <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfregex"])} size="lg" radius="md" variant="filled"
                 loading={services.isFetching}><TbReload size={18} /></ActionIcon>
             </Tooltip>
+            <Space w="xs" />
+            <DocsButton doc="nfregex" />
         </Box>
     </Box>
     <Space h="md" />
