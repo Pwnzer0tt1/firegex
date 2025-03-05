@@ -340,7 +340,6 @@ async def metrics():
             s.name,
             s.status,
             r.regex,
-            r.is_blacklist,
             r.mode,
             r.is_case_sensitive,
             r.blocked_packets,

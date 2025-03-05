@@ -136,6 +136,10 @@ class FiregexAPI:
             json={"name":name,"port":port, "proto": proto, "ip_int": ip_int, "fail_open": fail_open})
         return req.json()["service_id"] if verify(req) else False 
 
+    def nf_get_metrics(self):
+        req = self.s.get(f"{self.address}api/nfregex/metrics")
+        return req.text
+
     #PortHijack
     def ph_get_services(self):
         req = self.s.get(f"{self.address}api/porthijack/services")
