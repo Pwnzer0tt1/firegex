@@ -70,11 +70,21 @@ function NFRegex({ children }: { children: any }) {
             <LoadingOverlay visible={services.isLoading} />
             {(services.data && services.data?.length > 0)?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
                 navigator("/nfregex/"+srv.service_id)
-            }} />):<><Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No services found! Add one clicking the "+" buttons</Title>
-                <Box className='center-flex'>
-                    <Tooltip label="Add a new service" color="blue">
-                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
-                    </Tooltip>
+            }} />):<>
+                <Box className='center-flex-row'>
+                    <Space h="xl" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={3}>Netfilter Regex allows you to filter traffic using regexes</Title>
+                    <Space h="xs" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>Start a service, add your regexes and it's already done!</Title>
+                    <Space h="lg" />
+                    <Box className='center-flex' style={{gap: 20}}>
+                        <Tooltip label="Add a new service" color="blue">
+                            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled">
+                                <BsPlusLg size="20px" />
+                            </ActionIcon>
+                        </Tooltip>
+                        <DocsButton doc="nfregex" size="xl" />
+                    </Box>
                 </Box>
             </>}
         </>}

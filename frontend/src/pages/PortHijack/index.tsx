@@ -51,11 +51,22 @@ function PortHijack() {
         <Box className="center-flex-row" style={{gap: 20}}>
             <LoadingOverlay visible={services.isLoading} />
             {(services.data && services.data.length > 0) ?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} />):<>
-                <Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No services found! Add one clicking the "+" buttons</Title>
-                <Box className='center-flex'>
-                    <Tooltip label="Add a new service" color="blue">
-                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"><BsPlusLg size="20px" /></ActionIcon>
-                    </Tooltip>
+                <Box className='center-flex-row'>
+                    <Space h="xl" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={3}>Hjiack Port to Proxy is a feature that allows you to run your custom proxy without touch the service config</Title>
+                    <Space h="xs" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>It hijack the traffic to a secondary port, where you can run your proxy, that will still be able to contact the original service using loopback</Title>
+                    <Space h="xs" />
+                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>Start using port hijacking creating a new service and routing the traffic to your proxy not changing the original service configs</Title>
+                    <Space h="lg" />
+                    <Box className='center-flex' style={{gap: 20}}>
+                        <Tooltip label="Add a new service" color="blue">
+                            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled">
+                                <BsPlusLg size="20px" />
+                            </ActionIcon>
+                        </Tooltip>
+                        <DocsButton doc="porthijack" size="xl" />
+                    </Box>
                 </Box>
             </>}
             <AddNewService opened={open} onClose={closeModal} />

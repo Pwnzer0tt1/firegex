@@ -1,11 +1,10 @@
-import { ActionIcon, Box, Modal, ScrollArea, Title, Tooltip } from "@mantine/core";
+import { ActionIcon, ActionIconProps, Box, Modal, ScrollArea, Title, Tooltip } from "@mantine/core";
 import { useState } from "react";
 import { FaBookBookmark } from "react-icons/fa6";
 import { NFRegexDocs } from "./NFRegex/NFRegexDocs";
 import { NFProxyDocs } from "./NFProxy/NFProxyDocs";
 import { PortHijackDocs } from "./PortHijack/PortHijackDocs";
 import { EnumToPrimitiveUnion } from "../js/utils";
-
 
 export enum DocType{
     NFREGEX = "nfregex",
@@ -14,12 +13,12 @@ export enum DocType{
 }
 
 
-export const DocsButton = ({ doc }: { doc: EnumToPrimitiveUnion<DocType> }) => {
+export const DocsButton = ({ doc, ...props }: { doc: EnumToPrimitiveUnion<DocType> } & ActionIconProps) => {
     const [open, setOpen] = useState(false);
 
     return <Box>
-        <Tooltip label="Add a new service" color="pink">
-            <ActionIcon color="pink" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"><FaBookBookmark size="20px" /></ActionIcon>
+        <Tooltip label="Read the documentation" color="pink">
+            <ActionIcon color="pink" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled" {...props}><FaBookBookmark size="20px" /></ActionIcon>
         </Tooltip>
         <Modal opened={open} onClose={() => setOpen(false)} fullScreen title={
             <Title order={2}>Firegex Docs 📕</Title>

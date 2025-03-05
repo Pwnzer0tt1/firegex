@@ -147,22 +147,18 @@ export default function NFProxy({ children }: { children: any }) {
                     <Space h="xl" />
                     <Title className='center-flex' style={{textAlign:"center"}} order={3}>Netfilter proxy is a simulated proxy written using python with a c++ core</Title>
                     <Space h="xs" />
-                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>Filters are created using a simple python syntax, infact the first you need to do is to install the firegex lib:<Space w="xs" /><Code mb={-4} >pip install firegex</Code></Title>
+                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>Filters are created using a simple python syntax, infact the first you need to do is to install the firegex lib:<Space w="xs" /><Code mb={-4} >pip install -U fgex</Code></Title>
                     <Space h="xs" />
                     <Title className='center-flex' style={{textAlign:"center"}} order={5}>Then you can create a new service and write custom filters for the service</Title>
-                    <Space h="xs" />
-                    <Title className='center-flex' style={{textAlign:"center"}} order={5}>Below there is a description and example about how a pyfilter has to be composed (this example is replicated in every empty service)</Title>
                     <Space h="lg" />
-                    <CodeHighlight code={EXAMPLE_PYFILTER} language="python" />
-                    <Space h="lg" />
-                    <Title className='center-flex' style={{textAlign:"center"}} order={3}>Add your first service</Title>
-                    <Space h="lg" />
-                    <Tooltip label="Add a new service" color="blue">
-                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled">
-                            <BsPlusLg size="20px" />
-                        </ActionIcon>
-                    </Tooltip>
-
+                    <Box className='center-flex' style={{gap: 20}}>
+                        <Tooltip label="Add a new service" color="blue">
+                            <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled">
+                                <BsPlusLg size="20px" />
+                            </ActionIcon>
+                        </Tooltip>
+                        <DocsButton doc="nfproxy" size="xl" />
+                    </Box>
                 </Box>
             </>}
         </>}

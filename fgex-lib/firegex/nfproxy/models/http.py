@@ -188,10 +188,6 @@ class InternalBasicHttpMetaClass:
     def content_length(self) -> int|None:
         return self._parser.content_length_parsed
     
-    @property
-    def method(self) -> str|None:
-        return self._parser.method_parsed
-    
     def get_header(self, header: str, default=None) -> str:
         return self._parser.lheaders.get(header.lower(), default)
     
@@ -271,7 +267,7 @@ class HttpRequest(InternalBasicHttpMetaClass):
 
     @property
     def method(self) -> bytes:
-        return self._parser.method
+        return self._parser.method_parsed
     
     def _before_fetch_callable_checks(self, internal_data: DataStreamCtx):
         return internal_data.current_pkt.is_input

@@ -103,7 +103,7 @@ export const EXAMPLE_PYFILTER = `# This in an example of a filter file with http
 # From here we can import the DataTypes that we want to use:
 # The data type must be specified in the filter functions
 # And will also interally be used to decide when call some filters and how aggregate data
-from firegex.nfproxy.params import RawPacket
+from firegex.nfproxy.models import RawPacket
 
 # global context in this execution is dedicated to a single TCP stream
 # - This code will be executed once at the TCP stream start
@@ -158,15 +158,18 @@ def http_filter(http:HTTPRequest):
 # If the stream is too big, you can specify what actions to take:
 # This can be done defining some variables in the global context
 # - FGEX_STREAM_MAX_SIZE: The maximum size of the stream in bytes (default 1MB)
-#   NOTE: the stream size is calculated by the sum of the dimension of the packets in the stream (both directions)
+#   NOTE: the stream size is calculated and managed indipendently by the data type handling system
+#   Only types required by at least 1 filter will be stored.
 # - FGEX_FULL_STREAM_ACTION: The action to do when the stream is full
-#   - FLUSH: Flush the stream and continue to acquire new packets (default)
-#   - DROP: Drop the next stream packets - like a DROP action by filter
-#   - REJECT: Reject the stream and close the connection - like a REJECT action by filter
-#   - ACCEPT: Stops to call pyfilters and accept the traffic
+#   - FullStreamAction.FLUSH: Flush the stream and continue to acquire new packets (default)
+#   - FullStreamAction.DROP: Drop the next stream packets - like a DROP action by filter
+#   - FullStreamAction.REJECT: Reject the stream and close the connection - like a REJECT action by filter
+#   - FullStreamAction.ACCEPT: Stops to call pyfilters and accept the traffic
+
+from firege.nfproxy import FullStreamAction
 
 # Example of a global context
 FGEX_STREAM_MAX_SIZE = 4096
-FGEX_FULL_STREAM_ACTION = REJECT
+FGEX_FULL_STREAM_ACTION = FullStreamAction.REJECT
 # This could be an ideal configuration if we expect to normally have streams with a maximum size of 4KB of traffic
 `

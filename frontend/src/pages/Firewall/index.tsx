@@ -407,15 +407,20 @@ export const Firewall = () => {
             )}
           </Droppable>
         </DragDropContext>:<>
-    <Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No rule found! Add one clicking the "+" buttons</Title>
-    <Space h="xl" /> <Space h="xl" /> 
-    <Box className='center-flex'>
-        <Tooltip label="Add a new rule" color="blue">
-            <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled">
-              <BsPlusLg size="20px" /></ActionIcon>
-        </Tooltip>
-    </Box>
-</>}
+        <Box className='center-flex-row'>
+            <Space h="xl" />
+            <Title className='center-flex' style={{textAlign:"center"}} order={3}>Firewall Rules allows you to use nftables but through a web interface</Title>
+            <Space h="xs" />
+            <Title className='center-flex' style={{textAlign:"center"}} order={5}>Add new rules, sort it and enable the firewall: be carefull, wrong rules could also drops out firegex access</Title>
+            <Space h="lg" />
+            <Box className='center-flex' style={{gap: 20}}>
+            <Tooltip label="Add a new rule" color="blue">
+                <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled">
+                  <BsPlusLg size="20px" /></ActionIcon>
+            </Tooltip>
+            </Box>
+        </Box>
+    </>}
 
       <YesNoModal
           title='Are you sure to apply the changes to the firewall?'

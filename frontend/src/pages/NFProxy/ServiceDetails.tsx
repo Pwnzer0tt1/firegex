@@ -23,6 +23,7 @@ import { FiFileText } from "react-icons/fi";
 import { ModalLog } from '../../components/ModalLog';
 import { useListState } from '@mantine/hooks';
 import { ExceptionWarning } from '../../components/NFProxy/ExceptionWarning';
+import { DocsButton } from '../../components/DocsButton';
 
 export default function ServiceDetailsNFProxy() {
 
@@ -202,13 +203,11 @@ export default function ServiceDetailsNFProxy() {
 
         {(!filtersList.data || filtersList.data.length == 0)?<>
                 <Space h="xl" />
-                <Title className='center-flex' style={{textAlign:"center"}} order={3}>No filters found! Edit the proxy file, install the firegex client:<Space w="xs" /><Code mb={-4} >pip install fgex</Code></Title>
+                <Title className='center-flex' style={{textAlign:"center"}} order={3}>No filters found! Create some proxy filters, install the firegex client:<Space w="xs" /><Code mb={-4} >pip install -U fgex</Code></Title>
+                <Space h="xs" />
+                <Title className='center-flex' style={{textAlign:"center"}} order={3}>Read the documentation for more information<Space w="sm" /><DocsButton doc='nfproxy'/></Title>
                 <Space h="xs" />
                 <Title className='center-flex' style={{textAlign:"center"}} order={3}>Then create a new filter file with the following syntax and upload it here (using the button above)</Title>
-                <Space h="xs" />
-                <Title className='center-flex' style={{textAlign:"center"}} order={3}>Before upload the filter you can test it using the fgex command installed by the python lib</Title>
-                <Space h="lg" />
-                <CodeHighlight code={EXAMPLE_PYFILTER} language="python" />
             </>:<>{filtersList.data?.map( (filterInfo) => <PyFilterView filterInfo={filterInfo} key={filterInfo.name}/>)}</>
         }
         <YesNoModal
