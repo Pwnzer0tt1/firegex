@@ -346,6 +346,7 @@ class PktRequest {
 			case FilterAction::ACCEPT:
 				if (need_tcp_fixing){
 					if (do_serialize){
+						fix_data_payload();
 						reserialize();
 					}
 					nfq_nlmsg_verdict_put_pkt(nlh_verdict, packet.data(), packet.size());
