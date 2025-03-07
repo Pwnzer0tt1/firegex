@@ -24,7 +24,7 @@ jobs:
         run: python3 start.py start -P testpassword
         
       - name: Run tests
-        run: cd tests && ./run_tests.sh
+        run: sudo apt-get install -y iperf3 && cd tests && ./run_tests.sh
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@master
