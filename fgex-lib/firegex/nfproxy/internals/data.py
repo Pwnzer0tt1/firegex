@@ -2,9 +2,7 @@ from firegex.nfproxy.internals.models import FilterHandler
 from firegex.nfproxy.internals.models import FullStreamAction
 
 class RawPacket:
-    """
-    class rapresentation of the nfqueue packet sent in this context by the c++ core
-    """
+    "class rapresentation of the nfqueue packet sent in python context by the c++ core"
     
     def __init__(self,
         data: bytes,
@@ -24,30 +22,37 @@ class RawPacket:
     
     @property
     def is_input(self) -> bool:
+        "It's true if the packet is an input packet, false if it's an output packet"
         return self.__is_input
     
     @property
     def is_ipv6(self) -> bool:
+        "It's true if the packet is an ipv6 packet, false if it's an ipv4 packet"
         return self.__is_ipv6
     
     @property
     def is_tcp(self) -> bool:
+        "It's true if the packet is a tcp packet, false if it's an udp packet"
         return self.__is_tcp
     
     @property
     def data(self) -> bytes:
+        "The data of the packet assembled and sorted from TCP"
         return self.__data
     
     @property
     def l4_size(self) -> int:
+        "The size of the layer 4 data"
         return self.__l4_size
     
     @property
     def raw_packet_header_len(self) -> int:
+        "The size of the original packet header"
         return self.__raw_packet_header_size
     
     @property
     def l4_data(self) -> bytes:
+        "The layer 4 payload of the packet"
         return self.__raw_packet[self.raw_packet_header_len:]
     
     @l4_data.setter
@@ -60,6 +65,7 @@ class RawPacket:
     
     @property
     def raw_packet(self) -> bytes:
+        "The raw packet with IP and TCP headers"
         return self.__raw_packet
 
     @raw_packet.setter
@@ -92,6 +98,7 @@ class RawPacket:
 
 
 class DataStreamCtx:
+    "class to store the context of the data handler"
     
     def __init__(self, glob: dict, init_pkt: bool = True):
         if "__firegex_pyfilter_ctx" not in glob.keys():

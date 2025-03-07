@@ -7,20 +7,27 @@ class InternalTCPStream:
         data: bytes,
         is_ipv6: bool,
     ):
-        self.data = bytes(data)
+        self.__data = bytes(data)
         self.__is_ipv6 = bool(is_ipv6)
         self.__total_stream_size = len(data)
     
     @property
+    def data(self) -> bytes:
+        """The data of the packets assembled and sorted from TCP"""
+        return self.__data
+    
+    @property
     def is_ipv6(self) -> bool:
+        """It's true if the packet is an ipv6 packet, false if it's an ipv4 packet"""
         return self.__is_ipv6
     
     @property
     def total_stream_size(self) -> int:
+        """The size of the stream"""
         return self.__total_stream_size
     
     def _push_new_data(self, data: bytes):
-        self.data += data
+        self.__data += data
         self.__total_stream_size += len(data)
     
     @classmethod
