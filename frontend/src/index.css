@@ -96,6 +96,20 @@ body {
   opacity: 0.8;
 }
 
+.firegex__regexview__pyfilter_text{
+  padding: 6px;
+  padding-left: 15px;
+  padding-right: 15px;
+  background-color: var(--fourth_color);
+  border: 1px solid #444;
+  overflow-x: hidden;
+  border-radius: 8px;
+}
+
+.firegex__regexview__pyfilter_text:hover{
+  overflow-x: auto;
+}
+
 .firegex__porthijack__servicerow__row{
   width: 95%;
   padding: 15px 0px;

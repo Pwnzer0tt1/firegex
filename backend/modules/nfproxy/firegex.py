@@ -1,41 +1,58 @@
 from modules.nfproxy.nftables import FiregexTables
-from utils import run_func
 from modules.nfproxy.models import Service, PyFilter
 import os
 import asyncio
-from utils import DEBUG
 import traceback
 from fastapi import HTTPException
+import time
+from utils import run_func
+from utils import DEBUG
 
 nft = FiregexTables()
+
+OUTSTREAM_BUFFER_SIZE = 1024*10
 
 class FiregexInterceptor:
     
     def __init__(self):
         self.srv:Service
-        self._stats_updater_cb:callable
         self.filter_map_lock:asyncio.Lock
         self.filter_map: dict[str, PyFilter]
-        self.pyfilters: set[PyFilter]
         self.update_config_lock:asyncio.Lock
         self.process:asyncio.subprocess.Process
         self.update_task: asyncio.Task
+        self.server_task: asyncio.Task
+        self.sock_path: str
+        self.unix_sock: asyncio.Server
         self.ack_arrived = False
         self.ack_status = None
-        self.ack_fail_what = ""
+        self.ack_fail_what = "Queue response timed-out"
         self.ack_lock = asyncio.Lock()
-    
-    async def _call_stats_updater_callback(self, filter: PyFilter):
-        if self._stats_updater_cb:
-            await run_func(self._stats_updater_cb(filter))
+        self.sock_reader:asyncio.StreamReader = None
+        self.sock_writer:asyncio.StreamWriter = None
+        self.sock_conn_lock:asyncio.Lock
+        self.last_time_exception = 0
+        self.outstrem_function = None
+        self.expection_function = None
+        self.outstrem_task: asyncio.Task
+        self.outstrem_buffer = ""
     
     @classmethod
-    async def start(cls, srv: Service, stats_updater_cb:callable):
+    async def start(cls, srv: Service, outstream_func=None, exception_func=None):
         self = cls()
-        self._stats_updater_cb = stats_updater_cb
         self.srv = srv
         self.filter_map_lock = asyncio.Lock()
         self.update_config_lock = asyncio.Lock()
+        self.sock_conn_lock = asyncio.Lock()
+        self.outstrem_function = outstream_func
+        self.expection_function = exception_func
+        if not self.sock_conn_lock.locked():
+            await self.sock_conn_lock.acquire()
+        self.sock_path = f"/tmp/firegex_nfproxy_{srv.id}.sock"
+        if os.path.exists(self.sock_path):
+            os.remove(self.sock_path)
+        self.unix_sock = await asyncio.start_unix_server(self._server_listener,path=self.sock_path)
+        self.server_task = asyncio.create_task(self.unix_sock.serve_forever())
         queue_range = await self._start_binary()
         self.update_task = asyncio.create_task(self.update_stats())
         nft.add(self.srv, queue_range)
@@ -43,19 +60,49 @@ class FiregexInterceptor:
             await self.ack_lock.acquire()
         return self
     
+    async def _stream_handler(self):
+        while True:
+            try:
+                out_data = (await self.process.stdout.read(1024*10)).decode(errors="ignore")
+                if DEBUG:
+                    print(out_data, end="")
+            except asyncio.exceptions.LimitOverrunError:
+                self.outstrem_buffer = ""
+                continue
+            except Exception as e:
+                self.ack_arrived = False
+                self.ack_status = False
+                self.ack_fail_what = "Can't read from nfq client"
+                self.ack_lock.release()
+                await self.stop()
+                traceback.print_exc() # Python can't print it alone? nope it's python... wasted 1 day :)
+                raise HTTPException(status_code=500, detail="Can't read from nfq client") from e
+            self.outstrem_buffer+=out_data
+            if len(self.outstrem_buffer) > OUTSTREAM_BUFFER_SIZE:
+                self.outstrem_buffer = self.outstrem_buffer[-OUTSTREAM_BUFFER_SIZE:]+"\n"
+            if self.outstrem_function:
+                await run_func(self.outstrem_function, self.srv.id, out_data)
+    
     async def _start_binary(self):
-        proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cpproxy")
+        proxy_binary_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../cpproxy"))
         self.process = await asyncio.create_subprocess_exec(
-            proxy_binary_path,
-            stdout=asyncio.subprocess.PIPE, stdin=asyncio.subprocess.PIPE,
-            env={"NTHREADS": os.getenv("NTHREADS","1")},
+            proxy_binary_path, stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env={
+                "NTHREADS": os.getenv("NTHREADS","1"),
+                "FIREGEX_NFQUEUE_FAIL_OPEN": "1" if self.srv.fail_open else "0",
+                "FIREGEX_NFPROXY_SOCK": self.sock_path
+            },
         )
-        line_fut = self.process.stdout.readuntil()
+        self.outstrem_task = asyncio.create_task(self._stream_handler())
         try:
-            line_fut = await asyncio.wait_for(line_fut, timeout=3)
+            async with asyncio.timeout(3):
+                await self.sock_conn_lock.acquire()
+                line_fut = await self.sock_reader.readuntil()
         except asyncio.TimeoutError:
             self.process.kill()
-            raise Exception("Invalid binary output")
+            raise Exception("Binary don't returned queue number until timeout")
         line = line_fut.decode()
         if line.startswith("QUEUE "):
             params = line.split()
@@ -64,24 +111,45 @@ class FiregexInterceptor:
             self.process.kill()
             raise Exception("Invalid binary output")
 
+    async def _server_listener(self, reader:asyncio.StreamReader, writer:asyncio.StreamWriter):
+        if self.sock_reader or self.sock_writer:
+            writer.write_eof() # Technically never reached
+            writer.close()
+            reader.feed_eof()
+            return
+        self.sock_reader = reader
+        self.sock_writer = writer
+        self.sock_conn_lock.release()
+
     async def update_stats(self):
         try:
             while True:
-                line = (await self.process.stdout.readuntil()).decode()
-                if DEBUG:
-                    print(line)
+                try:
+                    line = (await self.sock_reader.readuntil()).decode()
+                except Exception as e:
+                    self.ack_arrived = False
+                    self.ack_status = False
+                    self.ack_fail_what = "Can't read from nfq client"
+                    self.ack_lock.release()
+                    await self.stop()
+                    raise HTTPException(status_code=500, detail="Can't read from nfq client") from e
                 if line.startswith("BLOCKED "):
-                    filter_id = line.split()[1]
+                    filter_name = line.split()[1]
+                    print("BLOCKED", filter_name)
                     async with self.filter_map_lock:
-                        if filter_id in self.filter_map:
-                            self.filter_map[filter_id].blocked_packets+=1
-                            await self.filter_map[filter_id].update()
-                if line.startswith("EDITED "):
-                    filter_id = line.split()[1]
+                        if filter_name in self.filter_map:
+                            self.filter_map[filter_name].blocked_packets+=1
+                            await self.filter_map[filter_name].update()  
+                if line.startswith("MANGLED "):
+                    filter_name = line.split()[1]
                     async with self.filter_map_lock:
-                        if filter_id in self.filter_map:
-                            self.filter_map[filter_id].edited_packets+=1
-                            await self.filter_map[filter_id].update()
+                        if filter_name in self.filter_map:
+                            self.filter_map[filter_name].edited_packets+=1
+                            await self.filter_map[filter_name].update()
+                if line.startswith("EXCEPTION"):
+                    self.last_time_exception = int(time.time()*1000) #ms timestamp
+                    if self.expection_function:
+                        await run_func(self.expection_function, self.srv.id, self.last_time_exception)
                 if line.startswith("ACK "):
                     self.ack_arrived = True
                     self.ack_status = line.split()[1].upper() == "OK"
@@ -96,26 +164,44 @@ class FiregexInterceptor:
             traceback.print_exc()
 
     async def stop(self):
+        self.server_task.cancel()
         self.update_task.cancel()
+        self.unix_sock.close()
+        self.outstrem_task.cancel()
+        if os.path.exists(self.sock_path):
+            os.remove(self.sock_path)
         if self.process and self.process.returncode is None:
             self.process.kill()
     
-    async def _update_config(self, filters_codes):
+    async def _update_config(self, code):
         async with self.update_config_lock:
-            # TODO write compiled code correctly
-            # self.process.stdin.write((" ".join(filters_codes)+"\n").encode())
-            await self.process.stdin.drain()
-            try:
-                async with asyncio.timeout(3):
-                    await self.ack_lock.acquire()
-            except TimeoutError:
-                pass
-            if not self.ack_arrived or not self.ack_status:
-                raise HTTPException(status_code=500, detail=f"NFQ error: {self.ack_fail_what}")
+            if self.sock_writer:
+                self.sock_writer.write(len(code).to_bytes(4, byteorder='big')+code.encode())
+                await self.sock_writer.drain()
+                try:
+                    async with asyncio.timeout(3):
+                        await self.ack_lock.acquire()
+                except TimeoutError:
+                    self.ack_fail_what = "Queue response timed-out"
+                if not self.ack_arrived or not self.ack_status:
+                    await self.stop()
+                    raise HTTPException(status_code=500, detail=f"NFQ error: {self.ack_fail_what}")
+            else:
+                raise HTTPException(status_code=400, detail="Socket not ready")
 
     async def reload(self, filters:list[PyFilter]):
         async with self.filter_map_lock:
-            self.filter_map = self.compile_filters(filters)
-            # TODO COMPILE CODE
-            #await self._update_config(filters_codes) TODO pass the compiled code
+            if os.path.exists(f"db/nfproxy_filters/{self.srv.id}.py"):
+                with open(f"db/nfproxy_filters/{self.srv.id}.py") as f:
+                    filter_file = f.read()
+            else:
+                filter_file = ""
+            self.filter_map = {ele.name: ele for ele in filters}
+            await self._update_config(
+                filter_file + "\n\n" +
+                "__firegex_pyfilter_enabled = [" + ", ".join([repr(f.name) for f in filters]) + "]\n" +
+                "__firegex_proto = " + repr(self.srv.proto) + "\n" +
+                "import firegex.nfproxy.internals\n" + 
+                "firegex.nfproxy.internals.compile(globals())\n"
+            )
 

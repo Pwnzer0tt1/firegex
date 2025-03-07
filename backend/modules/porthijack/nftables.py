@@ -28,7 +28,7 @@ class FiregexTables(NFTableManager):
                 "name":self.prerouting_porthijack,
                 "type":"filter",
                 "hook":"prerouting",
-                "prio":-300,
+                "prio":-310,
                 "policy":"accept"
             }}},
             {"add":{"chain":{
@@ -37,7 +37,7 @@ class FiregexTables(NFTableManager):
                 "name":self.postrouting_porthijack,
                 "type":"filter",
                 "hook":"postrouting",
-                "prio":-300,
+                "prio":-310,
                 "policy":"accept"
             }}}
         ],[

@@ -17,7 +17,6 @@ namespace Regex {
 typedef Tins::TCPIP::StreamIdentifier stream_id;
 typedef map<stream_id, hs_stream_t*> matching_map;
 
-#ifdef DEBUG
 ostream& operator<<(ostream& os, const Tins::TCPIP::StreamIdentifier::address_type &sid){
 	bool first_print = false;
 	for (auto ele: sid){
@@ -33,7 +32,6 @@ ostream& operator<<(ostream& os, const stream_id &sid){
 	os << sid.max_address << ":" << sid.max_address_port << " -> " << sid.min_address << ":" << sid.min_address_port;
 	return os;
 }
-#endif
 
 struct stream_ctx {
 	matching_map in_hs_streams;

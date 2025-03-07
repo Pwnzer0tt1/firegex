@@ -49,3 +49,10 @@ export type RegexAddForm = {
     mode:string, // C->S S->C BOTH,
     active: boolean
 }
+
+export type PyFilter = {
+    name:string,
+    blocked_packets:number,
+    edited_packets:number,
+    active:boolean
+}

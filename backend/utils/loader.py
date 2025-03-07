@@ -7,6 +7,8 @@ from starlette.responses import StreamingResponse
 from fastapi.responses import FileResponse
 from utils import DEBUG, ON_DOCKER, ROUTERS_DIR, list_files, run_func
 from utils.models import ResetRequest
+import asyncio
+import traceback
 
 REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
 REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
@@ -69,6 +71,7 @@ def get_router_modules():
                     name=route
                 ))
         except Exception as e:
+            traceback.print_exc()
             print(f"Router {route} failed to load: {e}")
     return res
 
@@ -87,12 +90,9 @@ def load_routers(app):
         if router.shutdown:
             shutdowns.append(router.shutdown)
     async def reset(reset_option:ResetRequest):
-        for func in resets:
-            await run_func(func, reset_option)
+        await asyncio.gather(*[run_func(func, reset_option) for func in resets])
     async def startup():
-        for func in startups:
-            await run_func(func)
+        await asyncio.gather(*[run_func(func) for func in startups])
     async def shutdown():
-        for func in shutdowns:
-            await run_func(func)
+        await asyncio.gather(*[run_func(func) for func in shutdowns])
     return reset, startup, shutdown

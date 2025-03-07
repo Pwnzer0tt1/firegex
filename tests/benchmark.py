@@ -35,7 +35,7 @@ else:
 
 def exit_test(code):
     if service_id:
-        server.stop()
+        server.kill()
         if(firegex.nf_delete_service(service_id)):
             puts("Sucessfully deleted service ✔", color=colors.green)
         else:

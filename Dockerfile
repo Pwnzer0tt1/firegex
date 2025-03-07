@@ -12,22 +12,23 @@ RUN bun i
 COPY ./frontend/ .
 RUN bun run build
 
-
 #Building main conteiner
 FROM --platform=$TARGETARCH registry.fedoraproject.org/fedora:latest
-RUN dnf -y update && dnf install -y python3.13-devel python3-pip @development-tools gcc-c++ \
+RUN dnf -y update && dnf install -y python3.13-devel @development-tools gcc-c++ \
     libnetfilter_queue-devel libnfnetlink-devel libmnl-devel libcap-ng-utils nftables \
-    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel
+    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel uv
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute
 
 ADD ./backend/requirements.txt /execute/requirements.txt
-RUN pip3 install --no-cache-dir --break-system-packages -r /execute/requirements.txt --no-warn-script-location
+RUN uv pip install --no-cache --system -r /execute/requirements.txt
+COPY ./fgex-lib /execute/fgex-lib
+RUN uv pip install --no-cache --system ./fgex-lib
 
 COPY ./backend/binsrc /execute/binsrc
 RUN g++ binsrc/nfregex.cpp -o modules/cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
-#RUN g++ binsrc/nfproxy.cpp -o modules/cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3.13 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
+RUN g++ binsrc/nfproxy.cpp -o modules/cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3.13 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
 
 COPY ./backend/ /execute/
 COPY --from=frontend /app/dist/ ./frontend/

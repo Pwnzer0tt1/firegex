@@ -1,5 +1,5 @@
-import { ActionIcon, Badge, Box, Divider, Grid, Menu, Space, Title, Tooltip } from '@mantine/core';
-import React, { useState } from 'react';
+import { ActionIcon, Badge, Box, Divider, Menu, Space, Title, Tooltip } from '@mantine/core';
+import { useState } from 'react';
 import { FaPlay, FaStop } from 'react-icons/fa';
 import { porthijack, Service } from '../utils';
 import YesNoModal from '../../YesNoModal';
@@ -17,11 +17,9 @@ export default function ServiceRow({ service }:{ service:Service }) {
     let status_color = service.active ? "teal": "red"
 
     const [buttonLoading, setButtonLoading] = useState(false)
-    const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
     const [changeDestModal, setChangeDestModal] = useState(false)
-    const portInputRef = React.createRef<HTMLInputElement>()
     const isMedium = isMediumScreen()
 
     const form = useForm({
@@ -113,13 +111,11 @@ export default function ServiceRow({ service }:{ service:Service }) {
                             <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
                         </MenuDropDownWithButton>
                         <Space w="md"/>                        
-                        <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
+                        <Tooltip label="Stop service" zIndex={0} color="red">
                             <ActionIcon color="red" loading={buttonLoading}
                             onClick={stopService} size="xl" radius="md" variant="filled"
                             disabled={!service.active}
-                            aria-describedby="tooltip-stop-id"
-                            onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
-                            onMouseEnter={() => setTooltipStopOpened(true)} onMouseLeave={() => setTooltipStopOpened(false)}>
+                            aria-describedby="tooltip-stop-id">
                                 <FaStop size="20px" />
                             </ActionIcon>
                         </Tooltip>

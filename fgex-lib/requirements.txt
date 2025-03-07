@@ -1,0 +1,6 @@
+typer==0.15.2
+pydantic>=2
+typing-extensions>=4.7.1
+watchfiles
+fgex
+pyllhttp

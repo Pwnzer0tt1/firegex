@@ -11,10 +11,11 @@
 
 # testing
 /frontend/coverage
-/proxy-client/firegex.egg-info
-/proxy-client/dist
-/proxy-client/fgex-pip/fgex.egg-info
-/proxy-client/fgex-pip/dist
+/fgex-lib/firegex.egg-info
+/fgex-lib/dist
+/fgex-lib/build
+/fgex-lib/fgex-pip/fgex.egg-info
+/fgex-lib/fgex-pip/dist
 /backend/db/
 /backend/db/**
 /frontend/build/

@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, Divider, FloatingIndicator, LoadingOverlay, Space, Switch, Table, Tabs, TextInput, Title, Tooltip, useMantineTheme } from "@mantine/core"
+import { ActionIcon, Badge, Box, Divider, FloatingIndicator, LoadingOverlay, Space, Switch, Table, Tabs, TextInput, ThemeIcon, Title, Tooltip, useMantineTheme } from "@mantine/core"
 import { useEffect, useState } from "react";
 import { BsPlusLg, BsTrashFill } from "react-icons/bs"
 import { rem } from '@mantine/core';
@@ -20,16 +20,12 @@ import { LuArrowBigRightDash } from "react-icons/lu"
 import { ImCheckmark, ImCross } from "react-icons/im";
 import { IoSettingsSharp } from "react-icons/io5";
 import { SettingsModal } from "./SettingsModal";
-
+import { FaDirections } from "react-icons/fa";
+import { PiWallLight } from "react-icons/pi";
 
 export const Firewall = () => {
 
-    const [tooltipAddOpened, setTooltipAddOpened] = useState(false);
-    const [tooltipRefreshOpened, setTooltipRefreshOpened] = useState(false);
-    const [tooltipApplyOpened, setTooltipApplyOpened] = useState(false);
-    const [tooltipSettingsOpened, setTooltipSettingsOpened] = useState(false);
     const [currentPolicy, setCurrentPolicy] = useState<ActionType>(ActionType.ACCEPT)
-    const [tooltipAddRulOpened, setTooltipAddRulOpened] = useState(false)
     const queryClient = useQueryClient()
     const rules = firewallRulesQuery()
     const [state, handlers] = useListState<Rule & {rule_id:string}>([]);
@@ -346,7 +342,7 @@ export const Firewall = () => {
         <Space h="sm" />
         <LoadingOverlay visible={rules.isLoading} />
         <Box className={isMedium?'center-flex':'center-flex-row'}>
-            <Title order={3}>Firewall Rules</Title>
+            <Title order={5} className="center-flex"><ThemeIcon radius="md" size="md" variant='filled' color='red' ><PiWallLight size={20} /></ThemeIcon><Space w="xs" />Firewall Rules</Title>
             {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
             <Box className='center-flex'>
               Enabled: <Space w="sm" /> <Switch checked={fwEnabled} onChange={switchState} />
@@ -361,33 +357,24 @@ export const Firewall = () => {
             {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
             <Box className='center-flex'>
               <Space w="xs" />
-              <Badge size="sm" color="green" variant="filled">Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
-              <Space w="xs" />
-              <Tooltip label="Add a new rule" position='bottom' color="blue" opened={tooltipAddOpened}>
-                  <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"
-                  onFocus={() => setTooltipAddOpened(false)} onBlur={() => setTooltipAddOpened(false)}
-                  onMouseEnter={() => setTooltipAddOpened(true)} onMouseLeave={() => setTooltipAddOpened(false)}><BsPlusLg size={18} /></ActionIcon>
+              <Badge size="md" radius="sm" color="green" variant="filled"><FaDirections style={{ marginBottom: -1, marginRight: 4}}/>Rules: {rules.isLoading?0:rules.data?.rules.length}</Badge>
+              <Space w="md" />
+              <Tooltip label="Add a new rule" position='bottom' color="blue">
+                  <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"><BsPlusLg size={18} /></ActionIcon>
               </Tooltip>
               <Space w="xs" />
-              <Tooltip label="Refresh" position='bottom' color="indigo" opened={tooltipRefreshOpened}>
+              <Tooltip label="Refresh" position='bottom' color="indigo">
                   <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["firewall"])} size="lg" radius="md" variant="filled"
-                  loading={rules.isFetching}
-                  onFocus={() => setTooltipRefreshOpened(false)} onBlur={() => setTooltipRefreshOpened(false)}
-                  onMouseEnter={() => setTooltipRefreshOpened(true)} onMouseLeave={() => setTooltipRefreshOpened(false)}><TbReload size={18} /></ActionIcon>
+                  loading={rules.isFetching}><TbReload size={18} /></ActionIcon>
               </Tooltip>
               <Space w="xs" />
-              <Tooltip label="Settings" position='bottom' color="cyan" opened={tooltipSettingsOpened}>
-                  <ActionIcon color="cyan" onClick={()=>setSettingsModal(true)} size="lg" radius="md" variant="filled"
-                  onFocus={() => setTooltipSettingsOpened(false)} onBlur={() => setTooltipSettingsOpened(false)}
-                  onMouseEnter={() => setTooltipSettingsOpened(true)} onMouseLeave={() => setTooltipSettingsOpened(false)}><IoSettingsSharp size={18} /></ActionIcon>
+              <Tooltip label="Settings" position='bottom' color="cyan">
+                  <ActionIcon color="cyan" onClick={()=>setSettingsModal(true)} size="lg" radius="md" variant="filled"><IoSettingsSharp size={18} /></ActionIcon>
               </Tooltip>
               <Space w="xs" />
-              <Tooltip label="Apply" position='bottom' color="grape" opened={tooltipApplyOpened}>
-                  <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled"
-                  onFocus={() => setTooltipApplyOpened(false)} onBlur={() => setTooltipApplyOpened(false)}
-                  onMouseEnter={() => setTooltipApplyOpened(true)} onMouseLeave={() => setTooltipApplyOpened(false)}
-                  disabled={!valuesChanged}
-                  ><TiTick size={22} /></ActionIcon>
+              <Tooltip label="Apply" position='bottom' color="grape">
+                  <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled" disabled={!valuesChanged}>
+                    <TiTick size={22} /></ActionIcon>
               </Tooltip>
             </Box>
         </Box>
@@ -420,16 +407,20 @@ export const Firewall = () => {
             )}
           </Droppable>
         </DragDropContext>:<>
-    <Space h="xl"/> <Title className='center-flex' style={{textAlign:"center"}} order={3}>No rule found! Add one clicking the "+" buttons</Title>
-    <Space h="xl" /> <Space h="xl" /> 
-    <Box className='center-flex'>
-        <Tooltip label="Add a new rule" color="blue" opened={tooltipAddRulOpened}>
-            <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled"
-                onFocus={() => setTooltipAddRulOpened(false)} onBlur={() => setTooltipAddRulOpened(false)}
-                onMouseEnter={() => setTooltipAddRulOpened(true)} onMouseLeave={() => setTooltipAddRulOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
-        </Tooltip>
-    </Box>
-</>}
+        <Box className='center-flex-row'>
+            <Space h="xl" />
+            <Title className='center-flex' style={{textAlign:"center"}} order={3}>Firewall Rules allows you to use nftables but through a web interface</Title>
+            <Space h="xs" />
+            <Title className='center-flex' style={{textAlign:"center"}} order={5}>Add new rules, sort it and enable the firewall: be carefull, wrong rules could also drops out firegex access</Title>
+            <Space h="lg" />
+            <Box className='center-flex' style={{gap: 20}}>
+            <Tooltip label="Add a new rule" color="blue">
+                <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled">
+                  <BsPlusLg size="20px" /></ActionIcon>
+            </Tooltip>
+            </Box>
+        </Box>
+    </>}
 
       <YesNoModal
           title='Are you sure to apply the changes to the firewall?'

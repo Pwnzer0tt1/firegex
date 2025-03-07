@@ -31,8 +31,6 @@ function HeaderPage(props: any) {
 
   const [changePasswordModal, setChangePasswordModal] = useState(false);
   const [resetFiregexModal, setResetFiregexModal] = useState(false);
-  const [tooltipHomeOpened, setTooltipHomeOpened] = useState(false);
-  const [tooltipLogoutOpened,setTooltipLogoutOpened] = useState(false);
   return <AppShell.Header className="firegex__header__header" {...props}>
         <Burger
           hiddenFrom='md'
@@ -64,19 +62,16 @@ function HeaderPage(props: any) {
           <Menu.Item color="red" leftSection={<MdOutlineSettingsBackupRestore size={18} />} onClick={() => setResetFiregexModal(true)}>Reset Firegex</Menu.Item>
         </MenuDropDownWithButton>
         <Space w="md" />
-        <Tooltip label="Home" position='bottom' color="teal" opened={tooltipHomeOpened}>
+        <Tooltip label="Home" position='bottom' color="teal">
           <ActionIcon color="teal" style={{marginRight:"10px"}}
             size="xl" radius="md" variant="filled"
-            onClick={go_to_home}
-            onFocus={() => setTooltipHomeOpened(false)} onBlur={() => setTooltipHomeOpened(false)}
-            onMouseEnter={() => setTooltipHomeOpened(true)} onMouseLeave={() => setTooltipHomeOpened(false)}>
+            onClick={go_to_home}>
             <AiFillHome size="25px" />
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="Logout" position='bottom' color="blue" opened={tooltipLogoutOpened}>
-          <ActionIcon color="blue" onClick={logout_action} size="xl" radius="md" variant="filled"
-            onFocus={() => setTooltipLogoutOpened(false)} onBlur={() => setTooltipLogoutOpened(false)}
-            onMouseEnter={() => setTooltipLogoutOpened(true)} onMouseLeave={() => setTooltipLogoutOpened(false)}><ImExit size={23} style={{marginTop:"3px", marginLeft:"2px"}}/></ActionIcon>
+        <Tooltip label="Logout" position='bottom' color="blue">
+          <ActionIcon color="blue" onClick={logout_action} size="xl" radius="md" variant="filled">
+            <ImExit size={23} style={{marginTop:"3px", marginLeft:"2px"}}/></ActionIcon>
         </Tooltip>        
         <ResetPasswordModal opened={changePasswordModal} onClose={() => setChangePasswordModal(false)} />
         <ResetModal opened={resetFiregexModal} onClose={() => setResetFiregexModal(false)} />

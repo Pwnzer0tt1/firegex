@@ -27,15 +27,12 @@ export default function ServiceDetailsNFRegex() {
     const [open, setOpen] = useState(false)
     const services = nfregexServiceQuery()
     const serviceInfo = services.data?.find(s => s.service_id == srv)
-    const [tooltipAddRegexOpened, setTooltipAddRegexOpened] = useState(false)
     const regexesList = nfregexServiceRegexesQuery(srv??"")
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
     const [editModal, setEditModal] = useState(false)
     const [buttonLoading, setButtonLoading] = useState(false)
     const queryClient = useQueryClient()
-    const [tooltipStopOpened, setTooltipStopOpened] = useState(false);
-    const [tooltipBackOpened, setTooltipBackOpened] = useState(false);
     const navigate = useNavigate()
     const isMedium = isMediumScreen()
 
@@ -133,23 +130,19 @@ export default function ServiceDetailsNFRegex() {
             </Box>
             {isMedium?null:<Space h="xl" />}
             <Box className='center-flex'>
-                <Tooltip label="Go back" zIndex={0} color="cyan" opened={tooltipBackOpened}>
+                <Tooltip label="Go back" zIndex={0} color="cyan">
                     <ActionIcon color="cyan"
                     onClick={() => navigate("/")} size="xl" radius="md" variant="filled"
-                    aria-describedby="tooltip-back-id"
-                    onFocus={() => setTooltipBackOpened(false)} onBlur={() => setTooltipBackOpened(false)}
-                    onMouseEnter={() => setTooltipBackOpened(true)} onMouseLeave={() => setTooltipBackOpened(false)}>
+                    aria-describedby="tooltip-back-id">
                         <FaArrowLeft size="25px" />
                     </ActionIcon>
                 </Tooltip>
                 <Space w="md"/>
-                <Tooltip label="Stop service" zIndex={0} color="red" opened={tooltipStopOpened}>
+                <Tooltip label="Stop service" zIndex={0} color="red">
                     <ActionIcon color="red" loading={buttonLoading}
                     onClick={stopService} size="xl" radius="md" variant="filled"
                     disabled={serviceInfo.status === "stop"}
-                    aria-describedby="tooltip-stop-id"
-                    onFocus={() => setTooltipStopOpened(false)} onBlur={() => setTooltipStopOpened(false)}
-                    onMouseEnter={() => setTooltipStopOpened(true)} onMouseLeave={() => setTooltipStopOpened(false)}>
+                    aria-describedby="tooltip-stop-id">
                         <FaStop size="20px" />
                     </ActionIcon>
                 </Tooltip>
@@ -168,11 +161,9 @@ export default function ServiceDetailsNFRegex() {
                 <Title className='center-flex' style={{textAlign:"center"}} order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
                 <Space h="xl" /> <Space h="xl" />
                 <Box className='center-flex'>
-                    <Tooltip label="Add a new regex" zIndex={0} color="blue" opened={tooltipAddRegexOpened}>
+                    <Tooltip label="Add a new regex" zIndex={0} color="blue">
                         <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
-                         aria-describedby="tooltip-AddRegex-id"
-                         onFocus={() => setTooltipAddRegexOpened(false)} onBlur={() => setTooltipAddRegexOpened(false)}
-                         onMouseEnter={() => setTooltipAddRegexOpened(true)} onMouseLeave={() => setTooltipAddRegexOpened(false)}><BsPlusLg size="20px" /></ActionIcon>
+                         aria-describedby="tooltip-AddRegex-id"><BsPlusLg size="20px" /></ActionIcon>
                     </Tooltip>
                 </Box>
             </>:

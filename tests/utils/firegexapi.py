@@ -101,6 +101,10 @@ class FiregexAPI:
     def nf_rename_service(self,service_id: str, newname: str):
         req = self.s.put(f"{self.address}api/nfregex/services/{service_id}/rename" , json={"name":newname})
         return verify(req)
+    
+    def nf_settings_service(self,service_id: str, port: int, proto: str, ip_int: str, fail_open: bool):
+        req = self.s.put(f"{self.address}api/nfregex/services/{service_id}/settings" , json={"port":port, "proto":proto, "ip_int":ip_int, "fail_open":fail_open})
+        return verify(req)
 
     def nf_get_service_regexes(self,service_id: str):
         req = self.s.get(f"{self.address}api/nfregex/services/{service_id}/regexes")
@@ -127,9 +131,9 @@ class FiregexAPI:
             json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_case_sensitive": is_case_sensitive})
         return verify(req)
 
-    def nf_add_service(self, name: str, port: int, proto: str, ip_int: str):
+    def nf_add_service(self, name: str, port: int, proto: str, ip_int: str, fail_open: bool = False):
         req = self.s.post(f"{self.address}api/nfregex/services" , 
-            json={"name":name,"port":port, "proto": proto, "ip_int": ip_int})
+            json={"name":name,"port":port, "proto": proto, "ip_int": ip_int, "fail_open": fail_open})
         return req.json()["service_id"] if verify(req) else False 
 
     def nf_get_metrics(self):

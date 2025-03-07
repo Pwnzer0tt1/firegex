@@ -1,6 +1,14 @@
 from modules.nfproxy.models import Service
 from utils import ip_parse, ip_family, NFTableManager, nftables_int_to_json
 
+def convert_protocol_to_l4(proto:str):
+    if proto == "tcp":
+        return "tcp"
+    elif proto == "http":
+        return "tcp"
+    else:
+        raise Exception("Invalid protocol")
+
 class FiregexFilter:
     def __init__(self, proto:str, port:int, ip_int:str, target:str, id:int):
         self.id = id
@@ -11,7 +19,7 @@ class FiregexFilter:
 
     def __eq__(self, o: object) -> bool:
         if isinstance(o, FiregexFilter) or isinstance(o, Service):
-            return self.port == o.port and self.proto == o.proto and ip_parse(self.ip_int) == ip_parse(o.ip_int)
+            return self.port == o.port and self.proto == convert_protocol_to_l4(o.proto) and ip_parse(self.ip_int) == ip_parse(o.ip_int)
         return False
 
 class FiregexTables(NFTableManager):
@@ -20,22 +28,22 @@ class FiregexTables(NFTableManager):
     
     def __init__(self):
         super().__init__([
-            {"add":{"chain":{
+            {"add":{"chain":{ #Input chain attached before conntrack see it
                 "family":"inet",
                 "table":self.table_name,
                 "name":self.input_chain,
                 "type":"filter",
                 "hook":"prerouting",
-                "prio":-150,
+                "prio":-310,
                 "policy":"accept"
             }}},
-            {"add":{"chain":{
+            {"add":{"chain":{ #Output chain attached after conntrack saw it
                 "family":"inet",
                 "table":self.table_name,
                 "name":self.output_chain,
                 "type":"filter",
                 "hook":"postrouting",
-                "prio":-150,
+                "prio":-310,
                 "policy":"accept"
             }}}
         ],[
@@ -61,7 +69,7 @@ class FiregexTables(NFTableManager):
                 "chain": self.output_chain,
                 "expr": [
                         {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
-                        {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "sport"}}, "op": "==", "right": int(srv.port)}},
+                        {'match': {"left": { "payload": {"protocol": convert_protocol_to_l4(str(srv.proto)), "field": "sport"}}, "op": "==", "right": int(srv.port)}},
                         {"mangle": {"key": {"meta": {"key": "mark"}},"value": 0x1338}},
                         {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
@@ -72,7 +80,7 @@ class FiregexTables(NFTableManager):
                 "chain": self.input_chain,
                 "expr": [
                         {'match': {'left': {'payload': {'protocol': ip_family(srv.ip_int), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.ip_int)}},
-                        {'match': {"left": { "payload": {"protocol": str(srv.proto), "field": "dport"}}, "op": "==", "right": int(srv.port)}},
+                        {'match': {"left": { "payload": {"protocol": convert_protocol_to_l4(str(srv.proto)), "field": "dport"}}, "op": "==", "right": int(srv.port)}},
                         {"mangle": {"key": {"meta": {"key": "mark"}},"value": 0x1337}},
                         {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                     ]
