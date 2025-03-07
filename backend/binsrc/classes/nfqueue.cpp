@@ -134,7 +134,8 @@ class PktRequest {
 		l4_proto = fill_l4_info();
 		#ifdef DEBUG
 		if (tcp){			
-			cerr << "[DEBUG] NEW_PACKET " << (is_input?"-> IN ":"<- OUT") << " [SEQ: " << tcp->seq() << "] \t[ACK: " << tcp->ack_seq() << "] \t[SIZE: " << data_size() << "]" << endl;
+			cerr << "[DEBUG] NEW_PACKET " << (is_input?"-> IN ":"<- OUT")  << " [SIZE: " << data_size() << "] FLAGS: " << (tcp->get_flag(Tins::TCP::FIN)?"FIN ":"") << (tcp->get_flag(Tins::TCP::SYN)?"SYN ":"") << (tcp->get_flag(Tins::TCP::RST)?"RST ":"") << (tcp->get_flag(Tins::TCP::ACK)?"ACK ":"") << (tcp->get_flag(Tins::TCP::PSH)?"PSH ":"") << endl;
+			cerr << "[SEQ: " << tcp->seq() << "] [ACK: " << tcp->ack_seq() << "]" << " [WIN: " << tcp->window() << "] [FLAGS: " << tcp->flags() << "]\n" << endl;
 		}
 		#endif
 	}
@@ -237,7 +238,8 @@ class PktRequest {
 		}
 		#ifdef DEBUG
 		size_t new_size = inner_data_size(tcp);
-		cerr << "[DEBUG] FIXED PKT  " << (is_input?"-> IN ":"<- OUT") << " [SEQ: " << tcp->seq() << "] \t[ACK: " << tcp->ack_seq() << "] \t[SIZE: " << new_size << "]" << endl;
+		cerr << "[DEBUG] FIXED PKT  " << (is_input?"-> IN ":"<- OUT")  << " [SIZE: " << data_size() << "] FLAGS: " << (tcp->get_flag(Tins::TCP::FIN)?"FIN ":"") << (tcp->get_flag(Tins::TCP::SYN)?"SYN ":"") << (tcp->get_flag(Tins::TCP::RST)?"RST ":"") << (tcp->get_flag(Tins::TCP::ACK)?"ACK ":"") << (tcp->get_flag(Tins::TCP::PSH)?"PSH ":"") << endl;
+		cerr << "[SEQ: " << tcp->seq() << "] [ACK: " << tcp->ack_seq() << "]" << " [WIN: " << tcp->window() << "] [FLAGS: " << tcp->flags() << "]\n" << endl;
 		#endif
 	}
 
@@ -360,7 +362,10 @@ class PktRequest {
 				}
 				nfq_nlmsg_verdict_put_pkt(nlh_verdict, packet.data(), packet.size());
 				#ifdef DEBUG
-				cerr << "[DEBUG] MANGLEDPKT " << (is_input?"-> IN ":"<- OUT") << " [SIZE: " << packet.size()-header_size() << "]" << endl;
+				if (tcp){
+					cerr << "[DEBUG] MANGLEDPKT " << (is_input?"-> IN ":"<- OUT")  << " [SIZE: " << data_size() << "] FLAGS: " << (tcp->get_flag(Tins::TCP::FIN)?"FIN ":"") << (tcp->get_flag(Tins::TCP::SYN)?"SYN ":"") << (tcp->get_flag(Tins::TCP::RST)?"RST ":"") << (tcp->get_flag(Tins::TCP::ACK)?"ACK ":"") << (tcp->get_flag(Tins::TCP::PSH)?"PSH ":"") << endl;
+					cerr << "[SEQ: " << tcp->seq() << "] [ACK: " << tcp->ack_seq() << "]" << " [WIN: " << tcp->window() << "] [FLAGS: " << tcp->flags() << "]\n" << endl;
+				}
 				#endif
 				if (tcp && ack_seq_offset && packet.size() != _original_size){
 					if (is_input){

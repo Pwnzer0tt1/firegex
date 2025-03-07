@@ -56,8 +56,7 @@ class RawPacket:
             raise Exception("Invalid data type, data MUST be of type bytes")
         #if len(v) != self.__l4_size:
         #    raise Exception("Invalid data size, must be equal to the original packet header size (due to a technical limitation)")
-        self.__raw_packet = self.__raw_packet[:self.raw_packet_header_len]+v
-        self.__l4_size = len(v)
+        self.raw_packet = self.__raw_packet[:self.raw_packet_header_len]+v
     
     @property
     def raw_packet(self) -> bytes:
@@ -67,6 +66,8 @@ class RawPacket:
     def raw_packet(self, v:bytes):
         if not isinstance(v, bytes):
             raise Exception("Invalid data type, data MUST be of type bytes")
+        if len(v) > 2**16:
+            raise Exception("Invalid data size, must be less than 2^16 bytes")
         #if len(v) != len(self.__raw_packet):
         #    raise Exception("Invalid data size, must be equal to the original packet size (due to a technical limitation)")
         if len(v) < self.raw_packet_header_len:
