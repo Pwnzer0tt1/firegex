@@ -36,10 +36,10 @@ jobs:
       run: echo TAG_NAME=$(echo $GITHUB_REF | cut -d / -f 3) >> $GITHUB_OUTPUT
     - name: Update version in setup.py
       run: >-
-        sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" proxy-client/setup.py;
-        sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" proxy-client/firegex/__init__.py;
+        sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/setup.py;
+        sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/firegex/__init__.py;
     - name: Build package
-      run: cd proxy-client && python -m build && mv ./dist ../
+      run: cd fgex-lib && python -m build && mv ./dist ../
     - name: Publish package
       uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
       with:

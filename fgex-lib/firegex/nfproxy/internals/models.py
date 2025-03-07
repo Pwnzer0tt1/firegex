@@ -2,12 +2,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 class Action(Enum):
+    """Action to be taken by the filter"""
     ACCEPT = 0
     DROP = 1
     REJECT = 2
     MANGLE = 3
 
 class FullStreamAction(Enum):
+    """Action to be taken by the filter when the stream is full"""
     FLUSH = 0
     ACCEPT = 1
     REJECT = 2
@@ -15,6 +17,7 @@ class FullStreamAction(Enum):
 
 @dataclass
 class FilterHandler:
+    """Filter handler"""
     func: callable
     name: str
     params: dict[type, callable]
@@ -22,6 +25,7 @@ class FilterHandler:
 
 @dataclass
 class PacketHandlerResult:
+    """Packet handler result"""
     glob: dict = field(repr=False)
     action: Action = Action.ACCEPT
     matched_by: str = None

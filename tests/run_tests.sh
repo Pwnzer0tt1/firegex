@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env bash
 
 cd "$(dirname "$0")"
 
@@ -30,7 +30,6 @@ python3 ph_test.py -p $PASSWORD -m udp -6 || ERROR=1
 if [[ "$ERROR" == "0" ]] then
 	python3 benchmark.py -p $PASSWORD -r 5 -d 1 -s 10 || ERROR=1
 fi
-
 
 exit $ERROR
 

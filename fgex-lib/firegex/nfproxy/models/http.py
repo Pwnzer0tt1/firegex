@@ -129,6 +129,7 @@ class InternalHttpResponse(InternalCallbackHandler, pyllhttp.Response):
         super(pyllhttp.Response, self).__init__()
         
 class InternalBasicHttpMetaClass:
+    """Internal class to handle HTTP requests and responses"""
     
     def __init__(self):
         self._parser: InternalHttpRequest|InternalHttpResponse
@@ -138,57 +139,71 @@ class InternalBasicHttpMetaClass:
     
     @property
     def total_size(self) -> int:
+        """Total size of the stream"""
         return self._parser.total_size
     
     @property
     def url(self) -> str|None:
+        """URL of the message"""
         return self._parser.url
     
     @property
     def headers(self) -> dict[str, str]:
+        """Headers of the message"""
         return self._parser.headers
     
     @property
     def user_agent(self) -> str:
+        """User agent of the message"""
         return self._parser.user_agent
     
     @property
     def content_encoding(self) -> str:
+        """Content encoding of the message"""
         return self._parser.content_encoding
     
     @property
     def has_begun(self) -> bool:
+        """If the message has begun"""
         return self._parser.has_begun
     
     @property
     def body(self) -> bytes:
+        """Body of the message"""
         return self._parser.body
     
     @property
     def headers_complete(self) -> bool:
+        """If the headers are complete"""
         return self._parser.headers_complete
     
     @property
     def message_complete(self) -> bool:
+        """If the message is complete"""
         return self._parser.message_complete
     
     @property
     def http_version(self) -> str:
+        """HTTP version of the message"""
         return self._parser.http_version
 
     @property
     def keep_alive(self) -> bool:
+        """If the message should keep alive"""
         return self._parser.keep_alive
 
     @property
     def should_upgrade(self) -> bool:
+        """If the message should upgrade"""
         return self._parser.should_upgrade
 
     @property
     def content_length(self) -> int|None:
+        """Content length of the message"""
         return self._parser.content_length_parsed
     
     def get_header(self, header: str, default=None) -> str:
+        """Get a header from the message without caring about the case"""
         return self._parser.lheaders.get(header.lower(), default)
     
     def _packet_to_stream(self, internal_data: DataStreamCtx):
@@ -259,6 +274,11 @@ class InternalBasicHttpMetaClass:
         return datahandler
 
 class HttpRequest(InternalBasicHttpMetaClass):
+    """
+    HTTP Request handler
+    This data handler will be called twice, first with the headers complete, and second with the body complete
+    """
+    
     def __init__(self):
         super().__init__()
         # These will be used in the metaclass
@@ -267,6 +287,7 @@ class HttpRequest(InternalBasicHttpMetaClass):
 
     @property
     def method(self) -> bytes:
+        """Method of the request"""
         return self._parser.method_parsed
     
     def _before_fetch_callable_checks(self, internal_data: DataStreamCtx):
@@ -276,6 +297,11 @@ class HttpRequest(InternalBasicHttpMetaClass):
         return f"<HttpRequest method={self.method} url={self.url} headers={self.headers} body={self.body} http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} has_begun={self.has_begun} content_length={self.content_length} stream={self.stream}>"
 
 class HttpResponse(InternalBasicHttpMetaClass):
+    """
+    HTTP Response handler
+    This data handler will be called twice, first with the headers complete, and second with the body complete
+    """
+
     def __init__(self):
         super().__init__()
         self._parser: InternalHttpResponse = InternalHttpResponse()
@@ -283,6 +309,7 @@ class HttpResponse(InternalBasicHttpMetaClass):
 
     @property
     def status_code(self) -> int:
+        """Status code of the response"""
         return self._parser.status
     
     def _before_fetch_callable_checks(self, internal_data: DataStreamCtx):
@@ -292,6 +319,11 @@ class HttpResponse(InternalBasicHttpMetaClass):
         return f"<HttpResponse status_code={self.status_code} url={self.url} headers={self.headers} body={self.body} http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} has_begun={self.has_begun} content_length={self.content_length} stream={self.stream}>"
 
 class HttpRequestHeader(HttpRequest):
+    """
+    HTTP Request Header handler
+    This data handler will be called only once, the headers are complete, the body will be empty and not buffered
+    """
+    
     def __init__(self):
         super().__init__()
         self._parser._save_body = False
@@ -306,6 +338,11 @@ class HttpRequestHeader(HttpRequest):
         return False
 
 class HttpResponseHeader(HttpResponse):
+    """
+    HTTP Response Header handler
+    This data handler will be called only once, the headers are complete, the body will be empty and not buffered
+    """
+    
     def __init__(self):
         super().__init__()
         self._parser._save_body = False
