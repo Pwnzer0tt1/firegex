@@ -8,6 +8,11 @@ ERROR=0
 
 pip3 install -r requirements.txt
 
+until curl --output /dev/null --silent --fail http://localhost:4444/api/status; do
+    printf '.'
+    sleep 1
+done
+
 echo "Running standard API test"
 python3 api_test.py -p $PASSWORD || ERROR=1
 echo "Running Netfilter Regex TCP ipv4"
