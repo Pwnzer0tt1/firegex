@@ -31,13 +31,16 @@ All the configuration at the startup is customizable in [firegex.py](./start.py)
 
 ## Functionalities
 
-- Regex filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/doxygen/html/) with [nftables](https://netfilter.org/projects/nftables/) uses a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
+- Regex filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/) with [nftables](https://netfilter.org/projects/nftables/) uses a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
 - Create basic firewall rules to allow and deny specific traffic, like ufw or iptables but using firegex graphic interface (by using [nftable](https://netfilter.org/projects/nftables/))
 - Port Hijacking allows you to redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using the loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
+- EXPERIMENTAL: Netfilter Proxy uses [nfqueue](https://netfilter.org/projects/libnetfilter_queue/) to simulate a python proxy, you can write your own filter in python and use it to filter the traffic. There are built-in some data handler to parse protocols like HTTP, and before apply the filter you can test it with fgex command (you need to install firegex lib from pypi).
 
 ## Documentation
 
-Find the documentation of the backend and of the frontend in the related README files
+Documentation about how the filters works, what features are available and how to use them are available on firegex interface.
+
+Heres a brief description about the firegex structure:
 
 - [Frontend (React)](frontend/README.md)
 - [Backend (FastAPI + C++)](backend/README.md)
