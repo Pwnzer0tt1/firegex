@@ -15,8 +15,8 @@ You can also run tests manually:
 $ ./api_test.py -h
 usage: api_test.py [-h] [--address ADDRESS] --password PASSWORD
 
-$ ./nf_test.py -h
-usage: nf_test.py [-h] [--address ADDRESS] --password PASSWORD [--service_name SERVICE_NAME] [--port PORT]
+$ ./nfregex_test.py -h
+usage: nfregex_test.py [-h] [--address ADDRESS] --password PASSWORD [--service_name SERVICE_NAME] [--port PORT]
                 [--ipv6] [--proto {tcp,udp}]
 
 optional arguments:

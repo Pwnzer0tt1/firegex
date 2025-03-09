@@ -71,7 +71,7 @@ class TCPInputStream(InternalTCPStream):
 
 TCPClientStream = TCPInputStream
 
-class TCPOutputStream:
+class TCPOutputStream(InternalTCPStream):
     """
     This datamodel will assemble the TCP output stream from the server sent data.
     The function that use this data model will be handled when:

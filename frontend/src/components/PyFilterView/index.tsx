@@ -12,7 +12,7 @@ export default function PyFilterView({ filterInfo }:{ filterInfo:PyFilter }) {
   const isMedium = isMediumScreen()
 
   const changeRegexStatus = () => {
-    (filterInfo.active?nfproxy.pyfilterdisable:nfproxy.pyfilterenable)(filterInfo.name).then(res => {
+    (filterInfo.active?nfproxy.pyfilterdisable:nfproxy.pyfilterenable)(filterInfo.service_id, filterInfo.name).then(res => {
       if(!res){
         okNotify(`Filter ${filterInfo.name} ${filterInfo.active?"deactivated":"activated"} successfully!`,`Filter '${filterInfo.name}' has been ${filterInfo.active?"deactivated":"activated"}!`)
       }else{

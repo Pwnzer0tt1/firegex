@@ -94,7 +94,6 @@ This handler will be called twice: one for the request headers and one for the r
 - headers: dict - The headers of the request
 - user_agent: str - The user agent of the request
 - content_encoding: str - The content encoding of the request
-- has_begun: bool - It's true if the request has begun
 - body: bytes - The body of the request
 - headers_complete: bool - It's true if the headers are complete
 - message_complete: bool - It's true if the message is complete
@@ -122,7 +121,6 @@ This handler will be called twice: one for the response headers and one for the 
 - headers: dict - The headers of the response
 - user_agent: str - The user agent of the response
 - content_encoding: str - The content encoding of the response
-- has_begun: bool - It's true if the response has begun
 - body: bytes - The body of the response
 - headers_complete: bool - It's true if the headers are complete
 - message_complete: bool - It's true if the message is complete

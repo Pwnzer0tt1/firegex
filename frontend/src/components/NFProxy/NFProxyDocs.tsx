@@ -30,7 +30,27 @@ def filter_with_args(http_request: HttpRequest) -> int:
         return REJECT
 `
 
-const IMPORT_FULL_ACTION_STREAM = `from firegex.nfproxy import FullStreamAction`
+const IMPORT_FULL_ACTION_STREAM = `from firegex.nfproxy import FullStreamAction
+
+# Here the definition of FullStreamAction enum
+class FullStreamAction(Enum):
+    """Action to be taken by the filter when the stream is full"""
+    FLUSH = 0
+    ACCEPT = 1
+    REJECT = 2
+    DROP = 3
+`
+
+const ENUM_IMPORT_AND_DEFINITION = `from firegex.nfproxy import ExceptionAction
+
+# Here the definition of ExceptionAction enum
+class ExceptionAction(Enum):
+    """Action to be taken by the filter when an exception occurs (used in some cases)"""
+    ACCEPT = 0    # Accept the packet that caused the exception
+    DROP = 1      # Drop the connection that caused the exception
+    REJECT = 2    # Reject the connection that caused the exception
+    NOACTION = 3  # Do nothing, the excpetion will be signaled and the stream will be accepted without calling anymore the pyfilters (for the current stream)
+`
 
 export const HELP_NFPROXY_SIM = `➤ fgex nfproxy -h
 
@@ -242,9 +262,6 @@ export const NFProxyDocs = () => {
             <strong>method: </strong> The method of the request (read only)
           </List.Item>
           <List.Item>
-            <strong>has_begun: </strong> It's true if the request has begun, false if it's not. (read only)
-          </List.Item>
-          <List.Item>
             <strong>headers_complete: </strong> It's true if the headers are complete, false if they are not. (read only)
           </List.Item>
           <List.Item>
@@ -304,9 +321,6 @@ export const NFProxyDocs = () => {
             <strong>status_code: </strong> The status code of the response (read only) (int)
           </List.Item>
           <List.Item>
-            <strong>has_begun: </strong> It's true if the response has begun, false if it's not. (read only)
-          </List.Item>
-          <List.Item>
             <strong>headers_complete: </strong> It's true if the headers are complete, false if they are not. (read only)
           </List.Item>
           <List.Item>
@@ -355,6 +369,17 @@ export const NFProxyDocs = () => {
             <List.Item>
                 <strong>ACCEPT: </strong> Stops to call pyfilters and accept the traffic
             </List.Item>
+          </List>
+      </Text>
+      <Title order={2} mt="lg" mb="sm">⚠️ Other Options</Title>
+      <Text size="lg" my="xs">
+          Here's other enums that you could need to use:
+          <CodeHighlight code={ENUM_IMPORT_AND_DEFINITION} language="python" my="sm" />
+          Then you can set in the globals these options:
+          <List>
+            <List.Item>
+                  <strong>FGEX_INVALID_ENCODING_ACTION: </strong> Sets the action performed when the stream has an invalid encoding (due to a parser crash). The default is ExceptionAction.REJECT.
+              </List.Item>
           </List>
       </Text>
       <Title order={2} mt="lg" mb="sm">🚀 How It Works</Title>

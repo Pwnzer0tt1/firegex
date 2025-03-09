@@ -38,6 +38,7 @@ class SettingsForm(BaseModel):
 
 class PyFilterModel(BaseModel):
     name: str
+    service_id: str
     blocked_packets: int
     edited_packets: int
     active: bool
@@ -55,7 +56,6 @@ class ServiceAddResponse(BaseModel):
 
 class SetPyFilterForm(BaseModel):
     code: str
-    sid: str|None = None
 
 app = APIRouter()
 
@@ -71,12 +71,13 @@ db = SQLite('db/nft-pyfilters.db', {
         'fail_open': 'BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1',
     },
     'pyfilter': {
-        'name': 'VARCHAR(100) PRIMARY KEY',
+        'name': 'VARCHAR(100) NOT NULL',
+        'service_id': 'VARCHAR(100) NOT NULL',
         'blocked_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
         'edited_packets': 'INTEGER UNSIGNED NOT NULL DEFAULT 0',
-        'service_id': 'VARCHAR(100) NOT NULL',
         'active' : 'BOOLEAN NOT NULL CHECK (active IN (0, 1)) DEFAULT 1',
         'FOREIGN KEY (service_id)':'REFERENCES services (service_id)',
+        'PRIMARY KEY': '(name, service_id)'
     },
     'QUERY':[
         "CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (port, ip_int, l4_proto);",
@@ -256,38 +257,38 @@ async def get_service_pyfilter_list(service_id: str):
         raise HTTPException(status_code=400, detail="This service does not exists!")
     return db.query("""
         SELECT 
-            name, blocked_packets, edited_packets, active
+            name, blocked_packets, edited_packets, active, service_id
         FROM pyfilter WHERE service_id = ?;
     """, service_id)
 
-@app.get('/pyfilters/{filter_name}', response_model=PyFilterModel)
-async def get_pyfilter_by_id(filter_name: str):
+@app.get('/services/{service_id}/pyfilters/{filter_name}', response_model=PyFilterModel)
+async def get_pyfilter_by_id(service_id: str, filter_name: str):
     """Get pyfilter info using his id"""
     res = db.query("""
         SELECT 
-            name, blocked_packets, edited_packets, active
-        FROM pyfilter WHERE name = ?;
-    """, filter_name)
+            name, blocked_packets, edited_packets, active, service_id
+        FROM pyfilter WHERE name = ? AND service_id = ?;
+    """, filter_name, service_id)
     if len(res) == 0:
         raise HTTPException(status_code=400, detail="This filter does not exists!")
     return res[0]
 
-@app.post('/pyfilters/{filter_name}/enable', response_model=StatusMessageModel)
-async def pyfilter_enable(filter_name: str):
+@app.post('/services/{service_id}/pyfilters/{filter_name}/enable', response_model=StatusMessageModel)
+async def pyfilter_enable(service_id: str, filter_name: str):
     """Request the enabling of a pyfilter"""
-    res = db.query('SELECT * FROM pyfilter WHERE name = ?;', filter_name)
+    res = db.query('SELECT * FROM pyfilter WHERE name = ? AND service_id = ?;', filter_name, service_id)
     if len(res) != 0:
-        db.query('UPDATE pyfilter SET active=1 WHERE name = ?;', filter_name)
+        db.query('UPDATE pyfilter SET active=1 WHERE name = ? AND service_id = ?;', filter_name, service_id)
         await firewall.get(res[0]["service_id"]).update_filters()
         await refresh_frontend()
     return {'status': 'ok'}
 
-@app.post('/pyfilters/{filter_name}/disable', response_model=StatusMessageModel)
-async def pyfilter_disable(filter_name: str):
+@app.post('/services/{service_id}/pyfilters/{filter_name}/disable', response_model=StatusMessageModel)
+async def pyfilter_disable(service_id: str, filter_name: str):
     """Request the deactivation of a pyfilter"""
-    res = db.query('SELECT * FROM pyfilter WHERE name = ?;', filter_name)
+    res = db.query('SELECT * FROM pyfilter WHERE name = ? AND service_id = ?;', filter_name, service_id)
     if len(res) != 0:
-        db.query('UPDATE pyfilter SET active=0 WHERE name = ?;', filter_name)
+        db.query('UPDATE pyfilter SET active=0 WHERE name = ? AND service_id = ?;', filter_name, service_id)
         await firewall.get(res[0]["service_id"]).update_filters()
         await refresh_frontend()
     return {'status': 'ok'}
@@ -312,8 +313,8 @@ async def add_new_service(form: ServiceAddForm):
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}
 
-@app.put('/services/{service_id}/pyfilters/code', response_model=StatusMessageModel)
-async def set_pyfilters(service_id: str, form: SetPyFilterForm):
+@app.put('/services/{service_id}/code', response_model=StatusMessageModel)
+async def set_pyfilters_code(service_id: str, form: SetPyFilterForm):
     """Set the python filter for a service"""
     service = db.query("SELECT service_id, proto FROM services WHERE service_id = ?;", service_id)
     if len(service) == 0:
@@ -356,10 +357,10 @@ async def set_pyfilters(service_id: str, form: SetPyFilterForm):
     
     return {'status': 'ok'}
 
-@app.get('/services/{service_id}/pyfilters/code', response_class=PlainTextResponse)
-async def get_pyfilters(service_id: str):
+@app.get('/services/{service_id}/code', response_class=PlainTextResponse)
+async def get_pyfilters_code(service_id: str):
     """Get the python filter for a service"""
-    if not db.query("SELECT 1 FROM services s WHERE s.service_id = ?;", service_id):
+    if not db.query("SELECT 1 FROM services WHERE service_id = ?;", service_id):
         raise HTTPException(status_code=400, detail="This service does not exists!")
     try:
         with open(f"db/nfproxy_filters/{service_id}.py") as f:

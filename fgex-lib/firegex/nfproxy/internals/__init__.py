@@ -75,12 +75,9 @@ def handle_packet(glob: dict) -> None:
     
     cache_call = {} # Cache of the data handler calls
     cache_call[RawPacket] = internal_data.current_pkt
-    
-    final_result = Action.ACCEPT
+
     result = PacketHandlerResult(glob)
     
-    func_name = None
-    mangled_packet = None
     for filter in internal_data.filter_call_info:
         final_params = []
         skip_call = False
@@ -116,24 +113,37 @@ def handle_packet(glob: dict) -> None:
         if skip_call:
             continue
         
-        res = context_call(glob, filter.func, *final_params)
-        
-        if res is None:
-            continue #ACCEPTED
-        if not isinstance(res, Action):
-            raise Exception(f"Invalid return type {type(res)} for function {filter.name}")
-        if res == Action.MANGLE:
-            mangled_packet = internal_data.current_pkt.raw_packet
-        if res != Action.ACCEPT:
-            func_name = filter.name
-            final_result = res
-            break
+        # Create an iterator with all the calls to be done
+        def try_to_call(params:list):
+            is_base_call = True
+            for i in range(len(params)):
+                if isinstance(params[i], list):
+                    new_params = params.copy()
+                    for ele in params[i]:
+                        new_params[i] = ele
+                        for ele in try_to_call(new_params):
+                            yield ele
+                    is_base_call = False
+                    break
+            if is_base_call:
+                yield context_call(glob, filter.func, *params)
+                    
+        for res in try_to_call(final_params):
+            if res is None:
+                continue #ACCEPTED
+            if not isinstance(res, Action):
+                raise Exception(f"Invalid return type {type(res)} for function {filter.name}")
+            if res == Action.MANGLE:
+                result.matched_by = filter.name
+                result.mangled_packet = internal_data.current_pkt.raw_packet
+                result.action = Action.MANGLE
+            elif res != Action.ACCEPT:
+                result.matched_by = filter.name
+                result.action = res
+                result.mangled_packet = None
+                return result.set_result()
     
-    result.action = final_result
-    result.matched_by = func_name
-    result.mangled_packet = mangled_packet
-    
-    return result.set_result()
+    return result.set_result() # Will be MANGLE or ACCEPT
 
 
 def compile(glob:dict) -> None:
@@ -148,13 +158,12 @@ def compile(glob:dict) -> None:
 
     if "FGEX_STREAM_MAX_SIZE" in glob and int(glob["FGEX_STREAM_MAX_SIZE"]) > 0:
         internal_data.stream_max_size = int(glob["FGEX_STREAM_MAX_SIZE"])
-    else:
-        internal_data.stream_max_size = 1*8e20 # 1MB default value
     
     if "FGEX_FULL_STREAM_ACTION" in glob and isinstance(glob["FGEX_FULL_STREAM_ACTION"], FullStreamAction):
         internal_data.full_stream_action = glob["FGEX_FULL_STREAM_ACTION"]
-    else:
-        internal_data.full_stream_action = FullStreamAction.FLUSH
+    
+    if "FGEX_INVALID_ENCODING_ACTION" in glob and isinstance(glob["FGEX_INVALID_ENCODING_ACTION"], Action):
+        internal_data.invalid_encoding_action = glob["FGEX_INVALID_ENCODING_ACTION"]
     
     PacketHandlerResult(glob).reset_result()
 

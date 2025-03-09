@@ -1,5 +1,5 @@
 from firegex.nfproxy.internals.models import FilterHandler
-from firegex.nfproxy.internals.models import FullStreamAction
+from firegex.nfproxy.internals.models import FullStreamAction, ExceptionAction
 
 class RawPacket:
     "class rapresentation of the nfqueue packet sent in python context by the c++ core"
@@ -120,22 +120,38 @@ class DataStreamCtx:
     @property
     def stream_max_size(self) -> int:
         if "stream_max_size" not in self.__data.keys():
-            self.__data["stream_max_size"] = 1*8e20
+            self.__data["stream_max_size"] = 1*8e20 # 1MB default value
         return self.__data.get("stream_max_size")
     
     @stream_max_size.setter
     def stream_max_size(self, v: int):
+        if not isinstance(v, int):
+            raise Exception("Invalid data type, data MUST be of type int")
         self.__data["stream_max_size"] = v
     
     @property
     def full_stream_action(self) -> FullStreamAction:
         if "full_stream_action" not in self.__data.keys():
-            self.__data["full_stream_action"] = "flush"
+            self.__data["full_stream_action"] = FullStreamAction.FLUSH
         return self.__data.get("full_stream_action")
     
     @full_stream_action.setter
     def full_stream_action(self, v: FullStreamAction):
+        if not isinstance(v, FullStreamAction):
+            raise Exception("Invalid data type, data MUST be of type FullStreamAction")
         self.__data["full_stream_action"] = v
+    
+    @property
+    def invalid_encoding_action(self) -> ExceptionAction:
+        if "invalid_encoding_action" not in self.__data.keys():
+            self.__data["invalid_encoding_action"] = ExceptionAction.REJECT
+        return self.__data.get("invalid_encoding_action")
+
+    @invalid_encoding_action.setter
+    def invalid_encoding_action(self, v: ExceptionAction):
+        if not isinstance(v, ExceptionAction):
+            raise Exception("Invalid data type, data MUST be of type ExceptionAction")
+        self.__data["invalid_encoding_action"] = v
     
     @property
     def data_handler_context(self) -> dict:

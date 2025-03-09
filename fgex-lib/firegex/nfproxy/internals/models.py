@@ -8,6 +8,13 @@ class Action(Enum):
     REJECT = 2
     MANGLE = 3
 
+class ExceptionAction(Enum):
+    """Action to be taken by the filter when an exception occurs (used in some cases)"""
+    ACCEPT = 0
+    DROP = 1
+    REJECT = 2
+    NOACTION = 3
+
 class FullStreamAction(Enum):
     """Action to be taken by the filter when the stream is full"""
     FLUSH = 0
@@ -40,5 +47,3 @@ class PacketHandlerResult:
     
     def reset_result(self) -> None:
         self.glob["__firegex_pyfilter_result"] = None
-
-

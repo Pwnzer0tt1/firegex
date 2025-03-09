@@ -54,12 +54,12 @@ export const nfproxy = {
     serviceinfo: async (service_id:string) => {
         return await getapi(`nfproxy/services/${service_id}`) as Service;
     },
-    pyfilterenable: async (filter_name:string) => {
-        const { status } = await postapi(`nfproxy/pyfilters/${filter_name}/enable`) as ServerResponse;
+    pyfilterenable: async (service_id:string, filter_name:string) => {
+        const { status } = await postapi(`nfproxy/services/${service_id}/pyfilters/${filter_name}/enable`) as ServerResponse;
         return status === "ok"?undefined:status
     },
-    pyfilterdisable: async (filter_name:string) => {
-        const { status } = await postapi(`nfproxy/pyfilters/${filter_name}/disable`) as ServerResponse;
+    pyfilterdisable: async (service_id:string, filter_name:string) => {
+        const { status } = await postapi(`nfproxy/services/${service_id}/pyfilters/${filter_name}/disable`) as ServerResponse;
         return status === "ok"?undefined:status
     },
     servicestart: async (service_id:string) => {
@@ -89,10 +89,10 @@ export const nfproxy = {
         return status === "ok"?undefined:status
     },
     getpyfilterscode: async (service_id:string) => {
-        return await getapi(`nfproxy/services/${service_id}/pyfilters/code`) as string;
+        return await getapi(`nfproxy/services/${service_id}/code`) as string;
     },
     setpyfilterscode: async (service_id:string, code:string) => {
-        const { status } = await putapi(`nfproxy/services/${service_id}/pyfilters/code`,{ code }) as ServerResponse;
+        const { status } = await putapi(`nfproxy/services/${service_id}/code`,{ code }) as ServerResponse;
         return status === "ok"?undefined:status
     }
 }

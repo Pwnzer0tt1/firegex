@@ -13,3 +13,4 @@ class RejectConnection(Exception):
 
 class StreamFullReject(Exception):
     "raise this exception if you want to reject the connection due to full stream"
+

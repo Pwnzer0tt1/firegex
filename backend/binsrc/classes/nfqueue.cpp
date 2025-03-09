@@ -191,6 +191,12 @@ class PktRequest {
 		size_t total_size;
 		if (is_ipv6){
 			delete ipv6;
+			ipv6 = nullptr;
+			if (data_size >= 40){ // 40 == fixed size of ipv6 header
+				// Resetting payload length before parsing to libtins
+				uint16_t payload_len = htons(data_size-40);
+				memcpy(((uint8_t *)data)+4, &payload_len, 2);
+			}
 			ipv6 = new Tins::IPv6((uint8_t*)data, data_size);
 			if (tcp){
 				tcp = ipv6->find_pdu<Tins::TCP>();
@@ -204,6 +210,7 @@ class PktRequest {
 			total_size = ipv6->size();
 		}else{
 			delete ipv4;
+			ipv4 = nullptr;
 			ipv4 = new Tins::IP((uint8_t*)data, data_size);
 			if (tcp){
 				tcp = ipv4->find_pdu<Tins::TCP>();
@@ -311,7 +318,10 @@ class PktRequest {
 				set_packet(raw_pkt, raw_pkt_size);
 				reserialize();
 				action = FilterAction::MANGLE;
-			}catch(...){
+			}catch(const std::exception& e){
+				#ifdef DEBUG
+				cerr << "[DEBUG] [PktRequest.mangle_custom_pkt] " << e.what() << endl;
+				#endif
 				action = FilterAction::DROP;
 			}
 			perfrom_action(false);

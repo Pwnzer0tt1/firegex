@@ -148,7 +148,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 			case PyFilterResponse::MANGLE:
 				pkt->mangle_custom_pkt(result.mangled_packet->c_str(), result.mangled_packet->size());
 				if (pkt->get_action() == NfQueue::FilterAction::DROP){
-					cerr << "[error] [filter_action] Failed to mangle: the packet sent is not serializzable... the packet was dropped" << endl;
+					cerr << "[ERROR] [filter_action] Failed to mangle: Malformed Packet... the packet was dropped" << endl;
 					print_blocked_reason(*result.filter_match_by);
 					print_exception_reason();
 				}else{

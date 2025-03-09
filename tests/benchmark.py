@@ -36,7 +36,7 @@ else:
 def exit_test(code):
     if service_id:
         server.kill()
-        if(firegex.nf_delete_service(service_id)):
+        if(firegex.nfregex_delete_service(service_id)):
             puts("Sucessfully deleted service ✔", color=colors.green)
         else:
             puts("Test Failed: Coulnd't delete serivce ✗", color=colors.red)
@@ -45,12 +45,12 @@ def exit_test(code):
 
 #Create new Service
 
-srvs = firegex.nf_get_services()
+srvs = firegex.nfregex_get_services()
 for ele in srvs:
     if ele['name'] == args.service_name:
-        firegex.nf_delete_service(ele['service_id'])
+        firegex.nfregex_delete_service(ele['service_id'])
 
-service_id = firegex.nf_add_service(args.service_name, args.port, "tcp", "127.0.0.1/24")
+service_id = firegex.nfregex_add_service(args.service_name, args.port, "tcp", "127.0.0.1/24")
 if service_id:
     puts(f"Sucessfully created service {service_id} ✔", color=colors.green)
 else:
@@ -105,7 +105,7 @@ print(f"{getReading(args.port)} MB/s")
 
 #Start firewall
 
-if firegex.nf_start_service(service_id):
+if firegex.nfregex_start_service(service_id):
     puts(f"Sucessfully started service with id {service_id} ✔", color=colors.green)
 else:
     puts("Benchmark Failed: Coulnd't start the service ✗", color=colors.red)
@@ -120,7 +120,7 @@ print(f"{results[0]} MB/s")
 #Add all the regexs
 for i in range(1,args.num_of_regexes+1):
     regex = gen_regex()
-    if not firegex.nf_add_regex(service_id,regex,"B",active=True,is_case_sensitive=False): 
+    if not firegex.nfregex_add_regex(service_id,regex,"B",active=True,is_case_sensitive=False): 
         puts("Benchmark Failed: Couldn't add the regex ✗", color=colors.red)
         exit_test(1)
     puts(f"Performance with {i} regex(s): ", color=colors.red, end='')
@@ -135,7 +135,7 @@ with open(args.output_file,'w') as f:
 puts(f"Sucessfully written results to {args.output_file} ✔", color=colors.magenta)
 
 #Delete the Service 
-if firegex.nf_delete_service(service_id):
+if firegex.nfregex_delete_service(service_id):
     puts(f"Sucessfully delete service with id {service_id} ✔", color=colors.green)
 else:
     puts("Test Failed: Couldn't delete service ✗", color=colors.red)
