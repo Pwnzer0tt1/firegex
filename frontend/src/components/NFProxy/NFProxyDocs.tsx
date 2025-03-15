@@ -82,7 +82,7 @@ const TCPBadge = () => {
 
 export const NFProxyDocs = () => {
   return (
-    <Container size="xl">
+    <>
       <Title order={1}>🌐 Netfilter Proxy Documentation</Title>
 
       <Title order={2} mt="xl" mb="sm">📖 Overview</Title>
@@ -250,6 +250,9 @@ export const NFProxyDocs = () => {
             <strong>body: </strong> The body of the request (read only). It's None if the body has not arrived yet.
           </List.Item>
           <List.Item>
+            <strong>body_decoded: </strong> By default the body will be decoded following the content encoding. gzip, br, deflate and zstd are supported. If the decoding fails and body is not None this paramether will be False.
+          </List.Item>
+          <List.Item>
             <strong>http_version: </strong> The http version of the request (read only)
           </List.Item>
           <List.Item>
@@ -307,6 +310,9 @@ export const NFProxyDocs = () => {
           </List.Item>
           <List.Item>
             <strong>body: </strong> The body of the response (read only). It's None if the body has not arrived yet.
+          </List.Item>
+          <List.Item>
+            <strong>body_decoded: </strong> By default the body will be decoded following the content encoding. gzip, br, deflate and zstd are supported. If the decoding fails and body is not None this paramether will be False.
           </List.Item>
           <List.Item>
             <strong>http_version: </strong> The http version of the response (read only)
@@ -430,6 +436,6 @@ export const NFProxyDocs = () => {
         Here's a pyfilter code commented example:
         <CodeHighlight code={EXAMPLE_PYFILTER} language="python" my="sm"/>
       </Text>
-    </Container>
+    </>
   );
 };

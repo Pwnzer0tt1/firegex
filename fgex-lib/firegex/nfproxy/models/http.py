@@ -6,6 +6,11 @@ from firegex.nfproxy.internals.models import FullStreamAction, ExceptionAction
 from dataclasses import dataclass, field
 from collections import deque
 from typing import Type
+from zstd import ZSTD_uncompress
+import gzip
+import io
+import zlib
+import brotli
 
 @dataclass
 class InternalHTTPMessage:
@@ -14,6 +19,7 @@ class InternalHTTPMessage:
     headers: dict[str, str] = field(default_factory=dict)
     lheaders: dict[str, str] = field(default_factory=dict) # lowercase copy of the headers
     body: bytes|None = field(default=None)
+    body_decoded: bool = field(default=False)
     headers_complete: bool = field(default=False)
     message_complete: bool = field(default=False)
     status: str|None = field(default=None)
@@ -114,14 +120,52 @@ class InternalCallbackHandler():
     def on_message_complete(self):
         self.msg.body = self.buffers._body_buffer
         self.buffers._body_buffer = b""
-        try:
-            if "gzip" in self.content_encoding.lower():
-                import gzip
-                import io
-                with gzip.GzipFile(fileobj=io.BytesIO(self.msg.body)) as f:
-                    self.msg.body = f.read()
-        except Exception as e:
-            print(f"Error decompressing gzip: {e}: skipping", flush=True)
+        encodings = [ele.strip() for ele in self.content_encoding.lower().split(",")]
+        decode_success = True
+        decoding_body = self.msg.body
+        for enc in reversed(encodings):
+            if not enc:
+                continue
+            if enc == "deflate":
+                try:
+                    decompress = zlib.decompressobj(-zlib.MAX_WBITS)
+                    decoding_body = decompress.decompress(decoding_body)
+                    decoding_body += decompress.flush()
+                except Exception as e:
+                    print(f"Error decompressing deflate: {e}: skipping", flush=True)
+                    decode_success = False
+                    break
+            elif enc == "br":
+                try:
+                    decoding_body = brotli.decompress(decoding_body)
+                except Exception as e:
+                    print(f"Error decompressing brotli: {e}: skipping", flush=True)
+                    decode_success = False
+                    break
+            elif enc == "gzip":      
+                try:
+                    if "gzip" in self.content_encoding.lower():
+                        with gzip.GzipFile(fileobj=io.BytesIO(decoding_body)) as f:
+                            decoding_body = f.read()
+                except Exception as e:
+                    print(f"Error decompressing gzip: {e}: skipping", flush=True)
+                    decode_success = False
+                    break
+            elif enc == "zstd":
+                try:
+                    decoding_body = ZSTD_uncompress(decoding_body)
+                except Exception as e:
+                    print(f"Error decompressing zstd: {e}: skipping", flush=True)
+                    decode_success = False
+                    break
+            else:
+                decode_success = False
+                break
+        
+        if decode_success:
+            self.msg.body = decoding_body
+            self.msg.body_decoded = True
+
         self.msg.message_complete = True
         self.has_begun = False
         if not self._packet_to_stream():

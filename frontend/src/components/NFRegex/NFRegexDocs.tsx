@@ -2,7 +2,7 @@ import { Container, Title, Text, List } from "@mantine/core";
 
 export const NFRegexDocs = () => {
   return (
-    <Container size="xl">
+    <>
         <Title order={1}>📡 Netfilter Regex Documentation</Title>
 
         <Title order={2} mt="xl" mb="sm">📖 Overview</Title>
@@ -64,6 +64,6 @@ export const NFRegexDocs = () => {
                 </Text>
             </List.Item>
         </List>
-    </Container>
+    </>
   );
 };

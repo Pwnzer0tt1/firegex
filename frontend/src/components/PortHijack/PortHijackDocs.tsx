@@ -4,7 +4,7 @@ import { HELP_NFPROXY_SIM } from "../NFProxy/NFProxyDocs"
 
 
 export const PortHijackDocs = () => {
-    return <Container size="xl">
+    return <>
           <Title order={1}>⚡️ Hijack port to proxy</Title>
     
           <Title order={2} mt="xl" mb="sm">📖 Overview</Title>
@@ -33,5 +33,5 @@ export const PortHijackDocs = () => {
             but externaly the packets exists as connections to the original service. This mangle is done only for external packet arriving from the external ip indicated, localhost traffic won't be touched.
           </Text>
           <Space h="xl" />
-        </Container>
+        </>
 }

@@ -16,13 +16,17 @@ RUN bun run build
 FROM --platform=$TARGETARCH registry.fedoraproject.org/fedora:latest
 RUN dnf -y update && dnf install -y python3.13-devel @development-tools gcc-c++ \
     libnetfilter_queue-devel libnfnetlink-devel libmnl-devel libcap-ng-utils nftables \
-    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel uv
+    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel uv git
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute
 
 ADD ./backend/requirements.txt /execute/requirements.txt
 RUN uv pip install --no-cache --system -r /execute/requirements.txt
+
+RUN git clone https://github.com/domysh/brotli && cd brotli && pip install . && cd .. && rm -rf brotli && \
+    git clone https://github.com/domysh/python-zstd --recurse && cd python-zstd && pip install . && cd .. && rm -rf python-zstd
+
 COPY ./fgex-lib /execute/fgex-lib
 RUN uv pip install --no-cache --system ./fgex-lib
 
