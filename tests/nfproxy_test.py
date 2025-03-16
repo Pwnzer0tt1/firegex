@@ -45,10 +45,10 @@ else:
 def exit_test(code):
     if service_id:
         server.stop()
-        #if firegex.nfproxy_delete_service(service_id):
-        #    puts("Sucessfully deleted service ✔", color=colors.green)
-        #else:
-        #    puts("Test Failed: Coulnd't delete serivce ✗", color=colors.red)      
+        if firegex.nfproxy_delete_service(service_id):
+            puts("Sucessfully deleted service ✔", color=colors.green)
+        else:
+            puts("Test Failed: Coulnd't delete serivce ✗", color=colors.red)      
     exit(code)
 
 if(firegex.nfproxy_start_service(service_id)):
@@ -492,6 +492,64 @@ if not server.recv_packet():
     puts("The malicious HTTP request with the malicious header was successfully blocked ✔", color=colors.green)
 else:
     puts("Test Failed: The HTTP request with the malicious header wasn't blocked ✗", color=colors.red)
+    exit_test(1)
+server.close_client()
+
+remove_filters()
+
+WS_REQUEST_PARSING_TEST = b'GET /sock/?EIO=4&transport=websocket HTTP/1.1\r\nHost: localhost:8080\r\nConnection: Upgrade\r\nPragma: no-cache\r\nCache-Control: no-cache\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)\xac AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36\r\nUpgrade: websocket\r\nOrigin: http://localhost:8080\r\nSec-WebSocket-Version: 13\r\nAccept-Encoding: gzip, deflate, br, zstd\r\nAccept-Language: it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6,zh;q=0.5\r\nCookie: cookie-consent=true; _iub_cs-86405163=%7B%22timestamp%22%3A%222024-09-12T18%3A20%3A18.627Z%22%2C%22version%22%3A%221.65.1%22%2C%22purposes%22%3A%7B%221%22%3Atrue%2C%224%22%3Atrue%7D%2C%22id%22%3A86405163%2C%22cons%22%3A%7B%22rand%22%3A%222b09e6%22%7D%7D\r\nSec-WebSocket-Key: eE01O3/ZShPKsrykACLAaA==\r\nSec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n\r\n\xc1\x84#\x8a\xb2\xbb\x11\xbb\xb2\xbb'
+
+HTTP_REQUEST_WS_PARSING_TEST = """
+from firegex.nfproxy.models import HttpRequest
+from firegex.nfproxy import pyfilter, ACCEPT, UNSTABLE_MANGLE, DROP, REJECT
+
+@pyfilter
+def data_type_test(req:HttpRequest):
+    print(req)
+
+"""
+
+if firegex.nfproxy_set_code(service_id, HTTP_REQUEST_WS_PARSING_TEST):
+    puts("Sucessfully added filter websocket parsing with HttpRequest ✔", color=colors.green)
+else:
+    puts("Test Failed: Couldn't add the websocket parsing filter ✗", color=colors.red)
+    exit_test(1)
+
+server.connect_client()
+server.send_packet(WS_REQUEST_PARSING_TEST)
+if server.recv_packet():
+    puts("The HTTP websocket upgrade request was successfully parsed ✔", color=colors.green)
+else:
+    puts("Test Failed: The HTTP websocket upgrade request wasn't parsed (an error occurred) ✗", color=colors.red)
+    exit_test(1)
+server.close_client()
+
+remove_filters()
+
+WS_RESPONSE_PARSING_TEST = b'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: eGnJqUSoSKE3wOfKD2M3G82RsS8=\r\nSec-WebSocket-Extensions: permessage-deflate\r\ndate: Sat, 15 Mar 2025 12:04:19 GMT\r\nserver: uvicorn\r\n\r\n\xc1_2\xa8V*\xceLQ\xb2Rr1\xb4\xc8\xf6r\x0c\xf3\xaf\xd25\xf7\x8e\xf4\xb3LsttrW\xd2Q*-H/JLI-V\xb2\x8a\x8e\xd5Q*\xc8\xccK\x0f\xc9\xccM\xcd/-Q\xb222\x00\x02\x88\x98g^IjQYb\x0eP\xd0\x14,\x98\x9bX\x11\x90X\x99\x93\x9f\x084\xda\xd0\x00\x0cj\x01\x00\xc1\x1b21\x80\xd9e\xe1n\x19\x9e\xe3RP\x9a[Z\x99\x93j\xea\x15\x00\xb4\xcbC\xa9\x16\x00'
+
+HTTP_RESPONSE_WS_PARSING_TEST = """
+from firegex.nfproxy.models import HttpResponse
+from firegex.nfproxy import pyfilter, ACCEPT, UNSTABLE_MANGLE, DROP, REJECT
+
+@pyfilter
+def data_type_test(req:HttpResponse):
+    print(req)
+
+"""
+
+if firegex.nfproxy_set_code(service_id, HTTP_RESPONSE_WS_PARSING_TEST):
+    puts("Sucessfully added filter websocket parsing with HttpResponse ✔", color=colors.green)
+else:
+    puts("Test Failed: Couldn't add the websocket parsing filter ✗", color=colors.red)
+    exit_test(1)
+
+server.connect_client()
+server.send_packet(WS_RESPONSE_PARSING_TEST)
+if server.recv_packet():
+    puts("The HTTP websocket upgrade response was successfully parsed ✔", color=colors.green)
+else:
+    puts("Test Failed: The HTTP websocket upgrade response wasn't parsed (an error occurred) ✗", color=colors.red)
     exit_test(1)
 server.close_client()
 

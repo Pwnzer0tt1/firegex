@@ -232,10 +232,10 @@ export const NFProxyDocs = () => {
             <strong>url: </strong> The url of the request (read only)
           </List.Item>
           <List.Item>
-            <strong>headers: </strong> The headers of the request (read only). The keys and values are exactly the same as the original request (case sensitive).
+            <strong>headers: </strong> The headers of the request (read only). The keys and values are exactly the same as the original request (case sensitive). (values can be list in case the same header field is repeated)
           </List.Item>
           <List.Item>
-            <strong>get_header(key:str, default = None): </strong> A function that returns the value of a header: it matches the key without case sensitivity. If the header is not found, it returns the default value.
+            <strong>get_header(key:str, default = None): </strong> A function that returns the value of a header: it matches the key without case sensitivity. If the header is not found, it returns the default value. (if the same header field is repeated, its value is concatenated with a comma, this function will never return a list)
           </List.Item>
           <List.Item>
             <strong>user_agent: </strong> The user agent of the request (read only)
@@ -260,6 +260,15 @@ export const NFProxyDocs = () => {
           </List.Item>
           <List.Item>
             <strong>should_upgrade: </strong> It's true if the connection should be upgraded, false if it's not. (read only)
+          </List.Item>
+          <List.Item>
+            <strong>upgrading_to_h2: </strong> It's true if the connection is upgrading to h2, false if it's not. (read only)
+          </List.Item>
+          <List.Item>
+            <strong>ws_stream: </strong> It's a list of websockets.frames.Frame decoded (permessage-deflate is supported). (read only) [<a href="https://websockets.readthedocs.io/en/stable/">docs</a>]
+          </List.Item>
+          <List.Item>
+            <strong>upgrading_to_ws: </strong> It's true if the connection is upgrading to ws, false if it's not. (read only)
           </List.Item>
           <List.Item>
             <strong>method: </strong> The method of the request (read only)
@@ -294,10 +303,10 @@ export const NFProxyDocs = () => {
             <strong>url: </strong> The url of the response (read only)
           </List.Item>
           <List.Item>
-            <strong>headers: </strong> The headers of the response (read only). The keys and values are exactly the same as the original response (case sensitive).
+            <strong>headers: </strong> The headers of the response (read only). The keys and values are exactly the same as the original response (case sensitive). (values can be list in case the same header field is repeated)
           </List.Item>
           <List.Item>
-            <strong>get_header(key:str, default = None): </strong> A function that returns the value of a header: it matches the key without case sensitivity. If the header is not found, it returns the default value.
+            <strong>get_header(key:str, default = None): </strong> A function that returns the value of a header: it matches the key without case sensitivity. If the header is not found, it returns the default value. (if the same header field is repeated, its value is concatenated with a comma, this function will never return a list)
           </List.Item>
           <List.Item>
             <strong>user_agent: </strong> The user agent of the response (read only)
@@ -322,6 +331,15 @@ export const NFProxyDocs = () => {
           </List.Item>
           <List.Item>
             <strong>should_upgrade: </strong> It's true if the connection should be upgraded, false if it's not. (read only)
+          </List.Item>
+          <List.Item>
+            <strong>upgrading_to_h2: </strong> It's true if the connection is upgrading to h2, false if it's not. (read only)
+          </List.Item>
+          <List.Item>
+            <strong>ws_stream: </strong> It's a list of websockets.frames.Frame decoded (permessage-deflate is supported). (read only) [<a href="https://websockets.readthedocs.io/en/stable/">docs</a>]
+          </List.Item>
+          <List.Item>
+            <strong>upgrading_to_ws: </strong> It's true if the connection is upgrading to ws, false if it's not. (read only)
           </List.Item>
           <List.Item>
             <strong>status_code: </strong> The status code of the response (read only) (int)

@@ -11,6 +11,9 @@ import gzip
 import io
 import zlib
 import brotli
+from websockets.frames import Frame
+from websockets.extensions.permessage_deflate import PerMessageDeflate
+from pyllhttp import PAUSED_H2_UPGRADE, PAUSED_UPGRADE
 
 @dataclass
 class InternalHTTPMessage:
@@ -33,16 +36,21 @@ class InternalHTTPMessage:
     method: str = field(default=str)
     content_length: int = field(default=0)
     stream: bytes = field(default_factory=bytes)
+    ws_stream: list[Frame] = field(default_factory=list) # Decoded websocket stream
+    upgrading_to_h2: bool = field(default=False)
+    upgrading_to_ws: bool = field(default=False)
 
 @dataclass
 class InternalHttpBuffer:
     """Internal class to handle HTTP messages"""
     _url_buffer: bytes = field(default_factory=bytes)
-    _header_fields: dict[bytes, bytes] = field(default_factory=dict)
+    _raw_header_fields: dict[str, str|list[str]] = field(default_factory=dict)
+    _header_fields: dict[str, str] = field(default_factory=dict)
     _body_buffer: bytes = field(default_factory=bytes)
     _status_buffer: bytes = field(default_factory=bytes)
     _current_header_field: bytes = field(default_factory=bytes)
     _current_header_value: bytes = field(default_factory=bytes)
+    _ws_packet_stream: bytes = field(default_factory=bytes)
 
 class InternalCallbackHandler():
     
@@ -52,6 +60,8 @@ class InternalCallbackHandler():
     raised_error = False
     has_begun = False
     messages: deque[InternalHTTPMessage] = deque()
+    _ws_extentions = None
+    _ws_raised_error = False
 
     def reset_data(self):
         self.msg = InternalHTTPMessage()
@@ -92,14 +102,31 @@ class InternalCallbackHandler():
 
     def on_header_value_complete(self):
         if self.buffers._current_header_field:
-            self.buffers._header_fields[self.buffers._current_header_field.decode(errors="ignore")] = self.buffers._current_header_value.decode(errors="ignore")
+            k, v = self.buffers._current_header_field.decode(errors="ignore"), self.buffers._current_header_value.decode(errors="ignore")
+            old_value = self.buffers._raw_header_fields.get(k, None)
+            
+            # raw headers are stored as thay were, considering to check changes between headers encoding
+            if isinstance(old_value, list): 
+                old_value.append(v)
+            elif isinstance(old_value, str):
+                self.buffers._raw_header_fields[k] = [old_value, v]
+            else:
+                self.buffers._raw_header_fields[k] = v
+            
+            # Decoding headers normally
+            kl = k.lower()
+            if kl in self.buffers._header_fields:
+                self.buffers._header_fields[kl] += f", {v}" # Should be considered as a single list separated by commas as said in the RFC
+            else:
+                self.buffers._header_fields[kl] = v
+            
         self.buffers._current_header_field = b""
         self.buffers._current_header_value = b""
     
     def on_headers_complete(self):
-        self.msg.headers = self.buffers._header_fields
-        self.msg.lheaders = {k.lower(): v for k, v in self.buffers._header_fields.items()}
-        self.buffers._header_fields = {}
+        self.msg.headers = self.buffers._raw_header_fields
+        self.msg.lheaders = self.buffers._header_fields
+        self.buffers._raw_header_fields = {}
         self.buffers._current_header_field = b""
         self.buffers._current_header_value = b""
         self.msg.headers_complete = True
@@ -119,6 +146,7 @@ class InternalCallbackHandler():
 
     def on_message_complete(self):
         self.msg.body = self.buffers._body_buffer
+        self.msg.should_upgrade = self.should_upgrade
         self.buffers._body_buffer = b""
         encodings = [ele.strip() for ele in self.content_encoding.lower().split(",")]
         decode_success = True
@@ -142,7 +170,7 @@ class InternalCallbackHandler():
                     print(f"Error decompressing brotli: {e}: skipping", flush=True)
                     decode_success = False
                     break
-            elif enc == "gzip":      
+            elif enc == "gzip" or enc == "x-gzip": #https://datatracker.ietf.org/doc/html/rfc2616#section-3.5      
                 try:
                     if "gzip" in self.content_encoding.lower():
                         with gzip.GzipFile(fileobj=io.BytesIO(decoding_body)) as f:
@@ -158,6 +186,8 @@ class InternalCallbackHandler():
                     print(f"Error decompressing zstd: {e}: skipping", flush=True)
                     decode_success = False
                     break
+            elif enc == "identity":
+                pass # No need to do anything https://datatracker.ietf.org/doc/html/rfc2616#section-3.5 (it's possible to be found also if it should't be used)
             else:
                 decode_success = False
                 break
@@ -214,20 +244,90 @@ class InternalCallbackHandler():
     def content_length_parsed(self) -> int:
         return self.content_length
     
+    def _is_input(self) -> bool:
+        raise NotImplementedError()
+    
     def _packet_to_stream(self):
         return self.should_upgrade and self.save_body
     
+    def _stream_parser(self, data: bytes):
+        if self.msg.upgrading_to_ws:
+            if self._ws_raised_error:
+                self.msg.stream += data
+                self.msg.total_size += len(data)
+                return
+            self.buffers._ws_packet_stream += data
+            while True:
+                try:
+                    new_frame, self.buffers._ws_packet_stream = self._parse_websocket_frame(self.buffers._ws_packet_stream)
+                except Exception as e:
+                    self._ws_raised_error = True
+                    self.msg.stream += self.buffers._ws_packet_stream
+                    self.buffers._ws_packet_stream = b""
+                    self.msg.total_size += len(data)
+                    return
+                if new_frame is None:
+                    break
+                self.msg.ws_stream.append(new_frame)
+                self.msg.total_size += len(new_frame.data)
+        if self.msg.upgrading_to_h2:
+            self.msg.total_size += len(data)
+            self.msg.stream += data
+    
+    def _parse_websocket_ext(self):
+        ext_ws = []
+        req_ext = []
+        for ele in self.msg.lheaders.get("sec-websocket-extensions", "").split(","):
+            for xt in ele.split(";"):
+                req_ext.append(xt.strip().lower())
+
+        for ele in req_ext:
+            if ele == "permessage-deflate":
+                ext_ws.append(PerMessageDeflate(False, False, 15, 15))
+        return ext_ws
+    
+    def _parse_websocket_frame(self, data: bytes) -> tuple[Frame|None, bytes]:
+        # mask = is_input
+        if self._ws_extentions is None:
+            self._ws_extentions = self._parse_websocket_ext()
+        read_buffering = bytearray()
+        def read_exact(n: int):
+            nonlocal read_buffering
+            buffer = bytearray(read_buffering)
+            while len(buffer) < n:
+                data = yield
+                if data is None:
+                    raise RuntimeError("Should not send None to this generator")
+                buffer.extend(data)
+            new_data = bytes(buffer[:n])
+            read_buffering = buffer[n:]
+            return new_data
+
+        parsing = Frame.parse(read_exact, extensions=self._ws_extentions, mask=self._is_input())
+        parsing.send(None)
+        try:
+            parsing.send(bytearray(data))
+        except StopIteration as e:
+            return e.value, read_buffering
+        
+        return None, read_buffering
+    
     def parse_data(self, data: bytes):
         if self._packet_to_stream(): # This is a websocket upgrade!
-            self.msg.message_complete = True # The message is complete but becomed a stream, so need to be called every time a new packet is received
-            self.msg.total_size += len(data)
-            self.msg.stream += data #buffering stream
+            self._stream_parser(data)
         else:
             try:
-                self.execute(data)
+                reason, consumed = self.execute(data)
+                if reason == PAUSED_UPGRADE:
+                    self.msg.upgrading_to_ws = True
+                    self.msg.message_complete = True
+                    self._stream_parser(data[consumed:])
+                elif reason == PAUSED_H2_UPGRADE:
+                    self.msg.upgrading_to_h2 = True
+                    self.msg.message_complete = True
+                    self._stream_parser(data[consumed:])
             except Exception as e:
                 self.raised_error = True
-                print(f"Error parsing HTTP packet: {e} with data {data}", flush=True)
                 raise e
     
     def pop_message(self):
@@ -241,18 +341,23 @@ class InternalHttpRequest(InternalCallbackHandler, pyllhttp.Request):
     def __init__(self):
         super(InternalCallbackHandler, self).__init__()
         super(pyllhttp.Request, self).__init__()
+    
+    def _is_input(self):
+        return True
         
 class InternalHttpResponse(InternalCallbackHandler, pyllhttp.Response):
     def __init__(self):
         super(InternalCallbackHandler, self).__init__()
         super(pyllhttp.Response, self).__init__()
+    
+    def _is_input(self):
+        return False
         
 class InternalBasicHttpMetaClass:
     """Internal class to handle HTTP requests and responses"""
     
     def __init__(self, parser: InternalHttpRequest|InternalHttpResponse, msg: InternalHTTPMessage):
         self._parser = parser
-        self.stream = b""
         self.raised_error = False
         self._message: InternalHTTPMessage|None = msg
         self._contructor_hook()
@@ -313,12 +418,32 @@ class InternalBasicHttpMetaClass:
     @property
     def should_upgrade(self) -> bool:
         """If the message should upgrade"""
-        return self._message.should_upgrade
+        return self._parser.should_upgrade
 
     @property
     def content_length(self) -> int|None:
         """Content length of the message"""
         return self._message.content_length
+
+    @property
+    def upgrading_to_h2(self) -> bool:
+        """If the message is upgrading to HTTP/2"""
+        return self._message.upgrading_to_h2
+    
+    @property
+    def upgrading_to_ws(self) -> bool:
+        """If the message is upgrading to Websocket"""
+        return self._message.upgrading_to_ws
+
+    @property
+    def ws_stream(self) -> list[Frame]:
+        """Websocket stream"""
+        return self._message.ws_stream
+    
+    @property
+    def stream(self) -> bytes:
+        """Stream of the message"""
+        return self._message.stream
     
     def get_header(self, header: str, default=None) -> str:
         """Get a header from the message without caring about the case"""
@@ -391,8 +516,8 @@ class InternalBasicHttpMetaClass:
         if not headers_were_set and parser.msg.headers_complete:
             messages_tosend.append(parser.msg) # Also the current message needs to be sent due to complete headers
         
-        if headers_were_set and parser.msg.message_complete and parser.msg.should_upgrade and parser.save_body:
-            messages_tosend.append(parser.msg) # Also the current message needs to beacase a websocket stream is going on
+        if parser._packet_to_stream():
+            messages_tosend.append(parser.msg) # Also the current message needs to beacase a stream is going on
         
         messages_to_call = len(messages_tosend)
         
@@ -423,7 +548,7 @@ class HttpRequest(InternalBasicHttpMetaClass):
         return self._parser.msg.method
     
     def __repr__(self):
-        return f"<HttpRequest method={self.method} url={self.url} headers={self.headers} body={self.body} http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream}>"
+        return f"<HttpRequest method={self.method} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
 
 class HttpResponse(InternalBasicHttpMetaClass):
     """
@@ -445,7 +570,7 @@ class HttpResponse(InternalBasicHttpMetaClass):
         return self._parser.msg.status
     
     def __repr__(self):
-        return f"<HttpResponse status_code={self.status_code} url={self.url} headers={self.headers} body={self.body} http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream}>"
+        return f"<HttpResponse status_code={self.status_code} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
 
 class HttpRequestHeader(HttpRequest):
     """

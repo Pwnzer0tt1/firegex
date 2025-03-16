@@ -5,4 +5,5 @@ zstd    # waiting for pull request to be merged
 brotli  # waiting for pull request to be merged
 watchfiles
 fgex
+websockets
 pyllhttp

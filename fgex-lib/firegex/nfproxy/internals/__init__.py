@@ -121,8 +121,7 @@ def handle_packet(glob: dict) -> None:
                     new_params = params.copy()
                     for ele in params[i]:
                         new_params[i] = ele
-                        for ele in try_to_call(new_params):
-                            yield ele
+                        yield from try_to_call(new_params)
                     is_base_call = False
                     break
             if is_base_call:
@@ -166,4 +165,9 @@ def compile(glob:dict) -> None:
         internal_data.invalid_encoding_action = glob["FGEX_INVALID_ENCODING_ACTION"]
     
     PacketHandlerResult(glob).reset_result()
+    
+    def fake_exit(*_a, **_k):
+        print("WARNING: This function should not be called", flush=True)
+    
+    glob["exit"] = fake_exit
 
