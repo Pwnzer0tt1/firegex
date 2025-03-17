@@ -517,7 +517,7 @@ def data_type_test(req:HttpResponse):
 """
 
 if firegex.nfproxy_set_code(service_id, HTTP_REQUEST_WS_PARSING_TEST):
-    puts("Sucessfully added filter websocket parsing with HttpRequest ✔", color=colors.green)
+    puts("Sucessfully added filter websocket parsing with HttpRequest and HttpResponse ✔", color=colors.green)
 else:
     puts("Test Failed: Couldn't add the websocket parsing filter ✗", color=colors.red)
     exit_test(1)
