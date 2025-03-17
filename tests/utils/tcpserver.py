@@ -1,4 +1,4 @@
-from multiprocessing import Process
+from multiprocessing import Process, Queue
 import socket
 import traceback
 
@@ -8,10 +8,11 @@ class TcpServer:
         self.ipv6 = ipv6
         self.port = port
         self.verbose = verbose
+        self._server_data_queue = Queue()
         self._regen_process()
 
     def _regen_process(self):
-        def _startServer(port):
+        def _startServer(port, server_queue:Queue):
             sock = socket.socket(socket.AF_INET6 if self.ipv6 else socket.AF_INET, socket.SOCK_STREAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('::1' if self.ipv6 else '127.0.0.1', port))
@@ -23,6 +24,10 @@ class TcpServer:
                         buf = connection.recv(4096)
                         if buf == b'':
                             break
+                        try:
+                            buf = server_queue.get(block=False)
+                        except Exception:
+                            pass
                         if self.verbose:
                             print("SERVER: ", buf)
                         connection.sendall(buf)
@@ -30,7 +35,7 @@ class TcpServer:
                         if self.verbose:
                             traceback.print_exc()
                 connection.close()
-        self.server = Process(target=_startServer,args=[self.port])
+        self.server = Process(target=_startServer,args=[self.port, self._server_data_queue])
 
     def start(self):
         self.server.start()
@@ -49,9 +54,11 @@ class TcpServer:
         if self.client_sock:
             self.client_sock.close()
 
-    def send_packet(self, packet):
+    def send_packet(self, packet, server_reply=None):
         if self.verbose:
             print("CLIENT: ", packet)
+        if server_reply:
+            self._server_data_queue.put(server_reply)
         self.client_sock.sendall(packet)
     
     def recv_packet(self):
