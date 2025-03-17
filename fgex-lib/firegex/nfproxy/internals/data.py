@@ -106,6 +106,7 @@ class DataStreamCtx:
         self.__data = glob["__firegex_pyfilter_ctx"]
         self.filter_glob = glob
         self.current_pkt = RawPacket._fetch_packet(self) if init_pkt else None
+        self.call_mem = {} #A memory space valid only for the current packet handler
     
     @property
     def filter_call_info(self) -> list[FilterHandler]:
