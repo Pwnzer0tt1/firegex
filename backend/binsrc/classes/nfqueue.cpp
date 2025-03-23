@@ -378,11 +378,12 @@ class PktRequest {
 					cerr << "[SEQ: " << tcp->seq() << "] [ACK: " << tcp->ack_seq() << "]" << " [WIN: " << tcp->window() << "] [FLAGS: " << tcp->flags() << "]\n" << endl;
 				}
 				#endif
-				if (tcp && ack_seq_offset && packet.size() != _original_size){
+				size_t payload_offset = data_size() != _data_original_size;
+				if (tcp && ack_seq_offset && payload_offset != 0){
 					if (is_input){
-						ack_seq_offset->in += data_size() - _data_original_size;
+						ack_seq_offset->in += payload_offset;
 					}else{
-						ack_seq_offset->out += data_size() - _data_original_size;
+						ack_seq_offset->out += payload_offset;
 					}
 				}
 				nfq_nlmsg_verdict_put(nlh_verdict, ntohl(packet_id), NF_ACCEPT );
