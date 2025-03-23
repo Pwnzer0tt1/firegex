@@ -32,6 +32,7 @@
 /firegex-compose-tmp-file.yml
 /firegex.py
 /tests/benchmark.csv
+/tests/comparemark.csv
 # misc
 **/.DS_Store
 **/.env.local

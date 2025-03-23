@@ -36,9 +36,5 @@ python3 nfproxy_test.py -p $PASSWORD || ERROR=1
 echo "Running Netfilter Proxy ipv6"
 python3 nfproxy_test.py -p $PASSWORD -6 || ERROR=1
 
-if [[ "$ERROR" == "0" ]] then
-	python3 benchmark.py -p $PASSWORD -r 5 -d 1 -s 10 || ERROR=1
-fi
-
 exit $ERROR
 
