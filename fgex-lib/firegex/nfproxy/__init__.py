@@ -25,7 +25,9 @@ def pyfilter(func):
 
 def get_pyfilters():
     """Returns the list of functions marked with @pyfilter."""
-    return list(pyfilter.registry)
+    if hasattr(pyfilter, "registry"):
+        return list(pyfilter.registry)
+    return []
 
 def clear_pyfilter_registry():
     """Clears the pyfilter registry."""

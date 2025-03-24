@@ -74,9 +74,8 @@ except Exception:
     exit_test(1)
 #Add new regex
 secret = bytes(secrets.token_hex(16).encode())
-regex = base64.b64encode(secret).decode()
 
-if firegex.nfregex_add_regex(service_id,regex,"B",active=True,is_case_sensitive=True): 
+if firegex.nfregex_add_regex(service_id,secret,"B",active=True,is_case_sensitive=True): 
     puts(f"Sucessfully added regex {str(secret)} ✔", color=colors.green)
 else:
     puts(f"Test Failed: Couldn't add the regex {str(secret)} ✗", color=colors.red)
@@ -95,9 +94,9 @@ def checkRegex(regex, should_work=True, upper=False, deleted=False):
     if should_work:
         global n_blocked
         for r in firegex.nfregex_get_service_regexes(service_id):
-            if r["regex"] == regex:
+            if r["regex"] == secret:
                 #Test the regex
-                s = base64.b64decode(regex).upper() if upper else base64.b64decode(regex)
+                s = regex.upper() if upper else regex
                 if not server.sendCheckData(secrets.token_bytes(40) + s +  secrets.token_bytes(40)):
                     puts("The malicious request was successfully blocked ✔", color=colors.green)
                     n_blocked += 1
@@ -140,7 +139,7 @@ def clear_regexes():
     global n_blocked
     n_blocked = 0
     for r in firegex.nfregex_get_service_regexes(service_id):
-        if r["regex"] == regex:
+        if r["regex"] == secret:
             if(firegex.nfregex_delete_regex(r["id"])): 
                 puts(f"Sucessfully deleted regex with id {r['id']} ✔", color=colors.green)
             else: 
@@ -153,7 +152,7 @@ def clear_regexes():
         puts("Test Failed: Metrics found after deleting the regex ✗", color=colors.red)
         exit_test(1)
 
-checkRegex(regex)
+checkRegex(secret)
 
 #Pause the proxy
 if(firegex.nfregex_stop_service(service_id)):
@@ -163,7 +162,7 @@ else:
     exit_test(1)
 
 #Check if it's actually paused
-checkRegex(regex,should_work=False)
+checkRegex(secret,should_work=False)
 
 #Start firewall
 if(firegex.nfregex_start_service(service_id)):
@@ -172,11 +171,11 @@ else:
     puts("Test Failed: Coulnd't start the service ✗", color=colors.red)
     exit_test(1)
 
-checkRegex(regex)
+checkRegex(secret)
 
 #Disable regex 
 for r in firegex.nfregex_get_service_regexes(service_id):
-    if r["regex"] == regex:
+    if r["regex"] == secret:
         if(firegex.nfregex_disable_regex(r["id"])): 
             puts(f"Sucessfully disabled regex with id {r['id']} ✔", color=colors.green)
         else: 
@@ -185,11 +184,11 @@ for r in firegex.nfregex_get_service_regexes(service_id):
         break
 
 #Check if it's actually disabled
-checkRegex(regex,should_work=False)
+checkRegex(secret,should_work=False)
 
 #Enable regex
 for r in firegex.nfregex_get_service_regexes(service_id):
-    if r["regex"] == regex:
+    if r["regex"] == secret:
         if(firegex.nfregex_enable_regex(r["id"])): 
             puts(f"Sucessfully enabled regex with id {r['id']} ✔", color=colors.green)
         else: 
@@ -197,23 +196,23 @@ for r in firegex.nfregex_get_service_regexes(service_id):
             exit_test(1)
         break
 
-checkRegex(regex)
+checkRegex(secret)
 
 #Delete regex
 clear_regexes()
 
 #Check if it's actually deleted
-checkRegex(regex,should_work=False,deleted=True)
+checkRegex(secret,should_work=False,deleted=True)
 
 #Add case insensitive regex
-if(firegex.nfregex_add_regex(service_id,regex,"B",active=True, is_case_sensitive=False)): 
+if(firegex.nfregex_add_regex(service_id,secret,"B",active=True, is_case_sensitive=False)): 
     puts(f"Sucessfully added case insensitive regex {str(secret)} ✔", color=colors.green)
 else:
     puts(f"Test Failed: Coulnd't add the case insensitive regex {str(secret)} ✗", color=colors.red)
     exit_test(1)
 
-checkRegex(regex, upper=True)
-checkRegex(regex)
+checkRegex(secret, upper=True)
+checkRegex(secret)
 
 clear_regexes()
 

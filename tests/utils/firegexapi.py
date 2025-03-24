@@ -1,5 +1,6 @@
 import string
 from requests import Session
+import base64
 
 def verify(req):
     try:
@@ -108,7 +109,11 @@ class FiregexAPI:
 
     def nfregex_get_service_regexes(self,service_id: str):
         req = self.s.get(f"{self.address}api/nfregex/services/{service_id}/regexes")
-        return req.json()
+        data = req.json()
+        for ele in data:
+            if "regex" in ele:
+                ele["regex"] = base64.b64decode(ele["regex"])
+        return data
 
     def nfregex_get_regex(self,regex_id: str):
         req = self.s.get(f"{self.address}api/nfregex/regexes/{regex_id}")
@@ -127,8 +132,10 @@ class FiregexAPI:
         return verify(req)
 
     def nfregex_add_regex(self, service_id: str, regex: str, mode: str, active: bool, is_case_sensitive: bool):
+        if isinstance(regex, str):
+            regex = regex.encode()
         req = self.s.post(f"{self.address}api/nfregex/regexes", 
-            json={"service_id": service_id, "regex": regex, "mode": mode, "active": active, "is_case_sensitive": is_case_sensitive})
+            json={"service_id": service_id, "regex": base64.b64encode(regex).decode(), "mode": mode, "active": active, "is_case_sensitive": is_case_sensitive})
         return verify(req)
 
     def nfregex_add_service(self, name: str, port: int, proto: str, ip_int: str, fail_open: bool = False):

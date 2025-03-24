@@ -12,6 +12,7 @@ parser.add_argument("--password", "-p", type=str, required=True, help='Firegex p
 parser.add_argument("--service_name", "-n", type=str , required=False, help='Name of the test service', default="Test Service")
 parser.add_argument("--port", "-P", type=int , required=False, help='Port of the test service', default=1337)
 parser.add_argument("--ipv6", "-6" , action="store_true", help='Test Ipv6', default=False)
+parser.add_argument("--verbose", "-V" , action="store_true", help='Verbose output', default=False)
 
 args = parser.parse_args()
 sep()
@@ -28,7 +29,7 @@ else:
     exit(1)
 
 #Create server
-server = TcpServer(args.port,ipv6=args.ipv6)
+server = TcpServer(args.port,ipv6=args.ipv6, verbose=args.verbose)
 
 srvs = firegex.nfproxy_get_services()
 for ele in srvs:
@@ -45,10 +46,12 @@ else:
 def exit_test(code):
     if service_id:
         server.stop()
+        """
         if firegex.nfproxy_delete_service(service_id):
             puts("Sucessfully deleted service ✔", color=colors.green)
         else:
-            puts("Test Failed: Coulnd't delete serivce ✗", color=colors.red)      
+            puts("Test Failed: Coulnd't delete serivce ✗", color=colors.red)  
+        """    
     exit(code)
 
 if(firegex.nfproxy_start_service(service_id)):

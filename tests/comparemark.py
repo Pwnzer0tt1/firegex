@@ -16,7 +16,7 @@ parser.add_argument("--password", "-p", type=str, required=True, help='Firegex p
 parser.add_argument("--duration", "-d", type=int, required=False, help='Duration of the Benchmark in seconds', default=5)
 parser.add_argument("--output-file", "-o", type=str, required=False, help='Output results csv file', default="comparemark.csv")
 parser.add_argument("--num-of-streams", "-s", type=int, required=False, help='Number of concurrent streams', default=1)
-parser.add_argument("--number-of-values", "-V", type=int, required=False, help='Number of values to generate', default=100)
+parser.add_argument("--number-of-values", "-V", type=int, required=False, help='Number of values to generate', default=10)
 
 args = parser.parse_args()
 sep()
@@ -133,7 +133,9 @@ for _ in range(args.number_of_values):
     no_regex_nfregex.append(data)
     print(f"{data} MB/s")
 
-if not firegex.nfregex_add_regex(service_id,text_filter_key,"B",active=True,is_case_sensitive=False): 
+if firegex.nfregex_add_regex(service_id,text_filter_key,"B",active=True,is_case_sensitive=False):
+    puts(f"Sucessfully added regex for {str(text_filter_key)} ✔", color=colors.green)
+else:
     puts("Benchmark Failed: Couldn't add the regex ✗", color=colors.red)
     exit_test(1)
 
@@ -191,7 +193,7 @@ from firegex.nfproxy import pyfilter, REJECT
 
 @pyfilter
 def verdict_test(packet:RawPacket):
-    if {repr(text_filter_key)} in packet.data:
+    if {repr(text_filter_key.encode())} in packet.data:
         return REJECT
 """
 

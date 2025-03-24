@@ -6,7 +6,6 @@ from time import sleep
 import iperf3
 import csv
 import argparse
-import base64
 import secrets
 
 parser = argparse.ArgumentParser()
@@ -96,8 +95,8 @@ def gen_regex():
     else:
         regex = custom_regex.pop()
     """
-    regex = secrets.token_hex(20)
-    return base64.b64encode(bytes(regex.encode())).decode()
+    return secrets.token_hex(20)
+
 
 #Get baseline reading 
 puts("Baseline without proxy: ", color=colors.blue, end='')
