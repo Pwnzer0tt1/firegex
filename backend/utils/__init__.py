@@ -207,3 +207,12 @@ def register_event(sio_server: AsyncServer, event_name: str, model: BaseModel, r
         return wrapper
     return decorator
 
+def nicenessify(priority:int, pid:int|None=None):
+    try:
+        pid = os.getpid() if pid is None else pid
+        ps = psutil.Process(pid)
+        if os.name == 'posix':
+            ps.nice(priority)
+    except Exception as e:
+        print(f"Error setting priority: {e} {traceback.format_exc()}")
+        pass

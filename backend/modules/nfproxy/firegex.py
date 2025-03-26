@@ -7,6 +7,7 @@ from fastapi import HTTPException
 import time
 from utils import run_func
 from utils import DEBUG
+from utils import nicenessify
 
 nft = FiregexTables()
 
@@ -95,6 +96,7 @@ class FiregexInterceptor:
                 "FIREGEX_NFPROXY_SOCK": self.sock_path
             },
         )
+        nicenessify(-10, self.process.pid)
         self.outstrem_task = asyncio.create_task(self._stream_handler())
         try:
             async with asyncio.timeout(3):

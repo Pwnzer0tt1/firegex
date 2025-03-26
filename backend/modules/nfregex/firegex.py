@@ -6,6 +6,7 @@ import asyncio
 import traceback
 from utils import DEBUG
 from fastapi import HTTPException
+from utils import nicenessify
 
 nft = FiregexTables()
 
@@ -106,6 +107,7 @@ class FiregexInterceptor:
                 "FIREGEX_NFQUEUE_FAIL_OPEN": "1" if self.srv.fail_open else "0",
             },
         )
+        nicenessify(-10, self.process.pid)
         line_fut = self.process.stdout.readuntil()
         try:
             line_fut = await asyncio.wait_for(line_fut, timeout=3)

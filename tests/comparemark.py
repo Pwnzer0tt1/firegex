@@ -196,7 +196,7 @@ elif args.module == "nfproxy":
     for _ in range(args.number_of_values):
         #Get baseline reading 
         data = getReading(args.port)
-        puts("Baseline nfregex with no filter: ", color=colors.blue, end='')
+        puts("Baseline nfproxy with no filter: ", color=colors.blue, end='')
         no_filters.append(data)
         print(f"{data} MB/s")
 

@@ -184,7 +184,8 @@ def write_compose(skip_password = True):
                             }
                         ],
                         "cap_add": [
-                            "NET_ADMIN"
+                            "NET_ADMIN",
+                            "SYS_NICE"
                         ]
                     }
                 },
