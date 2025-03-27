@@ -7,6 +7,10 @@ from matplotlib import cm
 
 plt.style.use('fivethirtyeight')
 colors = cm.Set1.colors  # Use a different strong color palette
+plt.rcParams['figure.facecolor'] = 'white'
+plt.rcParams['axes.edgecolor'] = 'white'
+plt.rcParams['axes.linewidth'] = 1.5
+plt.rcParams['legend.facecolor'] = 'white'
 
 files = [
     ("2.5.1 1T", "results/2.5.1-1T.csv"),
@@ -28,6 +32,7 @@ for label, file in files:
         data_dict[label] = data
 
 fig, ax = plt.subplots()
+ax.set_facecolor('white')
 
 for label in data_dict.keys():
     data = data_dict[label]
@@ -77,6 +82,7 @@ for label, file in files:
         data_dict[label] = data
 
 fig, ax = plt.subplots()
+ax.set_facecolor('white')
 
 for label in data_dict.keys():
     data = data_dict[label]
@@ -140,6 +146,7 @@ for label, file in files_nfproxy:
 
 # Generate whisker plot for nfproxy
 fig, ax = plt.subplots()
+ax.set_facecolor('white')
 
 y_max = max([max(data) for data in data_nfproxy.values()])
 y_min = min([min(data) for data in data_nfproxy.values()])
@@ -174,6 +181,7 @@ plt.close()
 average_data = {label: np.mean(data) for label, data in data_nfproxy.items()}
 
 fig, ax = plt.subplots()
+ax.set_facecolor('white')
 y_max = max(average_data.values())
 
 bars = ax.bar(
@@ -233,6 +241,7 @@ combined_data = {**data_nfproxy, **data_nfregex}
 
 # Generate whisker plot for combined data
 fig, ax = plt.subplots()
+ax.set_facecolor('white')
 
 y_max = max([max(data) for data in combined_data.values()])
 y_min = min([min(data) for data in combined_data.values()])
@@ -269,6 +278,7 @@ plt.close()
 average_combined_data = {label: np.mean(data) for label, data in combined_data.items()}
 
 fig, ax = plt.subplots()
+ax.set_facecolor('white')
 y_max = max(average_combined_data.values())
 
 bars = ax.bar(
