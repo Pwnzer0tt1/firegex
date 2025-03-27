@@ -1,2 +1,4 @@
 iperf3
 requests
+matplotlib
+numpy
