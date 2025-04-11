@@ -14,7 +14,7 @@ setuptools.setup(
     author="Pwnzer0tt1",
     author_email="pwnzer0tt1@poliba.it",
     scripts=["fgex"],
-    py_modules=["fgex"],
+    py_modules=["firegex"],
     install_requires=required,
     include_package_data=True,
     description="Firegex client",
