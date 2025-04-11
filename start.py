@@ -105,6 +105,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default=None)
+    parser_start.add_argument('--prebuilt', required=False, action="store_true", help='Use prebuilt docker image', default=False)
 
     #Stop Command
     parser_stop = subcommands.add_parser('stop', help='Stop the firewall')
@@ -120,6 +121,9 @@ def gen_args(args_to_parse: list[str]|None = None):
     
     if "version" not in args or not args.version:
         args.version = "latest"
+    
+    if "prebuilt" in args and args.prebuilt:
+        g.build = False
     
     if "clear" not in args:
         args.clear = False

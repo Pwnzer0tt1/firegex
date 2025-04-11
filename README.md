@@ -17,7 +17,7 @@ With this command you will download firegex.py, and run it, it will require you 
 
 Or, you can start in a similar way firegex, cloning this repository and executing this command
 ```bash
-python3 start.py
+python3 start.py start --prebuilt
 ```
 Cloning the repository start.py will automatically build the docker image of firegex from source, and start it.
 Image building of firegex will require more time, so it's recommended to use the version just builded and available in the github packages.
