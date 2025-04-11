@@ -24,8 +24,7 @@ WORKDIR /execute
 ADD ./backend/requirements.txt /execute/requirements.txt
 RUN uv pip install --no-cache --system -r /execute/requirements.txt
 
-RUN git clone https://github.com/domysh/brotli && cd brotli && pip install . && cd .. && rm -rf brotli && \
-    git clone https://github.com/domysh/python-zstd --recurse && cd python-zstd && pip install . && cd .. && rm -rf python-zstd
+RUN git clone https://github.com/domysh/brotli && cd brotli && pip install . && cd .. && rm -rf brotli
 
 COPY ./fgex-lib /execute/fgex-lib
 RUN uv pip install --no-cache --system ./fgex-lib
