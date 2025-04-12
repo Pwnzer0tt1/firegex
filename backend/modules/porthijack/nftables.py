@@ -37,7 +37,7 @@ class FiregexTables(NFTableManager):
                 "name":self.postrouting_porthijack,
                 "type":"filter",
                 "hook":"postrouting",
-                "prio":-310,
+                "prio":110,
                 "policy":"accept"
             }}}
         ],[

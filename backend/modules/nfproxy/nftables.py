@@ -34,7 +34,7 @@ class FiregexTables(NFTableManager):
                 "name":self.input_chain,
                 "type":"filter",
                 "hook":"prerouting",
-                "prio":-310,
+                "prio":-308,
                 "policy":"accept"
             }}},
             {"add":{"chain":{ #Output chain attached after conntrack saw it
@@ -43,7 +43,7 @@ class FiregexTables(NFTableManager):
                 "name":self.output_chain,
                 "type":"filter",
                 "hook":"postrouting",
-                "prio":-310,
+                "prio":108,
                 "policy":"accept"
             }}}
         ],[
