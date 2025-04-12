@@ -10,8 +10,7 @@ def convert_protocol_to_l4(proto:str):
         raise Exception("Invalid protocol")
 
 class FiregexFilter:
-    def __init__(self, proto:str, port:int, ip_int:str, target:str, id:int, family:str):
-        self.family = family
+    def __init__(self, proto:str, port:int, ip_int:str, target:str, id:int):
         self.id = id
         self.target = target
         self.proto = proto
@@ -29,30 +28,29 @@ class FiregexTables(NFTableManager):
     
     def __init__(self):
         super().__init__([
-            
-            *[{"add":{"chain":{ #Input chain attached before conntrack see it
-                "family":fam,
+            {"add":{"chain":{ #Input chain attached before conntrack see it
+                "family":"inet",
                 "table":self.table_name,
                 "name":self.input_chain,
                 "type":"filter",
                 "hook":"prerouting",
                 "prio":-310,
                 "policy":"accept"
-            }}} for fam in ("inet", "bridge")],
-            *[{"add":{"chain":{ #Output chain attached after conntrack saw it
-                "family":fam,
+            }}},
+            {"add":{"chain":{ #Output chain attached after conntrack saw it
+                "family":"inet",
                 "table":self.table_name,
                 "name":self.output_chain,
                 "type":"filter",
                 "hook":"postrouting",
                 "prio":-310,
                 "policy":"accept"
-            }}} for fam in ("inet", "bridge")],
+            }}}
         ],[
-            *[{"flush":{"chain":{"table":self.table_name,"family":fam, "name":self.input_chain}}} for fam in ("inet", "bridge")],
-            *[{"delete":{"chain":{"table":self.table_name,"family":fam, "name":self.input_chain}}} for fam in ("inet", "bridge")],
-            *[{"flush":{"chain":{"table":self.table_name,"family":fam, "name":self.output_chain}}} for fam in ("inet", "bridge")],
-            *[{"delete":{"chain":{"table":self.table_name,"family":fam, "name":self.output_chain}}} for fam in ("inet", "bridge")],
+            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.input_chain}}},
+            {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.input_chain}}},
+            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.output_chain}}},
+            {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.output_chain}}},
         ])
 
     def add(self, srv:Service, queue_range):
@@ -65,8 +63,8 @@ class FiregexTables(NFTableManager):
         if init > end:
             init, end = end, init
         self.cmd(
-            *[{ "insert":{ "rule": {
-                "family": fam,
+            { "insert":{ "rule": {
+                "family": "inet",
                 "table": self.table_name,
                 "chain": self.output_chain,
                 "expr": [
@@ -75,9 +73,9 @@ class FiregexTables(NFTableManager):
                         {"mangle": {"key": {"meta": {"key": "mark"}},"value": 0x1338}},
                         {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                 ]
-            }}} for fam in ("inet", "bridge")],
-            *[{"insert":{"rule":{
-                "family": fam,
+            }}},
+            {"insert":{"rule":{
+                "family": "inet",
                 "table": self.table_name,
                 "chain": self.input_chain,
                 "expr": [
@@ -86,7 +84,7 @@ class FiregexTables(NFTableManager):
                         {"mangle": {"key": {"meta": {"key": "mark"}},"value": 0x1337}},
                         {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
                     ]
-            }}} for fam in ("inet", "bridge")]
+            }}}
         )
 
 
@@ -101,7 +99,6 @@ class FiregexTables(NFTableManager):
             res.append(FiregexFilter(
                 target=filter["chain"],
                 id=int(filter["handle"]),
-                family=filter["family"],
                 proto=filter["expr"][1]["match"]["left"]["payload"]["protocol"],
                 port=filter["expr"][1]["match"]["right"],
                 ip_int=ip_int
@@ -112,10 +109,9 @@ class FiregexTables(NFTableManager):
         for filter in self.get():
             if filter.__eq__(srv):
                 self.cmd({ "delete":{ "rule": {
-                        "family": filter.family,
-                        "table": self.table_name,
-                        "chain": filter.target,
-                        "handle": filter.id
-                    }}}
-                )
+                    "family": "inet",
+                    "table": self.table_name,
+                    "chain": filter.target,
+                    "handle": filter.id
+                }}})
             
