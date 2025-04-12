@@ -166,9 +166,7 @@ class PktRequest {
 		auto bef_raw = before_raw_pdu_ptr();
 		if (bef_raw){
 			delete before_raw_pdu_ptr()->release_inner_pdu();
-			if (data_size > 0){
-				before_raw_pdu_ptr() /= move(Tins::RawPDU((uint8_t*)data, data_size));
-			}
+			before_raw_pdu_ptr() /= move(Tins::RawPDU((uint8_t*)data, data_size));
 		}
 	}
 
@@ -301,9 +299,7 @@ class PktRequest {
 			//This only for client packets, because this will trigger server to close the connection
 			//Packets will be filtered anyway also if client don't send packets
 			if (_data_original_size != 0){
-				tcp->set_flag(Tins::TCP::FIN,1);
-				tcp->set_flag(Tins::TCP::ACK,1);
-				tcp->set_flag(Tins::TCP::SYN,0);
+				tcp->set_flag(Tins::TCP::RST,1);
 			}
 			//Send the edited packet to the kernel
 			mangle();
