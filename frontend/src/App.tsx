@@ -142,8 +142,9 @@ const PageRouting = ({ getStatus }:{ getStatus:()=>void }) => {
 
   const queryClient = useQueryClient()
 
-
   useEffect(()=>{
+    socketio.auth = { token: localStorage.getItem("access_token") }
+    socketio.connect()
     getStatus()
     socketio.on("update", (data) => {
       queryClient.invalidateQueries({ queryKey: data  })
@@ -155,6 +156,7 @@ const PageRouting = ({ getStatus }:{ getStatus:()=>void }) => {
   return () => {
     socketio.off("update")
     socketio.off("connect_error")
+    socketio.disconnect()
   }
 },[])
 
