@@ -117,7 +117,7 @@ from firegex.nfproxy import pyfilter
 from firegex.nfproxy import REJECT, ACCEPT, UNSTABLE_MANGLE, DROP
 # - The filter must return one of the following values:
 #   - ACCEPT: The packet will be accepted
-#   - REJECT: The packet will be rejected (will be activated a mechanism to send a FIN packet and drop all data in the stream)
+#   - REJECT: The packet will be rejected (will be activated a mechanism to send a RST packet and drop all data in the stream)
 #   - UNSTABLE_MANGLE: The packet will be mangled and accepted
 #   - DROP: All the packets in this stream will be easly dropped
 
