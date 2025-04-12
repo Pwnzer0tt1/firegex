@@ -64,7 +64,7 @@ class TcpServer:
     def recv_packet(self):
         try:
             return self.client_sock.recv(4096)
-        except TimeoutError:
+        except (TimeoutError, ConnectionResetError):
             if self.verbose:
                 traceback.print_exc()
             return False

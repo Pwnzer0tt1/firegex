@@ -143,7 +143,7 @@ class NFTableManager(Singleton):
     
     def init(self):
         self.reset()
-        self.raw_cmd({"add":{"table":{"name":self.table_name,"family":"inet"}}})
+        self.raw_cmd(*[{"add":{"table":{"name":self.table_name,"family":fam}}} for fam in ("inet", "bridge")])
         self.cmd(*self.__init_cmds)
             
     def reset(self):

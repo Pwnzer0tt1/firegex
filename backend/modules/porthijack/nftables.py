@@ -2,8 +2,9 @@ from modules.porthijack.models import Service
 from utils import addr_parse, ip_parse, ip_family, NFTableManager, nftables_json_to_int
 
 class FiregexHijackRule():
-    def __init__(self, proto:str, public_port:int,proxy_port:int, ip_src:str, ip_dst:str, target:str, id:int):
+    def __init__(self, proto:str, public_port:int,proxy_port:int, ip_src:str, ip_dst:str, target:str, id:int, family:str):
         self.id = id
+        self.family = family
         self.target = target
         self.proto = proto
         self.public_port = public_port
@@ -22,29 +23,29 @@ class FiregexTables(NFTableManager):
     
     def __init__(self):
         super().__init__([
-            {"add":{"chain":{
-                "family":"inet",
+            *[{"add":{"chain":{
+                "family":fam,
                 "table":self.table_name,
                 "name":self.prerouting_porthijack,
                 "type":"filter",
                 "hook":"prerouting",
                 "prio":-310,
                 "policy":"accept"
-            }}},
-            {"add":{"chain":{
-                "family":"inet",
+            }}} for fam in ("inet", "bridge")],
+            *[{"add":{"chain":{
+                "family":fam,
                 "table":self.table_name,
                 "name":self.postrouting_porthijack,
                 "type":"filter",
                 "hook":"postrouting",
                 "prio":-310,
                 "policy":"accept"
-            }}}
+            }}} for fam in ("inet", "bridge")]
         ],[
-            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.prerouting_porthijack}}},
-            {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.prerouting_porthijack}}},
-            {"flush":{"chain":{"table":self.table_name,"family":"inet", "name":self.postrouting_porthijack}}},
-            {"delete":{"chain":{"table":self.table_name,"family":"inet", "name":self.postrouting_porthijack}}}
+            *[{"flush":{"chain":{"table":self.table_name,"family":fam, "name":self.prerouting_porthijack}}} for fam in ("inet", "bridge")],
+            *[{"delete":{"chain":{"table":self.table_name,"family":fam, "name":self.prerouting_porthijack}}} for fam in ("inet", "bridge")],
+            *[{"flush":{"chain":{"table":self.table_name,"family":fam, "name":self.postrouting_porthijack}}} for fam in ("inet", "bridge")],
+            *[{"delete":{"chain":{"table":self.table_name,"family":fam, "name":self.postrouting_porthijack}}} for fam in ("inet", "bridge")]
         ])
 
     def add(self, srv:Service):
@@ -53,8 +54,8 @@ class FiregexTables(NFTableManager):
             if ele.__eq__(srv):
                 return
         
-        self.cmd({ "insert":{ "rule": {
-            "family": "inet",
+        self.cmd(*[{ "insert":{ "rule": {
+            "family": fam,
             "table": self.table_name,
             "chain": self.prerouting_porthijack,
             "expr": [
@@ -63,9 +64,9 @@ class FiregexTables(NFTableManager):
                     {'mangle': {'key': {'payload': {'protocol': str(srv.proto), 'field': 'dport'}}, 'value': int(srv.proxy_port)}},
                     {'mangle': {'key': {'payload': {'protocol': ip_family(srv.ip_src), 'field': 'daddr'}}, 'value': addr_parse(srv.ip_dst)}}
                 ]
-        }}})
-        self.cmd({ "insert":{ "rule": {
-            "family": "inet",
+        }}} for fam in ("inet", "bridge")])
+        self.cmd(*[{ "insert":{ "rule": {
+            "family": fam,
             "table": self.table_name,
             "chain": self.postrouting_porthijack,
             "expr": [
@@ -74,7 +75,7 @@ class FiregexTables(NFTableManager):
                     {'mangle': {'key': {'payload': {'protocol': str(srv.proto), 'field': 'sport'}}, 'value': int(srv.public_port)}},
                     {'mangle': {'key': {'payload': {'protocol': ip_family(srv.ip_dst), 'field': 'saddr'}}, 'value': addr_parse(srv.ip_src)}}
                 ]
-        }}})
+        }}} for fam in ("inet", "bridge")])
 
 
     def get(self) -> list[FiregexHijackRule]:
@@ -83,6 +84,7 @@ class FiregexTables(NFTableManager):
             res.append(FiregexHijackRule(
                 target=filter["chain"],
                 id=int(filter["handle"]),
+                family=filter["family"],
                 proto=filter["expr"][1]["match"]["left"]["payload"]["protocol"],
                 public_port=filter["expr"][1]["match"]["right"] if filter["chain"] == self.prerouting_porthijack else filter["expr"][2]["mangle"]["value"],
                 proxy_port=filter["expr"][1]["match"]["right"] if filter["chain"] == self.postrouting_porthijack else filter["expr"][2]["mangle"]["value"], 
@@ -95,7 +97,7 @@ class FiregexTables(NFTableManager):
         for filter in self.get():
             if filter.__eq__(srv):
                 self.cmd({ "delete":{ "rule": {
-                    "family": "inet",
+                    "family": filter.family,
                     "table": self.table_name,
                     "chain": filter.target,
                     "handle": filter.id

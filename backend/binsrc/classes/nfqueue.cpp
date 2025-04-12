@@ -295,7 +295,7 @@ class PktRequest {
 		if (tcp){
 			//If the packet has data, we have to remove it
 			set_data(nullptr, 0);
-			//For the first matched data or only for data packets, we set FIN bit
+			//For the first matched data or only for data packets, we set RST bit
 			//This only for client packets, because this will trigger server to close the connection
 			//Packets will be filtered anyway also if client don't send packets
 			if (_data_original_size != 0){
