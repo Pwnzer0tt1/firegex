@@ -41,15 +41,12 @@ db = SQLite('db/port-hijacking.db', {
         'service_id': 'VARCHAR(100) PRIMARY KEY',
         'active' : 'BOOLEAN NOT NULL CHECK (active IN (0, 1))',
         'public_port': 'INT NOT NULL CHECK(public_port > 0 and public_port < 65536)',
-        'proxy_port': 'INT NOT NULL CHECK(proxy_port > 0 and proxy_port < 65536 and proxy_port != public_port)',
+        'proxy_port': 'INT NOT NULL CHECK(proxy_port > 0 and proxy_port < 65536)',
         'name': 'VARCHAR(100) NOT NULL UNIQUE',
         'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "udp"))',
         'ip_src': 'VARCHAR(100) NOT NULL',
         'ip_dst': 'VARCHAR(100) NOT NULL',
-    },
-    'QUERY':[
-        "CREATE UNIQUE INDEX IF NOT EXISTS unique_services ON services (public_port, ip_src, proto);"
-    ]
+    }
 })
 
 async def reset(params: ResetRequest):
