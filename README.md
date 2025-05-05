@@ -6,7 +6,7 @@
 <br />
 
 ## What is Firegex?
-Firegex is a firewall that includes different functionalities, created for CTF Attack-Defence competitions that has the aim to limit or totally deny malicious traffic through the use of different kind of filters.
+Firegex is a firewall that includes different functionalities, created for CTF Attack-Defense competitions that has the aim to limit or totally deny malicious traffic through the use of different kind of filters.
 
 ## Get started firegex
 What you need is a linux machine and docker ( + docker-compose )
