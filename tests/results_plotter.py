@@ -42,7 +42,7 @@ for label in data_dict.keys():
     )
 
 ax.set_xlabel("N. of regex", fontname="Roboto", fontsize=12)
-ax.set_ylabel("MB/s", fontname="Roboto", fontsize=12)
+ax.set_ylabel("Throughput [MB/s]", fontname="Roboto", fontsize=12)
 ax.legend(prop={"family": "Roboto", "size": 10})
 ax.legend(
     title_fontsize=12,
@@ -92,7 +92,7 @@ for label in data_dict.keys():
     )
 
 ax.set_xlabel("N. of regex", fontname="Roboto", fontsize=12)
-ax.set_ylabel("MB/s", fontname="Roboto", fontsize=12)
+ax.set_ylabel("Throughput [MB/s]", fontname="Roboto", fontsize=12)
 ax.legend(prop={"family": "Roboto", "size": 10})
 ax.legend(
     title_fontsize=12,
@@ -171,7 +171,7 @@ ax.set_yticks(
 ax.set_ylim(y_min - (y_max - y_min) * 0.1, y_max + (y_max - y_min) * 0.1)
 
 ax.set_title("NFProxy Benchmarks", fontweight="bold", fontname="Roboto", pad=20)
-ax.set_ylabel("MB/s", fontname="Roboto", fontsize=12)
+ax.set_ylabel("Throughput [MB/s]", fontname="Roboto", fontsize=12)
 fig.set_size_inches(12, 8)
 
 # plt.show()
@@ -197,7 +197,7 @@ ax.set_yticks(
     np.arange(0, int(y_max) + 100, step=100)
 )  # Ensure the range includes y_max
 ax.set_title("NFProxy Benchmarks", fontweight="bold", fontname="Roboto", pad=20)
-ax.set_ylabel("Average MB/s", fontname="Roboto", fontsize=12)
+ax.set_ylabel("Average Throughput [MB/s]", fontname="Roboto", fontsize=12)
 ax.set_xticklabels(average_data.keys(), fontname="Roboto", fontsize=12)
 
 # Annotate bars with their values
@@ -277,7 +277,7 @@ ax.set_title(
     fontname="Roboto",
     pad=20,
 )
-ax.set_ylabel("MB/s", fontname="Roboto", fontsize=12)
+ax.set_ylabel("Throughput [MB/s]", fontname="Roboto", fontsize=12)
 fig.set_size_inches(14, 8)
 
 # plt.show()
@@ -312,7 +312,7 @@ ax.set_title(
     fontname="Roboto",
     pad=20,
 )
-ax.set_ylabel("Average MB/s", fontname="Roboto", fontsize=12)
+ax.set_ylabel("Average Throughput [MB/s]", fontname="Roboto", fontsize=12)
 
 # Annotate bars with their values
 for bar in bars:
