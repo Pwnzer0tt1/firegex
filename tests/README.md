@@ -9,7 +9,7 @@ If you are working on the same machine firegex is running on, you can just run r
 ```bash
 $ ./run_tests.sh
 ```
-It will automatically perform a general API test, Netfilter and Proxy Regex test. 
+It will automatically perform a general API test, Netfilter and Proxy Regex test.
 You can also run tests manually:
 ```bash
 $ ./api_test.py -h
@@ -71,7 +71,7 @@ options:
                         Type of filtering
 ```
 Benchmarks let you evaluate the performance of the filters. You can run one by typing in a shell  ```test.py -p FIREGEX_PASSWORD -r NUM_OF_REGEX -d BENCHMARK_DURATION -m proxy``` to benchmark the Proxy based regex filter, or ``` -m netfilter ``` to benchmark the Netfilter based regex filtering.
-It uses iperf3 to benchmark the throughput in MB/s of the server, both with filters, without filters, and for each new added regex. It will automatically add a new random regex untill it has reached NUM_OF_REGEX specified in the arguments. 
+It uses iperf3 to benchmark the throughput in MB/s of the server, both with filters, without filters, and for each new added regex. It will automatically add a new random regex untill it has reached NUM_OF_REGEX specified in the arguments.
 
 You will find a new benchmark.csv file containg the results.
 
@@ -94,7 +94,7 @@ Firegex 2.5.0 changes the way the threads are assigned to the packets, this is d
 
 The charts are labeled as follows: `[version]-[n_thread]T` eg. `2.5.0-8T` means Firegex version 2.5.0 with 8 threads.
 
-![Firegex Benchmark](results/Benchmark-chart.png)
+![Firegex Benchmark](results/Benchmark-chart.svg)
 
 
 From the benchmark above we can't see the real advantage of multithreading in 2.5.1, we can better see the advantage of multithreading in the chart below where a fake load in filtering is done.
@@ -107,7 +107,7 @@ for (int i=0; i<50000; i++){
 }
 ```
 
-![Firegex Benchmark](results/Benchmark-chart-with-load.png)
+![Firegex Benchmark](results/Benchmark-chart-with-load.svg)
 
 In the chart above we can see that the 2.5.1 version with 8 threads has a better performance than the 2.5.1 version with 1 threads, and we can see it as much as the load increases.
 
@@ -118,15 +118,14 @@ The code used to test matches the following regex with the python re module:
 (?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])
 ```
 
-![nfproxy benchmarks](results/whisker_nfproxy.png)
+![nfproxy benchmarks](results/whisker_nfproxy.svg)
 
-![nfproxy benchmarks](results/istogramma_nfproxy.png)
+![nfproxy benchmarks](results/istogramma_nfproxy.svg)
 
 # Comparing nfproxy with nfregex
 
 Nfproxy has obviously a worse performance than nfregex, but it is more flexible and can be used in more complex scenarios.
 
-![nfproxy benchmarks](results/whisker_compare.png)
+![nfproxy benchmarks](results/whisker_compare.svg)
 
-![nfproxy benchmarks](results/istrogramma_compare.png)
-
+![nfproxy benchmarks](results/istrogramma_compare.svg)
