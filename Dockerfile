@@ -12,30 +12,41 @@ RUN bun i
 COPY ./frontend/ .
 RUN bun run build
 
-#Building main conteiner
-FROM --platform=$TARGETARCH registry.fedoraproject.org/fedora:latest
-RUN dnf -y update && dnf install -y python3.13-devel @development-tools gcc-c++ \
-    libnetfilter_queue-devel libnfnetlink-devel libmnl-devel libcap-ng-utils nftables \
-    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel uv git
+# Base fedora container
+FROM --platform=$TARGETARCH registry.fedoraproject.org/fedora:latest AS base
+RUN dnf -y update && dnf install -y python3.13 libnetfilter_queue \
+    libnfnetlink libmnl libcap-ng-utils nftables git \
+    vectorscan libtins python3-nftables libpcap uv
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute
 
-ADD ./backend/requirements.txt /execute/requirements.txt
-RUN uv pip install --no-cache --system -r /execute/requirements.txt
+FROM --platform=$TARGETARCH base AS compiler
 
-RUN git clone https://github.com/domysh/brotli && cd brotli && pip install . && cd .. && rm -rf brotli
-
-COPY ./fgex-lib /execute/fgex-lib
-RUN uv pip install --no-cache --system ./fgex-lib
+RUN dnf -y update && dnf install -y python3.13-devel @development-tools gcc-c++ \
+    libnetfilter_queue-devel libnfnetlink-devel libmnl-devel libcap-ng-utils nftables \
+    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel uv git
 
 COPY ./backend/binsrc /execute/binsrc
-RUN g++ binsrc/nfregex.cpp -o modules/cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
-RUN g++ binsrc/nfproxy.cpp -o modules/cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3.13 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
+RUN g++ binsrc/nfregex.cpp -o cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
+RUN g++ binsrc/nfproxy.cpp -o cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3.13 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
+
+#Building main conteiner
+FROM --platform=$TARGETARCH base AS final
+
+ADD ./backend/requirements.txt /execute/requirements.txt
+COPY ./fgex-lib /execute/fgex-lib
+
+RUN dnf install -y gcc-c++ python3.13-devel &&\
+    git clone https://github.com/domysh/brotli &&\
+    cd brotli && uv pip install --no-cache --system . &&\
+    cd .. && rm -rf brotli &&\
+    uv pip install --no-cache --system -r /execute/requirements.txt &&\
+    uv pip install --no-cache --system ./fgex-lib &&\
+    dnf remove -y gcc-c++ python3.13-devel
 
 COPY ./backend/ /execute/
+COPY --from=compiler /execute/cppregex /execute/cpproxy /execute/modules/
 COPY --from=frontend /app/dist/ ./frontend/
 
 CMD ["/bin/sh", "/execute/docker-entrypoint.sh"]
-
-
