@@ -25,7 +25,7 @@ FROM --platform=$TARGETARCH base AS compiler
 
 RUN dnf -y update && dnf install -y python3.13-devel @development-tools gcc-c++ \
     libnetfilter_queue-devel libnfnetlink-devel libmnl-devel libcap-ng-utils nftables \
-    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel uv git
+    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel
 
 COPY ./backend/binsrc /execute/binsrc
 RUN g++ binsrc/nfregex.cpp -o cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
@@ -37,13 +37,13 @@ FROM --platform=$TARGETARCH base AS final
 ADD ./backend/requirements.txt /execute/requirements.txt
 COPY ./fgex-lib /execute/fgex-lib
 
-RUN dnf install -y gcc-c++ python3.13-devel &&\
+RUN dnf install -y gcc-c++ python3.13-devel uv git &&\
     git clone https://github.com/domysh/brotli &&\
     cd brotli && uv pip install --no-cache --system . &&\
     cd .. && rm -rf brotli &&\
     uv pip install --no-cache --system -r /execute/requirements.txt &&\
     uv pip install --no-cache --system ./fgex-lib &&\
-    dnf remove -y gcc-c++ python3.13-devel
+    dnf remove -y gcc-c++ python3.13-devel uv git
 
 COPY ./backend/ /execute/
 COPY --from=compiler /execute/cppregex /execute/cpproxy /execute/modules/
