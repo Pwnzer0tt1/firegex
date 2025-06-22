@@ -73,6 +73,7 @@ class InternalCallbackHandler:
     messages: deque[InternalHTTPMessage] = deque()
     _ws_extentions = None
     _ws_raised_error = False
+    release_message_headers = True
 
     def reset_data(self):
         self.msg = InternalHTTPMessage()
@@ -604,6 +605,7 @@ class InternalBasicHttpMetaClass:
         if (
             not internal_data.call_mem["headers_were_set"]
             and parser.msg.headers_complete
+            and parser.release_message_headers
         ):
             messages_tosend.append(
                 parser.msg
@@ -641,7 +643,7 @@ class HttpRequest(InternalBasicHttpMetaClass):
 
     @staticmethod
     def _parser_class() -> str:
-        return "full_http"
+        return "http_module"
 
     def __repr__(self):
         return f"<HttpRequest method={self.method} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
@@ -664,10 +666,44 @@ class HttpResponse(InternalBasicHttpMetaClass):
 
     @staticmethod
     def _parser_class() -> str:
-        return "full_http"
+        return "http_module"
 
     def __repr__(self):
         return f"<HttpResponse status_code={self.status_code} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
+
+
+class HttpFullRequest(HttpRequest):
+    """
+    HTTP Request handler
+    This data handler will be called when the request data is complete
+    """
+
+    def _contructor_hook(self):
+        self._parser.release_message_headers = False
+
+    @staticmethod
+    def _parser_class() -> str:
+        return "http_full"
+
+    def __repr__(self):
+        return f"<HttpFullRequest method={self.method} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
+
+
+class HttpFullResponse(HttpResponse):
+    """
+    HTTP Response handler
+    This data handler will be called when the response data is complete
+    """
+
+    def _contructor_hook(self):
+        self._parser.release_message_headers = False
+
+    @staticmethod
+    def _parser_class() -> str:
+        return "http_full"
+
+    def __repr__(self):
+        return f"<HttpFullResponse status_code={self.status_code} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
 
 
 class HttpRequestHeader(HttpRequest):
@@ -681,7 +717,7 @@ class HttpRequestHeader(HttpRequest):
 
     @staticmethod
     def _parser_class() -> str:
-        return "header_http"
+        return "http_header"
 
 
 class HttpResponseHeader(HttpResponse):
@@ -695,4 +731,4 @@ class HttpResponseHeader(HttpResponse):
 
     @staticmethod
     def _parser_class() -> str:
-        return "header_http"
+        return "http_header"

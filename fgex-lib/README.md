@@ -50,7 +50,7 @@ def my_filter(raw_packet: RawPacket): #Logging filter
 
 ## Data handlers
 
-### RawPacket 
+### RawPacket
 ```python
 from firegex.nfproxy import RawPacket
 ```
@@ -111,6 +111,12 @@ from firegex.nfproxy import HttpRequestHeader
 ```
 This handler will be called only when the request headers are complete. It will receive a HttpRequestHeader object with the same properties as HttpRequest.
 
+### HttpFullRequest
+```python
+from firegex.nfproxy import HttpFullRequest
+```
+This handler will be called only when the request is complete. It will receive a HttpFullRequest object with the same properties as HttpRequest.
+
 ### HttpResponse
 ```python
 from firegex.nfproxy import HttpResponse
@@ -138,3 +144,8 @@ from firegex.nfproxy import HttpResponseHeader
 ```
 This handler will be called only when the response headers are complete. It will receive a HttpResponseHeader object with the same properties as HttpResponse.
 
+### HttpFullResponse
+```python
+from firegex.nfproxy import HttpFullResponse
+```
+This handler will be called only when the response is complete. It will receive a HttpFullResponse object with the same properties as HttpResponse.
