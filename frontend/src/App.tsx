@@ -21,7 +21,25 @@ function App() {
   const [reqError, setReqError] = useState<undefined|string>()
   const [error, setError] = useState<string|null>()
   const [loadinBtn, setLoadingBtn] = useState(false);
-  
+  const queryClient = useQueryClient()
+
+  useEffect(()=>{
+    socketio.auth = { token: localStorage.getItem("access_token") }
+    socketio.connect()
+    getStatus()
+    socketio.on("update", (data) => {
+      queryClient.invalidateQueries({ queryKey: data  })
+    })
+    socketio.on("connect_error", (err) => {
+      errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
+      getStatus()
+    });
+  return () => {
+    socketio.off("update")
+    socketio.off("connect_error")
+    socketio.disconnect()
+  }
+},[])
 
   const getStatus = () =>{
     getstatus().then( res =>{
@@ -139,26 +157,6 @@ function App() {
 }
 
 const PageRouting = ({ getStatus }:{ getStatus:()=>void }) => {
-
-  const queryClient = useQueryClient()
-
-  useEffect(()=>{
-    socketio.auth = { token: localStorage.getItem("access_token") }
-    socketio.connect()
-    getStatus()
-    socketio.on("update", (data) => {
-      queryClient.invalidateQueries({ queryKey: data  })
-    })
-    socketio.on("connect_error", (err) => {
-      errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
-      getStatus()
-    });
-  return () => {
-    socketio.off("update")
-    socketio.off("connect_error")
-    socketio.disconnect()
-  }
-},[])
 
   return <Routes>
   <Route element={<MainLayout><Outlet /></MainLayout>}>
