@@ -45,7 +45,7 @@ Heres a brief description about the firegex structure:
 - [Frontend (React)](frontend/README.md)
 - [Backend (FastAPI + C++)](backend/README.md)
 
-Some more specific information about how firegex works, and in particular how the nfproxy module works, are available here (in italian only): https://github.com/domysh/engineering-thesis
+More specific information about how Firegex works, and in particular about the nfproxy module, are available here (in italian only): [https://github.com/domysh/engineering-thesis](https://github.com/domysh/engineering-thesis) (PDF in the release attachments)
 
 ![Firegex Working Scheme](docs/FiregexInternals.png)
 
