@@ -1,7 +1,7 @@
 import { ActionIcon, Badge, Box, Code, LoadingOverlay, Space, ThemeIcon, Title, Tooltip } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { BsPlusLg } from "react-icons/bs";
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import ServiceRow from '../../components/NFProxy/ServiceRow';
 import { errorNotify, getErrorMessage, isMediumScreen } from '../../js/utils';
 import AddEditService from '../../components/NFProxy/AddEditService';

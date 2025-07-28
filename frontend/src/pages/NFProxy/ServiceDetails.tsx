@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Code, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router';
 import { Badge, Divider, Menu } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { FaFilter, FaPencilAlt, FaPlay, FaStop } from 'react-icons/fa';

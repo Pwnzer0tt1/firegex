@@ -4,7 +4,7 @@ import { AppShell } from '@mantine/core';
 import NavBar from './NavBar';
 import HeaderPage from './Header';
 import { getMainPath } from '../js/utils';
-import { useLocation } from 'react-router-dom';
+import { useLocation } from 'react-router';
 import { useNavbarStore } from '../js/store';
 import { HiMenu } from "react-icons/hi";
 

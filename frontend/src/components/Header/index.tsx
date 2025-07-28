@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ActionIcon, Divider, Image, Menu, Tooltip, Burger, Space, AppShell, Box, Title } from '@mantine/core';
 import { errorNotify, getMainPath, isLargeScreen, logout } from '../../js/utils';
 import { AiFillHome } from "react-icons/ai"
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { FaLock } from 'react-icons/fa';
 import { MdOutlineSettingsBackupRestore } from 'react-icons/md';
 import { ImExit } from 'react-icons/im';

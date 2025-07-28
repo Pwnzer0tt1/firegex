@@ -1,5 +1,5 @@
 import { ActionIcon, Box, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router';
 import RegexView from '../../components/RegexView';
 import AddNewRegex from '../../components/AddNewRegex';
 import { BsPlusLg } from "react-icons/bs";

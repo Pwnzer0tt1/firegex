@@ -1,7 +1,7 @@
 import { Divider, Group, MantineColor, ScrollArea, Text, ThemeIcon, Title, UnstyledButton, Box, AppShell } from "@mantine/core";
 import { useState } from "react";
 import { TbPlugConnected } from "react-icons/tb";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 import { GrDirections } from "react-icons/gr";
 import { PiWallLight } from "react-icons/pi";
 import { useNavbarStore } from "../../js/store";

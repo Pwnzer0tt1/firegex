@@ -1,7 +1,7 @@
 import { ActionIcon, Badge, Box, LoadingOverlay, Space, ThemeIcon, Title, Tooltip } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { BsPlusLg, BsRegex } from "react-icons/bs";
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import ServiceRow from '../../components/NFRegex/ServiceRow';
 import { nfregexServiceQuery } from '../../components/NFRegex/utils';
 import { errorNotify, getErrorMessage, isMediumScreen } from '../../js/utils';

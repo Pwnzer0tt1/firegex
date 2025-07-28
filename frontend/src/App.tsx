@@ -2,7 +2,7 @@ import { Button, Group, Loader, LoadingOverlay, Notification, Space, PasswordInp
 import { useForm } from '@mantine/form';
 import { useEffect, useState } from 'react';
 import { ImCross } from 'react-icons/im';
-import { Outlet, Route, Routes } from 'react-router-dom';
+import { Outlet, Route, Routes } from 'react-router';
 import MainLayout from './components/MainLayout';
 import { PasswordSend, ServerStatusResponse } from './js/models';
 import { errorNotify, getstatus, HomeRedirector, IS_DEV, login, setpassword, socketio } from './js/utils';

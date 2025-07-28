@@ -1,7 +1,7 @@
 import { showNotification } from "@mantine/notifications";
 import { ImCross } from "react-icons/im";
 import { TiTick } from "react-icons/ti"
-import { Navigate } from "react-router-dom";
+import { Navigate } from "react-router";
 import { ChangePassword, IpInterface, LoginResponse, PasswordSend, ServerResponse, ServerResponseToken, ServerStatusResponse } from "./models";
 import { Buffer } from "buffer"
 import { QueryClient, useQuery } from "@tanstack/react-query";
