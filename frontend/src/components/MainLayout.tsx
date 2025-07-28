@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
-import { ActionIcon, Container, Menu, Space } from '@mantine/core';
+import { ActionIcon, Container, Menu, Space, Tooltip } from '@mantine/core';
 import { AppShell } from '@mantine/core';
 import NavBar from './NavBar';
 import HeaderPage from './Header';
 import { getMainPath } from '../js/utils';
 import { useLocation } from 'react-router-dom';
-import { RiMenu5Fill } from 'react-icons/ri';
 import { useNavbarStore } from '../js/store';
+import { HiMenu } from "react-icons/hi";
 
 
 function MainLayout({ children }:{ children:any }) {
@@ -39,9 +39,11 @@ export default MainLayout;
 
 export const MenuDropDownWithButton = ({children}:{children:any}) => <Menu withArrow>
         <Menu.Target>
-            <ActionIcon variant='transparent'>
-                <RiMenu5Fill size={24} color='#FFF'/>
-            </ActionIcon>
+            <Tooltip label="More options" color="gray">
+              <ActionIcon variant='transparent'>
+                  <HiMenu size={24} color='#FFF'/>
+              </ActionIcon>
+            </Tooltip>
         </Menu.Target>
         <Menu.Dropdown>
             {children}

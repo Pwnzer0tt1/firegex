@@ -263,7 +263,7 @@ class PktRequest {
 	void drop(){
 		if (action == FilterAction::NOACTION){
 			action = FilterAction::DROP;
-			perfrom_action();
+			perform_action();
 		}else{
 			throw invalid_argument("Cannot drop a packet that has already been dropped or accepted");
 		}
@@ -276,7 +276,7 @@ class PktRequest {
 	void accept(){
 		if (action == FilterAction::NOACTION){
 			action = FilterAction::ACCEPT;
-			perfrom_action();
+			perform_action();
 		}else{
 			throw invalid_argument("Cannot accept a packet that has already been dropped or accepted");
 		}
@@ -285,7 +285,7 @@ class PktRequest {
 	void mangle(){
 		if (action == FilterAction::NOACTION){
 			action = FilterAction::MANGLE;
-			perfrom_action();
+			perform_action();
 		}else{
 			throw invalid_argument("Cannot mangle a packet that has already been accepted or dropped");
 		}
@@ -320,7 +320,7 @@ class PktRequest {
 				#endif
 				action = FilterAction::DROP;
 			}
-			perfrom_action(false);
+			perform_action(false);
 		}else{
 			throw invalid_argument("Cannot mangle a packet that has already been accepted or dropped");
 		}
@@ -344,8 +344,8 @@ class PktRequest {
 	}
 
 	private:
-	void perfrom_action(bool do_serialize = true){
-		char buf[MNL_SOCKET_BUFFER_SIZE];
+	void perform_action(bool do_serialize = true){
+		char buf[MNL_SOCKET_BUFFER_SIZE+packet.size()];
 		struct nlmsghdr *nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(res_id));
 		switch (action)
 		{
