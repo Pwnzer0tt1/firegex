@@ -13,6 +13,7 @@ import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
 import NFProxy from './pages/NFProxy';
 import ServiceDetailsNFProxy from './pages/NFProxy/ServiceDetails';
+import { useAuth } from './js/store';
 
 function App() {
 
@@ -22,16 +23,19 @@ function App() {
   const [error, setError] = useState<string|null>()
   const [loadinBtn, setLoadingBtn] = useState(false);
   const queryClient = useQueryClient()
+  const { isAuthenticated, access_token } = useAuth()
 
   useEffect(()=>{
-    socketio.auth = { token: localStorage.getItem("access_token") }
+    socketio.auth = { token: access_token || "" }
     socketio.connect()
     getStatus()
     socketio.on("update", (data) => {
       queryClient.invalidateQueries({ queryKey: data  })
     })
     socketio.on("connect_error", (err) => {
-      errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
+      if (access_token){
+        errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
+      }
       getStatus()
     });
   return () => {
@@ -39,7 +43,7 @@ function App() {
     socketio.off("connect_error")
     socketio.disconnect()
   }
-},[])
+},[isAuthenticated])
 
   const getStatus = () =>{
     getstatus().then( res =>{

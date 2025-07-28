@@ -7,6 +7,7 @@ import { Buffer } from "buffer"
 import { QueryClient, useQuery } from "@tanstack/react-query";
 import { useMediaQuery } from "@mantine/hooks";
 import { io } from "socket.io-client";
+import { useAuthStore, useSessionStore } from "./store";
 
 export const IS_DEV = import.meta.env.DEV
 
@@ -32,14 +33,14 @@ export const socketio = import.meta.env.DEV?
         path:"/sock/socket.io",
         transports: ['websocket'],
         auth: {
-            token: localStorage.getItem("access_token")
+            token: useAuthStore.getState().getAccessToken()
         }
     }):
     io({
         path:"/sock/socket.io",
         transports: ['websocket'],
         auth: {
-            token: localStorage.getItem("access_token")
+            token: useAuthStore.getState().getAccessToken()
         }
     })
 
@@ -86,7 +87,7 @@ export async function genericapi(method:string,path:string,data:any = undefined,
             cache: 'no-cache',
             headers: {
               ...(data?{'Content-Type': is_form ? 'application/x-www-form-urlencoded' : 'application/json'}:{}),
-              "Authorization" : "Bearer " + window.localStorage.getItem("access_token")
+              "Authorization" : "Bearer " + useAuthStore.getState().getAccessToken()
             },
             body: data? (is_form ? (new URLSearchParams(data)).toString() : JSON.stringify(data)) : undefined
         }).then(res => {
@@ -132,7 +133,7 @@ export function getMainPath(){
 }
 
 export function HomeRedirector(){
-    const section = sessionStorage.getItem("home_section")
+    const section = useSessionStore.getState().getHomeSection();
     const path = section?`/${section}`:`/nfregex`
     return <Navigate to={path} replace/>
 }
@@ -153,27 +154,27 @@ export async function getstatus(){
 }
 
 export async function logout(){
-    window.localStorage.removeItem("access_token")
+    useAuthStore.getState().clearAccessToken();
 }
 
 export async function setpassword(data:PasswordSend) {
     const { status, access_token } = await postapi("set-password",data) as ServerResponseToken;
     if (access_token)
-        window.localStorage.setItem("access_token", access_token);
+        useAuthStore.getState().setAccessToken(access_token);
     return status === "ok"?undefined:status
 }
 
 export async function changepassword(data:ChangePassword) {
     const { status, access_token } = await postapi("change-password",data) as ServerResponseToken;
     if (access_token)
-        window.localStorage.setItem("access_token", access_token);
+        useAuthStore.getState().setAccessToken(access_token);
         return status === "ok"?undefined:status
 }
 
 export async function login(data:PasswordSend) {
     const from = {username: "login", password: data.password};
     const { status, access_token } = await postapi("login",from,true) as LoginResponse;
-    window.localStorage.setItem("access_token", access_token);
+    useAuthStore.getState().setAccessToken(access_token);
     return status;
 }
 
