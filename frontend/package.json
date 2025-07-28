@@ -12,13 +12,7 @@
     "@mantine/modals": "^8.2.1",
     "@mantine/notifications": "^8.2.1",
     "@tanstack/react-query": "^4.40.1",
-    "@types/jest": "^27.5.2",
-    "@types/node": "^20.19.9",
-    "@types/react": "^18.3.23",
-    "@types/react-dom": "^18.3.7",
     "buffer": "^6.0.3",
-    "caniuse-lite": "^1.0.30001727",
-    "install": "^0.13.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-icons": "^5.5.0",
@@ -26,7 +20,6 @@
     "shiki": "^3.8.1",
     "socket.io-client": "^4.8.1",
     "typescript": "^5.8.3",
-    "web-vitals": "^2.1.4",
     "zustand": "^5.0.6"
   },
   "scripts": {
@@ -45,6 +38,10 @@
     "@vitejs/plugin-react": "^4.7.0",
     "vite": "^4.5.14",
     "vite-plugin-svgr": "^3.3.0",
-    "vite-tsconfig-paths": "^4.3.2"
+    "vite-tsconfig-paths": "^4.3.2",
+    "@types/jest": "^27.5.2",
+    "@types/node": "^20.19.9",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7"
   }
 }

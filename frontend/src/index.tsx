@@ -8,12 +8,13 @@ import {
 } from '@tanstack/react-query'
 import { queryClient } from './js/utils';
 import { CodeHighlightAdapterProvider, stripShikiCodeBlocks } from '@mantine/code-highlight';
+import { CodeHighlightAdapter } from '@mantine/code-highlight/lib/CodeHighlightProvider/CodeHighlightProvider';
 
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';
 import '@mantine/code-highlight/styles.css';
 import './index.css';
-import { CodeHighlightAdapter } from '@mantine/code-highlight/lib/CodeHighlightProvider/CodeHighlightProvider';
+
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
