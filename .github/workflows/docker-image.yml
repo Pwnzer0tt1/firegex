@@ -20,7 +20,7 @@ jobs:
             run_tests: true
           - os: ubuntu-24.04-arm
             arch: arm64
-            run_tests: false
+            run_tests: true
     permissions:
       contents: read
       packages: write
@@ -29,11 +29,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build and run firegex (amd64 only)
+      - name: Build and run firegex
         if: matrix.run_tests
         run: python3 start.py start -P testpassword
         
-      - name: Run tests (amd64 only)
+      - name: Run tests
         if: matrix.run_tests
         run: sudo apt-get install -y iperf3 && cd tests && ./run_tests.sh
 
