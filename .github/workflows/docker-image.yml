@@ -75,10 +75,14 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           platforms: linux/${{ matrix.arch }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-${{ matrix.arch }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-${{ matrix.arch }}
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+          provenance: false
+          sbom: false
 
   docker_manifest:
     needs: docker_build
@@ -107,14 +111,34 @@ jobs:
         run: |
           # Create manifest list for specific tag
           docker manifest create ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }} \
+            --amend ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
+            --amend ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-arm64
+          
+          # Annotate the manifest with architecture info
+          docker manifest annotate ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }} \
             ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
-            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-arm64
+            --arch amd64 --os linux
+          
+          docker manifest annotate ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }} \
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-arm64 \
+            --arch arm64 --os linux
+          
           docker manifest push ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}
           
           # Create manifest list for latest tag
           docker manifest create ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest \
-            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
-            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-arm64
+            --amend ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-amd64 \
+            --amend ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-arm64
+          
+          # Annotate the latest manifest with architecture info
+          docker manifest annotate ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest \
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-amd64 \
+            --arch amd64 --os linux
+          
+          docker manifest annotate ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest \
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-arm64 \
+            --arch arm64 --os linux
+          
           docker manifest push ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest
 
   create-rootfs-assets:
