@@ -502,7 +502,7 @@ def cleanup_standalone_mounts():
     ]
     
     # Create umount commands (with || true to ignore errors)
-    umount_commands = [f"umount {mount_point} || true" for mount_point in mount_points]
+    umount_commands = [f"umount -l {mount_point} || true" for mount_point in mount_points]
     
     # Run all umount commands in one batch
     run_privileged_commands(umount_commands, "cleanup mounts")
