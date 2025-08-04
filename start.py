@@ -508,6 +508,44 @@ def cleanup_standalone_mounts():
     # Run all umount commands in one batch
     run_privileged_commands(umount_commands, "cleanup mounts")
 
+def get_latest_release_tag():
+    """Get the latest release tag from GitHub API"""
+    import urllib.request
+    import json
+    
+    try:
+        url = "https://api.github.com/repos/Pwnzer0tt1/firegex/releases/latest"
+        with urllib.request.urlopen(url) as response:
+            data = json.loads(response.read().decode())
+            return data.get('tag_name')
+    except Exception as e:
+        puts(f"Failed to get latest release tag: {e}", color=colors.red)
+        return None
+
+def get_architecture():
+    """Get current architecture (amd64 or arm64)"""
+    import platform
+    arch = platform.machine().lower()
+    if arch in ['x86_64', 'amd64']:
+        return 'amd64'
+    elif arch in ['aarch64', 'arm64']:
+        return 'arm64'
+    else:
+        puts(f"Unsupported architecture: {arch}", color=colors.red)
+        return None
+
+def download_file(url, filename):
+    """Download a file using urllib"""
+    import urllib.request
+    
+    try:
+        puts(f"Downloading {filename}...", color=colors.green)
+        urllib.request.urlretrieve(url, filename)
+        return True
+    except Exception as e:
+        puts(f"Failed to download {filename}: {e}", color=colors.red)
+        return False
+
 def setup_standalone_rootfs():
     """Set up the standalone rootfs"""
     puts("Setting up standalone mode...", color=colors.green)
@@ -526,31 +564,36 @@ def setup_standalone_rootfs():
         puts(f"Failed to create rootfs directory: {e}", color=colors.red)
         return False
     
-    # Create temporary container and export it
-    puts("Downloading and extracting Docker image...", color=colors.green)
-    
-    # Create container from image
-    create_cmd = f"docker create ghcr.io/pwnzer0tt1/firegex:{args.version}"
-    result = subprocess.run(create_cmd, shell=True, capture_output=True, text=True)
-    if result.returncode != 0:
-        puts(f"Failed to create container: {result.stderr}", color=colors.red)
+    # Get latest release tag
+    release_tag = get_latest_release_tag()
+    if not release_tag:
+        puts("Failed to get latest release tag", color=colors.red)
         return False
     
-    container_id = result.stdout.strip()
+    # Get current architecture
+    arch = get_architecture()
+    if not arch:
+        return False
+    
+    # Download rootfs from GitHub releases
+    puts(f"Downloading rootfs for {arch} architecture from GitHub releases...", color=colors.green)
+    
+    # Construct download URL
+    rootfs_filename = f"firegex-rootfs-{arch}.tar.gz"
+    download_url = f"https://github.com/Pwnzer0tt1/firegex/releases/download/{release_tag}/{rootfs_filename}"
+    tar_path = os.path.join(g.rootfs_path, rootfs_filename)
+    
+    # Download the rootfs archive
+    if not download_file(download_url, tar_path):
+        return False
     
     try:
-        # Export container to tar file
-        tar_path = os.path.join(g.rootfs_path, "latest.tar")
-        export_cmd = f"docker export --output={tar_path} {container_id}"
-        if not safe_run_command(export_cmd):
-            return False
-        
-        # Extract tar file
+        # Extract tar.gz file
         puts("Extracting rootfs...", color=colors.green)
-        with tarfile.open(tar_path, 'r') as tar:
+        with tarfile.open(tar_path, 'r:gz') as tar:
             tar.extractall(path=g.rootfs_path, filter=lambda _: False)
         
-        # Remove tar file
+        # Remove tar.gz file
         os.remove(tar_path)
         
         # Create necessary directories
@@ -561,9 +604,12 @@ def setup_standalone_rootfs():
         puts("Rootfs setup completed", color=colors.green)
         return True
         
-    finally:
-        # Clean up container
-        safe_run_command(f"docker rm {container_id}", check_result=False)
+    except Exception as e:
+        puts(f"Failed to extract rootfs: {e}", color=colors.red)
+        # Clean up partial extraction
+        if os.path.exists(tar_path):
+            os.remove(tar_path)
+        return False
 
 def setup_standalone_mounts():
     """Set up bind mounts for standalone mode"""
