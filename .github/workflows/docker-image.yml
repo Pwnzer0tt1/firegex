@@ -198,21 +198,12 @@ jobs:
           gzip firegex-rootfs-arm64.tar
           ls -lh firegex-rootfs-arm64.tar.gz
 
-      - name: Calculate checksums
-        run: |
-          echo "Calculating checksums..."
-          sha256sum firegex-rootfs-amd64.tar.gz > firegex-rootfs-amd64.tar.gz.sha256
-          sha256sum firegex-rootfs-arm64.tar.gz > firegex-rootfs-arm64.tar.gz.sha256
-          cat *.sha256
-
       - name: Upload rootfs assets to release
         run: |
           echo "Uploading assets to release ${{ steps.get_tag.outputs.tag }}..."
           gh release upload ${{ steps.get_tag.outputs.tag }} \
             firegex-rootfs-amd64.tar.gz \
-            firegex-rootfs-amd64.tar.gz.sha256 \
             firegex-rootfs-arm64.tar.gz \
-            firegex-rootfs-arm64.tar.gz.sha256 \
             --clobber
           echo "Assets uploaded successfully!"
         env:

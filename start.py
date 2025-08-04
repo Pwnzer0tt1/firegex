@@ -534,14 +534,26 @@ def get_architecture():
         return None
 
 def download_file(url, filename):
-    """Download a file using urllib"""
+    """Download a file using urllib with progress bar"""
     import urllib.request
+    import sys
+    
+    def progress_hook(block_num, block_size, total_size):
+        if total_size > 0:
+            percent = min(100, (block_num * block_size * 100) // total_size)
+            sys.stdout.write(f"\rDownloading... {percent}%")
+            sys.stdout.flush()
+        else:
+            sys.stdout.write(f"\rDownloading... {block_num * block_size} bytes")
+            sys.stdout.flush()
     
     try:
         puts(f"Downloading {filename}...", color=colors.green)
-        urllib.request.urlretrieve(url, filename)
+        urllib.request.urlretrieve(url, filename, reporthook=progress_hook)
+        print()  # New line after progress
         return True
     except Exception as e:
+        print()  # New line after progress
         puts(f"Failed to download {filename}: {e}", color=colors.red)
         return False
 
@@ -590,7 +602,8 @@ def setup_standalone_rootfs():
         # Extract tar.gz file
         puts("Extracting rootfs...", color=colors.green)
         with tarfile.open(tar_path, 'r:gz') as tar:
-            tar.extractall(path=g.rootfs_path, filter=lambda _: False)
+            # Extract all files with tar filter (allows safe symbolic links)
+            tar.extractall(path=g.rootfs_path, filter='tar')
         
         # Remove tar.gz file
         os.remove(tar_path)
@@ -694,10 +707,8 @@ def run_standalone():
         # Write PID to file
         if write_pid_file(process.pid):
             puts(f"Firegex started successfully (PID: {process.pid})", color=colors.green)
-            puts(f"PID saved to: {g.pid_file}", color=colors.cyan)
             
             if is_process_running(process.pid):
-                puts("Firegex is running in background", color=colors.green)
                 puts(f"Web interface should be available at: http://localhost:{args.port}", color=colors.cyan)
             else:
                 puts("Firegex process failed to start", color=colors.red)

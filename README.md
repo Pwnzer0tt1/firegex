@@ -13,6 +13,7 @@ Firegex is a firewall that includes different functionalities, created for CTF A
 ### Docker Mode (Recommended)
 What you need is a linux machine and docker ( + docker-compose )
 ```bash
+# One-command installer (works for both Docker and standalone modes)
 sh <(curl -sLf https://pwnzer0tt1.it/firegex.sh)
 ```
 With this command you will download firegex.py, and run it, it will require you the password to use for firegex and start it with docker-compose
@@ -22,20 +23,24 @@ Or, you can start in a similar way firegex, cloning this repository and executin
 python3 start.py start --prebuilt
 ```
 
-### Standalone Mode
-If Docker is not available or you're running in a rootless environment, Firegex can run in standalone mode:
-```bash
-# Automatic detection (fallback to standalone if Docker unavailable)
-python3 start.py start
+Without the `--prebuilt` flag, it will build the docker image from source, which may take longer.
 
-# Force standalone mode
+### Standalone Mode
+If Docker is not available or you're running in a rootless environment, Firegex can run in standalone mode. The one-command installer above also works for standalone mode and will automatically detect and use standalone mode when Docker is unavailable.
+
+```bash
+sh <(curl -sLf https://pwnzer0tt1.it/firegex.sh)
+
+# Or manually force standalone mode:
 python3 start.py start --standalone
+# Or directly using the one-command installer:
+sh <(curl -sLf https://pwnzer0tt1.it/firegex.sh) --standalone
 
 # Check status
-python3 start.py status
+python3 start.py status [--standalone]
 
 # Stop standalone mode
-python3 start.py stop
+python3 start.py stop [--standalone]
 ```
 
 Standalone mode automatically:
