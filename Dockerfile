@@ -13,7 +13,7 @@ COPY ./frontend/ .
 RUN bun run build
 
 # Base fedora container
-FROM --platform=$TARGETARCH registry.fedoraproject.org/fedora:latest AS base
+FROM --platform=$TARGETARCH quay.io/fedora/fedora:42 AS base
 RUN dnf -y update && dnf install -y python3.13 libnetfilter_queue \
     libnfnetlink libmnl libcap-ng-utils nftables git \
     vectorscan libtins python3-nftables libpcap uv

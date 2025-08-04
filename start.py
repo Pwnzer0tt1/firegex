@@ -8,7 +8,6 @@ import os
 import multiprocessing
 import subprocess
 import getpass
-import shutil
 import tarfile
 
 pref = "\033["
