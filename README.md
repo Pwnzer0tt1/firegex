@@ -1,3 +1,16 @@
+
+# Rootless container and standalone install
+
+- Check if docker is in rootless mode
+
+```
+> docker info -f "{{println .SecurityOptions}}"
+[name=seccomp,profile=builtin name=rootless name=cgroupns]
+```
+
+- Start firegex without a container in case docker is not available or in rootless mode
+
+
 <h1><img align="left" src="docs/FiregexLogo.png" width="170" /><br />[Fi]*regex 🔥</h1>
 
 <a href="https://github.com/Pwnzer0tt1/firegex/releases/latest"><img alt="GitHub release (latest by date)" src="https://img.shields.io/github/v/release/pwnzer0tt1/firegex?color=D62246&style=flat-square"></a> <img alt="GitHub" src="https://img.shields.io/github/license/pwnzer0tt1/firegex?style=flat-square"> <img alt="GitHub top language" src="https://img.shields.io/github/languages/top/pwnzer0tt1/firegex?style=flat-square&color=44AA44"> <img alt="Code" src="https://img.shields.io/github/languages/code-size/pwnzer0tt1/firegex?color=%237289DA&label=Code&style=flat-square">

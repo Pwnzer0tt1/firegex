@@ -8,12 +8,17 @@ import os
 import multiprocessing
 import subprocess
 import getpass
+import shutil
+import tarfile
 
 pref = "\033["
 reset = f"{pref}0m"
 class g:
-    composefile = "firegex-compose-tmp-file.yml"
+    composefile = ".firegex-compose.yml"
     build = False
+    standalone_mode = False
+    rootfs_path = "./firegexfs"
+    pid_file = "./.firegex-standalone.pid"
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
 if os.path.isfile("./Dockerfile"):
@@ -90,6 +95,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     #Main parser
     parser = argparse.ArgumentParser(description="Firegex Manager")
     parser.add_argument('--clear', dest="bef_clear", required=False, action="store_true", help='Delete docker volume associated to firegex resetting all the settings', default=False)
+    parser.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
 
     subcommands = parser.add_subparsers(dest="command", help="Command to execute [Default start if not running]")
     
@@ -106,13 +112,20 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default=None)
     parser_start.add_argument('--prebuilt', required=False, action="store_true", help='Use prebuilt docker image', default=False)
+    parser_start.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
 
     #Stop Command
     parser_stop = subcommands.add_parser('stop', help='Stop the firewall')
     parser_stop.add_argument('--clear', required=False, action="store_true", help='Delete docker volume associated to firegex resetting all the settings', default=False)
+    parser_stop.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
     
     parser_restart = subcommands.add_parser('restart', help='Restart the firewall')
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
+    parser_restart.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
+    
+    #Status Command
+    parser_status = subcommands.add_parser('status', help='Show firewall status')
+    parser_status.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
     args = parser.parse_args(args=args_to_parse)
     
     if "version" in args and args.version and g.build:
@@ -125,8 +138,17 @@ def gen_args(args_to_parse: list[str]|None = None):
     if "prebuilt" in args and args.prebuilt:
         g.build = False
     
+    if "psw_on_web" not in args:
+        args.psw_on_web = False
+    
+    if "startup_psw" not in args:
+        args.startup_psw = None
+    
     if "clear" not in args:
         args.clear = False
+    
+    if "standalone" not in args:
+        args.standalone = False
     
     if "threads" not in args or args.threads < 1:
         args.threads = multiprocessing.cpu_count()
@@ -226,7 +248,7 @@ def write_compose(skip_password = True):
             }))
       
 def get_password():
-    if volume_exists() or args.psw_on_web:
+    if volume_exists() or args.psw_on_web or (g.standalone_mode and os.path.isfile(os.path.join(g.rootfs_path, "execute/db/firegex.db"))):
         return None
     if args.startup_psw:
         return args.startup_psw
@@ -291,8 +313,506 @@ def nfqueue_exists():
 def delete_volume():
     return cmd_check("docker volume rm firegex_firegex_data")
 
+def write_pid_file(pid):
+    """Write PID to file"""
+    try:
+        with open(g.pid_file, 'w') as f:
+            f.write(str(pid))
+        return True
+    except Exception as e:
+        puts(f"Failed to write PID file: {e}", color=colors.red)
+        return False
+
+def read_pid_file():
+    """Read PID from file"""
+    try:
+        if os.path.exists(g.pid_file):
+            with open(g.pid_file, 'r') as f:
+                return int(f.read().strip())
+        return None
+    except Exception:
+        return None
+
+def remove_pid_file():
+    """Remove PID file"""
+    try:
+        if os.path.exists(g.pid_file):
+            os.remove(g.pid_file)
+    except Exception:
+        pass
+
+def is_process_running(pid):
+    """Check if process with given PID is running"""
+    if pid is None:
+        return False
+    try:
+        # Send signal 0 to check if process exists
+        os.kill(pid, 0)
+        return True
+    except (OSError, ProcessLookupError):
+        return False
+
+def is_standalone_running():
+    """Check if standalone Firegex is already running"""
+    pid = read_pid_file()
+    if pid and is_process_running(pid):
+        return True
+    else:
+        # Clean up stale PID file
+        remove_pid_file()
+        return False
+
+def stop_standalone_process():
+    """Stop the standalone Firegex process"""
+    pid = read_pid_file()
+    if pid and is_process_running(pid):
+        try:
+            puts(f"Stopping Firegex process (PID: {pid})...", color=colors.yellow)
+            os.kill(pid, 15)  # SIGTERM
+            
+            # Wait a bit for graceful shutdown
+            import time
+            for _ in range(10):
+                if not is_process_running(pid):
+                    break
+                time.sleep(0.5)
+            
+            # Force kill if still running
+            if is_process_running(pid):
+                puts("Process didn't stop gracefully, forcing termination...", color=colors.yellow)
+                os.kill(pid, 9)  # SIGKILL
+                time.sleep(1)
+            
+            if not is_process_running(pid):
+                puts("Firegex process stopped", color=colors.green)
+                return True
+            else:
+                puts("Failed to stop Firegex process", color=colors.red)
+                return False
+                
+        except Exception as e:
+            puts(f"Error stopping process: {e}", color=colors.red)
+            return False
+    else:
+        puts("No running Firegex process found", color=colors.yellow)
+        return True
+
+def is_docker_rootless():
+    """Check if Docker is running in rootless mode"""
+    try:
+        output = cmd_check('docker info -f "{{println .SecurityOptions}}"', get_output=True)
+        return "rootless" in output.lower()
+    except Exception:
+        return False
+
+def should_use_standalone():
+    """Determine if standalone mode should be used"""
+    # Check if standalone mode is forced
+    if args.standalone:
+        return True
+    
+    if is_standalone_running():
+        return True
+    
+    # Check if Docker exists
+    if not cmd_check("docker --version"):
+        return True
+    
+    # Check if Docker Compose exists
+    if not cmd_check("docker-compose --version") and not cmd_check("docker compose --version"):
+        return True
+    
+    # Check if Docker is accessible
+    if not cmd_check("docker ps"):
+        return True
+    
+    # Check if Docker is in rootless mode
+    if is_docker_rootless():
+        return True
+    
+    return False
+
+def is_root():
+    """Check if running as root"""
+    return os.geteuid() == 0
+
+def get_sudo_prefix():
+    """Get sudo prefix if needed, empty string if already root"""
+    return "" if is_root() else "sudo "
+
+def run_privileged_commands(commands, description="operations"):
+    """Run a batch of privileged commands efficiently"""
+    if not commands:
+        return True
+    
+    if is_root():
+        # If already root, run commands directly
+        for cmd in commands:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                puts(f"Command failed: {cmd}", color=colors.red)
+                puts(f"Error: {result.stderr}", color=colors.red)
+                return False
+        return True
+    else:
+        # If not root, create a script and run it with sudo once
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.sh', delete=False) as script_file:
+            script_file.write("#!/bin/sh\nset -e\n")
+            for cmd in commands:
+                script_file.write(f"{cmd}\n")
+            script_path = script_file.name
+        
+        try:
+            os.chmod(script_path, 0o755)
+            result = subprocess.run(f"sudo sh {script_path}", shell=True, capture_output=True, text=True)
+            if result.returncode != 0:
+                puts(f"Failed to execute {description}", color=colors.red)
+                puts(f"Error: {result.stderr}", color=colors.red)
+                return False
+            return True
+        finally:
+            os.unlink(script_path)
+
+def safe_run_command(cmd, check_result=True, use_sudo=False):
+    """Run a command safely with proper error handling"""
+    if use_sudo:
+        cmd = f"{get_sudo_prefix()}{cmd}"
+    
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if check_result and result.returncode != 0:
+            puts(f"Command failed: {cmd}", color=colors.red)
+            puts(f"Error: {result.stderr}", color=colors.red)
+            return False
+        return result.returncode == 0
+    except Exception as e:
+        puts(f"Error running command: {cmd}", color=colors.red)
+        puts(f"Exception: {e}", color=colors.red)
+        return False
+
+def cleanup_standalone_mounts():
+    """Cleanup any existing mounts for standalone mode"""
+    mount_points = [
+        f"{g.rootfs_path}/dev",
+        f"{g.rootfs_path}/proc",
+        f"{g.rootfs_path}/sys_host/net.ipv4.conf.all.route_localnet",
+        f"{g.rootfs_path}/sys_host/net.ipv4.ip_forward", 
+        f"{g.rootfs_path}/sys_host/net.ipv4.conf.all.forwarding",
+        f"{g.rootfs_path}/sys_host/net.ipv6.conf.all.forwarding"
+    ]
+    
+    # Create umount commands (with || true to ignore errors)
+    umount_commands = [f"umount {mount_point} || true" for mount_point in mount_points]
+    
+    # Run all umount commands in one batch
+    run_privileged_commands(umount_commands, "cleanup mounts")
+
+def get_latest_release_tag():
+    """Get the latest release tag from GitHub API"""
+    import urllib.request
+    import json
+    
+    try:
+        url = "https://api.github.com/repos/Pwnzer0tt1/firegex/releases/latest"
+        with urllib.request.urlopen(url) as response:
+            data = json.loads(response.read().decode())
+            return data.get('tag_name')
+    except Exception as e:
+        puts(f"Failed to get latest release tag: {e}", color=colors.red)
+        return None
+
+def get_architecture():
+    """Get current architecture (amd64 or arm64)"""
+    import platform
+    arch = platform.machine().lower()
+    if arch in ['x86_64', 'amd64']:
+        return 'amd64'
+    elif arch in ['aarch64', 'arm64']:
+        return 'arm64'
+    else:
+        puts(f"Unsupported architecture: {arch}", color=colors.red)
+        return None
+
+def download_file(url, filename):
+    """Download a file using urllib"""
+    import urllib.request
+    
+    try:
+        puts(f"Downloading {filename}...", color=colors.green)
+        urllib.request.urlretrieve(url, filename)
+        return True
+    except Exception as e:
+        puts(f"Failed to download {filename}: {e}", color=colors.red)
+        return False
+
+def setup_standalone_rootfs():
+    """Set up the standalone rootfs"""
+    puts("Setting up standalone mode...", color=colors.green)
+    
+    # Remove and recreate rootfs directory
+    if os.path.exists(g.rootfs_path):
+        puts("Rootfs already exists, skipping download...", color=colors.yellow)
+        # Clean up any existing mounts
+        cleanup_standalone_mounts()
+        return True
+    
+    puts("Creating rootfs directory...", color=colors.green)
+    try:
+        os.makedirs(g.rootfs_path, exist_ok=True)
+    except Exception as e:
+        puts(f"Failed to create rootfs directory: {e}", color=colors.red)
+        return False
+    
+    # Get latest release tag
+    release_tag = get_latest_release_tag()
+    if not release_tag:
+        puts("Failed to get latest release tag", color=colors.red)
+        return False
+    
+    # Get current architecture
+    arch = get_architecture()
+    if not arch:
+        return False
+    
+    # Download rootfs from GitHub releases
+    puts(f"Downloading rootfs for {arch} architecture from GitHub releases...", color=colors.green)
+    
+    # Construct download URL
+    rootfs_filename = f"firegex-rootfs-{arch}.tar.gz"
+    download_url = f"https://github.com/Pwnzer0tt1/firegex/releases/download/{release_tag}/{rootfs_filename}"
+    tar_path = os.path.join(g.rootfs_path, rootfs_filename)
+    
+    # Download the rootfs archive
+    if not download_file(download_url, tar_path):
+        return False
+    
+    try:
+        # Extract tar.gz file
+        puts("Extracting rootfs...", color=colors.green)
+        with tarfile.open(tar_path, 'r:gz') as tar:
+            tar.extractall(path=g.rootfs_path, filter=lambda _: False)
+        
+        # Remove tar.gz file
+        os.remove(tar_path)
+        
+        # Create necessary directories
+        os.makedirs(os.path.join(g.rootfs_path, "dev"), exist_ok=True)
+        os.makedirs(os.path.join(g.rootfs_path, "proc"), exist_ok=True)
+        os.makedirs(os.path.join(g.rootfs_path, "sys_host"), exist_ok=True)
+        
+        puts("Rootfs setup completed", color=colors.green)
+        return True
+        
+    except Exception as e:
+        puts(f"Failed to extract rootfs: {e}", color=colors.red)
+        # Clean up partial extraction
+        if os.path.exists(tar_path):
+            os.remove(tar_path)
+        return False
+
+def setup_standalone_mounts():
+    """Set up bind mounts for standalone mode"""
+    puts("Setting up bind mounts...", color=colors.green)
+    
+    # Create mount point files
+    mount_files = [
+        "net.ipv4.conf.all.route_localnet",
+        "net.ipv4.ip_forward", 
+        "net.ipv4.conf.all.forwarding",
+        "net.ipv6.conf.all.forwarding"
+    ]
+    
+    sys_host_dir = os.path.join(g.rootfs_path, "sys_host")
+    
+    # Prepare all privileged commands
+    privileged_commands = []
+    
+    # Touch commands for mount point files
+    for mount_file in mount_files:
+        file_path = os.path.join(sys_host_dir, mount_file)
+        privileged_commands.append(f"touch {file_path}")
+    
+    # Mount commands
+    privileged_commands.extend([
+        f"mount --bind /dev {g.rootfs_path}/dev",
+        f"mount --bind /proc {g.rootfs_path}/proc",
+        f"mount --bind /proc/sys/net/ipv4/conf/all/route_localnet {g.rootfs_path}/sys_host/net.ipv4.conf.all.route_localnet",
+        f"mount --bind /proc/sys/net/ipv4/ip_forward {g.rootfs_path}/sys_host/net.ipv4.ip_forward",
+        f"mount --bind /proc/sys/net/ipv4/conf/all/forwarding {g.rootfs_path}/sys_host/net.ipv4.conf.all.forwarding", 
+        f"mount --bind /proc/sys/net/ipv6/conf/all/forwarding {g.rootfs_path}/sys_host/net.ipv6.conf.all.forwarding"
+    ])
+    
+    # Run all privileged commands in one batch
+    if not run_privileged_commands(privileged_commands, "setup bind mounts"):
+        puts("Failed to set up bind mounts", color=colors.red)
+        return False
+    
+    return True
+
+def run_standalone():
+    """Run Firegex in standalone mode as a daemon"""
+    puts("Starting Firegex in standalone mode...", color=colors.green)
+    
+    # Check if already running
+    if is_standalone_running():
+        puts("Firegex is already running in standalone mode!", color=colors.yellow)
+        pid = read_pid_file()
+        puts(f"Process PID: {pid}", color=colors.cyan)
+        return
+    
+    # Set up environment variables
+    env_vars = [
+        f"PORT={args.port}",
+        f"NTHREADS={args.threads}",
+    ]
+    
+    # Add password if set
+    psw_set = get_password()
+    if psw_set:
+        env_vars.append(f"HEX_SET_PSW={psw_set.encode().hex()}")
+    
+    # Prepare environment string for chroot
+    env_string = " ".join([f"{var}" for var in env_vars])
+    
+    # Run chroot command in background
+    chroot_cmd = f"{get_sudo_prefix()}env {env_string} chroot --userspec=root:root {g.rootfs_path} /bin/python3 /execute/app.py DOCKER"
+    
+    puts(f"Running: {chroot_cmd}", color=colors.cyan)
+    puts("Starting as daemon...", color=colors.green)
+    
+    try:
+        # Start process in background
+        process = subprocess.Popen(
+            chroot_cmd,
+            shell=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            preexec_fn=os.setsid  # Create new session
+        )
+        
+        # Write PID to file
+        if write_pid_file(process.pid):
+            puts(f"Firegex started successfully (PID: {process.pid})", color=colors.green)
+            puts(f"PID saved to: {g.pid_file}", color=colors.cyan)
+            
+            if is_process_running(process.pid):
+                puts("Firegex is running in background", color=colors.green)
+                puts(f"Web interface should be available at: http://localhost:{args.port}", color=colors.cyan)
+            else:
+                puts("Firegex process failed to start", color=colors.red)
+                remove_pid_file()
+                cleanup_standalone_mounts()
+        else:
+            puts("Failed to save PID file", color=colors.red)
+            process.terminate()
+            cleanup_standalone_mounts()
+            
+    except Exception as e:
+        puts(f"Failed to start Firegex: {e}", color=colors.red)
+        cleanup_standalone_mounts()
+
+def stop_standalone():
+    """Stop standalone mode by stopping the process and cleaning up mounts"""
+    puts("Stopping standalone mode...", color=colors.green)
+    
+    # Stop the process
+    if stop_standalone_process():
+        # Clean up mounts
+        cleanup_standalone_mounts()
+        # Remove PID file
+        remove_pid_file()
+        puts("Standalone mode stopped", color=colors.green)
+    else:
+        # Clean up anyway
+        cleanup_standalone_mounts()
+        remove_pid_file()
+        puts("Cleanup completed", color=colors.yellow)
+
+def clear_standalone():
+    """Clear standalone rootfs"""
+    puts("Clearing standalone rootfs...", color=colors.green)
+    cleanup_standalone_mounts()
+    if os.path.exists(g.rootfs_path):
+        # If permission denied, use privileged command
+        if run_privileged_commands([f"chmod ugo+rw -R {g.rootfs_path}", f"rm -rf {g.rootfs_path}"], "remove rootfs"):
+            puts("Standalone rootfs cleared", color=colors.green)
+        else:
+            puts("Failed to clear standalone rootfs", color=colors.red)
+    else:
+        puts("Standalone rootfs not found", color=colors.yellow)
+
+def status_standalone():
+    """Show standalone mode status"""
+    puts("Standalone mode status:", color=colors.cyan, is_bold=True)
+    
+    # Check if running
+    if is_standalone_running():
+        pid = read_pid_file()
+        puts(f"Status: Running (PID: {pid})", color=colors.green)
+        puts(f"Web interface: http://localhost:{args.port}", color=colors.cyan)
+    else:
+        puts("Status: Not running", color=colors.red)
+        if os.path.exists(g.rootfs_path):
+            puts(f"Rootfs: Available ({g.rootfs_path})", color=colors.white)
+        else:
+            puts("Rootfs: Not available", color=colors.yellow)
+
 def main():
     
+    # Check if we should use standalone mode
+    if should_use_standalone():
+        if not is_linux():
+            puts("Standalone mode only works on Linux!", color=colors.red)
+            puts("Please install Docker and Docker Compose.", color=colors.red)
+            exit(1)
+        
+        g.standalone_mode = True
+        if args.standalone:
+            puts("Standalone mode forced by --standalone option", color=colors.cyan)
+        elif is_standalone_running():
+            puts("Standalone mode already running, using it", color=colors.cyan)
+        else:
+            puts("Docker not available or in rootless mode, using standalone mode", color=colors.yellow)
+        
+        # Ensure we have root privileges for standalone mode operations
+        if not is_root():
+            puts("Standalone mode requires root privileges. 'sudo' will be used.", color=colors.yellow)
+        
+        if args.command == "start" or args.command is None:
+            # Check if already running
+            if is_standalone_running():
+                pid = read_pid_file()
+                puts(f"Firegex is already running in standalone mode! (PID: {pid})", color=colors.yellow)
+                puts(f"Web interface available at: http://localhost:{args.port}", color=colors.cyan)
+                return
+            
+            if not setup_standalone_rootfs():
+                exit(1)
+            if not setup_standalone_mounts():
+                exit(1)
+            run_standalone()
+        elif args.command == "stop":
+            stop_standalone()
+        elif args.command == "status":
+            status_standalone()
+        elif args.command == "restart":
+            stop_standalone()
+            if not setup_standalone_mounts():
+                exit(1)
+            run_standalone()
+        else:
+            puts("Command not supported in standalone mode", color=colors.red)
+            exit(1)
+            
+        # Handle clear option for standalone mode
+        if args.clear:
+            clear_standalone()
+            
+        return
+    
+    # Original Docker-based logic
     if not cmd_check("docker --version"):
         puts("Docker not found! please install docker and docker compose!", color=colors.red)
         exit()
@@ -348,6 +868,12 @@ def main():
                     composecmd("down", g.composefile)
                 else:
                     puts("Firegex is not running!" , color=colors.red, is_bold=True, flush=True)
+            case "status":
+                if check_already_running():
+                    puts("Firegex is running in Docker mode", color=colors.green)
+                    puts(f"Web interface: http://localhost:{args.port}", color=colors.cyan)
+                else:
+                    puts("Firegex is not running", color=colors.red)
     
     write_compose()
     
@@ -363,10 +889,6 @@ def main():
 
 if __name__ == "__main__":
     try:
-        try:
-            main()
-        finally:
-            if os.path.isfile(g.composefile):
-                os.remove(g.composefile)
+        main()
     except KeyboardInterrupt:
         print()
