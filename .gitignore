@@ -29,7 +29,13 @@
 /backend/modules/proxy
 /docker-compose.yml
 /firegex-compose.yml
-/firegex-compose-tmp-file.yml
+/.firegex-compose.yml
+
+/.firegex-standalone.pid
+
+/firegexfs/**
+/firegexfs
+
 /firegex.py
 /tests/benchmark.csv
 /tests/comparemark.csv
