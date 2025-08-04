@@ -9,6 +9,8 @@
 Firegex is a firewall that includes different functionalities, created for CTF Attack-Defense competitions that has the aim to limit or totally deny malicious traffic through the use of different kind of filters.
 
 ## Get started firegex
+
+### Docker Mode (Recommended)
 What you need is a linux machine and docker ( + docker-compose )
 ```bash
 sh <(curl -sLf https://pwnzer0tt1.it/firegex.sh)
@@ -19,6 +21,32 @@ Or, you can start in a similar way firegex, cloning this repository and executin
 ```bash
 python3 start.py start --prebuilt
 ```
+
+### Standalone Mode
+If Docker is not available or you're running in a rootless environment, Firegex can run in standalone mode:
+```bash
+# Automatic detection (fallback to standalone if Docker unavailable)
+python3 start.py start
+
+# Force standalone mode
+python3 start.py start --standalone
+
+# Check status
+python3 start.py status
+
+# Stop standalone mode
+python3 start.py stop
+```
+
+Standalone mode automatically:
+- Downloads pre-built rootfs from GitHub releases
+- Detects your architecture (amd64/arm64)
+- Sets up chroot environment with necessary bind mounts
+- Runs as a background daemon process
+- Manages PID files for process control
+
+If the server is restarted, docker mode will automatically restart the service, while standalone mode will require you to run the start command again manually.
+
 Cloning the repository start.py will automatically build the docker image of firegex from source, and start it.
 Image building of firegex will require more time, so it's recommended to use the version just builded and available in the github packages.
 This is default behaviour if start.py is not in the firegex source root directory.
@@ -35,6 +63,46 @@ All the configuration at the startup is customizable in [firegex.py](./start.py)
 - Create basic firewall rules to allow and deny specific traffic, like ufw or iptables but using firegex graphic interface (by using [nftable](https://netfilter.org/projects/nftables/))
 - Port Hijacking allows you to redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using the loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
 - EXPERIMENTAL: Netfilter Proxy uses [nfqueue](https://netfilter.org/projects/libnetfilter_queue/) to simulate a python proxy, you can write your own filter in python and use it to filter the traffic. There are built-in some data handler to parse protocols like HTTP, and before apply the filter you can test it with fgex command (you need to install firegex lib from pypi).
+
+## Deployment Modes
+
+### Docker Mode
+The default and recommended deployment method using Docker containers. Provides complete isolation and easy management.
+
+### Standalone Mode
+When Docker is not available or when running in environments where Docker cannot be used (e.g., rootless containers, restricted environments), Firegex can run in standalone mode.
+
+**How Standalone Mode Works:**
+1. **Automatic Detection**: If Docker is unavailable or in rootless mode, standalone mode is automatically enabled
+2. **Rootfs Download**: Downloads pre-built filesystem archives from GitHub releases based on your architecture
+3. **Chroot Environment**: Creates an isolated chroot environment with necessary system mounts
+4. **Daemon Process**: Runs as a background daemon with PID management
+5. **Process Control**: Provides start/stop/status commands for service management
+
+**Standalone Mode Commands:**
+```bash
+# Start (automatically detects if standalone needed)
+python3 start.py start
+
+# Force standalone mode
+python3 start.py --standalone start
+
+# Check if running
+python3 start.py status
+
+# Stop the service
+python3 start.py stop
+
+# Clean up rootfs (removes downloaded files)
+python3 start.py --clear-standalone
+```
+
+**Technical Details:**
+- Downloads `firegex-rootfs-{arch}.tar.gz` from latest GitHub release
+- Creates chroot environment in `~/.firegex/rootfs/`
+- Bind mounts `/dev`, `/proc`, and network configuration files
+- Manages daemon process with PID file in `~/.firegex/firegex.pid`
+- Automatically handles privilege escalation using sudo when needed
 
 ## Documentation
 
