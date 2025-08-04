@@ -29,6 +29,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Convert repository name to lowercase
+        id: lowercase
+        run: echo "image_name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
       - name: Build and run firegex
         if: matrix.run_tests
         run: python3 start.py start -P testpassword
@@ -52,7 +56,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
           
       - name: Extract tag name
         id: tag
@@ -71,7 +75,7 @@ jobs:
           builder: ${{ steps.buildx.outputs.name }}
           platforms: linux/${{ matrix.arch }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG_NAME }}-${{ matrix.arch }}
+          tags: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
@@ -84,6 +88,10 @@ jobs:
       packages: write
 
     steps:
+      - name: Convert repository name to lowercase
+        id: lowercase
+        run: echo "image_name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -98,16 +106,16 @@ jobs:
       - name: Create and push multi-platform manifest
         run: |
           # Create manifest list for specific tag
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG_NAME }} \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG_NAME }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG_NAME }}
+          docker manifest create ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }} \
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}
           
           # Create manifest list for latest tag
-          docker manifest create ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.TAG_NAME }}-arm64
-          docker manifest push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          docker manifest create ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest \
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
+            ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-arm64
+          docker manifest push ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest
 
   create-rootfs-assets:
     runs-on: ubuntu-latest
@@ -119,6 +127,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Convert repository name to lowercase
+        id: lowercase
+        run: echo "image_name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@master
@@ -145,7 +157,7 @@ jobs:
       - name: Export rootfs for amd64
         run: |
           echo "Creating and exporting amd64 container..."
-          CONTAINER_ID=$(docker create --platform linux/amd64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_tag.outputs.tag }})
+          CONTAINER_ID=$(docker create --platform linux/amd64 ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.get_tag.outputs.tag }})
           docker export $CONTAINER_ID --output="firegex-rootfs-amd64.tar"
           docker rm $CONTAINER_ID
           echo "Compressing amd64 rootfs..."
@@ -155,7 +167,7 @@ jobs:
       - name: Export rootfs for arm64
         run: |
           echo "Creating and exporting arm64 container..."
-          CONTAINER_ID=$(docker create --platform linux/arm64 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.get_tag.outputs.tag }})
+          CONTAINER_ID=$(docker create --platform linux/arm64 ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.get_tag.outputs.tag }})
           docker export $CONTAINER_ID --output="firegex-rootfs-arm64.tar"
           docker rm $CONTAINER_ID
           echo "Compressing arm64 rootfs..."
