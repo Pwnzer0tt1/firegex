@@ -30,6 +30,7 @@
 /docker-compose.yml
 /firegex-compose.yml
 /.firegex-compose.yml
+/.firegex-conf.json
 
 /.firegex-standalone.pid
 

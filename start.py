@@ -14,6 +14,7 @@ pref = "\033["
 reset = f"{pref}0m"
 class g:
     composefile = ".firegex-compose.yml"
+    configfile = ".firegex-conf.json"
     build = False
     standalone_mode = False
     rootfs_path = "./firegexfs"
@@ -89,7 +90,44 @@ def composecmd(cmd, composefile=None):
 def check_already_running():
     return "firegex" in cmd_check('docker ps --filter "name=^firegex$"', get_output=True)
 
+def load_config():
+    """Load configuration from .firegex-conf.json"""
+    import json
+    default_config = {
+        "port": 4444,
+        "host": "0.0.0.0"
+    }
+    
+    if os.path.isfile(g.configfile):
+        try:
+            with open(g.configfile, 'r') as f:
+                config = json.load(f)
+                # Ensure all required keys exist
+                for key, value in default_config.items():
+                    if key not in config:
+                        config[key] = value
+                return config
+        except (json.JSONDecodeError, IOError) as e:
+            puts(f"Warning: Failed to load config file {g.configfile}: {e}", color=colors.yellow)
+            puts("Using default configuration", color=colors.yellow)
+    
+    return default_config
+
+def save_config(config):
+    """Save configuration to .firegex-conf.json"""
+    import json
+    try:
+        with open(g.configfile, 'w') as f:
+            json.dump(config, f, indent=2)
+        return True
+    except IOError as e:
+        puts(f"Warning: Failed to save config file {g.configfile}: {e}", color=colors.yellow)
+        return False
+
 def gen_args(args_to_parse: list[str]|None = None):                     
+    
+    # Load configuration
+    config = load_config()
     
     #Main parser
     parser = argparse.ArgumentParser(description="Firegex Manager")
@@ -107,7 +145,8 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--threads', "-t", type=int, required=False, help='Number of threads started for each service/utility', default=-1)
     parser_start.add_argument('--startup-psw','-P', required=False, help='Insert password in the startup screen of firegex', type=str, default=None)
     parser_start.add_argument('--psw-on-web', required=False, help='Setup firegex password on the web interface', action="store_true", default=False)
-    parser_start.add_argument('--port', "-p", type=int, required=False, help='Port where open the web service of the firewall', default=4444)
+    parser_start.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
+    parser_start.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default=None)
     parser_start.add_argument('--prebuilt', required=False, action="store_true", help='Use prebuilt docker image', default=False)
@@ -119,12 +158,22 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_stop.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
     
     parser_restart = subcommands.add_parser('restart', help='Restart the firewall')
+    parser_restart.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
+    parser_restart.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_restart.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
     
     #Status Command
     parser_status = subcommands.add_parser('status', help='Show firewall status')
+    parser_status.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
+    parser_status.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_status.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
+    
+    #Config Command
+    parser_config = subcommands.add_parser('config', help='Manage configuration settings')
+    parser_config.add_argument('--port', "-p", type=int, required=False, help='Set default port for web service')
+    parser_config.add_argument('--host', required=False, help='Set default host IP address to bind the service to')
+    parser_config.add_argument('--show', required=False, action="store_true", help='Show current configuration', default=False)
     args = parser.parse_args(args=args_to_parse)
     
     if "version" in args and args.version and g.build:
@@ -152,8 +201,24 @@ def gen_args(args_to_parse: list[str]|None = None):
     if "threads" not in args or args.threads < 1:
         args.threads = multiprocessing.cpu_count()
     
+    # Use config values as fallback, but allow command line to override
     if "port" not in args or args.port < 1:
-        args.port = 4444
+        args.port = config["port"]
+    
+    if "host" not in args:
+        args.host = config["host"]
+    
+    # Save configuration if values were specified via command line and differ from config
+    config_changed = False
+    if hasattr(args, 'port') and args.port != config["port"]:
+        config["port"] = args.port
+        config_changed = True
+    if hasattr(args, 'host') and args.host != config["host"]:
+        config["host"] = args.host
+        config_changed = True
+    
+    if config_changed:
+        save_config(config)
     
     if args.command is None:
         if not args.clear:
@@ -167,6 +232,16 @@ args = gen_args()
 
 def is_linux():
     return "linux" in sys.platform and 'microsoft-standard' not in platform.uname().release
+
+def get_web_interface_url():
+    # In modalità host network (Linux), l'host configurato non è applicabile
+    # quindi usiamo sempre localhost
+    if is_linux():
+        return f"http://localhost:{args.port}"
+    # Per altre piattaforme, usiamo l'host configurato se non è 0.0.0.0
+    # altrimenti usiamo localhost per evitare confusione
+    display_host = "localhost" if args.host == "0.0.0.0" else args.host
+    return f"http://{display_host}:{args.port}"
 
 def write_compose(skip_password = True):
     psw_set = get_password() if not skip_password else None
@@ -182,6 +257,7 @@ def write_compose(skip_password = True):
                         "network_mode": "host",
                         "environment": [
                             f"PORT={args.port}",
+                            f"HOST={args.host}",
                             f"NTHREADS={args.threads}",
                             *([f"HEX_SET_PSW={psw_set.encode().hex()}"] if psw_set else [])
                         ],
@@ -226,7 +302,7 @@ def write_compose(skip_password = True):
                         "container_name": "firegex",
                         "build" if g.build else "image": "." if g.build else f"ghcr.io/pwnzer0tt1/firegex:{args.version}",
                         "ports": [
-                            f"{args.port}:{args.port}"
+                            f"{args.host}:{args.port}:{args.port}"
                         ],
                         "environment": [
                             f"PORT={args.port}",
@@ -676,6 +752,7 @@ def run_standalone():
     # Set up environment variables
     env_vars = [
         f"PORT={args.port}",
+        f"HOST={args.host}",
         f"NTHREADS={args.threads}",
     ]
     
@@ -709,7 +786,7 @@ def run_standalone():
             puts(f"Firegex started successfully (PID: {process.pid})", color=colors.green)
             
             if is_process_running(process.pid):
-                puts(f"Web interface should be available at: http://localhost:{args.port}", color=colors.cyan)
+                puts(f"Web interface should be available at: {get_web_interface_url()}", color=colors.cyan)
             else:
                 puts("Firegex process failed to start", color=colors.red)
                 remove_pid_file()
@@ -753,6 +830,40 @@ def clear_standalone():
     else:
         puts("Standalone rootfs not found", color=colors.yellow)
 
+def handle_config_command(args):
+    """Handle config command"""
+    config = load_config()
+    config_changed = False
+    
+    if args.show:
+        puts("Current configuration:", color=colors.cyan, is_bold=True)
+        puts(f"Port: {config['port']}", color=colors.white)
+        puts(f"Host: {config['host']}", color=colors.white)
+        puts(f"Config file: {g.configfile}", color=colors.white)
+        return
+    
+    if hasattr(args, 'port') and args.port is not None:
+        if args.port < 1 or args.port > 65535:
+            puts("Error: Port must be between 1 and 65535", color=colors.red)
+            exit(1)
+        config["port"] = args.port
+        config_changed = True
+        puts(f"Port set to: {args.port}", color=colors.green)
+    
+    if hasattr(args, 'host') and args.host is not None:
+        config["host"] = args.host
+        config_changed = True
+        puts(f"Host set to: {args.host}", color=colors.green)
+    
+    if config_changed:
+        if save_config(config):
+            puts(f"Configuration saved to {g.configfile}", color=colors.green)
+        else:
+            puts("Failed to save configuration", color=colors.red)
+            exit(1)
+    else:
+        puts("No configuration changes specified. Use --show to view current configuration.", color=colors.yellow)
+
 def status_standalone():
     """Show standalone mode status"""
     puts("Standalone mode status:", color=colors.cyan, is_bold=True)
@@ -761,7 +872,7 @@ def status_standalone():
     if is_standalone_running():
         pid = read_pid_file()
         puts(f"Status: Running (PID: {pid})", color=colors.green)
-        puts(f"Web interface: http://localhost:{args.port}", color=colors.cyan)
+        puts(f"Web interface: {get_web_interface_url()}", color=colors.cyan)
     else:
         puts("Status: Not running", color=colors.red)
         if os.path.exists(g.rootfs_path):
@@ -795,7 +906,7 @@ def main():
             if is_standalone_running():
                 pid = read_pid_file()
                 puts(f"Firegex is already running in standalone mode! (PID: {pid})", color=colors.yellow)
-                puts(f"Web interface available at: http://localhost:{args.port}", color=colors.cyan)
+                puts(f"Web interface available at: {get_web_interface_url()}", color=colors.cyan)
                 return
             
             if not setup_standalone_rootfs():
@@ -812,6 +923,8 @@ def main():
             if not setup_standalone_mounts():
                 exit(1)
             run_standalone()
+        elif args.command == "config":
+            handle_config_command(args)
         else:
             puts("Command not supported in standalone mode", color=colors.red)
             exit(1)
@@ -881,9 +994,11 @@ def main():
             case "status":
                 if check_already_running():
                     puts("Firegex is running in Docker mode", color=colors.green)
-                    puts(f"Web interface: http://localhost:{args.port}", color=colors.cyan)
+                    puts(f"Web interface: {get_web_interface_url()}", color=colors.cyan)
                 else:
                     puts("Firegex is not running", color=colors.red)
+            case "config":
+                handle_config_command(args)
     
     write_compose()
     

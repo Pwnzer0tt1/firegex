@@ -9,7 +9,7 @@ from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from passlib.context import CryptContext
 from utils.sqlite import SQLite
-from utils import API_VERSION, FIREGEX_PORT, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD
+from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 from contextlib import asynccontextmanager
@@ -219,7 +219,7 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
-        host="0.0.0.0" if DEBUG else None,
+        host=FIREGEX_HOST,
         port=FIREGEX_PORT,
         reload=DEBUG and not NORELOAD,
         access_log=True,
