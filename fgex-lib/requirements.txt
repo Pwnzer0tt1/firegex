@@ -3,8 +3,8 @@ pydantic>=2
 typing-extensions>=4.7.1
 pycryptodome
 zstd
-brotli  # waiting for pull request to be merged
 watchfiles
 fgex
 websockets
+brotli
 pyllhttp

@@ -38,11 +38,8 @@ ADD ./backend/requirements.txt /execute/requirements.txt
 COPY ./fgex-lib /execute/fgex-lib
 
 RUN dnf install -y gcc-c++ python3.13-devel uv git &&\
-    git clone https://github.com/domysh/brotli &&\
-    cd brotli && uv pip install --no-cache --system . &&\
-    cd .. && rm -rf brotli &&\
-    uv pip install --no-cache --system -r /execute/requirements.txt &&\
     uv pip install --no-cache --system ./fgex-lib &&\
+    uv pip install --no-cache --system -r /execute/requirements.txt &&\
     dnf remove -y gcc-c++ python3.13-devel uv git
 
 COPY ./backend/ /execute/
