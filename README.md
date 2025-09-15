@@ -20,7 +20,7 @@ With this command you will download firegex.py, and run it, it will require you 
 
 Or, you can start in a similar way firegex, cloning this repository and executing this command
 ```bash
-python3 start.py start --prebuilt
+python3 run.py start --prebuilt
 ```
 
 Without the `--prebuilt` flag, it will build the docker image from source, which may take longer.
@@ -32,15 +32,15 @@ If Docker is not available or you're running in a rootless environment, Firegex 
 sh <(curl -sLf https://pwnzer0tt1.it/firegex.sh)
 
 # Or manually force standalone mode:
-python3 start.py start --standalone
+python3 run.py start --standalone
 # Or directly using the one-command installer:
 sh <(curl -sLf https://pwnzer0tt1.it/firegex.sh) --standalone
 
 # Check status
-python3 start.py status [--standalone]
+python3 run.py status [--standalone]
 
 # Stop standalone mode
-python3 start.py stop [--standalone]
+python3 run.py stop [--standalone]
 ```
 
 Standalone mode automatically:
@@ -52,13 +52,13 @@ Standalone mode automatically:
 
 If the server is restarted, docker mode will automatically restart the service, while standalone mode will require you to run the start command again manually.
 
-Cloning the repository start.py will automatically build the docker image of firegex from source, and start it.
+Cloning the repository run.py will automatically build the docker image of firegex from source, and start it.
 Image building of firegex will require more time, so it's recommended to use the version just builded and available in the github packages.
-This is default behaviour if start.py is not in the firegex source root directory.
+This is default behaviour if run.py is not in the firegex source root directory.
 
 By default firegex will start in a multithread configuration using the number of threads available in your system.
 The default port of firegex is 4444. At the startup you will choose a password, that is essential for your security.
-All the configuration at the startup is customizable in [firegex.py](./start.py) or directly in the firegex interface.
+All the configuration at the startup is customizable in [firegex.py](./run.py) or directly in the firegex interface.
 
 ![Firegex Network scheme](docs/Firegex_Screenshot.png)
 

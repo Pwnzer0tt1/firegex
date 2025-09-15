@@ -1,7 +1,7 @@
 
 # Firegex Dockerfile UUID signature
 # cf1795af-3284-4183-a888-81ad3590ad84
-# Needed for start.py to detect the Dockerfile
+# Needed for run.py to detect the Dockerfile
 
 
 FROM --platform=$BUILDPLATFORM oven/bun AS frontend
