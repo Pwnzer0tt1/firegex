@@ -35,7 +35,7 @@ jobs:
 
       - name: Build and run firegex
         if: matrix.run_tests
-        run: python3 start.py start -P testpassword
+        run: python3 run.py start -P testpassword
         
       - name: Run tests
         if: matrix.run_tests
