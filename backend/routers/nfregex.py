@@ -1,7 +1,8 @@
 from base64 import b64decode
 import secrets
 import sqlite3
-from fastapi import APIRouter, Response, HTTPException
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from modules.nfregex.nftables import FiregexTables
 from modules.nfregex.firewall import STATUS, FirewallManager
@@ -332,7 +333,7 @@ async def add_new_service(form: ServiceAddForm):
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}
 
-@app.get('/metrics', response_class = Response)
+@app.get('/metrics', response_class = PlainTextResponse)
 async def metrics():
     """Aggregate metrics"""
     stats = db.query("""
