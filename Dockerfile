@@ -24,8 +24,8 @@ WORKDIR /execute
 FROM --platform=$TARGETARCH base AS compiler
 
 RUN dnf -y update && dnf install -y python3.13-devel @development-tools gcc-c++ \
-    libnetfilter_queue-devel libnfnetlink-devel libmnl-devel libcap-ng-utils nftables \
-    vectorscan-devel libtins-devel python3-nftables libpcap-devel boost-devel
+    libnetfilter_queue-devel libnfnetlink-devel libmnl-devel \
+    vectorscan-devel libtins-devel libpcap-devel boost-devel
 
 COPY ./backend/binsrc /execute/binsrc
 RUN g++ binsrc/nfregex.cpp -o cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
