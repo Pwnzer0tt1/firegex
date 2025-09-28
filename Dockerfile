@@ -34,7 +34,7 @@ RUN g++ binsrc/nfproxy.cpp -o cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3
 #Building main conteiner
 FROM --platform=$TARGETARCH base AS final
 
-ADD ./backend/requirements.txt /execute/requirements.txt
+COPY ./backend/requirements.txt /execute/requirements.txt
 COPY ./fgex-lib /execute/fgex-lib
 
 RUN dnf -y update && dnf install -y gcc-c++ python3.13-devel uv git &&\
