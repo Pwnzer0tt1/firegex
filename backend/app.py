@@ -7,7 +7,6 @@ import logging
 from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
-from passlib.context import CryptContext
 from utils.sqlite import SQLite
 from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD
 from utils.loader import frontend_deploy, load_routers
@@ -16,6 +15,7 @@ from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 import socketio
 from socketio.exceptions import ConnectionRefusedError
+import hashlib
 
 # DB init
 db = SQLite('db/firegex.db')
@@ -27,7 +27,6 @@ sysctl = SysctlManager({
 })
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login", auto_error=False)
-crypto = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 @asynccontextmanager
 async def lifespan(app):
@@ -65,9 +64,15 @@ app.mount("/sock", sio_app)
 def APP_STATUS(): return "init" if db.get("password") is None else "run"
 def JWT_SECRET(): return db.get("secret")
 
+def hash_psw(psw: str):
+    salt = db.get("salt")
+    if not salt:
+        salt = secrets.token_hex(32)
+        db.put("salt", salt)
+    return hashlib.pbkdf2_hmac("sha256", psw.encode(), salt.encode(), 500_000).hex()
+
 def set_psw(psw: str):
-    hash_psw = crypto.hash(psw)
-    db.put("password",hash_psw)
+    db.put("password", hash_psw(psw))
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -137,7 +142,7 @@ async def login_api(form: OAuth2PasswordRequestForm = Depends()):
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
     await asyncio.sleep(0.3) # No bruteforce :)
-    if crypto.verify(form.password, db.get("password")):
+    if db.get("password") == hash_psw(form.password):
         return {"access_token": create_access_token({"logged_in": True}), "token_type": "bearer"}
     raise HTTPException(406,"Wrong password!")
 

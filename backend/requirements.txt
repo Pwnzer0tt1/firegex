@@ -1,8 +1,6 @@
 fastapi[all]
 httpx
 uvicorn[standard]
-passlib[bcrypt]
-bcrypt <5
 psutil
 python-jose[cryptography]
 python-socketio
