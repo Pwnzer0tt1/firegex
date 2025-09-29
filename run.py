@@ -95,7 +95,8 @@ def load_config():
     import json
     default_config = {
         "port": 4444,
-        "host": "0.0.0.0"
+        # any allow to bind service also on ipv6 (see the main of backend to understand why)
+        "host": "any"
     }
     
     if os.path.isfile(g.configfile):

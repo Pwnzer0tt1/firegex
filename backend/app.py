@@ -224,7 +224,8 @@ if __name__ == '__main__':
     os.chdir(os.path.dirname(os.path.realpath(__file__)))
     uvicorn.run(
         "app:app",
-        host=FIREGEX_HOST,
+        # None allows to bind also on ipv6, and is selected if FIREGEX_HOST is any
+        host=None if FIREGEX_HOST == "any" else FIREGEX_HOST,
         port=FIREGEX_PORT,
         reload=DEBUG and not NORELOAD,
         access_log=True,
