@@ -309,7 +309,7 @@ def write_compose(skip_password = True):
                         "container_name": "firegex",
                         "build" if g.build else "image": "." if g.build else f"ghcr.io/pwnzer0tt1/firegex:{args.version}",
                         "ports": [
-                            f"{args.host}:{args.port}:{args.port}"
+                            f"{'' if args.host == 'any' else args.host+':'}{args.port}:{args.port}"
                         ],
                         "environment": [
                             f"PORT={args.port}",

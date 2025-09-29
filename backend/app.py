@@ -227,7 +227,7 @@ if __name__ == '__main__':
     uvicorn.run(
         "app:app",
         # None allows to bind also on ipv6, and is selected if FIREGEX_HOST is any
-        host=None if FIREGEX_HOST == "any" else FIREGEX_HOST,
+        host="" if FIREGEX_HOST == "any" else FIREGEX_HOST,
         port=FIREGEX_PORT,
         reload=DEBUG and not NORELOAD,
         access_log=True,
