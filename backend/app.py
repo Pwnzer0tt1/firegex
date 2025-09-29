@@ -65,11 +65,13 @@ def APP_STATUS(): return "init" if db.get("password") is None else "run"
 def JWT_SECRET(): return db.get("secret")
 
 def hash_psw(psw: str):
-    salt = db.get("salt")
-    if not salt:
-        salt = secrets.token_hex(32)
-        db.put("salt", salt)
-    return hashlib.pbkdf2_hmac("sha256", psw.encode(), salt.encode(), 500_000).hex()
+    salt = secrets.token_hex(32)
+    return hashlib.pbkdf2_hmac("sha256", psw.encode(), salt.encode(), 500_000).hex()+"-"+salt
+
+def verify_psw(psw: str, hashed: str) -> bool:
+    psw_hash, salt = hashed.split("-")
+    new_hashed = hashlib.pbkdf2_hmac("sha256", psw.encode(), salt.encode(), 500_000).hex()
+    return new_hashed == psw_hash
 
 def set_psw(psw: str):
     db.put("password", hash_psw(psw))
@@ -142,7 +144,7 @@ async def login_api(form: OAuth2PasswordRequestForm = Depends()):
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
     await asyncio.sleep(0.3) # No bruteforce :)
-    if db.get("password") == hash_psw(form.password):
+    if verify_psw(form.password, db.get("password")):
         return {"access_token": create_access_token({"logged_in": True}), "token_type": "bearer"}
     raise HTTPException(406,"Wrong password!")
 
@@ -185,8 +187,8 @@ reset, startup, shutdown = load_routers(api)
 
 async def startup_main():
     db.init()
-    if os.getenv("HEX_SET_PSW"):
-        set_psw(bytes.fromhex(os.getenv("HEX_SET_PSW")).decode())
+    if os.getenv("PSW_HASH_SET"):
+        db.put("password", os.getenv("PSW_HASH_SET"))
     try:
         sysctl.set()
     except Exception as e:

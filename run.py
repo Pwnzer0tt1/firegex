@@ -9,6 +9,8 @@ import multiprocessing
 import subprocess
 import getpass
 import tarfile
+import hashlib
+import secrets
 
 pref = "\033["
 reset = f"{pref}0m"
@@ -37,6 +39,10 @@ class colors:
     magenta = "35m"
     cyan = "36m"
     white = "37m"
+
+def hash_psw(psw: str):
+    salt = secrets.token_hex(32)
+    return hashlib.pbkdf2_hmac("sha256", psw.encode(), salt.encode(), 500_000).hex()+"-"+salt
 
 def puts(text, *args, color=colors.white, is_bold=False, **kwargs):
     print(f'{pref}{1 if is_bold else 0};{color}' + text + reset, *args, **kwargs)
@@ -260,7 +266,7 @@ def write_compose(skip_password = True):
                             f"PORT={args.port}",
                             f"HOST={args.host}",
                             f"NTHREADS={args.threads}",
-                            *([f"HEX_SET_PSW={psw_set.encode().hex()}"] if psw_set else [])
+                            *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -308,7 +314,7 @@ def write_compose(skip_password = True):
                         "environment": [
                             f"PORT={args.port}",
                             f"NTHREADS={args.threads}",
-                            *([f"HEX_SET_PSW={psw_set.encode().hex()}"] if psw_set else [])
+                            *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db"
@@ -760,7 +766,7 @@ def run_standalone():
     # Add password if set
     psw_set = get_password()
     if psw_set:
-        env_vars.append(f"HEX_SET_PSW={psw_set.encode().hex()}")
+        env_vars.append(f"PSW_HASH_SET={hash_psw(psw_set)}")
     
     # Prepare environment string for chroot
     env_string = " ".join([f"{var}" for var in env_vars])
