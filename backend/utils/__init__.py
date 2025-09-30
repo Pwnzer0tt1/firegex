@@ -26,6 +26,8 @@ DEBUG = "DEBUG" in sys.argv
 NORELOAD = "NORELOAD" in sys.argv
 FIREGEX_PORT = int(os.getenv("PORT","4444"))
 FIREGEX_HOST = os.getenv("HOST","0.0.0.0")
+FIREGEX_SOCKET_DIR = os.getenv("SOCKET_DIR", None)
+FIREGEX_SOCKET = os.path.join(FIREGEX_SOCKET_DIR, "firegex.sock") if FIREGEX_SOCKET_DIR else None
 JWT_ALGORITHM: str = "HS256"
 API_VERSION = "{{VERSION_PLACEHOLDER}}" if "{" not in "{{VERSION_PLACEHOLDER}}" else "0.0.0"
 
