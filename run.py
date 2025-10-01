@@ -254,9 +254,7 @@ def is_linux():
 def get_web_interface_url():
     if args.socket_dir:
         return os.path.join(args.socket_dir, "firegex.sock")
-
-    # Per altre piattaforme, usiamo l'host configurato se non è 0.0.0.0
-    # altrimenti usiamo localhost per evitare confusione
+    
     display_host = "localhost" if args.host == "0.0.0.0" else args.host
     return f"http://{display_host}:{args.port}"
 
@@ -277,7 +275,7 @@ def write_compose(skip_password = True):
                             f"HOST={args.host}",
                             f"NTHREADS={args.threads}",
                             *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else []),
-                            *([f"SOCKET_DIR=/run/firegex"] if args.socket_dir else [])
+                            *(["SOCKET_DIR=/run/firegex"] if args.socket_dir else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -600,6 +598,10 @@ def cleanup_standalone_mounts():
         f"{g.rootfs_path}/sys_host/net.ipv6.conf.all.forwarding"
     ]
     
+    # Add socket directory mount point if configured
+    if args.socket_dir:
+        mount_points.append(f"{g.rootfs_path}/run/firegex")
+    
     # Create umount commands (with || true to ignore errors)
     umount_commands = [f"umount -l {mount_point} || true" for mount_point in mount_points]
     
@@ -754,6 +756,18 @@ def setup_standalone_mounts():
         f"mount --bind /proc/sys/net/ipv6/conf/all/forwarding {g.rootfs_path}/sys_host/net.ipv6.conf.all.forwarding"
     ])
     
+    # Add socket directory bind mount if configured
+    if args.socket_dir:
+        # Create socket directory on host if it doesn't exist
+        # Create mount point in rootfs and bind mount the socket directory
+        privileged_commands.extend([
+            f"mkdir -p {args.socket_dir}",
+            f"chmod 755 {args.socket_dir}",
+            f"mkdir -p {g.rootfs_path}/run/firegex",
+            f"chmod 755 {g.rootfs_path}/run/firegex",
+            f"mount --bind {args.socket_dir} {g.rootfs_path}/run/firegex"
+        ])
+
     # Run all privileged commands in one batch
     if not run_privileged_commands(privileged_commands, "setup bind mounts"):
         puts("Failed to set up bind mounts", color=colors.red)
@@ -784,9 +798,9 @@ def run_standalone():
     if psw_set:
         env_vars.append(f"PSW_HASH_SET={hash_psw(psw_set)}")
     
-    # Add socket dir if set
+    # Add socket dir if set (use path inside chroot)
     if args.socket_dir:
-        env_vars.append(f"SOCKET_DIR={args.socket_dir}")
+        env_vars.append("SOCKET_DIR=/run/firegex")
     
     # Prepare environment string for chroot
     env_string = " ".join([f"{var}" for var in env_vars])
