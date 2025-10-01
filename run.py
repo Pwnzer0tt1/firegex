@@ -102,7 +102,8 @@ def load_config():
     default_config = {
         "port": 4444,
         # any allow to bind service also on ipv6 (see the main of backend to understand why)
-        "host": "any"
+        "host": "any",
+        "socket_dir": None
     }
     
     if os.path.isfile(g.configfile):
@@ -154,6 +155,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--psw-on-web', required=False, help='Setup firegex password on the web interface', action="store_true", default=False)
     parser_start.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_start.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
+    parser_start.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default=None)
     parser_start.add_argument('--prebuilt', required=False, action="store_true", help='Use prebuilt docker image', default=False)
@@ -167,6 +169,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_restart = subcommands.add_parser('restart', help='Restart the firewall')
     parser_restart.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_restart.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
+    parser_restart.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_restart.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
     
@@ -174,12 +177,14 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_status = subcommands.add_parser('status', help='Show firewall status')
     parser_status.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_status.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
+    parser_status.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_status.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
     
     #Config Command
     parser_config = subcommands.add_parser('config', help='Manage configuration settings')
     parser_config.add_argument('--port', "-p", type=int, required=False, help='Set default port for web service')
     parser_config.add_argument('--host', required=False, help='Set default host IP address to bind the service to')
+    parser_config.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_config.add_argument('--show', required=False, action="store_true", help='Show current configuration', default=False)
     args = parser.parse_args(args=args_to_parse)
     
@@ -215,6 +220,9 @@ def gen_args(args_to_parse: list[str]|None = None):
     if "host" not in args:
         args.host = config["host"]
     
+    if "socket_dir" not in args:
+        args.socket_dir = config["socket_dir"]
+    
     # Save configuration if values were specified via command line and differ from config
     config_changed = False
     if hasattr(args, 'port') and args.port != config["port"]:
@@ -222,6 +230,9 @@ def gen_args(args_to_parse: list[str]|None = None):
         config_changed = True
     if hasattr(args, 'host') and args.host != config["host"]:
         config["host"] = args.host
+        config_changed = True
+    if hasattr(args, 'socket_dir') and args.socket_dir != config["socket_dir"]:
+        config["socket_dir"] = args.socket_dir
         config_changed = True
     
     if config_changed:
@@ -241,10 +252,9 @@ def is_linux():
     return "linux" in sys.platform and 'microsoft-standard' not in platform.uname().release
 
 def get_web_interface_url():
-    # In modalità host network (Linux), l'host configurato non è applicabile
-    # quindi usiamo sempre localhost
-    if is_linux():
-        return f"http://localhost:{args.port}"
+    if args.socket_dir:
+        return os.path.join(args.socket_dir, "firegex.sock")
+
     # Per altre piattaforme, usiamo l'host configurato se non è 0.0.0.0
     # altrimenti usiamo localhost per evitare confusione
     display_host = "localhost" if args.host == "0.0.0.0" else args.host
@@ -266,7 +276,8 @@ def write_compose(skip_password = True):
                             f"PORT={args.port}",
                             f"HOST={args.host}",
                             f"NTHREADS={args.threads}",
-                            *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else [])
+                            *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else []),
+                            *([f"SOCKET_DIR=/run/firegex"] if args.socket_dir else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -289,7 +300,12 @@ def write_compose(skip_password = True):
                                 "type": "bind",
                                 "source": "/proc/sys/net/ipv6/conf/all/forwarding",
                                 "target": "/sys_host/net.ipv6.conf.all.forwarding"
-                            }
+                            },
+                            *([{
+                                "type": "bind",
+                                "source": args.socket_dir,
+                                "target": "/run/firegex"
+                            }] if args.socket_dir else [])
                         ],
                         "cap_add": [
                             "NET_ADMIN",
@@ -768,6 +784,10 @@ def run_standalone():
     if psw_set:
         env_vars.append(f"PSW_HASH_SET={hash_psw(psw_set)}")
     
+    # Add socket dir if set
+    if args.socket_dir:
+        env_vars.append(f"SOCKET_DIR={args.socket_dir}")
+    
     # Prepare environment string for chroot
     env_string = " ".join([f"{var}" for var in env_vars])
     
@@ -846,6 +866,7 @@ def handle_config_command(args):
         puts("Current configuration:", color=colors.cyan, is_bold=True)
         puts(f"Port: {config['port']}", color=colors.white)
         puts(f"Host: {config['host']}", color=colors.white)
+        puts(f"Socket dir: {config['socket_dir']}", color=colors.white)
         puts(f"Config file: {g.configfile}", color=colors.white)
         return
     
@@ -861,6 +882,11 @@ def handle_config_command(args):
         config["host"] = args.host
         config_changed = True
         puts(f"Host set to: {args.host}", color=colors.green)
+    
+    if hasattr(args, 'socket_dir') and args.socket_dir is not None:
+        config["socket_dir"] = args.socket_dir
+        config_changed = True
+        puts(f"Socket dir set to: {args.socket_dir}", color=colors.green)
     
     if config_changed:
         if save_config(config):

@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from utils.sqlite import SQLite
-from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD
+from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 from contextlib import asynccontextmanager
@@ -229,6 +229,7 @@ if __name__ == '__main__':
         # None allows to bind also on ipv6, and is selected if FIREGEX_HOST is any
         host="" if FIREGEX_HOST == "any" else FIREGEX_HOST,
         port=FIREGEX_PORT,
+        uds=FIREGEX_SOCKET,
         reload=DEBUG and not NORELOAD,
         access_log=True,
         workers=1, # Firewall module can't be replicated in multiple workers
