@@ -92,6 +92,7 @@ function App() {
         }
       }).catch( err => setError(err.toString()))
       setLoadingBtn(false)
+      form.reset()
     }
     
 
@@ -125,6 +126,7 @@ function App() {
           }
         }).catch( err => setError(err.toString()))
         setLoadingBtn(false)
+        form.reset()
       }
     
 
