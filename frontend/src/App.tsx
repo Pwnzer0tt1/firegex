@@ -120,6 +120,7 @@ function App() {
         setLoadingBtn(true)
         await login(values).then(res => {
           if(!res){
+            queryClient.invalidateQueries()
             setSystemStatus({...systemStatus, loggined:true})
           }else{
             setError("Login failed")
