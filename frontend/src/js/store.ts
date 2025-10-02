@@ -42,21 +42,6 @@ export const useAuthStore = create<AuthState>()(
   )
 );
 
-// Hook personalizzati per un uso più facile nei componenti
-export const useAuth = () => {
-  const { access_token, setAccessToken, clearAccessToken, getAccessToken } = useAuthStore();
-  
-  const isAuthenticated = !!access_token;
-  
-  return {
-    access_token,
-    isAuthenticated,
-    setAccessToken,
-    clearAccessToken,
-    getAccessToken,
-  };
-};
-
 interface SessionState {
   home_section: string | null;
   setHomeSection: (section: string | null) => void;
