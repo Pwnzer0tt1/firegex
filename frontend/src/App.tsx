@@ -92,6 +92,7 @@ function App() {
         }
       }).catch( err => setError(err.toString()))
       setLoadingBtn(false)
+      form.reset()
     }
     
 
@@ -119,12 +120,14 @@ function App() {
         setLoadingBtn(true)
         await login(values).then(res => {
           if(!res){
+            queryClient.invalidateQueries()
             setSystemStatus({...systemStatus, loggined:true})
           }else{
             setError("Login failed")
           }
         }).catch( err => setError(err.toString()))
         setLoadingBtn(false)
+        form.reset()
       }
     
 
