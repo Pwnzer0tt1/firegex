@@ -8,7 +8,7 @@ ERROR=0
 
 pip3 install -r requirements.txt
 
-until curl --output /dev/null --silent --fail http://localhost:4444/api/status; do
+until curl --output /dev/null --silent --fail http://127.0.0.1:4444/api/status; do
     printf '.'
     sleep 1
 done

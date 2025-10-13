@@ -4,5 +4,5 @@ uvicorn[standard]
 psutil
 python-jose[cryptography]
 python-socketio
-git+https://github.com/google/brotli.git@35d4992ac8eb1eca3b6c5f220e76cfc8b7e470aa
+git+https://github.com/google/brotli.git
 #git+https://salsa.debian.org/pkg-netfilter-team/pkg-nftables#egg=nftables&subdirectory=py

@@ -10,7 +10,7 @@ from firegex.nfproxy.internals.exceptions import (
 from firegex.nfproxy.internals.models import FullStreamAction, ExceptionAction
 from dataclasses import dataclass, field
 from collections import deque
-from zstd import ZSTD_uncompress
+from compression import zstd
 import gzip
 import io
 import zlib
@@ -200,7 +200,7 @@ class InternalCallbackHandler:
                     break
             elif enc == "zstd":
                 try:
-                    decoding_body = ZSTD_uncompress(decoding_body)
+                    decoding_body = zstd.decompress(decoding_body)
                 except Exception as e:
                     print(f"Error decompressing zstd: {e}: skipping", flush=True)
                     decode_success = False
