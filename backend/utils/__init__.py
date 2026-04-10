@@ -6,13 +6,14 @@ import psutil
 import sys
 import nftables
 from socketio import AsyncServer
-from fastapi import Path
-from typing import Annotated
+from typing import Annotated, List, Union
 from functools import wraps
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ValidationError, Field
 import traceback
 from utils.models import StatusMessageModel
-from typing import List
+from pathlib import Path
+
+from fastapi import HTTPException, status
 
 LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
 
@@ -31,7 +32,32 @@ FIREGEX_SOCKET = os.path.join(FIREGEX_SOCKET_DIR, "firegex.sock") if FIREGEX_SOC
 JWT_ALGORITHM: str = "HS256"
 API_VERSION = "{{VERSION_PLACEHOLDER}}" if "{" not in "{{VERSION_PLACEHOLDER}}" else "0.0.0"
 
-PortType = Annotated[int, Path(gt=0, lt=65536)]   
+PortType = Annotated[int, Field(gt=0, lt=65536)]   
+
+def safe_join(base_dir: Union[str, Path], *paths: str) -> Path:
+    """
+    Safely join a base directory with one or more path components.
+    
+    Returns the resolved Path object if safe.
+    Raises HTTPException 403 if a directory traversal attack is detected.
+    """
+    # 1. Convert base_dir to a resolved, absolute Path
+    base_path = Path(base_dir).resolve()
+    
+    # 2. Join the parts and resolve the result (removes symbols like '../')
+    # If the user input is an absolute path (starting with /), 
+    # joinpath handles it correctly or we can strip leading slashes.
+    clean_paths = [p.lstrip("/") for p in paths]
+    target_path = base_path.joinpath(*clean_paths).resolve()
+
+    # 3. Security check
+    if not target_path.is_relative_to(base_path):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: Path is invalid."
+        )
+
+    return target_path
 
 async def run_func(func, *args, **kwargs):
     if asyncio.iscoroutinefunction(func): 

@@ -5,7 +5,7 @@ from typing import Callable
 from fastapi import APIRouter
 from starlette.responses import StreamingResponse
 from fastapi.responses import FileResponse
-from utils import DEBUG, ON_DOCKER, ROUTERS_DIR, list_files, run_func
+from utils import DEBUG, ON_DOCKER, ROUTERS_DIR, list_files, run_func, safe_join
 from utils.models import ResetRequest
 import asyncio
 import traceback
@@ -20,7 +20,7 @@ async def frontend_debug_proxy(path):
     return StreamingResponse(resp.aiter_bytes(),status_code=resp.status_code, headers=resp.headers)
 
 async def react_deploy(path):
-    file_request = os.path.join(REACT_BUILD_DIR, path)
+    file_request = safe_join(REACT_BUILD_DIR, path)
     if not os.path.isfile(file_request):
         return FileResponse(REACT_HTML_PATH, media_type='text/html')
     else:
