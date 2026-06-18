@@ -452,7 +452,7 @@ class NfQueue {
 		// https://elixir.bootlin.com/linux/v5.18.12/source/include/linux/errno.h#L27
 		#define ENOTSUPP	524	/* Operation is not supported */
 
-		if (error_msg->error != -ENOTSUPP) {
+		if (error_msg->error != -ENOTSUPP && error_msg->error != -EOPNOTSUPP) {
 			_clear();
 			throw invalid_argument( "queueid is already busy" );
 		}
