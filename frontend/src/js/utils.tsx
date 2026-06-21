@@ -143,7 +143,7 @@ export async function resetfiregex(delete_data:boolean = false){
     return (status === "ok"?undefined:status)
 }
 
-export const ipInterfacesQuery = () => useQuery(["ipinterfaces"], getipinterfaces)
+export const ipInterfacesQuery = () => useQuery({ queryKey: ["ipinterfaces"], queryFn: getipinterfaces })
 
 export async function getipinterfaces(){
     return await getapi("interfaces") as IpInterface[];

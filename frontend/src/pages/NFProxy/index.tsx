@@ -128,7 +128,7 @@ export default function NFProxy({ children }: { children: any }) {
         }
         <Space w="xs" />
             <Tooltip label="Refresh" position='bottom' color="indigo">
-                <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfproxy"])} size="lg" radius="md" variant="filled" loading={services.isFetching}>
+                <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries({ queryKey: ["nfproxy"] })} size="lg" radius="md" variant="filled" loading={services.isFetching}>
                     <TbReload size={18} />
                 </ActionIcon>
             </Tooltip>

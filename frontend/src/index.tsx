@@ -7,8 +7,7 @@ import {
   QueryClientProvider,
 } from '@tanstack/react-query'
 import { queryClient } from './js/utils';
-import { CodeHighlightAdapterProvider, stripShikiCodeBlocks } from '@mantine/code-highlight';
-import { CodeHighlightAdapter } from '@mantine/code-highlight/lib/CodeHighlightProvider/CodeHighlightProvider';
+import { CodeHighlightAdapterProvider, stripShikiCodeBlocks, CodeHighlightAdapter } from '@mantine/code-highlight';
 
 import '@mantine/core/styles.css';
 import '@mantine/notifications/styles.css';

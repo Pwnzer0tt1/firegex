@@ -57,7 +57,7 @@ function NFRegex({ children }: { children: any }) {
         }
         <Space w="xs" />
             <Tooltip label="Refresh" position='bottom' color="indigo">
-                <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["nfregex"])} size="lg" radius="md" variant="filled"
+                <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries({ queryKey: ["nfregex"] })} size="lg" radius="md" variant="filled"
                 loading={services.isFetching}><TbReload size={18} /></ActionIcon>
             </Tooltip>
             <Space w="xs" />

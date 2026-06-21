@@ -1,7 +1,7 @@
 import { Box, Space, Title } from "@mantine/core"
 import React from "react"
 import PortInput from "./PortInput";
-import { UseFormReturnType } from "@mantine/form/lib/types";
+import { UseFormReturnType } from "@mantine/form";
 import { InterfaceInput } from "./InterfaceInput";
 
 type ItemProps = {

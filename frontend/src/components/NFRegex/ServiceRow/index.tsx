@@ -36,7 +36,7 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
         await nfregex.servicestop(service.service_id).then(res => {
             if(!res){
                 okNotify(`Service ${service.name} stopped successfully!`,`The service on ${service.port} has been stopped!`)
-                queryClient.invalidateQueries(serviceQueryKey)
+                queryClient.invalidateQueries({ queryKey: serviceQueryKey })
             }else{
                 errorNotify(`An error as occurred during the stopping of the service ${service.port}`,`Error: ${res}`)
             }
@@ -51,7 +51,7 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
         await nfregex.servicestart(service.service_id).then(res => {
             if(!res){
                 okNotify(`Service ${service.name} started successfully!`,`The service on ${service.port} has been started!`)
-                queryClient.invalidateQueries(serviceQueryKey)
+                queryClient.invalidateQueries({ queryKey: serviceQueryKey })
             }else{
                 errorNotify(`An error as occurred during the starting of the service ${service.port}`,`Error: ${res}`)
             }
@@ -65,7 +65,7 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
         nfregex.servicedelete(service.service_id).then(res => {
             if (!res){
                 okNotify("Service delete complete!",`The service ${service.name} has been deleted!`)
-                queryClient.invalidateQueries(serviceQueryKey)
+                queryClient.invalidateQueries({ queryKey: serviceQueryKey })
             }else
                 errorNotify("An error occurred while deleting a service",`Error: ${res}`)
         }).catch(err => {

@@ -40,7 +40,7 @@ function PortHijack() {
                 </Tooltip>
                 <Space w="xs" />
                 <Tooltip label="Refresh" position='bottom' color="indigo">
-                    <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["porthijack"])} size="lg" radius="md" variant="filled"
+                    <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries({ queryKey: ["porthijack"] })} size="lg" radius="md" variant="filled"
                     loading={services.isFetching}><TbReload size={18} /></ActionIcon>
                 </Tooltip>
                 <Space w="xs" />

@@ -2,7 +2,6 @@ import { IoIosWarning } from "react-icons/io"
 import { socketio, WARNING_NFPROXY_TIME_LIMIT } from "../../js/utils"
 import { Tooltip } from "@mantine/core"
 import { useEffect, useState } from "react"
-import { round } from "@mantine/core/lib/components/ColorPicker/converters/parsers"
 
 
 export const ExceptionWarning = ({ service_id }: { service_id: string }) => {

@@ -78,7 +78,7 @@ export default function ServiceDetailsNFProxy() {
         await nfproxy.servicestart(serviceInfo.service_id).then(res => {
             if(!res){
                 okNotify(`Service ${serviceInfo.name} started successfully!`,`The service on ${serviceInfo.port} has been started!`)
-                queryClient.invalidateQueries(serviceQueryKey)
+                queryClient.invalidateQueries({ queryKey: serviceQueryKey })
             }else{
                 errorNotify(`An error as occurred during the starting of the service ${serviceInfo.port}`,`Error: ${res}`)
             }
@@ -92,7 +92,7 @@ export default function ServiceDetailsNFProxy() {
         nfproxy.servicedelete(serviceInfo.service_id).then(res => {
             if (!res){
                 okNotify("Service delete complete!",`The service ${serviceInfo.name} has been deleted!`)
-                queryClient.invalidateQueries(serviceQueryKey)
+                queryClient.invalidateQueries({ queryKey: serviceQueryKey })
             }else
                 errorNotify("An error occurred while deleting a service",`Error: ${res}`)
         }).catch(err => {
@@ -106,7 +106,7 @@ export default function ServiceDetailsNFProxy() {
         await nfproxy.servicestop(serviceInfo.service_id).then(res => {
             if(!res){
                 okNotify(`Service ${serviceInfo.name} stopped successfully!`,`The service on ${serviceInfo.port} has been stopped!`)
-                queryClient.invalidateQueries(serviceQueryKey)
+                queryClient.invalidateQueries({ queryKey: serviceQueryKey })
             }else{
                 errorNotify(`An error as occurred during the stopping of the service ${serviceInfo.port}`,`Error: ${res}`)
             }

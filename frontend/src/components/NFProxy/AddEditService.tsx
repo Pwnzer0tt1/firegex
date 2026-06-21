@@ -1,4 +1,4 @@
-import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl, Box, Tooltip } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl, Box, Tooltip, ActionIcon } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useEffect, useState } from 'react';
 import { okNotify, regex_ipv4, regex_ipv6 } from '../../js/utils';
@@ -97,18 +97,27 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
                         {...form.getInputProps('autostart', { type: 'checkbox' })}
                     />:null}
                     <Space h="sm" />
-                    <Switch
-                        label={<Box className='center-flex'>
-                            Enable fail-open nfqueue
-                            <Space w="xs" />
-                            <Tooltip label={<>
+                    <Group gap="xs" wrap="nowrap" align="center">
+                        <Switch
+                            label="Enable fail-open nfqueue"
+                            {...form.getInputProps('fail_open', { type: 'checkbox' })}
+                        />
+                        <Tooltip 
+                            label={<>
                                 Firegex use internally nfqueue to handle packets<br />enabling this option will allow packets to pass through the firewall <br /> in case the filtering is too slow or too many traffic is coming<br />
-                            </>}>
-                                <IoMdInformationCircleOutline size={15} />
-                            </Tooltip>
-                        </Box>}
-                        {...form.getInputProps('fail_open', { type: 'checkbox' })}
-                    />
+                            </>}
+                            zIndex={1000000}
+                        >
+                            <ActionIcon 
+                                variant="subtle" 
+                                color="gray" 
+                                size="sm" 
+                                onClick={(e: any) => { e.preventDefault(); e.stopPropagation(); }}
+                            >
+                                <IoMdInformationCircleOutline size={18} />
+                            </ActionIcon>
+                        </Tooltip>
+                    </Group>
                 </Box>
                 <Box className="flex-spacer"></Box>
                 {edit?null:<SegmentedControl

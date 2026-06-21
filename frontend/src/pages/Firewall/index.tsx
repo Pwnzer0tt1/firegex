@@ -364,7 +364,7 @@ export const Firewall = () => {
               </Tooltip>
               <Space w="xs" />
               <Tooltip label="Refresh" position='bottom' color="indigo">
-                  <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries(["firewall"])} size="lg" radius="md" variant="filled"
+                  <ActionIcon color="indigo" onClick={()=>queryClient.invalidateQueries({ queryKey: ["firewall"] })} size="lg" radius="md" variant="filled"
                   loading={rules.isFetching}><TbReload size={18} /></ActionIcon>
               </Tooltip>
               <Space w="xs" />
