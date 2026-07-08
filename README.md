@@ -26,7 +26,7 @@ python3 run.py start --prebuilt
 Without the `--prebuilt` flag, it will build the docker image from source, which may take longer.
 
 ### Standalone Mode
-If Docker is not available or you're running in a rootless environment, Firegex can run in standalone mode. The one-command installer above also works for standalone mode and will automatically detect and use standalone mode when Docker is unavailable.
+If Docker is not available or you're running it in a rootless environment, Firegex can run in standalone mode. The one-command installer above also works for standalone mode and will automatically detect and use standalone mode when Docker is unavailable or in rootless mode.
 
 ```bash
 sh <(curl -sLf https://pwnzer0tt1.it/firegex.sh)
