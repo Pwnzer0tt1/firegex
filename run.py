@@ -248,6 +248,65 @@ def gen_args(args_to_parse: list[str]|None = None):
 
 args = gen_args()
 
+def get_git_version() -> str | None:
+    import os
+    import re
+
+    def parse_version(v):
+        v = v.lstrip("v")
+        parts = re.split(r'[^0-9]+', v)
+        return tuple(int(p) if p.isdigit() else 0 for p in parts if p)
+
+    def find_git_dir(start_path):
+        current = start_path
+        while current and current != "/" and current != "":
+            gd = os.path.join(current, ".git")
+            if os.path.isdir(gd):
+                return gd
+            parent = os.path.dirname(current)
+            if parent == current:
+                break
+            current = parent
+        return None
+
+    try:
+        git_dir = find_git_dir(os.path.abspath(os.path.dirname(__file__)))
+        if not git_dir:
+            return None
+            
+        branch = None
+        with open(os.path.join(git_dir, "HEAD"), "r") as f:
+            head = f.read().strip()
+            if head.startswith("ref: refs/heads/"):
+                branch = head.split("ref: refs/heads/")[1]
+                
+        if branch != "main":
+            return None
+            
+        tags = []
+        try:
+            with open(os.path.join(git_dir, "packed-refs"), "r") as f:
+                for line in f:
+                    if " refs/tags/" in line:
+                        tags.append(line.strip().split(" refs/tags/")[1])
+        except Exception:
+            pass
+            
+        tags_dir = os.path.join(git_dir, "refs", "tags")
+        try:
+            for root, _, files in os.walk(tags_dir):
+                for file in files:
+                    tags.append(os.path.relpath(os.path.join(root, file), tags_dir).replace(os.path.sep, "/"))
+        except Exception:
+            pass
+            
+        version_tags = [t for t in set(tags) if any(c.isdigit() for c in t)]
+        if version_tags:
+            return max(version_tags, key=parse_version)
+    except Exception:
+        pass
+    return None
+
 def is_linux():
     return "linux" in sys.platform and 'microsoft-standard' not in platform.uname().release
 
@@ -275,7 +334,8 @@ def write_compose(skip_password = True):
                             f"HOST={args.host}",
                             f"NTHREADS={args.threads}",
                             *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else []),
-                            *(["SOCKET_DIR=/run/firegex"] if args.socket_dir else [])
+                            *(["SOCKET_DIR=/run/firegex"] if args.socket_dir else []),
+                            *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -328,7 +388,8 @@ def write_compose(skip_password = True):
                         "environment": [
                             f"PORT={args.port}",
                             f"NTHREADS={args.threads}",
-                            *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else [])
+                            *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else []),
+                            *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db"
