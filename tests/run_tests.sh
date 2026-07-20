@@ -8,6 +8,9 @@ ERROR=0
 
 pip3 install -r requirements.txt
 
+echo "Running Nginx config unit test"
+python3 nginx_test.py || ERROR=1
+
 until curl --output /dev/null --silent --fail http://127.0.0.1:4444/api/status; do
     printf '.'
     sleep 1

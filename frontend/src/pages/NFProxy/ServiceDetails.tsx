@@ -16,7 +16,7 @@ import { FaArrowLeft } from "react-icons/fa";
 import { IoSettingsSharp } from 'react-icons/io5';
 import AddEditService from '../../components/NFProxy/AddEditService';
 import PyFilterView from '../../components/PyFilterView';
-import { TbPlugConnected } from 'react-icons/tb';
+import { TbPlugConnected, TbShieldLock } from 'react-icons/tb';
 import { CodeHighlight } from '@mantine/code-highlight';
 import { FaPython } from "react-icons/fa";
 import { FiFileText } from "react-icons/fi";
@@ -24,6 +24,7 @@ import { ModalLog } from '../../components/ModalLog';
 import { useListState } from '@mantine/hooks';
 import { ExceptionWarning } from '../../components/NFProxy/ExceptionWarning';
 import { DocsButton } from '../../components/DocsButton';
+import TLSConfigModal from '../../components/TLSConfigModal';
 
 export default function ServiceDetailsNFProxy() {
 
@@ -34,6 +35,7 @@ export default function ServiceDetailsNFProxy() {
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
     const [editModal, setEditModal] = useState(false)
+    const [tlsModal, setTlsModal] = useState(false)
     const [buttonLoading, setButtonLoading] = useState(false)
     const queryClient = useQueryClient()
     const filterCode = nfproxyServiceFilterCodeQuery(srv??"")
@@ -136,11 +138,18 @@ export default function ServiceDetailsNFProxy() {
                 <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient" radius="md" mr="sm">
                     :{serviceInfo.port}
                 </Badge>
+                {serviceInfo.tls_enabled && (
+                    <Badge color="green" size="xl" variant="light" radius="md" mr="sm">
+                        <TbShieldLock size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                        TLS (lo:{serviceInfo.clear_port})
+                    </Badge>
+                )}
 
                 <MenuDropDownWithButton>
                     <Menu.Item><b>Edit service</b></Menu.Item>
                     <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
                     <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
+                    <Menu.Item leftSection={<TbShieldLock size={18} />} onClick={()=>setTlsModal(true)}>Configure TLS</Menu.Item>
                     <Divider />
                     <Menu.Label><b>Danger zone</b></Menu.Label>
                     <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
@@ -226,6 +235,13 @@ export default function ServiceDetailsNFProxy() {
             opened={editModal}
             onClose={()=>setEditModal(false)}
             edit={serviceInfo}
+        />
+        <TLSConfigModal
+            opened={tlsModal}
+            onClose={() => setTlsModal(false)}
+            service={serviceInfo}
+            updateTlsConfig={nfproxy.updatetlsconfig}
+            queryKey={serviceQueryKey}
         />
         <ModalLog
             opened={openLogModal}

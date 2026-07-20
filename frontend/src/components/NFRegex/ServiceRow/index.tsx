@@ -14,6 +14,8 @@ import { FaFilter } from "react-icons/fa";
 import { VscRegex } from "react-icons/vsc";
 import { IoSettingsSharp } from 'react-icons/io5';
 import AddEditService from '../AddEditService';
+import { TbShieldLock } from "react-icons/tb";
+import TLSConfigModal from '../../TLSConfigModal';
 
 export default function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
@@ -28,6 +30,7 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
     const [editModal, setEditModal] = useState(false)
+    const [tlsModal, setTlsModal] = useState(false)
     const isMedium = isMediumScreen()
 
     const stopService = async () => {
@@ -89,6 +92,12 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
                         <Badge size="lg" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient" radius="md" style={{ fontSize: "110%" }}>
                             :{service.port}
                         </Badge>
+                        {service.tls_enabled && (
+                            <Badge color="green" radius="md" size="lg" variant="light">
+                                <TbShieldLock size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
+                                TLS (lo:{service.clear_port})
+                            </Badge>
+                        )}
                     </Box>
                     {isMedium?null:<Space w="xl" />}
                 </Box>
@@ -109,6 +118,7 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
                             <Menu.Item><b>Edit service</b></Menu.Item>
                             <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
                             <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
+                            <Menu.Item leftSection={<TbShieldLock size={18} />} onClick={()=>setTlsModal(true)}>Configure TLS</Menu.Item>
                             <Divider />
                             <Menu.Label><b>Danger zone</b></Menu.Label>
                             <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
@@ -153,6 +163,13 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
             opened={editModal}
             onClose={()=>setEditModal(false)}
             edit={service}
+        />
+        <TLSConfigModal
+            opened={tlsModal}
+            onClose={() => setTlsModal(false)}
+            service={service}
+            updateTlsConfig={nfregex.updatetlsconfig}
+            queryKey={serviceQueryKey}
         />
     </>
 }

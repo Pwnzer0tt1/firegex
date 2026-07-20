@@ -8,7 +8,8 @@ from modules.nfregex.nftables import FiregexTables
 from modules.nfregex.firewall import STATUS, FirewallManager
 from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, socketio_emit, PortType
-from utils.models import ResetRequest, StatusMessageModel
+from utils.certs import CertsDB, populate_services_tls_config
+from utils.models import ResetRequest, StatusMessageModel, TLSConfigForm
 from modules.nfregex.firegex import test_regex_validity
 
 class ServiceModel(BaseModel):
@@ -21,6 +22,11 @@ class ServiceModel(BaseModel):
     n_regex: int
     n_packets: int
     fail_open: bool
+    tls_enabled: bool = False
+    tls_cert: str|None = None
+    tls_key: str|None = None
+    ssl_port: int|None = None
+    clear_port: int|None = None
 
 class RenameForm(BaseModel):
     name:str
@@ -53,6 +59,9 @@ class ServiceAddForm(BaseModel):
     proto: str
     ip_int: str
     fail_open: bool = False
+    tls_enabled: bool = False
+    tls_cert: str | None = None
+    tls_key: str | None = None
 
 class ServiceAddResponse(BaseModel):
     status:str
@@ -68,7 +77,8 @@ db = SQLite('db/nft-regex.db', {
         'name': 'VARCHAR(100) NOT NULL UNIQUE',
         'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "udp"))',
         'ip_int': 'VARCHAR(100) NOT NULL',
-        'fail_open': 'BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1'
+        'fail_open': 'BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1',
+        'tls_enabled': 'BOOLEAN NOT NULL CHECK (tls_enabled IN (0, 1)) DEFAULT 0',
     },
     'regexes': {
         'regex': 'TEXT NOT NULL',
@@ -130,7 +140,7 @@ firewall = FirewallManager(db)
 @app.get('/services', response_model=list[ServiceModel])
 async def get_service_list():
     """Get the list of existent firegex services"""
-    return db.query("""
+    res = db.query("""
         SELECT
             s.service_id service_id,
             s.status status,
@@ -139,11 +149,13 @@ async def get_service_list():
             s.proto proto,
             s.ip_int ip_int,
             s.fail_open fail_open,
+            s.tls_enabled tls_enabled,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
         GROUP BY s.service_id;
     """)
+    return populate_services_tls_config(res)
 
 @app.get('/services/{service_id}', response_model=ServiceModel)
 async def get_service_by_id(service_id: str):
@@ -157,6 +169,7 @@ async def get_service_by_id(service_id: str):
             s.proto proto,
             s.ip_int ip_int,
             s.fail_open fail_open,
+            s.tls_enabled tls_enabled,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
@@ -164,7 +177,7 @@ async def get_service_by_id(service_id: str):
     """, service_id)
     if len(res) == 0:
         raise HTTPException(status_code=400, detail="This service does not exists!")
-    return res[0]
+    return populate_services_tls_config(res)[0]
 
 @app.post('/services/{service_id}/stop', response_model=StatusMessageModel)
 async def service_stop(service_id: str):
@@ -183,6 +196,9 @@ async def service_start(service_id: str):
 @app.delete('/services/{service_id}', response_model=StatusMessageModel)
 async def service_delete(service_id: str):
     """Request the deletion of a specific service"""
+    srv_res = db.query('SELECT ip_int, port FROM services WHERE service_id = ?;', service_id)
+    if srv_res:
+        CertsDB().delete_cert_and_key(srv_res[0]["ip_int"], srv_res[0]["port"])
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     db.query('DELETE FROM regexes WHERE service_id = ?;', service_id)
     await firewall.remove(service_id)
@@ -206,8 +222,18 @@ async def service_rename(service_id: str, form: RenameForm):
 async def service_settings(service_id: str, form: SettingsForm):
     """Request to change the settings of a specific service (will cause a restart)"""
         
+    srv_check = db.query("SELECT proto, ip_int, port, tls_enabled FROM services WHERE service_id = ?;", service_id)
+    if len(srv_check) == 0:
+        raise HTTPException(status_code=404, detail="Service not found")
+    old_srv = srv_check[0]
+    
     if form.proto is not None and form.proto not in ["tcp", "udp"]:
         raise HTTPException(status_code=400, detail="Invalid protocol")
+        
+    if old_srv["tls_enabled"]:
+        new_proto = form.proto if form.proto is not None else old_srv["proto"]
+        if new_proto != "tcp":
+            raise HTTPException(status_code=400, detail="TLS is only supported for TCP protocol")
     
     if form.port is not None and (form.port < 1 or form.port > 65535):
         raise HTTPException(status_code=400, detail="Invalid port")
@@ -217,6 +243,9 @@ async def service_settings(service_id: str, form: SettingsForm):
             form.ip_int = ip_parse(form.ip_int)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid address")
+            
+    new_ip = form.ip_int if form.ip_int is not None else old_srv["ip_int"]
+    new_port = form.port if form.port is not None else old_srv["port"]
     
     keys = []
     values = []
@@ -227,10 +256,22 @@ async def service_settings(service_id: str, form: SettingsForm):
         
     if len(keys) == 0:
         raise HTTPException(status_code=400, detail="No settings to change provided")
+        
+    if old_srv["tls_enabled"] and (new_ip != old_srv["ip_int"] or new_port != old_srv["port"]):
+        cert, key = CertsDB().get_cert_and_key(old_srv["ip_int"], old_srv["port"])
+        if cert and key:
+            CertsDB().upsert_cert_and_key(new_ip, new_port, cert, key)
+            CertsDB().delete_cert_and_key(old_srv["ip_int"], old_srv["port"])
     
     try:
         db.query(f'UPDATE services SET {", ".join([f"{key}=?" for key in keys])} WHERE service_id = ?;', *values, service_id)
     except sqlite3.IntegrityError:
+        # If migration was performed, rollback CertsDB change (upsert old, delete new)
+        if old_srv["tls_enabled"] and (new_ip != old_srv["ip_int"] or new_port != old_srv["port"]):
+            cert, key = CertsDB().get_cert_and_key(new_ip, new_port)
+            if cert and key:
+                CertsDB().upsert_cert_and_key(old_srv["ip_int"], old_srv["port"], cert, key)
+                CertsDB().delete_cert_and_key(new_ip, new_port)
         raise HTTPException(status_code=400, detail="A service with these settings already exists")
     
     old_status = firewall.get(service_id).status
@@ -322,16 +363,48 @@ async def add_new_service(form: ServiceAddForm):
         raise HTTPException(status_code=400, detail="Invalid address")
     if form.proto not in ["tcp", "udp"]:
         raise HTTPException(status_code=400, detail="Invalid protocol")
+    if form.tls_enabled:
+        if form.proto != "tcp":
+            raise HTTPException(status_code=400, detail="TLS is only supported for TCP protocol")
+        if not form.tls_cert or not form.tls_key:
+            raise HTTPException(status_code=400, detail="Cert and Key are required when TLS is enabled")
+        CertsDB().upsert_cert_and_key(form.ip_int, form.port, form.tls_cert, form.tls_key)
+            
     srv_id = None
     try:
         srv_id = gen_service_id()
-        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int, fail_open) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int, form.fail_open)
+        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int, fail_open, tls_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int, form.fail_open, int(form.tls_enabled))
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="This type of service already exists")
     await firewall.reload()
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}
+
+@app.put('/services/{service_id}/tls-config', response_model=StatusMessageModel)
+async def update_service_tls(service_id: str, form: TLSConfigForm):
+    """Update TLS configuration for a service"""
+    srv_res = db.query("SELECT ip_int, port, proto FROM services WHERE service_id = ?;", service_id)
+    if len(srv_res) == 0:
+        raise HTTPException(status_code=404, detail="Service not found")
+    srv = srv_res[0]
+        
+    if form.tls_enabled:
+        if srv["proto"] != "tcp":
+            raise HTTPException(status_code=400, detail="TLS is only supported for TCP protocol")
+        if not form.tls_cert or not form.tls_key:
+            raise HTTPException(status_code=400, detail="Cert and Key are required when TLS is enabled")
+        CertsDB().upsert_cert_and_key(srv["ip_int"], srv["port"], form.tls_cert, form.tls_key)
+            
+    db.query("""
+        UPDATE services 
+        SET tls_enabled = ?
+        WHERE service_id = ?;
+    """, int(form.tls_enabled), service_id)
+    
+    await firewall.get(service_id).update_tls_config()
+    await refresh_frontend()
+    return {'status': 'ok'}
 
 @app.get('/metrics', response_class = PlainTextResponse)
 async def metrics():

@@ -305,6 +305,8 @@ def nicenessify(priority:int, pid:int|None=None):
         ps = psutil.Process(pid)
         if os.name == 'posix':
             ps.nice(priority)
+    except (psutil.AccessDenied, PermissionError) as e:
+        print(f"Permission denied setting priority (pid={pid}, priority={priority}): {e}")
     except Exception as e:
         print(f"Error setting priority: {e} {traceback.format_exc()}")
         pass

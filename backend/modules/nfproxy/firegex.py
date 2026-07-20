@@ -90,11 +90,11 @@ class FiregexInterceptor:
             proxy_binary_path, stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env={
+            env=dict(os.environ, **{
                 "NTHREADS": os.getenv("NTHREADS","1"),
                 "FIREGEX_NFQUEUE_FAIL_OPEN": "1" if self.srv.fail_open else "0",
                 "FIREGEX_NFPROXY_SOCK": self.sock_path
-            },
+            }),
         )
         nicenessify(-10, self.process.pid)
         self.outstrem_task = asyncio.create_task(self._stream_handler())

@@ -2,6 +2,7 @@ import { Button, Group, Space, TextInput, Notification, Modal, Switch, Segmented
 import { useForm } from '@mantine/form';
 import { useEffect, useState } from 'react';
 import { okNotify, regex_ipv4, regex_ipv6 } from '../../js/utils';
+import TLSServiceFields from '../TLSServiceFields';
 import { ImCross } from "react-icons/im"
 import { nfregex, Service } from './utils';
 import PortAndInterface from '../PortAndInterface';
@@ -18,7 +19,10 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
         ip_int:edit?.ip_int??"",
         proto:edit?.proto??"tcp",
         fail_open: edit?.fail_open??false,
-        autostart: true
+        autostart: true,
+        tls_enabled: false,
+        tls_cert: "",
+        tls_key: ""
     }
     
     const form = useForm({
@@ -28,6 +32,8 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
             port: (value) => (value>0 && value<65536) ? null : "Invalid port",
             proto: (value) => ["tcp","udp"].includes(value) ? null : "Invalid protocol",
             ip_int: (value) => (value.match(regex_ipv6) || value.match(regex_ipv4)) ? null : "Invalid IP address",
+            tls_cert: (value, values) => !edit && values.tls_enabled && !value ? "Certificate is required when TLS is enabled" : null,
+            tls_key: (value, values) => !edit && values.tls_enabled && !value ? "Private key is required when TLS is enabled" : null,
         }
     })
 
@@ -38,6 +44,8 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
         }
     }, [opened])
 
+
+
     const close = () =>{
         onClose()
         form.reset()
@@ -47,26 +55,36 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
     const [submitLoading, setSubmitLoading] = useState(false)
     const [error, setError] = useState<string|null>(null)
  
-    const submitRequest = ({ name, port, autostart, proto, ip_int, fail_open }:ServiceAddForm) =>{
+    const submitRequest = (values: ServiceAddForm) => {
         setSubmitLoading(true)
         if (edit){
-            nfregex.settings(edit.service_id, { port, proto, ip_int, fail_open }).then( res => {
+            nfregex.settings(edit.service_id, { port: values.port, proto: values.proto, ip_int: values.ip_int, fail_open: values.fail_open }).then( res => {
                 if (!res){
                     setSubmitLoading(false)
                     close();
-                    okNotify(`Service ${name} settings updated`, `Successfully updated settings for service ${name}`)
+                    okNotify(`Service ${values.name} settings updated`, `Successfully updated settings for service ${values.name}`)
                 }
             }).catch( err => {
                 setSubmitLoading(false)
                 setError("Request Failed! [ "+err+" ]")
             })
         }else{
-            nfregex.servicesadd({ name, port, proto, ip_int, fail_open }).then( res => {
+            const payload = {
+                name: values.name,
+                port: values.port,
+                proto: values.proto,
+                ip_int: values.ip_int,
+                fail_open: values.fail_open,
+                tls_enabled: values.tls_enabled,
+                tls_cert: values.tls_enabled ? values.tls_cert : null,
+                tls_key: values.tls_enabled ? values.tls_key : null,
+            }
+            nfregex.servicesadd(payload).then( res => {
                 if (res.status === "ok" && res.service_id){
                     setSubmitLoading(false)
                     close();
-                    if (autostart) nfregex.servicestart(res.service_id)
-                    okNotify(`Service ${name} has been added`, `Successfully added service with port ${port}`)
+                    if (values.autostart) nfregex.servicestart(res.service_id)
+                    okNotify(`Service ${values.name} has been added`, `Successfully added service with port ${values.port}`)
                 }else{
                     setSubmitLoading(false)
                     setError("Invalid request! [ "+res.status+" ]")
@@ -128,6 +146,8 @@ function AddEditService({ opened, onClose, edit }:{ opened:boolean, onClose:()=>
                     {...form.getInputProps('proto')}
                 />
             </Box>      
+
+            {!edit && <TLSServiceFields form={form} disabled={form.values.proto !== 'tcp'} />}
 
             <Group justify='flex-end' mt="md" mb="sm">
                 <Button loading={submitLoading} type="submit" disabled={edit?!form.isDirty():false}>{edit?"Edit Service":"Add Service"}</Button>

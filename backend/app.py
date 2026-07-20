@@ -11,6 +11,7 @@ from utils.sqlite import SQLite
 from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
+from utils.certs import CERTIFICATES_SCHEMA
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 import socketio
@@ -18,7 +19,7 @@ from socketio.exceptions import ConnectionRefusedError
 import hashlib
 
 # DB init
-db = SQLite('db/firegex.db')
+db = SQLite('db/firegex.db', CERTIFICATES_SCHEMA)
 sysctl = SysctlManager({
     "net.ipv4.conf.all.forwarding": True,
     "net.ipv6.conf.all.forwarding": True,
