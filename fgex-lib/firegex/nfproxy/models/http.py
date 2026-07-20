@@ -48,6 +48,7 @@ class InternalHTTPMessage:
     ws_stream: list[Frame] = field(default_factory=list)  # Decoded websocket stream
     upgrading_to_h2: bool = field(default=False)
     upgrading_to_ws: bool = field(default=False)
+    added_to_history: bool = field(default=False)
 
 
 @dataclass
@@ -393,6 +394,59 @@ class InternalHttpResponse(InternalCallbackHandler, pyllhttp.Response):
         return False
 
 
+class HttpHistory:
+    """
+    HTTP History handler for pyfilters.
+    Provides access to completed previous requests and responses in the current TCP stream.
+    """
+
+    def __init__(
+        self,
+        requests: list["HttpFullRequest"] | None = None,
+        responses: list["HttpFullResponse"] | None = None,
+    ):
+        self._requests = list(requests) if requests is not None else []
+        self._responses = list(responses) if responses is not None else []
+
+    @property
+    def requests(self) -> list["HttpFullRequest"]:
+        """List of previous completed HTTP requests"""
+        return self._requests
+
+    @property
+    def responses(self) -> list["HttpFullResponse"]:
+        """List of previous completed HTTP responses"""
+        return self._responses
+
+    @classmethod
+    def _fetch_packet(cls, internal_data: DataStreamCtx):
+        if (
+            internal_data.current_pkt is None
+            or internal_data.current_pkt.is_tcp is False
+        ):
+            raise NotReadyToRun()
+
+        for key in ["http_module", "http_full", "http_header"]:
+            obj = internal_data.call_mem.get(f"_fetched_obj_{key}")
+            if obj is not None:
+                if isinstance(obj, list) and len(obj) > 0:
+                    return [item.history for item in obj]
+                elif hasattr(obj, "history"):
+                    return obj.history
+
+        fetch_cls = HttpRequest if internal_data.current_pkt.is_input else HttpResponse
+        obj = fetch_cls._fetch_packet(internal_data)
+        if isinstance(obj, list):
+            return [item.history for item in obj]
+        return obj.history
+
+    def __repr__(self):
+        return f"<HttpHistory requests={len(self._requests)} responses={len(self._responses)}>"
+
+
+HttpStreamHistory = HttpHistory
+
+
 class InternalBasicHttpMetaClass:
     """Internal class to handle HTTP requests and responses"""
 
@@ -404,10 +458,18 @@ class InternalBasicHttpMetaClass:
         self._parser = parser
         self.raised_error = False
         self._message: InternalHTTPMessage | None = msg
+        self._history: HttpHistory | None = None
         self._contructor_hook()
 
     def _contructor_hook(self):
         pass
+
+    @property
+    def history(self) -> HttpHistory:
+        """HTTP History for the current stream connection"""
+        if self._history is None:
+            return HttpHistory([], [])
+        return self._history
 
     @property
     def total_size(self) -> int:
@@ -493,6 +555,10 @@ class InternalBasicHttpMetaClass:
         """Get a header from the message without caring about the case"""
         return self._message.lheaders.get(header.lower(), default)
 
+    @classmethod
+    def _should_release_message_headers(cls) -> bool:
+        return True
+
     @staticmethod
     def _before_fetch_callable_checks(internal_data: DataStreamCtx) -> bool:
         raise NotImplementedError()
@@ -520,6 +586,9 @@ class InternalBasicHttpMetaClass:
         if parser is None or parser.raised_error:
             parser: InternalHttpRequest | InternalHttpResponse = ParserType()
             internal_data.data_handler_context[parser_key] = parser
+
+        parser.release_message_headers = cls._should_release_message_headers()
+
 
         if not internal_data.call_mem.get(
             cls._parser_class(), False
@@ -620,10 +689,47 @@ class InternalBasicHttpMetaClass:
 
         if messages_to_call == 0:
             raise NotReadyToRun()
-        elif messages_to_call == 1:
-            return cls(parser, messages_tosend[0])
 
-        return [cls(parser, ele) for ele in messages_tosend]
+        max_history = int(internal_data.filter_glob.get("FGEX_MAX_HISTORY_SIZE", 100))
+        req_history_deque: deque = (
+            internal_data.data_handler_context.setdefault(
+                "http_history_requests", deque(maxlen=max_history)
+            )
+        )
+        resp_history_deque: deque = (
+            internal_data.data_handler_context.setdefault(
+                "http_history_responses", deque(maxlen=max_history)
+            )
+        )
+
+        built_instances = []
+        for msg in messages_tosend:
+            history_snapshot = HttpHistory(
+                list(req_history_deque), list(resp_history_deque)
+            )
+            instance = cls(parser, msg)
+            instance._history = history_snapshot
+            built_instances.append(instance)
+
+            if msg.message_complete and not getattr(msg, "added_to_history", False):
+                msg.added_to_history = True
+                if internal_data.current_pkt.is_input:
+                    full_req = HttpFullRequest(parser, msg)
+                    full_req._history = history_snapshot
+                    req_history_deque.append(full_req)
+                else:
+                    full_resp = HttpFullResponse(parser, msg)
+                    full_resp._history = history_snapshot
+                    resp_history_deque.append(full_resp)
+
+        if len(built_instances) == 1:
+            res = built_instances[0]
+            internal_data.call_mem[f"_fetched_obj_{cls._parser_class()}"] = res
+            return res
+
+        internal_data.call_mem[f"_fetched_obj_{cls._parser_class()}"] = built_instances
+        return built_instances
+
 
 
 class HttpRequest(InternalBasicHttpMetaClass):
@@ -639,7 +745,7 @@ class HttpRequest(InternalBasicHttpMetaClass):
     @property
     def method(self) -> bytes:
         """Method of the request"""
-        return self._parser.msg.method
+        return self._message.method
 
     @staticmethod
     def _parser_class() -> str:
@@ -662,7 +768,8 @@ class HttpResponse(InternalBasicHttpMetaClass):
     @property
     def status_code(self) -> int:
         """Status code of the response"""
-        return self._parser.msg.status
+        return self._message.status
+
 
     @staticmethod
     def _parser_class() -> str:
@@ -677,6 +784,10 @@ class HttpFullRequest(HttpRequest):
     HTTP Request handler
     This data handler will be called when the request data is complete
     """
+
+    @classmethod
+    def _should_release_message_headers(cls) -> bool:
+        return False
 
     def _contructor_hook(self):
         self._parser.release_message_headers = False
@@ -695,6 +806,10 @@ class HttpFullResponse(HttpResponse):
     This data handler will be called when the response data is complete
     """
 
+    @classmethod
+    def _should_release_message_headers(cls) -> bool:
+        return False
+
     def _contructor_hook(self):
         self._parser.release_message_headers = False
 
@@ -704,6 +819,7 @@ class HttpFullResponse(HttpResponse):
 
     def __repr__(self):
         return f"<HttpFullResponse status_code={self.status_code} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
+
 
 
 class HttpRequestHeader(HttpRequest):
