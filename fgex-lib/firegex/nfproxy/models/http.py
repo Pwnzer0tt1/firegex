@@ -411,12 +411,12 @@ class HttpHistory:
     @property
     def requests(self) -> list["HttpFullRequest"]:
         """List of previous completed HTTP requests"""
-        return self._requests
+        return self._requests.copy()
 
     @property
     def responses(self) -> list["HttpFullResponse"]:
         """List of previous completed HTTP responses"""
-        return self._responses
+        return self._responses.copy()
 
     @classmethod
     def _fetch_packet(cls, internal_data: DataStreamCtx):

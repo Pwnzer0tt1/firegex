@@ -264,6 +264,25 @@ def filter_req(req: HttpFullRequest):
     handle_packet(glob)
 
 
+def test_http_history_nfproxy_import():
+    from firegex.nfproxy import HttpHistory as HH1, HttpStreamHistory as HH2
+    assert HH1 is HttpHistory
+    assert HH2 is HttpStreamHistory
+
+
+def test_http_history_list_mutation():
+    history_obj = HttpHistory(requests=["dummy_req"], responses=["dummy_resp"])
+    reqs = history_obj.requests
+    reqs.clear()
+    assert len(history_obj.requests) == 1
+    assert history_obj.requests == ["dummy_req"]
+
+    resps = history_obj.responses
+    resps.append("extra_resp")
+    assert len(history_obj.responses) == 1
+    assert history_obj.responses == ["dummy_resp"]
+
+
 if __name__ == "__main__":
     test_http_history_model()
     test_http_history_stream_execution()
@@ -272,6 +291,9 @@ if __name__ == "__main__":
     test_http_history_parameter_order()
     test_http_history_property_immutability()
     test_http_history_negative_max_size()
+    test_http_history_nfproxy_import()
+    test_http_history_list_mutation()
     print("All HTTP history unit tests passed successfully!")
+
 
 

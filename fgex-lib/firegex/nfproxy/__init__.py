@@ -1,5 +1,13 @@
 import functools
-from firegex.nfproxy.models import RawPacket, TCPInputStream, TCPOutputStream, TCPClientStream, TCPServerStream
+from firegex.nfproxy.models import (
+    RawPacket,
+    TCPInputStream,
+    TCPOutputStream,
+    TCPClientStream,
+    TCPServerStream,
+    HttpHistory,
+    HttpStreamHistory,
+)
 from firegex.nfproxy.internals.models import Action, FullStreamAction
 
 ACCEPT = Action.ACCEPT
