@@ -426,19 +426,21 @@ class HttpHistory:
         ):
             raise NotReadyToRun()
 
-        for key in ["http_module", "http_full", "http_header"]:
+        for key in ("http_module", "http_full", "http_header"):
             obj = internal_data.call_mem.get(f"_fetched_obj_{key}")
             if obj is not None:
-                if isinstance(obj, list) and len(obj) > 0:
+                if isinstance(obj, list) and obj:
                     return [item.history for item in obj]
                 elif hasattr(obj, "history"):
                     return obj.history
 
-        fetch_cls = HttpRequest if internal_data.current_pkt.is_input else HttpResponse
-        obj = fetch_cls._fetch_packet(internal_data)
-        if isinstance(obj, list):
-            return [item.history for item in obj]
-        return obj.history
+        req_history_deque = internal_data.data_handler_context.get(
+            "http_history_requests", deque()
+        )
+        resp_history_deque = internal_data.data_handler_context.get(
+            "http_history_responses", deque()
+        )
+        return HttpHistory(list(req_history_deque), list(resp_history_deque))
 
     def __repr__(self):
         return f"<HttpHistory requests={len(self._requests)} responses={len(self._responses)}>"
@@ -473,8 +475,8 @@ class InternalBasicHttpMetaClass:
 
     @property
     def total_size(self) -> int:
-        """Total size of the stream"""
-        return self._parser.total_size
+        """Total size of the message"""
+        return self._message.total_size
 
     @property
     def url(self) -> str | None:
@@ -524,7 +526,7 @@ class InternalBasicHttpMetaClass:
     @property
     def should_upgrade(self) -> bool:
         """If the message should upgrade"""
-        return self._parser.should_upgrade
+        return self._message.should_upgrade
 
     @property
     def content_length(self) -> int | None:
@@ -690,17 +692,29 @@ class InternalBasicHttpMetaClass:
         if messages_to_call == 0:
             raise NotReadyToRun()
 
-        max_history = int(internal_data.filter_glob.get("FGEX_MAX_HISTORY_SIZE", 100))
+        raw_max = internal_data.filter_glob.get("FGEX_MAX_HISTORY_SIZE", 100)
+        try:
+            max_history = max(0, int(raw_max))
+        except (ValueError, TypeError):
+            max_history = 100
+
         req_history_deque: deque = (
             internal_data.data_handler_context.setdefault(
                 "http_history_requests", deque(maxlen=max_history)
             )
         )
+        if req_history_deque.maxlen != max_history:
+            req_history_deque = deque(req_history_deque, maxlen=max_history)
+            internal_data.data_handler_context["http_history_requests"] = req_history_deque
+
         resp_history_deque: deque = (
             internal_data.data_handler_context.setdefault(
                 "http_history_responses", deque(maxlen=max_history)
             )
         )
+        if resp_history_deque.maxlen != max_history:
+            resp_history_deque = deque(resp_history_deque, maxlen=max_history)
+            internal_data.data_handler_context["http_history_responses"] = resp_history_deque
 
         built_instances = []
         for msg in messages_tosend:
@@ -711,7 +725,7 @@ class InternalBasicHttpMetaClass:
             instance._history = history_snapshot
             built_instances.append(instance)
 
-            if msg.message_complete and not getattr(msg, "added_to_history", False):
+            if msg.message_complete and not msg.added_to_history:
                 msg.added_to_history = True
                 if internal_data.current_pkt.is_input:
                     full_req = HttpFullRequest(parser, msg)

@@ -139,8 +139,139 @@ def filter_resp(resp: HttpFullResponse):
     assert lengths[2] == (1, 1)
 
 
+def test_http_history_invalid_max_size():
+    glob = {}
+    clear_pyfilter_registry()
+
+    code = """
+from firegex.nfproxy import pyfilter, ACCEPT
+from firegex.nfproxy.models import HttpFullRequest
+
+@pyfilter
+def filter_req(req: HttpFullRequest):
+    return ACCEPT
+"""
+
+    glob["__firegex_pyfilter_enabled"] = ["filter_req"]
+    glob["__firegex_proto"] = "http"
+    glob["FGEX_MAX_HISTORY_SIZE"] = "invalid_number"
+    exec(code, glob, glob)
+    compile(glob)
+
+    glob["__firegex_packet_info"] = create_packet_info(b"GET /test HTTP/1.1\r\nHost: test\r\n\r\n", is_input=True)
+    # Should not raise ValueError, should default to 100
+    handle_packet(glob)
+
+
+def test_http_history_parameter_order():
+    glob = {}
+    clear_pyfilter_registry()
+
+    code = """
+from firegex.nfproxy import pyfilter, ACCEPT
+from firegex.nfproxy.models import HttpFullRequest, HttpHistory
+
+calls_log = []
+
+@pyfilter
+def filter_history_first(history: HttpHistory, req: HttpFullRequest):
+    calls_log.append(("history_first", req.url, len(history.requests)))
+    return ACCEPT
+"""
+
+    glob["__firegex_pyfilter_enabled"] = ["filter_history_first"]
+    glob["__firegex_proto"] = "http"
+    exec(code, glob, glob)
+    compile(glob)
+
+    glob["__firegex_packet_info"] = create_packet_info(b"GET /first HTTP/1.1\r\nHost: test\r\n\r\n", is_input=True)
+    handle_packet(glob)
+
+    calls = glob["calls_log"]
+    # Must be called EXACTLY ONCE with 0 history elements for the first request
+    assert len(calls) == 1
+    assert calls[0] == ("history_first", "/first", 0)
+
+
+def test_http_history_property_immutability():
+    glob = {}
+    clear_pyfilter_registry()
+    immutability_log = []
+
+    code = """
+from firegex.nfproxy import pyfilter, ACCEPT
+from firegex.nfproxy.models import HttpFullRequest, HttpHistory
+
+@pyfilter
+def filter_req(req: HttpFullRequest, history: HttpHistory):
+    if len(history.requests) > 0:
+        past = history.requests[0]
+        immutability_log.append({
+            "past_size": past.total_size,
+            "past_url": past.url,
+            "curr_size": req.total_size,
+            "curr_url": req.url,
+        })
+    return ACCEPT
+"""
+
+    glob["__firegex_pyfilter_enabled"] = ["filter_req"]
+    glob["__firegex_proto"] = "http"
+    glob["immutability_log"] = immutability_log
+    exec(code, glob, glob)
+    compile(glob)
+
+    # 1. First short request
+    req1_data = b"GET /short HTTP/1.1\r\nHost: test\r\n\r\n"
+    glob["__firegex_packet_info"] = create_packet_info(req1_data, is_input=True)
+    handle_packet(glob)
+
+    # 2. Second longer request
+    req2_data = b"POST /large_path HTTP/1.1\r\nHost: test\r\nContent-Length: 5\r\n\r\nHELLO"
+    glob["__firegex_packet_info"] = create_packet_info(req2_data, is_input=True)
+    handle_packet(glob)
+
+    entries = glob["immutability_log"]
+    assert len(entries) == 1
+    # Historical request 1 size must equal 14 (/short), current size 39 (/large_path)
+    assert entries[0]["past_size"] == 14
+    assert entries[0]["past_url"] == "/short"
+    assert entries[0]["curr_size"] == 39
+    assert entries[0]["curr_url"] == "/large_path"
+
+
+def test_http_history_negative_max_size():
+    glob = {}
+    clear_pyfilter_registry()
+
+    code = """
+from firegex.nfproxy import pyfilter, ACCEPT
+from firegex.nfproxy.models import HttpFullRequest
+
+@pyfilter
+def filter_req(req: HttpFullRequest):
+    return ACCEPT
+"""
+
+    glob["__firegex_pyfilter_enabled"] = ["filter_req"]
+    glob["__firegex_proto"] = "http"
+    glob["FGEX_MAX_HISTORY_SIZE"] = "-5"
+    exec(code, glob, glob)
+    compile(glob)
+
+    glob["__firegex_packet_info"] = create_packet_info(b"GET /test HTTP/1.1\r\nHost: test\r\n\r\n", is_input=True)
+    # Should not raise ValueError for maxlen=-5, should clamp to 0
+    handle_packet(glob)
+
+
 if __name__ == "__main__":
     test_http_history_model()
     test_http_history_stream_execution()
     test_http_history_attribute_on_request()
+    test_http_history_invalid_max_size()
+    test_http_history_parameter_order()
+    test_http_history_property_immutability()
+    test_http_history_negative_max_size()
     print("All HTTP history unit tests passed successfully!")
+
+
