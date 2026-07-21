@@ -728,13 +728,9 @@ class InternalBasicHttpMetaClass:
             if msg.message_complete and not msg.added_to_history:
                 msg.added_to_history = True
                 if internal_data.current_pkt.is_input:
-                    full_req = HttpFullRequest(parser, msg)
-                    full_req._history = history_snapshot
-                    req_history_deque.append(full_req)
+                    req_history_deque.append(HttpFullRequest(parser, msg))
                 else:
-                    full_resp = HttpFullResponse(parser, msg)
-                    full_resp._history = history_snapshot
-                    resp_history_deque.append(full_resp)
+                    resp_history_deque.append(HttpFullResponse(parser, msg))
 
         if len(built_instances) == 1:
             res = built_instances[0]
