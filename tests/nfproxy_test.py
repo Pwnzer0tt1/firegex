@@ -783,6 +783,52 @@ if __name__ == "__main__":
 
     remove_filters()
 
+    HTTP_HISTORY_TEST_FILTER = textwrap.dedent("""
+    from firegex.nfproxy.models import HttpFullRequest, HttpHistory
+    from firegex.nfproxy import pyfilter, ACCEPT, REJECT
+
+    @pyfilter
+    def history_filter_test(req: HttpFullRequest, history: HttpHistory):
+        past_urls = [r.url for r in history.requests]
+        if "/history_flag" in past_urls and req.url == "/history_secret":
+            return REJECT
+        return ACCEPT
+    """)
+
+    if firegex.nfproxy_set_code(service_id, HTTP_HISTORY_TEST_FILTER):
+        puts(
+            "Successfully added filter for HttpHistory test ✔",
+            color=colors.green,
+        )
+    else:
+        puts("Test Failed: Couldn't add HttpHistory filter ✗", color=colors.red)
+        exit_test(1)
+
+    server.connect_client()
+    req1 = b"GET /history_flag HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"
+    resp1 = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK"
+    server.send_packet(req1, server_reply=resp1)
+    if not server.recv_packet():
+        puts("Test Failed: /history_flag request was blocked unexpectedly ✗", color=colors.red)
+        exit_test(1)
+
+    req2 = b"GET /history_secret HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n"
+    server.send_packet(req2)
+    if not server.recv_packet():
+        puts(
+            "The HTTP request to /history_secret was successfully blocked based on HttpHistory ✔",
+            color=colors.green,
+        )
+    else:
+        puts(
+            "Test Failed: The HTTP request to /history_secret wasn't blocked by HttpHistory filter ✗",
+            color=colors.red,
+        )
+        exit_test(1)
+    server.close_client()
+
+    remove_filters()
+
     # Simulating requests is more complex due to websocket extensions handshake
 
     WS_REQUEST_PARSING_TEST = b"GET /sock/?EIO=4&transport=websocket HTTP/1.1\r\nHost: localhost:8080\r\nConnection: Upgrade\r\nPragma: no-cache\r\nCache-Control: no-cache\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)\xac AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36\r\nUpgrade: websocket\r\nOrigin: http://localhost:8080\r\nSec-WebSocket-Version: 13\r\nAccept-Encoding: gzip, deflate, br, zstd\r\nAccept-Language: it-IT,it;q=0.9,en-US;q=0.8,en;q=0.7,zh-CN;q=0.6,zh;q=0.5\r\nCookie: cookie-consent=true; _iub_cs-86405163=%7B%22timestamp%22%3A%222024-09-12T18%3A20%3A18.627Z%22%2C%22version%22%3A%221.65.1%22%2C%22purposes%22%3A%7B%221%22%3Atrue%2C%224%22%3Atrue%7D%2C%22id%22%3A86405163%2C%22cons%22%3A%7B%22rand%22%3A%222b09e6%22%7D%7D\r\nSec-WebSocket-Key: eE01O3/ZShPKsrykACLAaA==\r\nSec-WebSocket-Extensions: permessage-deflate; client_max_window_bits\r\n\r\n\xc1\x84#\x8a\xb2\xbb\x11\xbb\xb2\xbb"
