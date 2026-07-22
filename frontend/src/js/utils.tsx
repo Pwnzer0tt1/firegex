@@ -32,6 +32,7 @@ export const socketio = import.meta.env.DEV?
     io("ws://"+DEV_IP_BACKEND, {
         path:"/sock/socket.io",
         transports: ['websocket'],
+        autoConnect: false,
         auth: {
             token: useAuthStore.getState().getAccessToken()
         }
@@ -39,6 +40,7 @@ export const socketio = import.meta.env.DEV?
     io({
         path:"/sock/socket.io",
         transports: ['websocket'],
+        autoConnect: false,
         auth: {
             token: useAuthStore.getState().getAccessToken()
         }
@@ -91,7 +93,10 @@ export async function genericapi(method:string,path:string,data:any = undefined,
             },
             body: data? (is_form ? (new URLSearchParams(data)).toString() : JSON.stringify(data)) : undefined
         }).then(res => {
-            if(res.status === 401) window.location.reload() 
+            if(res.status === 401) {
+                useAuthStore.getState().clearAccessToken();
+                window.location.reload();
+            } 
             if(res.status === 406) resolve({status:"Wrong Password"})
             if(!res.ok){
                 const errorDefault = res.statusText

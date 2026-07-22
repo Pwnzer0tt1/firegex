@@ -13,7 +13,7 @@ import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
 import NFProxy from './pages/NFProxy';
 import ServiceDetailsNFProxy from './pages/NFProxy/ServiceDetails';
-import { useAuthStore } from './js/store';
+import { useAuthStore, useSystemStore } from './js/store';
 
 function App() {
 
@@ -24,40 +24,57 @@ function App() {
   const [loadinBtn, setLoadingBtn] = useState(false);
   const queryClient = useQueryClient()
   const { access_token } = useAuthStore()
+  const { setVersion } = useSystemStore()
 
-  useEffect(()=>{
-    socketio.auth = { token: access_token || "" }
-    socketio.connect()
-    getStatus()
-    socketio.on("update", (data) => {
-      queryClient.invalidateQueries({ queryKey: data  })
-    })
-    socketio.on("connect_error", (err) => {
-      if (access_token){
-        errorNotify("Socket.Io connection failed! ",`Error message: [${err.message}]`)
-      }
-      getStatus()
-    });
-  return () => {
-    socketio.off("update")
-    socketio.off("connect_error")
-    socketio.disconnect()
-  }
-  },[access_token])
-
-  const getStatus = () =>{
-    getstatus().then( res =>{
+  const getStatus = () => {
+    getstatus().then(res => {
       setSystemStatus(res)
+      setVersion(res.version || "unknown")
+      if (!res.loggined && useAuthStore.getState().getAccessToken()) {
+        useAuthStore.getState().clearAccessToken()
+      }
       setReqError(undefined)
-    }).catch(err=>{
+    }).catch(err => {
       setReqError(err.toString())
       setTimeout(getStatus, 500)
-    }).finally( ()=>setLoading(false) )
+    }).finally(() => setLoading(false))
   }
 
-  useEffect(()=>{
+  useEffect(() => {
     getStatus()
-  },[])
+  }, [])
+
+  useEffect(() => {
+    if (access_token && systemStatus.loggined) {
+      socketio.auth = { token: access_token }
+      if (!socketio.connected) {
+        socketio.connect()
+      }
+    } else {
+      if (socketio.connected) {
+        socketio.disconnect()
+      }
+    }
+  }, [access_token, systemStatus.loggined])
+
+  useEffect(() => {
+    socketio.on("update", (data) => {
+      queryClient.invalidateQueries({ queryKey: data })
+    })
+    socketio.on("connect_error", (err) => {
+      if (err.message === "Unauthorized") {
+        useAuthStore.getState().clearAccessToken()
+        getStatus()
+      } else if (access_token && systemStatus.loggined) {
+        errorNotify("Socket.Io connection failed! ", `Error message: [${err.message}]`)
+        getStatus()
+      }
+    });
+    return () => {
+      socketio.off("update")
+      socketio.off("connect_error")
+    }
+  }, [access_token, systemStatus.loggined])
 
   const form = useForm({
     initialValues: {
