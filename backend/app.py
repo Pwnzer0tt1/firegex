@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import socketio
 from socketio.exceptions import ConnectionRefusedError
 import hashlib
-
+from ipaddress import ip_network, ip_address
 # DB init
 db = SQLite('db/firegex.db')
 sysctl = SysctlManager({
@@ -34,6 +34,51 @@ async def lifespan(app):
     yield
     await shutdown_main()
 
+ALLOWED_NETWORKS = [ip_network(ip.strip(), strict=False) for ip in os.getenv("ALLOWED_IPS", "").split(",") if ip.strip()]
+PROXY_IP_HEADER = os.getenv("PROXY_IP_HEADER", "")
+
+class IPFilterMiddleware:
+    def __init__(self, app):
+        self.app = app
+        
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ["http", "websocket"]:
+            if ALLOWED_NETWORKS:
+                client_ip = None
+                if PROXY_IP_HEADER:
+                    headers = dict(scope.get("headers", []))
+                    header_val = headers.get(PROXY_IP_HEADER.lower().encode())
+                    if header_val:
+                        client_ip = header_val.decode().split(",")[0].strip()
+                
+                if not client_ip and scope.get("client"):
+                    client_ip = scope["client"][0]
+                    
+                if client_ip:
+                    try:
+                        ip_obj = ip_address(client_ip)
+                        if not any(ip_obj in net for net in ALLOWED_NETWORKS):
+                            if scope["type"] == "http":
+                                await send({
+                                    "type": "http.response.start",
+                                    "status": 403,
+                                    "headers": [(b"content-type", b"text/plain")],
+                                })
+                                await send({
+                                    "type": "http.response.body",
+                                    "body": b"Forbidden",
+                                })
+                            elif scope["type"] == "websocket":
+                                await send({
+                                    "type": "websocket.close",
+                                    "code": 1008
+                                })
+                            return
+                    except ValueError:
+                        pass
+                        
+        await self.app(scope, receive, send)
+
 app = FastAPI(
     debug=DEBUG,
     redoc_url=None,
@@ -42,6 +87,7 @@ app = FastAPI(
     title="Firegex API",
     version=API_VERSION,
 )
+app.add_middleware(IPFilterMiddleware)
 
 if DEBUG:
     app.add_middleware(
@@ -64,17 +110,23 @@ app.mount("/sock", sio_app)
 def APP_STATUS(): return "init" if db.get("password") is None else "run"
 def JWT_SECRET(): return db.get("secret")
 
-def hash_psw(psw: str):
+def _hash_psw_sync(psw: str) -> str:
     salt = secrets.token_hex(32)
     return hashlib.pbkdf2_hmac("sha256", psw.encode(), salt.encode(), 500_000).hex()+"-"+salt
 
-def verify_psw(psw: str, hashed: str) -> bool:
+async def hash_psw(psw: str) -> str:
+    return await asyncio.to_thread(_hash_psw_sync, psw)
+
+def _verify_psw_sync(psw: str, hashed: str) -> bool:
     psw_hash, salt = hashed.split("-")
     new_hashed = hashlib.pbkdf2_hmac("sha256", psw.encode(), salt.encode(), 500_000).hex()
     return new_hashed == psw_hash
 
-def set_psw(psw: str):
-    db.put("password", hash_psw(psw))
+async def verify_psw(psw: str, hashed: str) -> bool:
+    return await asyncio.to_thread(_verify_psw_sync, psw, hashed)
+
+async def set_psw(psw: str):
+    db.put("password", await hash_psw(psw))
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -144,7 +196,7 @@ async def login_api(form: OAuth2PasswordRequestForm = Depends()):
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
     await asyncio.sleep(0.3) # No bruteforce :)
-    if verify_psw(form.password, db.get("password")):
+    if await verify_psw(form.password, db.get("password")):
         return {"access_token": create_access_token({"logged_in": True}), "token_type": "bearer"}
     raise HTTPException(406,"Wrong password!")
 
@@ -156,7 +208,7 @@ async def set_password(form: PasswordForm):
         raise HTTPException(status_code=400)
     if form.password == "":
         return {"status":"Cannot insert an empty password!"}
-    set_psw(form.password)
+    await set_psw(form.password)
     await refresh_frontend()
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 
@@ -172,7 +224,7 @@ async def change_password(form: PasswordChangeForm):
         db.put("secret", secrets.token_hex(32))
         await disconnect_all()
     
-    set_psw(form.password)
+    await set_psw(form.password)
     await refresh_frontend()
     return {"status":"ok", "access_token": create_access_token({"logged_in": True})}
 

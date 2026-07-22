@@ -3,7 +3,7 @@ import sqlite3
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from modules.nfproxy.nftables import FiregexTables
-from modules.nfproxy.firewall import STATUS, FirewallManager
+from modules.nfproxy.firewall import STATUS, FirewallManager, ServiceNotFoundException
 from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, socketio_emit, PortType
 from utils.models import ResetRequest, StatusMessageModel
@@ -373,9 +373,13 @@ async def join_outstream(sid, data):
     """Client joins a room."""
     srv = data.get("service")
     if srv:
-        room = f"nfproxy-outstream-{srv}"
-        await utils.socketio.enter_room(sid, room)
-        await utils.socketio.emit(room, firewall.get(srv).read_outstrem_buffer(), room=sid)
+        try:
+            srv_manager = firewall.get(srv)
+            room = f"nfproxy-outstream-{srv}"
+            await utils.socketio.enter_room(sid, room)
+            await utils.socketio.emit(room, srv_manager.read_outstrem_buffer(), room=sid)
+        except ServiceNotFoundException:
+            pass
 
 async def leave_outstream(sid, data):
     """Client leaves a room."""
@@ -387,9 +391,13 @@ async def join_exception(sid, data):
     """Client joins a room."""
     srv = data.get("service")
     if srv:
-        room = f"nfproxy-exception-{srv}"
-        await utils.socketio.enter_room(sid, room)
-        await utils.socketio.emit(room, firewall.get(srv).last_exception_time, room=sid)
+        try:
+            srv_manager = firewall.get(srv)
+            room = f"nfproxy-exception-{srv}"
+            await utils.socketio.enter_room(sid, room)
+            await utils.socketio.emit(room, srv_manager.last_exception_time, room=sid)
+        except ServiceNotFoundException:
+            pass
 
 async def leave_exception(sid, data):
     """Client leaves a room."""

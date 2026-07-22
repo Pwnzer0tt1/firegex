@@ -13,7 +13,7 @@ import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
 import NFProxy from './pages/NFProxy';
 import ServiceDetailsNFProxy from './pages/NFProxy/ServiceDetails';
-import { useAuthStore } from './js/store';
+import { useAuthStore, useSystemStore } from './js/store';
 
 function App() {
 
@@ -24,6 +24,7 @@ function App() {
   const [loadinBtn, setLoadingBtn] = useState(false);
   const queryClient = useQueryClient()
   const { access_token } = useAuthStore()
+  const { setVersion } = useSystemStore()
 
   useEffect(()=>{
     socketio.auth = { token: access_token || "" }
@@ -48,6 +49,7 @@ function App() {
   const getStatus = () =>{
     getstatus().then( res =>{
       setSystemStatus(res)
+      setVersion(res.version || "unknown")
       setReqError(undefined)
     }).catch(err=>{
       setReqError(err.toString())
