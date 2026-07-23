@@ -27,7 +27,23 @@ public:
         PktRequest<Derived>* pkt;
         for(;;) {
             queue.take(pkt);
-            static_cast<Derived*>(this)->handle_next_packet(pkt);
+            try {
+                static_cast<Derived*>(this)->handle_next_packet(pkt);
+            } catch (const std::exception& e) {
+                std::cerr << "[error] Exception handling packet: " << e.what() << std::endl;
+                if (pkt->get_action() == FilterAction::NOACTION) {
+                    try {
+                        pkt->accept();
+                    } catch (...) {}
+                }
+            } catch (...) {
+                std::cerr << "[error] Unknown exception handling packet" << std::endl;
+                if (pkt->get_action() == FilterAction::NOACTION) {
+                    try {
+                        pkt->accept();
+                    } catch (...) {}
+                }
+            }
             delete pkt;
         }
     }

@@ -103,7 +103,9 @@ def load_config():
         "port": 4444,
         # any allow to bind service also on ipv6 (see the main of backend to understand why)
         "host": "any",
-        "socket_dir": None
+        "socket_dir": None,
+        "allowed_ips": None,
+        "proxy_ip_header": None
     }
     
     if os.path.isfile(g.configfile):
@@ -156,6 +158,8 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_start.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_start.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
+    parser_start.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
+    parser_start.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default=None)
     parser_start.add_argument('--prebuilt', required=False, action="store_true", help='Use prebuilt docker image', default=False)
@@ -170,6 +174,8 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_restart.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_restart.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_restart.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
+    parser_restart.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
+    parser_restart.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_restart.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
     
@@ -186,6 +192,8 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_config.add_argument('--host', required=False, help='Set default host IP address to bind the service to')
     parser_config.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_config.add_argument('--password', required=False, type=str, nargs='?', const='', help='Change the password of the firewall (omit the value to be prompted for it interactively)')
+    parser_config.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
+    parser_config.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_config.add_argument('--show', required=False, action="store_true", help='Show current configuration', default=False)
     args = parser.parse_args(args=args_to_parse)
     
@@ -235,6 +243,12 @@ def gen_args(args_to_parse: list[str]|None = None):
         config_changed = True
     if hasattr(args, 'socket_dir') and args.socket_dir != config["socket_dir"]:
         config["socket_dir"] = args.socket_dir
+        config_changed = True
+    if hasattr(args, 'allowed_ips') and args.allowed_ips != config.get("allowed_ips"):
+        config["allowed_ips"] = args.allowed_ips
+        config_changed = True
+    if hasattr(args, 'proxy_ip_header') and args.proxy_ip_header != config.get("proxy_ip_header"):
+        config["proxy_ip_header"] = args.proxy_ip_header
         config_changed = True
     
     if config_changed:
@@ -337,7 +351,9 @@ def write_compose(skip_password = True):
                             f"NTHREADS={args.threads}",
                             *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else []),
                             *(["SOCKET_DIR=/run/firegex"] if args.socket_dir else []),
-                            *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else [])
+                            *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else []),
+                            *([f"ALLOWED_IPS={args.allowed_ips}"] if getattr(args, 'allowed_ips', None) else []),
+                            *([f"PROXY_IP_HEADER={args.proxy_ip_header}"] if getattr(args, 'proxy_ip_header', None) else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -391,7 +407,9 @@ def write_compose(skip_password = True):
                             f"PORT={args.port}",
                             f"NTHREADS={args.threads}",
                             *([f"PSW_HASH_SET={hash_psw(psw_set)}"] if psw_set else []),
-                            *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else [])
+                            *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else []),
+                            *([f"ALLOWED_IPS={args.allowed_ips}"] if getattr(args, 'allowed_ips', None) else []),
+                            *([f"PROXY_IP_HEADER={args.proxy_ip_header}"] if getattr(args, 'proxy_ip_header', None) else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db"
@@ -855,6 +873,11 @@ def run_standalone():
         f"HOST={args.host}",
         f"NTHREADS={args.threads}",
     ]
+    
+    if getattr(args, 'allowed_ips', None):
+        env_vars.append(f"ALLOWED_IPS={args.allowed_ips}")
+    if getattr(args, 'proxy_ip_header', None):
+        env_vars.append(f"PROXY_IP_HEADER={args.proxy_ip_header}")
     
     # Add password if set
     psw_set = get_password()
