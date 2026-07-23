@@ -17,7 +17,6 @@ export const UploadFilterModal = ({ opened, onClose, service }: { opened: boolea
     useEffect(() => {
         if (opened && file){
             file.bytes().then( code => {
-                console.log(code.toString())
                 setSubmitLoading(true)
                 nfproxy.setpyfilterscode(service?.service_id??"",code.toString()).then( res => {
                     if (!res){

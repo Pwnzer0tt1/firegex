@@ -68,6 +68,7 @@ if __name__ == "__main__":
         args.port + 1, ipv6=args.ipv6, proxy_port=args.port
     )
 
+    service_id = None
     def exit_test(code):
         if service_id:
             server.stop()
@@ -75,7 +76,7 @@ if __name__ == "__main__":
                 puts("Sucessfully deleted service ✔", color=colors.green)
             else:
                 puts("Test Failed: Coulnd't delete serivce ✗", color=colors.red)
-                exit_test(1)
+                exit(1)
         exit(code)
 
     srvs = firegex.ph_get_services()

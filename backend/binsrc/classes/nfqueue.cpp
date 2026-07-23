@@ -451,6 +451,7 @@ class NfQueue {
 		// error code taken from the linux kernel:
 		// https://elixir.bootlin.com/linux/v5.18.12/source/include/linux/errno.h#L27
 		#define ENOTSUPP	524	/* Operation is not supported */
+		#define EOPNOTSUPP	95	/* Operation not supported on transport endpoint */
 
 		if (error_msg->error != -ENOTSUPP && error_msg->error != -EOPNOTSUPP) {
 			_clear();

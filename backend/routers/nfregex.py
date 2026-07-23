@@ -8,19 +8,22 @@ from modules.nfregex.nftables import FiregexTables
 from modules.nfregex.firewall import STATUS, FirewallManager
 from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, socketio_emit, PortType
+from modules.tls.service import activate_stream
 from utils.models import ResetRequest, StatusMessageModel
 from modules.nfregex.firegex import test_regex_validity
 
 class ServiceModel(BaseModel):
     status: str
     service_id: str
-    port: PortType
+    port: PortType|None = None
     name: str
     proto: str
-    ip_int: str
+    ip_int: str|None = None
     n_regex: int
     n_packets: int
     fail_open: bool
+    target_type: str
+    tls_stream_id: str|None = None
 
 class RenameForm(BaseModel):
     name:str
@@ -30,6 +33,8 @@ class SettingsForm(BaseModel):
     proto: str|None = None
     ip_int: str|None = None
     fail_open: bool|None = None
+    target_type: str|None = None
+    tls_stream_id: str|None = None
 
 class RegexModel(BaseModel):
     regex:str
@@ -49,10 +54,12 @@ class RegexAddForm(BaseModel):
 
 class ServiceAddForm(BaseModel):
     name: str
-    port: PortType
+    port: PortType|None = None
     proto: str
-    ip_int: str
+    ip_int: str|None = None
     fail_open: bool = False
+    target_type: str = "flow"
+    tls_stream_id: str|None = None
 
 class ServiceAddResponse(BaseModel):
     status:str
@@ -64,11 +71,13 @@ db = SQLite('db/nft-regex.db', {
     'services': {
         'service_id': 'VARCHAR(100) PRIMARY KEY',
         'status': 'VARCHAR(100) NOT NULL',
-        'port': 'INT NOT NULL CHECK(port > 0 and port < 65536)',
+        'target_type': 'VARCHAR(10) NOT NULL CHECK(target_type IN ("flow", "tls")) DEFAULT "flow"',
+        'tls_stream_id': 'VARCHAR(100)',
+        'port': 'INT CHECK(port > 0 and port < 65536)',
         'name': 'VARCHAR(100) NOT NULL UNIQUE',
         'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "udp"))',
-        'ip_int': 'VARCHAR(100) NOT NULL',
-        'fail_open': 'BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1'
+        'ip_int': 'VARCHAR(100)',
+        'fail_open': 'BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1',
     },
     'regexes': {
         'regex': 'TEXT NOT NULL',
@@ -113,10 +122,8 @@ async def startup():
         print("WARNING cannot start firewall:", e)
 
 async def shutdown():
-    db.backup()
     await firewall.close()
     db.disconnect()
-    db.restore()
 
 def gen_service_id():
     while True:
@@ -130,7 +137,7 @@ firewall = FirewallManager(db)
 @app.get('/services', response_model=list[ServiceModel])
 async def get_service_list():
     """Get the list of existent firegex services"""
-    return db.query("""
+    res = db.query("""
         SELECT
             s.service_id service_id,
             s.status status,
@@ -139,11 +146,14 @@ async def get_service_list():
             s.proto proto,
             s.ip_int ip_int,
             s.fail_open fail_open,
+            s.target_type target_type,
+            s.tls_stream_id tls_stream_id,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
         GROUP BY s.service_id;
     """)
+    return res
 
 @app.get('/services/{service_id}', response_model=ServiceModel)
 async def get_service_by_id(service_id: str):
@@ -157,6 +167,8 @@ async def get_service_by_id(service_id: str):
             s.proto proto,
             s.ip_int ip_int,
             s.fail_open fail_open,
+            s.target_type target_type,
+            s.tls_stream_id tls_stream_id,
             COUNT(r.regex_id) n_regex,
             COALESCE(SUM(r.blocked_packets),0) n_packets
         FROM services s LEFT JOIN regexes r ON s.service_id = r.service_id
@@ -176,6 +188,10 @@ async def service_stop(service_id: str):
 @app.post('/services/{service_id}/start', response_model=StatusMessageModel)
 async def service_start(service_id: str):
     """Request the start of a specific service"""
+    srv = db.query("SELECT target_type, tls_stream_id FROM services WHERE service_id = ?;", service_id)
+    if srv and srv[0]["target_type"] == "tls":
+        if not await activate_stream(srv[0]["tls_stream_id"]):
+            raise HTTPException(status_code=400, detail="Linked TLS stream not found")
     await firewall.get(service_id).next(STATUS.ACTIVE)
     await refresh_frontend()
     return {'status': 'ok'}
@@ -206,9 +222,14 @@ async def service_rename(service_id: str, form: RenameForm):
 async def service_settings(service_id: str, form: SettingsForm):
     """Request to change the settings of a specific service (will cause a restart)"""
         
+    srv_check = db.query("SELECT proto, ip_int, port, target_type, tls_stream_id FROM services WHERE service_id = ?;", service_id)
+    if len(srv_check) == 0:
+        raise HTTPException(status_code=404, detail="Service not found")
+    old_srv = srv_check[0]
+    
     if form.proto is not None and form.proto not in ["tcp", "udp"]:
         raise HTTPException(status_code=400, detail="Invalid protocol")
-    
+        
     if form.port is not None and (form.port < 1 or form.port > 65535):
         raise HTTPException(status_code=400, detail="Invalid port")
     
@@ -217,6 +238,22 @@ async def service_settings(service_id: str, form: SettingsForm):
             form.ip_int = ip_parse(form.ip_int)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid address")
+            
+    new_ip = form.ip_int if form.ip_int is not None else old_srv["ip_int"]
+    new_port = form.port if form.port is not None else old_srv["port"]
+    new_proto = form.proto if form.proto is not None else old_srv["proto"]
+    
+    new_target_type = form.target_type if form.target_type is not None else old_srv["target_type"]
+    new_tls_stream_id = form.tls_stream_id if form.tls_stream_id is not None else old_srv["tls_stream_id"]
+    
+    if new_target_type == "tls":
+        if new_proto != "tcp":
+            raise HTTPException(status_code=400, detail="TLS is only supported for TCP protocol")
+        if not new_tls_stream_id:
+            raise HTTPException(status_code=400, detail="TLS stream ID is required when target type is tls")
+            
+    if new_target_type == "flow" and (new_ip is None or new_port is None):
+        raise HTTPException(status_code=400, detail="IP and Port are required when target type is flow")
     
     keys = []
     values = []
@@ -227,7 +264,7 @@ async def service_settings(service_id: str, form: SettingsForm):
         
     if len(keys) == 0:
         raise HTTPException(status_code=400, detail="No settings to change provided")
-    
+            
     try:
         db.query(f'UPDATE services SET {", ".join([f"{key}=?" for key in keys])} WHERE service_id = ?;', *values, service_id)
     except sqlite3.IntegrityError:
@@ -235,9 +272,11 @@ async def service_settings(service_id: str, form: SettingsForm):
     
     old_status = firewall.get(service_id).status
     await firewall.remove(service_id)
+    if old_status == STATUS.ACTIVE and new_target_type == "tls":
+        await activate_stream(new_tls_stream_id)
     await firewall.reload()
     await firewall.get(service_id).next(old_status)
-    
+
     await refresh_frontend()
     return {'status': 'ok'}
 
@@ -316,22 +355,33 @@ async def add_new_regex(form: RegexAddForm):
 @app.post('/services', response_model=ServiceAddResponse)
 async def add_new_service(form: ServiceAddForm):
     """Add a new service"""
-    try:
-        form.ip_int = ip_parse(form.ip_int)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid address")
+    if form.target_type == "flow":
+        if form.ip_int is None or form.port is None:
+            raise HTTPException(status_code=400, detail="IP and Port are required when target type is flow")
+        try:
+            form.ip_int = ip_parse(form.ip_int)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid address")
+    elif form.target_type == "tls":
+        if not form.tls_stream_id:
+            raise HTTPException(status_code=400, detail="TLS stream ID is required when target type is tls")
+            
     if form.proto not in ["tcp", "udp"]:
         raise HTTPException(status_code=400, detail="Invalid protocol")
+    if form.target_type == "tls" and form.proto != "tcp":
+        raise HTTPException(status_code=400, detail="TLS is only supported for TCP protocol")
+            
     srv_id = None
     try:
         srv_id = gen_service_id()
-        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int, fail_open) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int, form.fail_open)
+        db.query("INSERT INTO services (service_id ,name, port, status, proto, ip_int, fail_open, target_type, tls_stream_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int, form.fail_open, form.target_type, form.tls_stream_id)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="This type of service already exists")
     await firewall.reload()
     await refresh_frontend()
     return {'status': 'ok', 'service_id': srv_id}
+
 
 @app.get('/metrics', response_class = PlainTextResponse)
 async def metrics():
@@ -355,3 +405,52 @@ async def metrics():
         metrics.append(f'firegex_blocked_packets{{{props}}} {stat["blocked_packets"]}')
         metrics.append(f'firegex_active{{{props}}} {int(stat["active"] and stat["status"] == "active")}')
     return "\n".join(metrics)
+
+@app.get('/services/{service_id}/export')
+async def export_service_regexes(service_id: str):
+    """Export all regexes for a specific service as JSON"""
+    if len(db.query('SELECT 1 FROM services WHERE service_id = ?;', service_id)) == 0:
+        raise HTTPException(status_code=404, detail="Service not found")
+    
+    regexes = db.query("SELECT regex, mode, is_case_sensitive, active FROM regexes WHERE service_id = ?;", service_id)
+    return {"regexes": regexes}
+
+@app.post('/services/{service_id}/import', response_model=StatusMessageModel)
+async def import_service_regexes(service_id: str, data: dict):
+    """Import regexes for a specific service from JSON"""
+    if len(db.query('SELECT 1 FROM services WHERE service_id = ?;', service_id)) == 0:
+        raise HTTPException(status_code=404, detail="Service not found")
+        
+    regexes = data.get("regexes", [])
+    if not isinstance(regexes, list):
+        raise HTTPException(status_code=400, detail="Invalid format")
+        
+    for r in regexes:
+        regex = r.get("regex")
+        mode = r.get("mode")
+        is_case_sensitive = r.get("is_case_sensitive", False)
+        active = r.get("active", True)
+        
+        if not regex or not mode:
+            continue
+            
+        try:
+            db.query('INSERT INTO regexes (regex, mode, service_id, is_case_sensitive, active) VALUES (?, ?, ?, ?, ?);', 
+                     regex, mode, service_id, int(is_case_sensitive), int(active))
+            
+            # Since we inserted it directly, we need to notify the firewall to update its rules if it's active
+            if active and firewall.get(service_id).status == STATUS.ACTIVE:
+                # Easiest way to sync is to restart the service rule engine
+                await firewall.get(service_id).next(STATUS.ACTIVE)
+        except sqlite3.IntegrityError:
+            # Skip duplicates
+            pass
+            
+    # Force reload of all rules for this service
+    old_status = firewall.get(service_id).status
+    await firewall.remove(service_id)
+    await firewall.reload()
+    await firewall.get(service_id).next(old_status)
+    
+    await refresh_frontend()
+    return {'status': 'ok'}

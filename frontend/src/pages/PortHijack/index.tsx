@@ -47,8 +47,8 @@ function PortHijack() {
                 <DocsButton doc="porthijack" />
             </Box>
         </Box>
-        <Space h="md" />
-        <Box className="center-flex-row" style={{gap: 20}}>
+        <Space h="xl" />
+        <Box className="center-flex-row" style={{ gap: 12, width: "100%" }}>
             <LoadingOverlay visible={services.isLoading} />
             {(services.data && services.data.length > 0) ?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} />):<>
                 <Box className='center-flex-row'>

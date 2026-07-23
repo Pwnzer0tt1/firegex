@@ -1,10 +1,11 @@
-import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl, Box } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Modal, Switch, SegmentedControl, Box, Card, Divider, Tabs, Title } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useState } from 'react';
 import { okNotify, regex_ipv6_no_cidr, regex_ipv4_no_cidr } from '../../js/utils';
 import { ImCross } from "react-icons/im"
 import { porthijack } from './utils';
 import PortAndInterface from '../PortAndInterface';
+import { TbSettings, TbShieldLock } from 'react-icons/tb';
 
 type ServiceAddForm = {
     name:string,
@@ -66,36 +67,68 @@ function AddNewService({ opened, onClose }:{ opened:boolean, onClose:()=>void })
     }
 
 
-  return <Modal size="xl" title="Add a new service" opened={opened} onClose={close} closeOnClickOutside={false} centered>
-    <form onSubmit={form.onSubmit(submitRequest)}>
-            <TextInput
-                label="Service name"
-                placeholder="Challenge 01"
-                {...form.getInputProps('name')}
-            />
-            <Space h="md" />
-            <PortAndInterface form={form} int_name="ip_src" port_name="public_port" label="Public IP Address and port (ipv4/ipv6)" />
-            <Space h="md" />
-            <PortAndInterface form={form} int_name="ip_dst" port_name="proxy_port" label="Proxy/Internal IP Address and port (ipv4/ipv6)" />
-            <Space h="md" />
+    return <Modal size="xl" title="Add a new service" opened={opened} onClose={close} closeOnClickOutside={false} centered>
+        <form onSubmit={form.onSubmit(submitRequest)}>
+            <Tabs defaultValue="general" color="cyan" variant="outline" radius="md">
+                <Tabs.List>
+                    <Tabs.Tab value="general" leftSection={<TbSettings size={16} />}>
+                        General
+                    </Tabs.Tab>
+                    <Tabs.Tab value="advanced" leftSection={<TbShieldLock size={16} />}>
+                        Advanced
+                    </Tabs.Tab>
+                </Tabs.List>
 
-            <Box className='center-flex'>
-                <Switch
-                    label="Auto-Start Service"
-                    {...form.getInputProps('autostart', { type: 'checkbox' })}
-                />  
-                <Box className="flex-spacer" />
-                <SegmentedControl
-                    data={[
-                        { label: 'TCP', value: 'tcp' },
-                        { label: 'UDP', value: 'udp' },
-                    ]}
-                    {...form.getInputProps('proto')}
-                />
-            </Box>      
+                <Tabs.Panel value="general" pt="xl" pb="md">
+                    <TextInput
+                        label="Service name"
+                        placeholder="Challenge 01"
+                        size="md"
+                        {...form.getInputProps('name')}
+                    />
+                    <Space h="md" />
+                    <Title order={6} mb="xs">Protocol</Title>
+                    <SegmentedControl
+                        fullWidth
+                        size="md"
+                        color="cyan"
+                        data={[
+                            { label: 'TCP', value: 'tcp' },
+                            { label: 'UDP', value: 'udp' },
+                        ]}
+                        {...form.getInputProps('proto')}
+                    />
+                    
+                    <Space h="xl" />
+                    <Divider mb="xl" label="Interface & Port Setup" labelPosition="center" />
+                    
+                    <PortAndInterface form={form} int_name="ip_src" port_name="public_port" label="Public IP Address and port (ipv4/ipv6)" />
+                    <Space h="md" />
+                    <PortAndInterface form={form} int_name="ip_dst" port_name="proxy_port" label="Proxy/Internal IP Address and port (ipv4/ipv6)" />
+                </Tabs.Panel>
 
-            <Group justify='flex-end' mt="md" mb="sm">
-                <Button loading={submitLoading} type="submit">Add Service</Button>
+                <Tabs.Panel value="advanced" pt="xl" pb="md">
+                    <Card withBorder padding="lg" radius="md" bg="transparent">
+                        <Box>
+                            <Group justify="space-between" mb="xs">
+                                <Title order={6}>Auto-Start Service</Title>
+                                <Switch
+                                    size="md"
+                                    color="cyan"
+                                    {...form.getInputProps('autostart', { type: 'checkbox' })}
+                                />
+                            </Group>
+                            <Title order={6} size="sm" c="dimmed" style={{ fontWeight: "normal" }}>
+                                Automatically start this service as soon as it is created.
+                            </Title>
+                        </Box>
+                    </Card>
+                </Tabs.Panel>
+            </Tabs>
+
+            <Group justify='flex-end' mt="xl" mb="sm">
+                <Button variant="default" onClick={close}>Cancel</Button>
+                <Button loading={submitLoading} type="submit" color="cyan">Add Service</Button>
             </Group>
 
             {error?<>

@@ -50,12 +50,9 @@ async def startup():
     await firewall.init()
 
 async def shutdown():
-    keep_rules = firewall.keep_rules
-    db.backup()
-    if not keep_rules:
+    if not firewall.keep_rules:
         await firewall.close()
     db.disconnect()
-    db.restore()
 
 async def refresh_frontend(additional:list[str]=[]):
     await socketio_emit(["firewall"]+additional)

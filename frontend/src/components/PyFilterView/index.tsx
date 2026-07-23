@@ -1,4 +1,4 @@
-import { Text, Badge, Space, ActionIcon, Tooltip, Box } from '@mantine/core';
+import { Text, Badge, Space, ActionIcon, Tooltip, Box, Card, Group } from '@mantine/core';
 import { useState } from 'react';
 import { PyFilter } from '../../js/models';
 import { errorNotify, isMediumScreen, okNotify } from '../../js/utils';
@@ -21,24 +21,43 @@ export default function PyFilterView({ filterInfo }:{ filterInfo:PyFilter }) {
     }).catch( err => errorNotify(`Filter ${filterInfo.name} ${filterInfo.active?"deactivation":"activation"} failed!`,`Error: ${err}`))
   }
 
-  return <Box my="sm" display="flex" style={{alignItems:"center"}}>
-      
-      <Box className="firegex__regexview__pyfilter_text" style={{ width: "100%", alignItems: "center"}} display="flex" >
-        <Badge size="sm" radius="lg" mr="sm" color={filterInfo.active?"lime":"red"} variant="filled" />
-          {filterInfo.name}
-          <Box className='flex-spacer' />
-          <Space w="xs" />
-          {isMedium?<>
-            <Badge size="md" radius="md" color="yellow" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 2}} /> {filterInfo.blocked_packets}</Badge>
-            <Space w="xs" />
-            <Badge size="md" radius="md" color="orange" variant="filled"><FaPencilAlt style={{ marginBottom: -1, marginRight: 2}} /> {filterInfo.edited_packets}</Badge>
-            <Space w="lg" />
-          </>:null}
-          <Tooltip label={filterInfo.active?"Deactivate":"Activate"} zIndex={0} color={filterInfo.active?"orange":"teal"}>
-            <ActionIcon color={filterInfo.active?"orange":"teal"} onClick={changeRegexStatus} size="lg" radius="md" variant="filled">
-              {filterInfo.active?<FaPause size="20px" />:<FaPlay size="20px" />}</ActionIcon>
-          </Tooltip>
-      </Box>
+  return (
+    <Card 
+      withBorder 
+      shadow="sm" 
+      radius="md" 
+      p="sm" 
+      mb="sm"
+      bg="transparent"
+      style={{ borderColor: 'var(--fourth_color)', transition: 'border-color 0.2s ease' }}
+    >
+      <Group justify="space-between" align="center" wrap="nowrap">
+        <Group gap="sm" align="center">
+          <Badge size="xs" circle color={filterInfo.active ? "lime" : "red"} variant="filled" />
+          <Text fw={600} style={{ fontFamily: 'monospace' }}>{filterInfo.name}</Text>
+        </Group>
 
-  </Box>
+        <Group gap="xs" wrap="nowrap">
+          <Badge size="sm" color="yellow" variant="light" leftSection={<FaFilter size={10} style={{ marginTop: 2 }} />}>
+            {filterInfo.blocked_packets}
+          </Badge>
+          <Badge size="sm" color="orange" variant="light" leftSection={<FaPencilAlt size={10} style={{ marginTop: 2 }} />}>
+            {filterInfo.edited_packets}
+          </Badge>
+          <Space w="xs" />
+          <Tooltip label={filterInfo.active ? "Deactivate" : "Activate"} color={filterInfo.active ? "orange" : "teal"}>
+            <ActionIcon 
+              color={filterInfo.active ? "orange" : "teal"} 
+              onClick={changeRegexStatus} 
+              size="lg" 
+              radius="md" 
+              variant="light"
+            >
+              {filterInfo.active ? <FaPause size={16} /> : <FaPlay size={16} />}
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      </Group>
+    </Card>
+  )
 }

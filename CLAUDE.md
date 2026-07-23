@@ -1,0 +1,87 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+Firegex is a firewall built for CTF Attack-Defense competitions: it sits in front of a vulnerable service and blocks/mangles malicious traffic before it reaches it. It ships several independent filtering modules (regex-based, Python-filter-based, port hijacking, plain nftables rules, TLS decrypt-and-reinspect) behind a single FastAPI backend and React frontend.
+
+## Commands
+
+### Running the whole app (Docker or standalone)
+```bash
+python3 run.py                      # build+start (Docker if available, else standalone chroot on Linux)
+python3 run.py --standalone         # force standalone mode (no Docker)
+python3 run.py stop [--clear]       # stop (optionally wipe the DB volume/rootfs)
+python3 run.py restart              # restart WITHOUT rebuilding (stale image if source changed)
+python3 run.py status
+python3 run.py config --password [newpass]   # change the running instance's password; omit the value to be prompted interactively
+```
+`run.py` has zero external dependencies (stdlib only) by design. `restart` does not rebuild the Docker image; after a source change use `stop` then the bare start command to force `docker compose up -d --build`.
+
+### Frontend (`frontend/`)
+```bash
+bun install          # bun.lock is canonical
+bun run dev           # vite dev server
+bun run build         # tsc && vite build
+npx tsc --noEmit -p . # typecheck only (no separate lint script is configured)
+```
+
+### Backend (`backend/`)
+Needs Linux with `NET_ADMIN` (nftables/nfqueue) and root, so it's normally only run via `run.py` (Docker or standalone). Direct iteration on a Linux box/VM:
+```bash
+cd backend && DEBUG=1 python3 app.py DEBUG
+```
+
+### Tests (`tests/`)
+No pytest — plain scripts driven against a **live, already-running** firegex instance (`http://127.0.0.1:4444` by default), root/Linux required.
+```bash
+cd tests
+./run_tests.sh [password]           # full suite (defaults to "testpassword")
+python3 nfregex_test.py -p <pw> -m tcp [--ipv6] [--tls]
+python3 nfproxy_test.py -p <pw> [--ipv6] [--tls]
+python3 ph_test.py -p <pw> -m tcp|udp [--ipv6]
+python3 tls_test.py -p <pw> [--ipv6]
+python3 api_test.py -p <pw>
+python3 nginx_test.py               # the only test that doesn't need a live instance
+```
+CI (`.github/workflows/docker-image.yml`) does exactly: `python3 run.py start -P testpassword` then `cd tests && ./run_tests.sh`.
+
+## Architecture
+
+### Three tiers
+React (Vite + Mantine + react-router + TanStack Query + socket.io-client) → FastAPI backend → per-module C++ binaries that do the actual packet interception via nftables/NFQUEUE. The backend mostly orchestrates: SQLite-backed config, spawning/talking to the C++ processes over unix sockets, and deploying the built React app.
+
+### Backend router auto-discovery (`backend/utils/loader.py`)
+Every `.py` file in `backend/routers/` is auto-imported and mounted at `/api/<filename>` if it exposes a module-level `app` (a `fastapi.APIRouter`). Optional module-level `startup()`, `shutdown()`, `reset(params)` async functions are collected and called by the app's lifespan/`/api/reset` handlers. **Adding a new module = adding a new file here** — nothing else needs to register it.
+
+### Per-module pattern
+Each filtering module (`nfproxy`, `nfregex`, `porthijack`, `firewall`, `tls`) follows the same shape:
+- `backend/routers/<mod>.py` — FastAPI endpoints + its own SQLite DB, via `utils.sqlite.SQLite`.
+- `backend/modules/<mod>/models.py` — plain `Service`/filter model, `from_dict`.
+- `backend/modules/<mod>/firewall.py` — `FirewallManager`/`ServiceManager` pair: `FirewallManager` tracks one `ServiceManager` per DB row (in-memory), `ServiceManager.next(status)` starts/stops the interceptor/nft rules for that one service.
+- `backend/modules/<mod>/nftables.py` — builds/tears down the module's nftables rules; the manager class extends `utils.NFTableManager` (a `Singleton`), so there's exactly one nft-rule-set owner per module.
+
+### nfproxy vs nfregex
+Both intercept via NFQUEUE, but differently:
+- **nfregex** (`backend/binsrc/nfregex.cpp` → `cppregex`): pure C++, matches PCRE2/hyperscan regexes against the stream entirely in the binary. Faster, but rules are just regex+mode.
+- **nfproxy** (`backend/binsrc/nfproxy.cpp`, `binsrc/pyproxy/*`, embeds libpython → `cpproxy`): user-supplied Python filter code (via the `firegex` pip package, `fgex-lib/`) runs inside the C++ process through the embedded interpreter, talking back to the backend over a unix socket for stats/exceptions. Much more flexible, slower than nfregex.
+
+### TLS Decrypt bridge (`backend/modules/tls/`)
+A `tls_streams` DB row describes one public `ip:port` to decrypt. `ssl_port`/`clear_port` are two loopback ports **deterministically derived from a hash of `ip:port`** (`get_tls_ports()`), not stored arbitrarily. nginx (config generated by `modules/tls/nginx.py`) does the actual TLS work per active stream:
+1. `listen loopback:ssl_port ssl` → terminates the public TLS connection, forwards **plaintext** to `loopback:clear_port`.
+2. `listen loopback:clear_port` → re-encrypts (`proxy_ssl on`) and forwards to the real `ip:port`. The real backend is expected to also speak TLS (mirrors a CTF challenge service that natively does TLS) — this is not a generic "terminate TLS in front of a plaintext service" reverse proxy.
+
+The only unencrypted hop is the loopback leg between `ssl_port` and `clear_port` — an nfproxy/nfregex service must attach there (`target_type="tls"`, `tls_stream_id=...`) to see decrypted content. Both modules' `nftables.py` has a `resolve_target(srv)` helper that swaps in `(loopback_ip, clear_port)` for `target_type="tls"` services instead of the service's own `ip_int`/`port` (which mirror the stream's real destination for display only). Stopping a TLS stream cascades to stop dependent filter services (and vice versa on start); deleting a stream still referenced by a service is rejected. This cross-module logic lives in `routers/tls.py`, which imports `routers.nfproxy`/`routers.nfregex` directly (one-directional — those modules only import `modules.tls.*`, never `routers.tls`).
+
+### SQLite wrapper (`backend/utils/sqlite.py`)
+Each DB file's schema is versioned by hashing the Python schema dict; on mismatch the **entire file is deleted and recreated** (not migrated) — any schema dict change wipes that DB file on next startup, including `db/firegex.db`'s `keys_values` table (password/JWT secret). `dump()`/`load()` back the export/import backup feature; `dump()` deliberately excludes `password`/`secret` from exported `keys_values` rows, so `/api/import` explicitly re-preserves the current password/secret around the import.
+
+### Real-time frontend updates
+One Socket.IO event, `"update"`, whose payload is a list of strings treated as a react-query `queryKey` prefix (e.g. `["nfproxy"]`, `["tls_streams"]`). `App.tsx` does `queryClient.invalidateQueries({ queryKey: data })` — prefix matching invalidates any query whose key starts with that array. Convention: each module's mutating endpoints emit the same tag string that module's frontend queries use as the first `queryKey` element. `staleTime: Infinity` is set globally, so this event is the **only** automatic refresh mechanism — a missing/mismatched tag means silent staleness for other clients/tabs.
+
+### Frontend structure
+`pages/<Module>/` (routes) + `components/<Module>/` (ServiceRow, AddEditService, `utils.ts` with query key + API wrapper) per module, mirroring the backend split. Detail drill-down lives at `pages/<Module>/ServiceDetails.tsx` under a nested `:srv` route (see `App.tsx`'s `PageRouting`). Theme tokens are CSS variables in `src/index.css`; Mantine `Card` defaults are set globally in `index.tsx`. Prefer Mantine `Group`/`Stack` with `gap` over the legacy `Box className="center-flex"` utility classes still present in older parts of the codebase.
+
+### `fgex-lib/`
+Separate, independently-published PyPI package (`pip install fgex`/`firegex`) — the library users write nfproxy filters against (`@pyfilter`, `RawPacket`/`HttpRequest`/etc.), plus the `fgex` CLI and a local `proxysim` for testing filters without a real firegex instance. Not part of the backend/frontend build.

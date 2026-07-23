@@ -2,6 +2,7 @@
 from utils.colors import colors, puts, sep
 from utils.firegexapi import FiregexAPI
 from utils.tcpserver import TcpServer
+from utils.tls_helpers import generate_self_signed_cert_key, tls_connect_send_recv
 import argparse
 import secrets
 import time
@@ -41,6 +42,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--verbose", "-V", action="store_true", help="Verbose output", default=False
+    )
+    parser.add_argument(
+        "--tls", "-t", action="store_true", help="Test TLS Decrypt", default=False
     )
 
     args = parser.parse_args()
@@ -458,14 +462,14 @@ if __name__ == "__main__":
     X-TeSt: {secret.decode()}
     Content-Length: 15
 
-    A Friendly Body""").replace("\n", "\r\n")
+    A Friendly Body""").replace("\n    ", "\n").replace("\n", "\r\n")
 
     REQUEST_BODY_TEST = textwrap.dedent(f"""POST / HTTP/1.1
     Host: localhost
     X-TeSt: NotTheSecret
     Content-Length: {len(secret.decode())}
 
-    {secret.decode()}""").replace("\n", "\r\n")
+    {secret.decode()}""").replace("\n    ", "\n").replace("\n", "\r\n")
 
     HTTP_REQUEST_STREAM_TEST = textwrap.dedent(f"""
     from firegex.nfproxy.models import HttpRequest
@@ -624,14 +628,14 @@ if __name__ == "__main__":
     X-TeSt: {secret.decode()}
     Content-Length: 15
 
-    A Friendly Body""").replace("\n", "\r\n")
+    A Friendly Body""").replace("\n    ", "\n").replace("\n", "\r\n")
 
     RESPONSE_BODY_TEST = textwrap.dedent(f"""HTTP/1.1 200 OK
     Host: localhost
     X-TeSt: NotTheSecret
     Content-Length: {len(secret.decode())}
 
-    {secret.decode()}""").replace("\n", "\r\n")
+    {secret.decode()}""").replace("\n    ", "\n").replace("\n", "\r\n")
 
     HTTP_RESPONSE_STREAM_TEST = textwrap.dedent(f"""
     from firegex.nfproxy.models import HttpResponse
@@ -902,9 +906,9 @@ if __name__ == "__main__":
         puts("Test Failed: Coulnd't rename service ✗", color=colors.red)
         exit_test(1)
 
-    # Change settings
+    # Change settings, including proto (exercises the proto -> l4_proto conversion path)
     if firegex.nfproxy_settings_service(
-        service_id, 1338, "::dead:beef" if args.ipv6 else "123.123.123.123", True
+        service_id, 1338, "::dead:beef" if args.ipv6 else "123.123.123.123", True, proto="tcp"
     ):
         srv_updated = firegex.nfproxy_get_service(service_id)
         if (
@@ -912,6 +916,7 @@ if __name__ == "__main__":
             and ("::dead:beef" if args.ipv6 else "123.123.123.123")
             in srv_updated["ip_int"]
             and srv_updated["fail_open"]
+            and srv_updated["proto"] == "tcp"
         ):
             puts("Sucessfully changed service settings ✔", color=colors.green)
         else:
@@ -923,5 +928,127 @@ if __name__ == "__main__":
     else:
         puts("Test Failed: Coulnd't change service settings ✗", color=colors.red)
         exit_test(1)
+
+    if args.tls:
+        # Testing a target_type='tls' pyfilter service: the backend must also speak TLS
+        # since nginx's loopback clear_port leg always re-encrypts to the real destination.
+        tls_service_name = f"{args.service_name} TLS"
+        tls_port = args.port + 10
+
+        for ele in firegex.nfproxy_get_services():
+            if ele["name"] == tls_service_name or ele["port"] == tls_port:
+                firegex.nfproxy_delete_service(ele["service_id"])
+        for s in firegex.tls_get_streams():
+            if s["port"] == tls_port:
+                firegex.tls_stop_stream(s["id"])
+                firegex.tls_delete_stream(s["id"])
+
+        backend_cert, backend_key = generate_self_signed_cert_key("127.0.0.1")
+        tls_server = TcpServer(tls_port, ipv6=args.ipv6, tls_cert=backend_cert, tls_key=backend_key)
+        tls_server.start()
+        time.sleep(0.5)
+
+        stream_cert, stream_key = generate_self_signed_cert_key("localhost")
+        tls_stream_id = firegex.tls_add_stream(
+            tls_service_name + "_Stream", "::1" if args.ipv6 else "127.0.0.1", tls_port, stream_cert, stream_key
+        )
+        if tls_stream_id:
+            puts(f"Sucessfully created TLS stream {tls_stream_id} ✔", color=colors.green)
+        else:
+            puts("Test Failed: Couldn't create TLS stream ✗", color=colors.red)
+            tls_server.stop()
+            exit_test(1)
+
+        if firegex.tls_start_stream(tls_stream_id):
+            puts("Sucessfully started TLS stream ✔", color=colors.green)
+        else:
+            puts("Test Failed: Couldn't start TLS stream ✗", color=colors.red)
+            tls_server.stop()
+            firegex.tls_delete_stream(tls_stream_id)
+            exit_test(1)
+
+        tls_ssl_port = firegex.tls_get_stream(tls_stream_id)["ssl_port"]
+
+        tls_srv_id = firegex.nfproxy_add_service(
+            tls_service_name, tls_port, "tcp", "::1" if args.ipv6 else "127.0.0.1",
+            target_type="tls", tls_stream_id=tls_stream_id
+        )
+        if tls_srv_id:
+            puts(f"Sucessfully created TLS service {tls_srv_id} ✔", color=colors.green)
+        else:
+            puts("Test Failed: Couldn't create TLS service ✗", color=colors.red)
+            tls_server.stop()
+            firegex.tls_delete_stream(tls_stream_id)
+            exit_test(1)
+
+        if firegex.nfproxy_start_service(tls_srv_id):
+            puts("Sucessfully started TLS service ✔", color=colors.green)
+        else:
+            puts("Test Failed: Couldn't start TLS service ✗", color=colors.red)
+            firegex.nfproxy_delete_service(tls_srv_id)
+            tls_server.stop()
+            firegex.tls_delete_stream(tls_stream_id)
+            exit_test(1)
+
+        tls_secret = bytes(secrets.token_hex(16).encode())
+        if firegex.nfproxy_set_code(tls_srv_id, get_vedict_test(tls_secret.decode(), "REJECT")):
+            puts(f"Sucessfully added TLS filter for {str(tls_secret)} ✔", color=colors.green)
+        else:
+            puts("Test Failed: Couldn't add TLS filter ✗", color=colors.red)
+            exit_test(1)
+
+        time.sleep(0.5)
+        blocked_response = tls_connect_send_recv(
+            tls_ssl_port, args.ipv6, secrets.token_bytes(40) + tls_secret + secrets.token_bytes(40)
+        )
+        if not blocked_response:
+            puts("The malicious request over TLS was successfully blocked ✔", color=colors.green)
+        else:
+            puts("Test Failed: The malicious request over TLS wasn't blocked ✗", color=colors.red)
+            exit_test(1)
+
+        clean_data = secrets.token_bytes(64)
+        if tls_connect_send_recv(tls_ssl_port, args.ipv6, clean_data) == clean_data:
+            puts("Clean traffic over TLS passed through correctly ✔", color=colors.green)
+        else:
+            puts("Test Failed: Clean traffic over TLS wasn't echoed back correctly ✗", color=colors.red)
+            exit_test(1)
+
+        # Cascade: stopping the TLS stream should stop the dependent service
+        if firegex.tls_stop_stream(tls_stream_id):
+            time.sleep(1)
+            if firegex.nfproxy_get_service(tls_srv_id)["status"] == "stop":
+                puts("TLS stream stop correctly cascaded to stop the dependent service ✔", color=colors.green)
+            else:
+                puts("Test Failed: Dependent service wasn't cascade-stopped ✗", color=colors.red)
+                exit_test(1)
+        else:
+            puts("Test Failed: Couldn't stop the TLS stream ✗", color=colors.red)
+            exit_test(1)
+
+        # Cascade: starting the dependent service should reactivate the TLS stream
+        if firegex.nfproxy_start_service(tls_srv_id):
+            time.sleep(1)
+            if firegex.tls_get_stream(tls_stream_id)["status"] == "active":
+                puts("Starting the service correctly cascaded to reactivate the TLS stream ✔", color=colors.green)
+            else:
+                puts("Test Failed: TLS stream wasn't cascade-reactivated ✗", color=colors.red)
+                exit_test(1)
+        else:
+            puts("Test Failed: Couldn't start the TLS service ✗", color=colors.red)
+            exit_test(1)
+
+        # Deleting a still-referenced TLS stream must be rejected
+        if not firegex.tls_delete_stream(tls_stream_id):
+            puts("Correctly rejected deletion of a TLS stream still in use ✔", color=colors.green)
+        else:
+            puts("Test Failed: Deleting an in-use TLS stream should have failed ✗", color=colors.red)
+            exit_test(1)
+
+        firegex.nfproxy_delete_service(tls_srv_id)
+        tls_server.stop()
+        firegex.tls_stop_stream(tls_stream_id)
+        firegex.tls_delete_stream(tls_stream_id)
+        puts("Sucessfully cleaned up TLS test service ✔", color=colors.green)
 
     exit_test(0)

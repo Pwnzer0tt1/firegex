@@ -38,11 +38,11 @@ function NFRegex({ children }: { children: any }) {
         <Box className='center-flex' >
             {isMedium?"General stats:":null}
             <Space w="xs" />
-            <Badge size="md" radius="sm" color="green" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:services.data?.length}</Badge>
+            <Badge size="md" radius="sm" color="green" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:Array.isArray(services.data)?services.data.length:0}</Badge>
             <Space w="xs" />
-            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_packets, 0)}</Badge>
+            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.n_packets, 0):0}</Badge>
             <Space w="xs" />
-            <Badge size="md" radius="sm" color="violet" variant="filled"><VscRegex style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_regex, 0)}</Badge>
+            <Badge size="md" radius="sm" color="violet" variant="filled"><VscRegex style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.n_regex, 0):0}</Badge>
             <Space w="xs" />
         </Box>
         {isMedium?null:<Space h="md" />}
@@ -64,8 +64,8 @@ function NFRegex({ children }: { children: any }) {
             <DocsButton doc="nfregex" />
         </Box>
     </Box>
-    <Space h="md" />
-    <Box className="center-flex-row" style={{gap: 20}}>
+    <Space h="xl" />
+    <Box className="center-flex-row" style={{ gap: 12, width: "100%" }}>
         {srv?null:<>
             <LoadingOverlay visible={services.isLoading} />
             {(services.data && services.data?.length > 0)?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
