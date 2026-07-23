@@ -8,6 +8,7 @@ import { MdAdd } from "react-icons/md";
 import { getapi, postapi, putapi, deleteapi, errorNotify, okNotify } from "../../js/utils";
 import PortAndInterface from "../../components/PortAndInterface";
 import { TbShieldLock } from "react-icons/tb";
+import { DocsButton } from "../../components/DocsButton";
 
 export const tlsStreamsQueryKey = ["tls_streams"];
 
@@ -153,7 +154,10 @@ const TLSDecrypt = () => {
     <Box p="md">
       <Group justify="space-between" mb="md">
         <Title order={2}>TLS Decryption Streams</Title>
-        <Button leftSection={<MdAdd />} onClick={openAdd}>Add Stream</Button>
+        <Group gap="xs">
+          <DocsButton doc="tls" />
+          <Button leftSection={<MdAdd />} onClick={openAdd}>Add Stream</Button>
+        </Group>
       </Group>
 
       <Text c="dimmed" mb="xl">

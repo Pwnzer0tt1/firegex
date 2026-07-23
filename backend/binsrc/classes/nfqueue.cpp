@@ -531,13 +531,21 @@ class NfQueue {
 			return MNL_CB_ERROR;
 		}
 		
+		struct nfqnl_msg_packet_hdr *ph = (nfqnl_msg_packet_hdr*) mnl_attr_get_payload(attr[NFQA_PACKET_HDR]);
+		struct nfgenmsg *nfg = (nfgenmsg *)mnl_nlmsg_get_payload(nlh);
+
+		if (attr[NFQA_PAYLOAD] == nullptr) {
+			cerr << "[error] [NfQueue._real_queue_cb] payload not set" << endl;
+			char buf[MNL_SOCKET_BUFFER_SIZE];
+			struct nlmsghdr *nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(nfg->res_id));
+			nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT);
+			mnl_socket_sendto(info->nl, nlh_verdict, nlh_verdict->nlmsg_len);
+			return MNL_CB_OK;
+		}
+
 		//Get Payload
 		uint16_t plen = mnl_attr_get_payload_len(attr[NFQA_PAYLOAD]);
 		char *payload = (char *)mnl_attr_get_payload(attr[NFQA_PAYLOAD]);
-		
-		//Return result to the kernel
-		struct nfqnl_msg_packet_hdr *ph = (nfqnl_msg_packet_hdr*) mnl_attr_get_payload(attr[NFQA_PACKET_HDR]);
-		struct nfgenmsg *nfg = (nfgenmsg *)mnl_nlmsg_get_payload(nlh);
 
 		bool is_input = ntohl(mnl_attr_get_u32(attr[NFQA_MARK])) & 0x1; // == 0x1337 that is odd
 		handle_func(new PktRequest<D>(

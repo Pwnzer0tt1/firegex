@@ -4,12 +4,16 @@ import { FaBookBookmark } from "react-icons/fa6";
 import { NFRegexDocs } from "./NFRegex/NFRegexDocs";
 import { NFProxyDocs } from "./NFProxy/NFProxyDocs";
 import { PortHijackDocs } from "./PortHijack/PortHijackDocs";
+import { FirewallDocs } from "./Firewall/FirewallDocs";
+import { TLSDocs } from "./TLSDocs";
 import { EnumToPrimitiveUnion } from "../js/utils";
 
 export enum DocType{
     NFREGEX = "nfregex",
     NFPROXY = "nfproxy",
     PORTHIJACK = "porthijack",
+    FIREWALL = "firewall",
+    TLS = "tls",
 }
 
 
@@ -31,6 +35,10 @@ export const DocsButton = ({ doc, ...props }: { doc: EnumToPrimitiveUnion<DocTyp
                         <NFProxyDocs />:
                     doc == DocType.PORTHIJACK ?
                         <PortHijackDocs />:
+                    doc == DocType.FIREWALL ?
+                        <FirewallDocs />:
+                    doc == DocType.TLS ?
+                        <TLSDocs />:
                     <Title order={3}>Docs not found</Title>
                 }
             </Container>

@@ -5,16 +5,17 @@ import NavBar from './NavBar';
 import HeaderPage from './Header';
 import { getMainPath } from '../js/utils';
 import { useLocation } from 'react-router';
-import { useNavbarStore } from '../js/store';
+import { useNavbarStore, useSessionStore } from '../js/store';
 import { HiMenu } from "react-icons/hi";
 
 
 function MainLayout({ children }:{ children:any }) {
   const { navOpened } = useNavbarStore()
+  const { setHomeSection } = useSessionStore()
   const location = useLocation()
   useEffect(()=>{
     if (location.pathname !== "/"){
-      sessionStorage.setItem('home_section', getMainPath())
+      setHomeSection(getMainPath())
     }
   },[location.pathname])
   return <AppShell

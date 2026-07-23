@@ -8,7 +8,7 @@ from firegex.nfproxy.models import (
     HttpHistory,
     HttpStreamHistory,
 )
-from firegex.nfproxy.internals.models import Action, FullStreamAction
+from firegex.nfproxy.internals.models import Action, FullStreamAction, ExceptionAction
 
 ACCEPT = Action.ACCEPT
 DROP = Action.DROP
@@ -44,7 +44,7 @@ def clear_pyfilter_registry():
 
 __all__ = [
     "ACCEPT", "DROP", "REJECT", "UNSTABLE_MANGLE",
-    "Action", "FullStreamAction", "pyfilter",
+    "Action", "FullStreamAction", "ExceptionAction", "pyfilter",
     "RawPacket", "TCPInputStream", "TCPOutputStream", "TCPClientStream", "TCPServerStream",
     "HttpHistory", "HttpStreamHistory"
 ]

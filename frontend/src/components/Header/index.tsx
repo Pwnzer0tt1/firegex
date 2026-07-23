@@ -9,13 +9,14 @@ import { ImExit } from 'react-icons/im';
 import ResetPasswordModal from './ResetPasswordModal';
 import ResetModal from './ResetModal';
 import { MenuDropDownWithButton } from '../MainLayout';
-import { useNavbarStore } from '../../js/store';
+import { useNavbarStore, useSystemStore } from '../../js/store';
 
 
 function HeaderPage(props: any) {
   
   const navigator = useNavigate()
   const { navOpened, toggleNav } = useNavbarStore()
+  const { version } = useSystemStore()
   
   const logout_action = () => {
     logout().then(r => {
@@ -48,7 +49,7 @@ function HeaderPage(props: any) {
           </Box>
           <Box display="flex" style={{ flexDirection: "column" }} visibleFrom='xs'>
             <Title order={2} >[Fi]*regex</Title>
-            <p style={{margin: 0, fontSize: "70%"}}>By <a href="https://pwnzer0tt1.it">Pwnzer0tt1</a></p>
+            <p style={{margin: 0, fontSize: "70%"}}>By <a href="https://pwnzer0tt1.it">Pwnzer0tt1</a> {version && <span style={{marginLeft: "5px", color: "gray"}}>{version}</span>}</p>
           </Box>
         </Box>
         
