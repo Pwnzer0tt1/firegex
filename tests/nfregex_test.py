@@ -3,6 +3,7 @@ from utils.colors import colors, puts, sep
 from utils.firegexapi import FiregexAPI
 from utils.tcpserver import TcpServer
 from utils.udpserver import UdpServer
+from utils.tls_helpers import generate_self_signed_cert_key, tls_connect_send_recv
 import argparse
 import secrets
 import base64
@@ -49,13 +50,24 @@ if __name__ == "__main__":
         help="Select the protocol",
         default="tcp",
     )
+    parser.add_argument(
+        "--tls", "-t", action="store_true", help="Test TLS Decrypt", default=False
+    )
 
     args = parser.parse_args()
+    if args.tls and args.proto != "tcp":
+        puts("TLS is only supported with TCP protocol.", color=colors.red)
+        exit(1)
+        
     sep()
     puts("Testing will start on ", color=colors.cyan, end="")
     puts(f"{args.address}", color=colors.yellow)
 
     firegex = FiregexAPI(args.address)
+
+    status = firegex.status()
+    if status.get("status") == "init":
+        firegex.set_password(args.password)
 
     # Login
     if firegex.login(args.password):
@@ -64,11 +76,17 @@ if __name__ == "__main__":
         puts("Test Failed: Unknown response or wrong passowrd ✗", color=colors.red)
         exit(1)
 
-    # Create server
+    # Create server. When testing TLS, the backend itself must also speak TLS: nginx's
+    # loopback clear_port leg always re-encrypts before forwarding to the real destination
+    # (this mirrors a CTF challenge service that natively speaks TLS).
+    backend_cert, backend_key = generate_self_signed_cert_key("127.0.0.1") if args.tls else (None, None)
     server = (TcpServer if args.proto == "tcp" else UdpServer)(
-        args.port, ipv6=args.ipv6
+        args.port, ipv6=args.ipv6, **({"tls_cert": backend_cert, "tls_key": backend_key} if args.tls else {})
     )
 
+    tls_stream_id = None
+    tls_ssl_port = None
+    service_id = None
     def exit_test(code):
         if service_id:
             server.stop()
@@ -76,7 +94,14 @@ if __name__ == "__main__":
                 puts("Sucessfully deleted service ✔", color=colors.green)
             else:
                 puts("Test Failed: Coulnd't delete serivce ✗", color=colors.red)
-                exit_test(1)
+                exit(1)
+        if tls_stream_id:
+            firegex.tls_stop_stream(tls_stream_id)
+            if firegex.tls_delete_stream(tls_stream_id):
+                puts("Sucessfully deleted TLS stream ✔", color=colors.green)
+            else:
+                puts("Test Failed: Couldn't delete TLS stream ✗", color=colors.red)
+                exit(1)
         exit(code)
 
     srvs = firegex.nfregex_get_services()
@@ -84,8 +109,33 @@ if __name__ == "__main__":
         if ele["name"] == args.service_name:
             firegex.nfregex_delete_service(ele["service_id"])
 
+    if args.tls:
+        streams = firegex.tls_get_streams()
+        for s in streams:
+            if s["port"] == args.port:
+                firegex.tls_stop_stream(s["id"])
+                firegex.tls_delete_stream(s["id"])
+
+        cert, key = generate_self_signed_cert_key("localhost")
+        tls_stream_id = firegex.tls_add_stream("TLS Stream", "::1" if args.ipv6 else "127.0.0.1", args.port, cert, key)
+        if tls_stream_id:
+            puts(f"Sucessfully created TLS stream {tls_stream_id} ✔", color=colors.green)
+        else:
+            puts("Test Failed: Failed to create TLS stream ✗", color=colors.red)
+            exit_test(1)
+
+        if firegex.tls_start_stream(tls_stream_id):
+            puts("Sucessfully started TLS stream ✔", color=colors.green)
+        else:
+            puts("Test Failed: Failed to start TLS stream ✗", color=colors.red)
+            exit_test(1)
+
+        tls_ssl_port = firegex.tls_get_stream(tls_stream_id)["ssl_port"]
+
     service_id = firegex.nfregex_add_service(
-        args.service_name, args.port, args.proto, "::1" if args.ipv6 else "127.0.0.1"
+        args.service_name, args.port, args.proto, "::1" if args.ipv6 else "127.0.0.1",
+        target_type="tls" if args.tls else "flow",
+        tls_stream_id=tls_stream_id if args.tls else None
     )
     if service_id:
         puts(f"Sucessfully created service {service_id} ✔", color=colors.green)
@@ -101,8 +151,18 @@ if __name__ == "__main__":
 
     server.start()
     time.sleep(0.5)
+
+    def send_check(data):
+        """Sends data and checks it was echoed back unmodified. When testing TLS,
+        routes through a real TLS handshake against the stream's public ssl_port
+        (so the check actually exercises decrypt -> filter -> re-encrypt), instead
+        of talking to the backend directly."""
+        if args.tls:
+            return tls_connect_send_recv(tls_ssl_port, args.ipv6, data) == data
+        return server.sendCheckData(data)
+
     try:
-        if server.sendCheckData(secrets.token_bytes(432)):
+        if send_check(secrets.token_bytes(432)):
             puts("Successfully tested first proxy with no regex ✔", color=colors.green)
         else:
             puts("Test Failed: Data was corrupted ", color=colors.red)
@@ -121,6 +181,8 @@ if __name__ == "__main__":
         puts(f"Test Failed: Couldn't add the regex {str(secret)} ✗", color=colors.red)
         exit_test(1)
 
+
+
     # Check if regex is present in the service
     n_blocked = 0
 
@@ -136,7 +198,7 @@ if __name__ == "__main__":
                 if r["regex"] == secret:
                     # Test the regex
                     s = regex.upper() if upper else regex
-                    if not server.sendCheckData(
+                    if not send_check(
                         secrets.token_bytes(40) + s + secrets.token_bytes(40)
                     ):
                         puts(
@@ -191,7 +253,7 @@ if __name__ == "__main__":
             puts("Test Failed: The regex wasn't found ✗", color=colors.red)
             exit_test(1)
         else:
-            if server.sendCheckData(
+            if send_check(
                 secrets.token_bytes(40)
                 + base64.b64decode(regex)
                 + secrets.token_bytes(40)
@@ -342,32 +404,74 @@ if __name__ == "__main__":
         puts("Test Failed: Coulnd't rename service ✗", color=colors.red)
         exit_test(1)
 
-    # Change settings
-    opposite_proto = "udp" if args.proto == "tcp" else "tcp"
-    if firegex.nfregex_settings_service(
-        service_id,
-        1338,
-        opposite_proto,
-        "::dead:beef" if args.ipv6 else "123.123.123.123",
-        True,
-    ):
-        srv_updated = firegex.nfregex_get_service(service_id)
-        if (
-            srv_updated["port"] == 1338
-            and srv_updated["proto"] == opposite_proto
-            and ("::dead:beef" if args.ipv6 else "123.123.123.123")
-            in srv_updated["ip_int"]
-            and srv_updated["fail_open"]
+    # Change settings (skipped in --tls mode: the service's own port/ip/proto no longer
+    # drive traffic interception once linked to a TLS stream, see resolve_target())
+    if not args.tls:
+        opposite_proto = "udp" if args.proto == "tcp" else "tcp"
+        if firegex.nfregex_settings_service(
+            service_id,
+            1338,
+            "::dead:beef" if args.ipv6 else "123.123.123.123",
+            True,
+            proto=opposite_proto,
         ):
-            puts("Sucessfully changed service settings ✔", color=colors.green)
+            srv_updated = firegex.nfregex_get_service(service_id)
+            if (
+                srv_updated["port"] == 1338
+                and srv_updated["proto"] == opposite_proto
+                and ("::dead:beef" if args.ipv6 else "123.123.123.123")
+                in srv_updated["ip_int"]
+                and srv_updated["fail_open"]
+            ):
+                puts("Sucessfully changed service settings ✔", color=colors.green)
+            else:
+                puts(
+                    "Test Failed: Service settings weren't updated correctly ✗",
+                    color=colors.red,
+                )
+                exit_test(1)
         else:
-            puts(
-                "Test Failed: Service settings weren't updated correctly ✗",
-                color=colors.red,
-            )
+            puts("Test Failed: Coulnd't change service settings ✗", color=colors.red)
             exit_test(1)
-    else:
-        puts("Test Failed: Coulnd't change service settings ✗", color=colors.red)
-        exit_test(1)
+
+    if args.tls:
+        # Stopping the TLS stream should cascade-stop the dependent service
+        if firegex.tls_stop_stream(tls_stream_id):
+            time.sleep(1)
+            srv_after_stop = firegex.nfregex_get_service(service_id)
+            if srv_after_stop["status"] == "stop":
+                puts("TLS stream stop correctly cascaded to stop the dependent service ✔", color=colors.green)
+            else:
+                puts("Test Failed: Dependent service wasn't cascade-stopped ✗", color=colors.red)
+                exit_test(1)
+        else:
+            puts("Test Failed: Coulnd't stop the TLS stream ✗", color=colors.red)
+            exit_test(1)
+
+        # Starting the dependent service should cascade-reactivate the TLS stream
+        if firegex.nfregex_start_service(service_id):
+            time.sleep(1)
+            stream_after_start = firegex.tls_get_stream(tls_stream_id)
+            if stream_after_start["status"] == "active":
+                puts("Starting the service correctly cascaded to reactivate the TLS stream ✔", color=colors.green)
+            else:
+                puts("Test Failed: TLS stream wasn't cascade-reactivated ✗", color=colors.red)
+                exit_test(1)
+        else:
+            puts("Test Failed: Coulnd't start the service ✗", color=colors.red)
+            exit_test(1)
+
+        if send_check(secrets.token_bytes(64)):
+            puts("Traffic flows correctly after the cascade reactivation ✔", color=colors.green)
+        else:
+            puts("Test Failed: Traffic didn't flow correctly after the cascade reactivation ✗", color=colors.red)
+            exit_test(1)
+
+        # Deleting a still-referenced TLS stream must be rejected
+        if not firegex.tls_delete_stream(tls_stream_id):
+            puts("Correctly rejected deletion of a TLS stream still in use ✔", color=colors.green)
+        else:
+            puts("Test Failed: Deleting an in-use TLS stream should have failed ✗", color=colors.red)
+            exit_test(1)
 
     exit_test(0)

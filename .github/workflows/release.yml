@@ -1,4 +1,4 @@
-name: Create and publish Docker images
+name: Test, build and publish release artifacts
 
 on:
   release:
@@ -10,17 +10,33 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Gate for every publish target below: nothing gets pushed to Docker/PyPI unless this passes.
+  run_tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build and run firegex
+        run: python3 run.py start -P testpassword
+
+      - name: Run tests
+        run: sudo apt-get install -y iperf3 && cd tests && ./run_tests.sh
+
   docker_build:
+    needs: run_tests
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - os: ubuntu-latest
             arch: amd64
-            run_tests: true
           - os: ubuntu-24.04-arm
             arch: arm64
-            run_tests: true
     permissions:
       contents: read
       packages: write
@@ -33,14 +49,6 @@ jobs:
         id: lowercase
         run: echo "image_name=$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      - name: Build and run firegex
-        if: matrix.run_tests
-        run: python3 run.py start -P testpassword
-        
-      - name: Run tests
-        if: matrix.run_tests
-        run: sudo apt-get install -y iperf3 && cd tests && ./run_tests.sh
-
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@master
@@ -51,23 +59,23 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}
-          
+
       - name: Extract tag name
         id: tag
         run: echo TAG_NAME=$(echo $GITHUB_REF | cut -d / -f 3) >> $GITHUB_OUTPUT
-        
+
       - name: Update version in setup.py
         run: >-
           sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" backend/utils/__init__.py;
           sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/setup.py;
           sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/firegex/__init__.py;
-          
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
@@ -102,43 +110,43 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Extract tag name
         id: tag
         run: echo TAG_NAME=$(echo $GITHUB_REF | cut -d / -f 3) >> $GITHUB_OUTPUT
-          
+
       - name: Create and push multi-platform manifest
         run: |
           # Create manifest list for specific tag
           docker manifest create ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }} \
             --amend ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
             --amend ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-arm64
-          
+
           # Annotate the manifest with architecture info
           docker manifest annotate ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }} \
             ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-amd64 \
             --arch amd64 --os linux
-          
+
           docker manifest annotate ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }} \
             ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}-arm64 \
             --arch arm64 --os linux
-          
+
           docker manifest push ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:${{ steps.tag.outputs.TAG_NAME }}
-          
+
           # Create manifest list for latest tag
           docker manifest create ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest \
             --amend ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-amd64 \
             --amend ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-arm64
-          
+
           # Annotate the latest manifest with architecture info
           docker manifest annotate ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest \
             ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-amd64 \
             --arch amd64 --os linux
-          
+
           docker manifest annotate ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest \
             ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest-arm64 \
             --arch arm64 --os linux
-          
+
           docker manifest push ${{ env.REGISTRY }}/${{ steps.lowercase.outputs.image_name }}:latest
 
   create-rootfs-assets:
@@ -208,3 +216,64 @@ jobs:
           echo "Assets uploaded successfully!"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  pypi_publish_firegex:
+    needs: run_tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+      - name: Extract tag name
+        id: tag
+        run: echo TAG_NAME=$(echo $GITHUB_REF | cut -d / -f 3) >> $GITHUB_OUTPUT
+      - name: Update version in setup.py
+        run: >-
+          sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/setup.py;
+          sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/firegex/__init__.py;
+      - name: Build package
+        run: cd fgex-lib && python -m build && mv ./dist ../
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN }}
+
+  pypi_publish_fgex_alias:
+    needs: run_tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build
+      - name: Extract tag name
+        id: tag
+        run: echo TAG_NAME=$(echo $GITHUB_REF | cut -d / -f 3) >> $GITHUB_OUTPUT
+      - name: Update version in setup.py
+        run: >-
+          sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/fgex-pip/setup.py;
+      - name: Build package
+        run: cd fgex-lib/fgex-pip && python -m build && mv ./dist ../../
+      - name: Publish package
+        uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
+        with:
+          user: __token__
+          password: ${{ secrets.PYPI_API_TOKEN_FGEX }}

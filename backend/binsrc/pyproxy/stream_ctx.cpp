@@ -105,7 +105,8 @@ struct pyfilter_ctx {
 
 	py_filter_response handle_packet(
 		NfQueue::PktRequest<PyProxyQueue>* pkt,
-		const string& data
+		const string& data,
+		bool is_client
 	){
 		PyObject * packet_info = PyDict_New();
 		
@@ -113,7 +114,7 @@ struct pyfilter_ctx {
 		set_item_to_dict(packet_info, "data", PyBytes_FromStringAndSize(data.c_str(), data.size()));
 		set_item_to_dict(packet_info, "l4_size", PyLong_FromLong(pkt->data_size()));
 		set_item_to_dict(packet_info, "raw_packet", PyBytes_FromStringAndSize(pkt->packet.c_str(), pkt->packet.size()));
-		set_item_to_dict(packet_info, "is_input", PyBool_FromLong(pkt->is_input));
+		set_item_to_dict(packet_info, "is_input", PyBool_FromLong(is_client));
 		set_item_to_dict(packet_info, "is_ipv6", PyBool_FromLong(pkt->is_ipv6));
 		set_item_to_dict(packet_info, "is_tcp", PyBool_FromLong(pkt->l4_proto == NfQueue::L4Proto::TCP));
 
@@ -243,6 +244,7 @@ typedef map<stream_id, pyfilter_ctx*> matching_map;
 struct stream_ctx {
 
 	matching_map streams_ctx;
+
 	NfQueue::tcp_ack_map tcp_ack_ctx;
 
 	void clean_stream_by_id(stream_id sid){

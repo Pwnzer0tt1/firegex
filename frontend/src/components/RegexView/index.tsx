@@ -1,4 +1,4 @@
-import { Text, Title, Badge, Space, ActionIcon, Tooltip, Box } from '@mantine/core';
+import { Text, Title, Badge, Space, ActionIcon, Tooltip, Box, Card, Code, Group } from '@mantine/core';
 import { useState } from 'react';
 import { RegexFilter } from '../../js/models';
 import { b64decode, errorNotify, isMediumScreen, okNotify } from '../../js/utils';
@@ -41,45 +41,93 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
     }).catch( err => errorNotify(`Regex ${regex_expr} ${regexInfo.active?"deactivation":"activation"} failed!`,`Error: ${err}`))
   }
 
-  return <Box className="firegex__regexview__box">
-        <Box>
-          <Box className='center-flex' style={{width: "100%"}}>
-            <Box className="firegex__regexview__outer_regex_text">
-              <Text className="firegex__regexview__regex_text" onClick={()=>{
+  return (
+    <Card 
+      withBorder 
+      shadow="sm" 
+      radius="md" 
+      p="sm" 
+      mb="sm"
+      bg="transparent"
+      style={{ borderColor: 'var(--fourth_color)', transition: 'border-color 0.2s ease' }}
+    >
+      <Group justify="space-between" align="center" wrap="nowrap">
+        <Box style={{ flexGrow: 1, overflow: 'hidden' }}>
+          <Tooltip label="Click to copy regex" position="top-start">
+            <Code 
+              block 
+              color="dark.8" 
+              style={{ 
+                cursor: 'pointer', 
+                overflowX: 'auto', 
+                whiteSpace: 'pre-wrap', 
+                wordBreak: 'break-all',
+                fontSize: '1.1rem',
+                padding: '12px 16px',
+                borderRadius: '8px',
+                border: '1px solid var(--fourth_color)',
+                backgroundColor: 'rgba(0,0,0,0.2)'
+              }}
+              onClick={() => {
                 clipboard.copy(regex_expr)
-                okNotify("Regex copied to clipboard!",`The regex '${regex_expr}' has been copied to the clipboard!`)
-              }}>{regex_expr}</Text>
-            </Box>
-            <Space w="xs" />
-            <Tooltip label={regexInfo.active?"Deactivate":"Activate"} zIndex={0} color={regexInfo.active?"orange":"teal"}>
-              <ActionIcon color={regexInfo.active?"orange":"teal"} onClick={changeRegexStatus} size="xl" radius="md" variant="filled"
-              >{regexInfo.active?<FaPause size="20px" />:<FaPlay size="20px" />}</ActionIcon>
-            </Tooltip>
-            <Space w="xs" />
-            <Tooltip label="Delete regex" zIndex={0} color="red" >
-              <ActionIcon color="red" onClick={()=>setDeleteModal(true)} size="xl" radius="md" variant="filled">
-                <BsTrashFill size={22} /></ActionIcon>
-            </Tooltip>
-          </Box>
-          <Box display="flex" mt="sm" ml="xs">
-            <Badge size="md" color="yellow" variant="filled"><FaFilter style={{ marginBottom: -2}} /> {regexInfo.n_packets}</Badge>
-            <Space w="xs" />
-            <Badge size="md" color={regexInfo.active?"lime":"red"} variant="filled">{regexInfo.active?"ACTIVE":"DISABLED"}</Badge>
-            <Space w="xs" />
-            <Badge size="md" color={regexInfo.is_case_sensitive?"grape":"pink"} variant="filled">{regexInfo.is_case_sensitive?"Strict":"Loose"}</Badge>
-            <Space w="xs" />
-            <Badge size="md" color="blue" variant="filled">{mode_string}</Badge>
-          </Box>
+                okNotify("Regex copied to clipboard!", `The regex '${regex_expr}' has been copied to the clipboard!`)
+              }}
+            >
+              {regex_expr}
+            </Code>
+          </Tooltip>
         </Box>
-        <YesNoModal
-            title='Are you sure to delete this regex?'
-            description={`You are going to delete the regex '${regex_expr}'.`}
-            onClose={()=>setDeleteModal(false)}
-            action={deleteRegex}
-            opened={deleteModal}
-        />
-        
-  </Box>
+
+        <Group gap="sm" wrap="nowrap" ml="md">
+          <Tooltip label={regexInfo.active ? "Deactivate" : "Activate"} color={regexInfo.active ? "orange" : "teal"}>
+            <ActionIcon 
+              color={regexInfo.active ? "orange" : "teal"} 
+              onClick={changeRegexStatus} 
+              size="xl" 
+              radius="md" 
+              variant="light"
+            >
+              {regexInfo.active ? <FaPause size={18} /> : <FaPlay size={18} />}
+            </ActionIcon>
+          </Tooltip>
+          <Tooltip label="Delete regex" color="red">
+            <ActionIcon 
+              color="red" 
+              onClick={() => setDeleteModal(true)} 
+              size="xl" 
+              radius="md" 
+              variant="light"
+            >
+              <BsTrashFill size={18} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      </Group>
+
+      <Group gap="sm" mt="md">
+        <Badge size="md" color="yellow" variant="light" leftSection={<FaFilter size={12} style={{ marginTop: 2 }} />}>
+          {regexInfo.n_packets} packets
+        </Badge>
+        <Badge size="md" color={regexInfo.active ? "lime" : "red"} variant="light">
+          {regexInfo.active ? "ACTIVE" : "DISABLED"}
+        </Badge>
+        <Badge size="md" color={regexInfo.is_case_sensitive ? "grape" : "pink"} variant="light">
+          {regexInfo.is_case_sensitive ? "Strict" : "Loose"}
+        </Badge>
+        <Badge size="md" color="blue" variant="light">
+          {mode_string}
+        </Badge>
+      </Group>
+
+      <YesNoModal
+        title='Are you sure to delete this regex?'
+        description={`You are going to delete the regex '${regex_expr}'.`}
+        onClose={() => setDeleteModal(false)}
+        action={deleteRegex}
+        opened={deleteModal}
+      />
+    </Card>
+  )
 }
 
 export default RegexView;

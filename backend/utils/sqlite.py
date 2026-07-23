@@ -125,3 +125,44 @@ class SQLite():
     
     def set(self, key, value):
         return self.put(key, value)
+        
+    def dump(self) -> dict:
+        self.connect()
+        res = {}
+        tables = self.query("SELECT name FROM sqlite_master WHERE type='table';")
+        for table in tables:
+            tname = table["name"]
+            if tname == 'keys_values':
+                res[tname] = self.query(f"SELECT * FROM {tname} WHERE key NOT IN ('password', 'secret');")
+            else:
+                res[tname] = self.query(f"SELECT * FROM {tname};")
+        return res
+        
+    def load(self, data: dict):
+        self.connect()
+        cur = self.conn.cursor()
+        try:
+            cur.execute("BEGIN")
+            for table_name, rows in data.items():
+                # Verify table exists to prevent SQL injection or schema mismatches
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
+                if len(cur.fetchall()) == 0:
+                    continue
+                cur.execute(f"DELETE FROM {table_name};")
+                if rows:
+                    cols = list(rows[0].keys())
+                    placeholders = ", ".join(["?"] * len(cols))
+                    col_names = ", ".join(cols)
+                    query = f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})"
+                    for row in rows:
+                        cur.execute(query, [row[c] for c in cols])
+            cur.execute("COMMIT")
+        except Exception as e:
+            cur.execute("ROLLBACK")
+            raise e
+        finally:
+            cur.close()
+            try:
+                self.conn.commit()
+            except Exception:
+                pass

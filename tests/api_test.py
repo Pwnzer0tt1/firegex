@@ -121,6 +121,28 @@ if __name__ == "__main__":
         )
         exit(1)
 
+    # Backups never contain the password/secret (see export_db), so importing one back
+    # must not lock the current session out or force a re-login.
+    backup = firegex.export_backup()
+    if backup:
+        puts("Sucessfully exported backup ✔", color=colors.green)
+    else:
+        puts("Test Failed: Couldn't export backup ✗", color=colors.red)
+        exit(1)
+
+    if firegex.import_backup(backup):
+        puts("Sucessfully imported backup ✔", color=colors.green)
+    else:
+        puts("Test Failed: Couldn't import backup ✗", color=colors.red)
+        exit(1)
+
+    firegex3 = FiregexAPI(args.address)
+    if firegex3.login(args.password):
+        puts("Password survived the backup import ✔", color=colors.green)
+    else:
+        puts("Test Failed: Password was lost/changed after backup import ✗", color=colors.red)
+        exit(1)
+
     puts("List of available interfaces:", color=colors.yellow)
     for interface in firegex.get_interfaces():
         puts(

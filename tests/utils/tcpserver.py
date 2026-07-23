@@ -1,18 +1,37 @@
 import queue
 from multiprocessing import Process, Queue
 import socket
+import ssl
+import tempfile
 import traceback
 
 
-def _start_tcp_server(port, server_queue: Queue, ipv6, verbose):
+def _start_tcp_server(port, server_queue: Queue, ipv6, verbose, tls_cert=None, tls_key=None):
     sock = socket.socket(
         socket.AF_INET6 if ipv6 else socket.AF_INET, socket.SOCK_STREAM
     )
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind(("::1" if ipv6 else "127.0.0.1", port))
     sock.listen(8)
+
+    tls_context = None
+    if tls_cert and tls_key:
+        tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".crt", delete=False) as cert_file, \
+             tempfile.NamedTemporaryFile(mode="w", suffix=".key", delete=False) as key_file:
+            cert_file.write(tls_cert)
+            key_file.write(tls_key)
+            cert_path, key_path = cert_file.name, key_file.name
+        tls_context.load_cert_chain(cert_path, key_path)
+
     while True:
         connection, address = sock.accept()
+        if tls_context:
+            try:
+                connection = tls_context.wrap_socket(connection, server_side=True)
+            except ssl.SSLError:
+                connection.close()
+                continue
         while True:
             try:
                 buf = connection.recv(4096)
@@ -40,26 +59,35 @@ def _start_tcp_server(port, server_queue: Queue, ipv6, verbose):
 
 
 class TcpServer:
-    def __init__(self, port, ipv6, proxy_port=None, verbose=False):
+    def __init__(self, port, ipv6, proxy_port=None, verbose=False, tls_cert=None, tls_key=None):
         self.proxy_port = proxy_port
         self.ipv6 = ipv6
         self.port = port
         self.verbose = verbose
+        self.tls_cert = tls_cert
+        self.tls_key = tls_key
         self._server_data_queue = Queue()
         self._regen_process()
 
     def _regen_process(self):
         self.server = Process(
             target=_start_tcp_server,
-            args=[self.port, self._server_data_queue, self.ipv6, self.verbose],
+            args=[self.port, self._server_data_queue, self.ipv6, self.verbose, self.tls_cert, self.tls_key],
         )
 
     def start(self):
         self.server.start()
 
     def stop(self):
-        self.server.terminate()
-        self.server.join()
+        if self.server and self.server.is_alive():
+            try:
+                self.server.terminate()
+                self.server.join()
+                import time
+                time.sleep(0.1)
+            except AttributeError:
+                pass
+            self.server = None
         self._regen_process()
 
     def connect_client(self):

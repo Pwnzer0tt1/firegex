@@ -67,10 +67,8 @@ async def startup():
     await firewall.init()
 
 async def shutdown():
-    db.backup()
     await firewall.close()
     db.disconnect()
-    db.restore()
 
 async def refresh_frontend(additional:list[str]=[]):
     await socketio_emit(["porthijack"]+additional)

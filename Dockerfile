@@ -16,7 +16,7 @@ RUN bun run build
 FROM --platform=$TARGETARCH quay.io/fedora/fedora:43 AS base
 RUN dnf -y update && dnf install -y python3.14 libnetfilter_queue \
     libnfnetlink libmnl libcap-ng-utils nftables \
-    vectorscan libtins python3-nftables libpcap && dnf clean all
+    vectorscan libtins python3-nftables libpcap nginx nginx-mod-stream && dnf clean all
 
 RUN mkdir -p /execute/modules
 WORKDIR /execute

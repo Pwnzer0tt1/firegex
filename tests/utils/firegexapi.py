@@ -79,6 +79,14 @@ class FiregexAPI:
     def reset(self, delete: bool):
         self.s.post(f"{self.address}api/reset", json={"delete":delete})
 
+    def export_backup(self):
+        req = self.s.get(f"{self.address}api/export")
+        return req.json()
+
+    def import_backup(self, backup: dict):
+        req = self.s.post(f"{self.address}api/import", json=backup)
+        return verify(req)
+
     def nfregex_get_services(self):
         req = self.s.get(f"{self.address}api/nfregex/services")
         return req.json() 
@@ -103,10 +111,6 @@ class FiregexAPI:
         req = self.s.put(f"{self.address}api/nfregex/services/{service_id}/rename" , json={"name":newname})
         return verify(req)
     
-    def nfregex_settings_service(self,service_id: str, port: int, proto: str, ip_int: str, fail_open: bool):
-        req = self.s.put(f"{self.address}api/nfregex/services/{service_id}/settings" , json={"port":port, "proto":proto, "ip_int":ip_int, "fail_open":fail_open})
-        return verify(req)
-
     def nfregex_get_service_regexes(self,service_id: str):
         req = self.s.get(f"{self.address}api/nfregex/services/{service_id}/regexes")
         data = req.json()
@@ -131,17 +135,24 @@ class FiregexAPI:
         req = self.s.post(f"{self.address}api/nfregex/regexes/{regex_id}/disable")
         return verify(req)
 
-    def nfregex_add_regex(self, service_id: str, regex: str, mode: str, active: bool, is_case_sensitive: bool):
+    def nfregex_add_regex(self, service_id: str, regex: str, mode: str = "B", active: bool = True, is_case_sensitive: bool = True):
         if isinstance(regex, str):
             regex = regex.encode()
         req = self.s.post(f"{self.address}api/nfregex/regexes", 
             json={"service_id": service_id, "regex": base64.b64encode(regex).decode(), "mode": mode, "active": active, "is_case_sensitive": is_case_sensitive})
         return verify(req)
 
-    def nfregex_add_service(self, name: str, port: int, proto: str, ip_int: str, fail_open: bool = False):
-        req = self.s.post(f"{self.address}api/nfregex/services" , 
-            json={"name":name,"port":port, "proto": proto, "ip_int": ip_int, "fail_open": fail_open})
-        return req.json()["service_id"] if verify(req) else False 
+    def nfregex_add_service(self, name: str, port: int, proto: str, ip_int: str, fail_open: bool = False, target_type: str = "flow", tls_stream_id: str | None = None):
+        payload = {"name": name, "port": port, "proto": proto, "ip_int": ip_int, "fail_open": fail_open, "target_type": target_type, "tls_stream_id": tls_stream_id}
+        req = self.s.post(f"{self.address}api/nfregex/services", json=payload)
+        return req.json()["service_id"] if verify(req) else False
+
+    def nfregex_settings_service(self, service_id: str, port: int, ip_int: str, fail_open: bool, proto: str | None = None, target_type: str = "flow", tls_stream_id: str | None = None):
+        payload = {"port": port, "ip_int": ip_int, "fail_open": fail_open, "target_type": target_type, "tls_stream_id": tls_stream_id}
+        if proto is not None:
+            payload["proto"] = proto
+        req = self.s.put(f"{self.address}api/nfregex/services/{service_id}/settings", json=payload)
+        return verify(req)
 
     def nfregex_get_metrics(self):
         req = self.s.get(f"{self.address}api/nfregex/metrics")
@@ -205,8 +216,11 @@ class FiregexAPI:
         req = self.s.put(f"{self.address}api/nfproxy/services/{service_id}/rename" , json={"name":newname})
         return verify(req)
     
-    def nfproxy_settings_service(self,service_id: str, port: int, ip_int: str, fail_open: bool):
-        req = self.s.put(f"{self.address}api/nfproxy/services/{service_id}/settings" , json={"port":port, "ip_int":ip_int, "fail_open":fail_open})
+    def nfproxy_settings_service(self,service_id: str, port: int, ip_int: str, fail_open: bool, proto: str | None = None):
+        payload = {"port":port, "ip_int":ip_int, "fail_open":fail_open}
+        if proto is not None:
+            payload["proto"] = proto
+        req = self.s.put(f"{self.address}api/nfproxy/services/{service_id}/settings" , json=payload)
         return verify(req)
 
     def nfproxy_get_service_pyfilters(self,service_id: str):
@@ -225,10 +239,10 @@ class FiregexAPI:
         req = self.s.post(f"{self.address}api/nfproxy/services/{service_id}/pyfilters/{filter_name}/disable")
         return verify(req)
 
-    def nfproxy_add_service(self, name: str, port: int, proto: str, ip_int: str, fail_open: bool = False):
-        req = self.s.post(f"{self.address}api/nfproxy/services" , 
-            json={"name":name,"port":port, "proto": proto, "ip_int": ip_int, "fail_open": fail_open})
-        return req.json()["service_id"] if verify(req) else False 
+    def nfproxy_add_service(self, name: str, port: int, proto: str, ip_int: str, fail_open: bool = False, target_type: str = "flow", tls_stream_id: str | None = None):
+        payload = {"name": name, "port": port, "proto": proto, "ip_int": ip_int, "fail_open": fail_open, "target_type": target_type, "tls_stream_id": tls_stream_id}
+        req = self.s.post(f"{self.address}api/nfproxy/services", json=payload)
+        return req.json()["service_id"] if verify(req) else False
 
     def nfproxy_get_code(self, service_id: str):
         req = self.s.get(f"{self.address}api/nfproxy/services/{service_id}/code")
@@ -237,3 +251,36 @@ class FiregexAPI:
     def nfproxy_set_code(self, service_id: str, code: str):
         req = self.s.put(f"{self.address}api/nfproxy/services/{service_id}/code", json={"code":code})
         return verify(req)
+        
+    #TLS
+    def tls_get_streams(self):
+        req = self.s.get(f"{self.address}api/tls/streams")
+        return req.json()
+        
+    def tls_add_stream(self, name: str, ip_int: str, port: int, cert: str, key: str):
+        payload = {"name": name, "ip_int": ip_int, "port": port, "cert": cert, "key": key}
+        req = self.s.post(f"{self.address}api/tls/streams", json=payload)
+        return req.json()["stream_id"] if verify(req) else False
+        
+    def tls_delete_stream(self, stream_id: str):
+        req = self.s.delete(f"{self.address}api/tls/streams/{stream_id}")
+        return verify(req)
+        
+    def tls_start_stream(self, stream_id: str):
+        req = self.s.post(f"{self.address}api/tls/streams/{stream_id}/start")
+        return verify(req)
+        
+    def tls_stop_stream(self, stream_id: str):
+        req = self.s.post(f"{self.address}api/tls/streams/{stream_id}/stop")
+        return verify(req)
+
+    def tls_edit_stream(self, stream_id: str, name: str | None = None, ip_int: str | None = None, port: int | None = None, cert: str | None = None, key: str | None = None):
+        payload = {k: v for k, v in {"name": name, "ip_int": ip_int, "port": port, "cert": cert, "key": key}.items() if v is not None}
+        req = self.s.put(f"{self.address}api/tls/streams/{stream_id}", json=payload)
+        return verify(req)
+
+    def tls_get_stream(self, stream_id: str):
+        for stream in self.tls_get_streams():
+            if stream["id"] == stream_id:
+                return stream
+        return None

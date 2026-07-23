@@ -6,12 +6,12 @@ import ServiceRow from '../../components/NFProxy/ServiceRow';
 import { errorNotify, getErrorMessage, isMediumScreen } from '../../js/utils';
 import AddEditService from '../../components/NFProxy/AddEditService';
 import { useQueryClient } from '@tanstack/react-query';
-import { TbPlugConnected, TbReload } from 'react-icons/tb';
+import { TbPlugConnected, TbReload, TbCode } from 'react-icons/tb';
 import { EXAMPLE_PYFILTER, nfproxy, nfproxyServiceQuery } from '../../components/NFProxy/utils';
 import { FaFilter, FaPencilAlt, FaServer } from 'react-icons/fa';
 import { MdUploadFile } from "react-icons/md";
 import { notifications } from '@mantine/notifications';
-import { useFileDialog } from '@mantine/hooks';
+import { EditFilterModal } from '../../components/NFProxy/EditFilterModal';
 import { CodeHighlight } from '@mantine/code-highlight';
 import { DocsButton } from '../../components/DocsButton';
 
@@ -24,69 +24,8 @@ export default function NFProxy({ children }: { children: any }) {
     const queryClient = useQueryClient()
     const isMedium = isMediumScreen()
     const services = nfproxyServiceQuery()
-    const fileDialog = useFileDialog({
-        accept: ".py",
-        multiple: false,
-        resetOnOpen: true,
-        onChange: (files) => {
-            if (files?.length??0 > 0)
-                setFile(files![0])
-        }
-    });
-    const [file, setFile] = useState<File | null>(null);
-    useEffect(() => {
-        if (!srv) return
-        const service = services.data?.find(s => s.service_id === srv)
-        if (!service) return
-        if (file){
-            console.log("Uploading code")
-            const notify_id = notifications.show(
-                {
-                    title: "Uploading code",
-                    message: `Uploading code for service ${service.name}`,
-                    color: "blue",
-                    icon: <MdUploadFile size={20} />,
-                    autoClose: false,
-                    loading: true,
-                }
-            )
-            file.text()
-            .then( code => nfproxy.setpyfilterscode(service?.service_id??"",code.toString()))
-            .then( res => {
-                if (!res){
-                    notifications.update({
-                        id: notify_id,
-                        title: "Code uploaded",
-                        message: `Successfully uploaded code for service ${service.name}`,
-                        color: "green",
-                        icon: <MdUploadFile size={20} />,
-                        autoClose: 5000,
-                        loading: false,
-                    })
-                }else{
-                    notifications.update({
-                        id: notify_id,
-                        title: "Code upload failed",
-                        message: `Error: ${res}`,
-                        color: "red",
-                        icon: <MdUploadFile size={20} />,
-                        autoClose: 5000,
-                        loading: false,
-                    })
-                }
-            }).catch( err => {
-                notifications.update({
-                    id: notify_id,
-                    title: "Code upload failed",
-                    message: `Error: ${err}`,
-                    color: "red",
-                    icon: <MdUploadFile size={20} />,
-                    autoClose: 5000,
-                    loading: false,
-                })
-            }).finally(()=>{setFile(null)})  
-        }
-    }, [file])
+    const [editorOpen, setEditorOpen] = useState(false);
+    // File upload logic has been moved to EditFilterModal
 
     useEffect(()=> {
         if(services.isError)
@@ -103,21 +42,21 @@ export default function NFProxy({ children }: { children: any }) {
         <Box className='center-flex' >
             {isMedium?"General stats:":null}
             <Space w="xs" />
-            <Badge size="md" radius="sm" color="green" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:services.data?.length}</Badge>
+            <Badge size="md" radius="sm" color="green" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:Array.isArray(services.data)?services.data.length:0}</Badge>
             <Space w="xs" />
-            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.blocked_packets, 0)}</Badge>
+            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.blocked_packets, 0):0}</Badge>
             <Space w="xs" />
-            <Badge color="orange" radius="sm" size="md" variant="filled"><FaPencilAlt style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.edited_packets, 0)}</Badge>
+            <Badge color="orange" radius="sm" size="md" variant="filled"><FaPencilAlt style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.edited_packets, 0):0}</Badge>
             <Space w="xs" />
-            <Badge size="md" radius="sm" color="violet" variant="filled"><TbPlugConnected style={{ marginBottom: -2, marginRight: 4}} size={13} />{services.isLoading?0:services.data?.reduce((acc, s)=> acc+=s.n_filters, 0)}</Badge>
+            <Badge size="md" radius="sm" color="violet" variant="filled"><TbPlugConnected style={{ marginBottom: -2, marginRight: 4}} size={13} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.n_filters, 0):0}</Badge>
             <Space w="xs" />
         </Box>
         {isMedium?null:<Space h="md" />}
         <Box className='center-flex' >
             { srv?
-            <Tooltip label="Upload a new filter code" position='bottom' color="blue">
-                <ActionIcon color="blue" size="lg" radius="md" variant="filled" onClick={fileDialog.open}>
-                    <MdUploadFile size={18} />
+            <Tooltip label="Edit python filter code" position='bottom' color="blue">
+                <ActionIcon color="blue" size="lg" radius="md" variant="filled" onClick={() => setEditorOpen(true)}>
+                    <TbCode size={18} />
                 </ActionIcon>
             </Tooltip>      
             : <Tooltip label="Add a new service" position='bottom' color="blue">
@@ -136,8 +75,8 @@ export default function NFProxy({ children }: { children: any }) {
             <DocsButton doc="nfproxy" />
         </Box>
     </Box>
-    <Space h="md" />
-    <Box className="center-flex-row" style={{gap: 20}}>
+    <Space h="xl" />
+    <Box className="center-flex-row" style={{ gap: 12, width: "100%" }}>
         {srv?null:<>
             <LoadingOverlay visible={services.isLoading} />
             {(services.data && services.data?.length > 0)?services.data.map( srv => <ServiceRow service={srv} key={srv.service_id} onClick={()=>{
@@ -167,6 +106,11 @@ export default function NFProxy({ children }: { children: any }) {
     {!srv?
         <AddEditService opened={open} onClose={closeModal} />:null
     }
+    <EditFilterModal 
+        opened={editorOpen} 
+        onClose={() => setEditorOpen(false)} 
+        service={services.data?.find(s => s.service_id === srv)} 
+    />
     </>
 }
 

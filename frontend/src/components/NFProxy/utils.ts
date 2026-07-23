@@ -13,7 +13,16 @@ export type Service = {
     edited_packets:number,
     blocked_packets:number,
     fail_open:boolean,
+    target_type:string,
+    tls_stream_id:string|null,
 }
+
+export type TLSConfig = {
+    tls_enabled: boolean,
+    tls_cert: string | null,
+    tls_key: string | null,
+}
+
 
 export type ServiceAddForm = {
     name:string,
@@ -21,12 +30,17 @@ export type ServiceAddForm = {
     proto:string,
     ip_int:string,
     fail_open: boolean,
+    target_type?: string,
+    tls_stream_id?: string | null,
 }
 
 export type ServiceSettings = {
     port?:number,
+    proto?:string,
     ip_int?:string,
     fail_open?: boolean,
+    target_type?: string,
+    tls_stream_id?: string | null,
 }
 
 export type ServiceAddResponse = {
@@ -86,6 +100,10 @@ export const nfproxy = {
     },
     settings: async (service_id:string, data:ServiceSettings) => {
         const { status } = await putapi(`nfproxy/services/${service_id}/settings`,data) as ServerResponse;
+        return status === "ok"?undefined:status
+    },
+    updatetlsconfig: async (service_id:string, data:TLSConfig) => {
+        const { status } = await putapi(`nfproxy/services/${service_id}/tls-config`,data) as ServerResponse;
         return status === "ok"?undefined:status
     },
     getpyfilterscode: async (service_id:string) => {

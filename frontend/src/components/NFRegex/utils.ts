@@ -13,6 +13,8 @@ export type Service = {
     n_packets:number,
     n_regex:number,
     fail_open:boolean,
+    target_type:string,
+    tls_stream_id:string|null,
 }
 
 export type ServiceAddForm = {
@@ -21,6 +23,8 @@ export type ServiceAddForm = {
     proto:string,
     ip_int:string,
     fail_open: boolean,
+    target_type?: string,
+    tls_stream_id?: string | null,
 }
 
 export type ServiceSettings = {
@@ -28,6 +32,8 @@ export type ServiceSettings = {
     proto?:string,
     ip_int?:string,
     fail_open?: boolean,
+    target_type?: string,
+    tls_stream_id?: string | null,
 }
 
 export type ServiceAddResponse = {
@@ -91,5 +97,9 @@ export const nfregex = {
     settings: async (service_id:string, data:ServiceSettings) => {
         const { status } = await putapi(`nfregex/services/${service_id}/settings`,data) as ServerResponse;
         return status === "ok"?undefined:status
+    },
+    updatetlsconfig: async (service_id: string, data: { tls_enabled: boolean, tls_cert: string | null, tls_key: string | null }) => {
+        const { status } = await putapi(`nfregex/services/${service_id}/tls-config`, data) as ServerResponse;
+        return status === "ok" ? undefined : status;
     },
 }
