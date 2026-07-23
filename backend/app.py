@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from utils.sqlite import SQLite
-from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD
+from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD, safe_join
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 from contextlib import asynccontextmanager
@@ -17,6 +17,8 @@ from fastapi.middleware.cors import CORSMiddleware
 import socketio
 from socketio.exceptions import ConnectionRefusedError
 import hashlib
+import hmac
+import re
 from ipaddress import ip_network, ip_address
 # DB init
 db = SQLite('db/firegex.db')
@@ -125,9 +127,13 @@ async def hash_psw(psw: str) -> str:
     return await asyncio.to_thread(_hash_psw_sync, psw)
 
 def _verify_psw_sync(psw: str, hashed: str) -> bool:
-    psw_hash, salt = hashed.split("-")
+    try:
+        psw_hash, salt = hashed.split("-")
+    except (ValueError, AttributeError):
+        return False
     new_hashed = hashlib.pbkdf2_hmac("sha256", psw.encode(), salt.encode(), 500_000).hex()
-    return new_hashed == psw_hash
+    # Constant-time comparison to avoid leaking hash-match progress via timing.
+    return hmac.compare_digest(new_hashed, psw_hash)
 
 async def verify_psw(psw: str, hashed: str) -> bool:
     return await asyncio.to_thread(_verify_psw_sync, psw, hashed)
@@ -297,9 +303,45 @@ async def export_db():
                     dbs['nfproxy_filters'][f] = base64.b64encode(script_file.read()).decode('utf-8')
     return dbs
 
+# Backup entries are limited to plain basenames of the two shapes export_db()
+# produces: "<name>.db" databases and "<id>.py" nfproxy filter files. The charset
+# forbids path separators and "..", so a crafted key can't escape the target dir.
+_SAFE_DB_NAME = re.compile(r'^[A-Za-z0-9_-]+\.db$')
+_SAFE_PY_NAME = re.compile(r'^[A-Za-z0-9_-]+\.py$')
+
 @api.post('/import', response_model=StatusMessageModel)
 async def import_db(data: dict):
     """Import all configuration databases from JSON"""
+    # Validate the ENTIRE payload before touching any file, so a malformed or
+    # malicious backup is rejected atomically instead of being half-applied.
+    db_imports = []       # (destination path, dump dict)
+    filter_imports = []   # (destination path, decoded bytes)
+
+    for key, value in data.items():
+        if not isinstance(key, str):
+            raise HTTPException(status_code=400, detail="Invalid backup: keys must be strings")
+        if _SAFE_DB_NAME.match(key):
+            if not isinstance(value, dict):
+                raise HTTPException(status_code=400, detail=f"Invalid backup: '{key}' must be an object")
+            # safe_join is defense-in-depth on top of the regex: it rejects any
+            # path that would resolve outside the db/ directory.
+            db_imports.append((safe_join('db', key), value))
+        elif key == 'nfproxy_filters':
+            if not isinstance(value, dict):
+                raise HTTPException(status_code=400, detail="Invalid backup: 'nfproxy_filters' must be an object")
+            for fname, script_content in value.items():
+                if not isinstance(fname, str) or not _SAFE_PY_NAME.match(fname):
+                    raise HTTPException(status_code=400, detail=f"Invalid backup: illegal filter filename '{fname}'")
+                if not isinstance(script_content, str):
+                    raise HTTPException(status_code=400, detail=f"Invalid backup: filter '{fname}' must be a base64 string")
+                try:
+                    decoded = base64.b64decode(script_content, validate=True)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"Invalid backup: filter '{fname}' is not valid base64")
+                filter_imports.append((safe_join('db/nfproxy_filters', fname), decoded))
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid backup: unexpected entry '{key}'")
+
     if not os.path.exists('db'):
         os.makedirs('db')
 
@@ -308,19 +350,17 @@ async def import_db(data: dict):
     current_password = db.get("password")
     current_secret = db.get("secret")
 
-    for db_file, db_data in data.items():
-        if db_file.endswith('.db'):
-            temp_db = SQLite(os.path.join('db', db_file))
-            # Just load the data, we assume schemas exist or will be matched
-            # We don't delete the whole file to preserve DB_VERSION and schemas
-            temp_db.load(db_data)
-        elif db_file == 'nfproxy_filters':
-            if not os.path.exists('db/nfproxy_filters'):
-                os.makedirs('db/nfproxy_filters')
-            for f, script_content in db_data.items():
-                if f.endswith('.py'):
-                    with open(os.path.join('db/nfproxy_filters', f), 'wb') as script_file:
-                        script_file.write(base64.b64decode(script_content))
+    for db_path, db_data in db_imports:
+        temp_db = SQLite(str(db_path))
+        # Load into the existing schema; SQLite.load only writes to tables/columns
+        # that actually exist, so unknown fields in the backup are ignored.
+        temp_db.load(db_data)
+
+    if filter_imports:
+        os.makedirs('db/nfproxy_filters', exist_ok=True)
+        for filter_path, decoded in filter_imports:
+            with open(filter_path, 'wb') as script_file:
+                script_file.write(decoded)
 
     if current_password is not None:
         db.put("password", current_password)
