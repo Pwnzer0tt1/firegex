@@ -121,7 +121,7 @@ export const EXAMPLE_PYFILTER = `# This in an example of a filter file with http
 # From here we can import the DataTypes that we want to use:
 # The data type must be specified in the filter functions
 # And will also interally be used to decide when call some filters and how aggregate data
-from firegex.nfproxy.models import RawPacket
+from firegex.nfproxy.models import RawPacket, HttpRequest
 
 # global context in this execution is dedicated to a single TCP stream
 # - This code will be executed once at the TCP stream start
@@ -165,7 +165,7 @@ def strange_filter(packet:RawPacket):
 
 # Example with a higher level of abstraction
 @pyfilter
-def http_filter(http:HTTPRequest):
+def http_filter(http:HttpRequest):
     if http.method == "GET" and "test" in http.url:
         return REJECT
 
@@ -184,7 +184,7 @@ def http_filter(http:HTTPRequest):
 #   - FullStreamAction.REJECT: Reject the stream and close the connection - like a REJECT action by filter
 #   - FullStreamAction.ACCEPT: Stops to call pyfilters and accept the traffic
 
-from firege.nfproxy import FullStreamAction
+from firegex.nfproxy import FullStreamAction
 
 # Example of a global context
 FGEX_STREAM_MAX_SIZE = 4096

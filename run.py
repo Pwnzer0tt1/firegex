@@ -116,6 +116,13 @@ def load_config():
                 for key, value in default_config.items():
                     if key not in config:
                         config[key] = value
+                # port/host always need a concrete value: a stale/explicit null in the
+                # config file (unlike socket_dir/allowed_ips/proxy_ip_header, which are
+                # legitimately optional) must fall back to the default, not stay None.
+                if config.get("port") is None:
+                    config["port"] = default_config["port"]
+                if config.get("host") is None:
+                    config["host"] = default_config["host"]
                 return config
         except (json.JSONDecodeError, IOError) as e:
             puts(f"Warning: Failed to load config file {g.configfile}: {e}", color=colors.yellow)
@@ -226,10 +233,10 @@ def gen_args(args_to_parse: list[str]|None = None):
     if "command" in args and args.command != "config":
         if "port" not in args or args.port is None or args.port < 1:
             args.port = config["port"]
-        
+
         if "host" not in args or args.host is None:
             args.host = config["host"]
-        
+
         if "socket_dir" not in args or args.socket_dir is None:
             args.socket_dir = config["socket_dir"]
     
@@ -1195,8 +1202,9 @@ def main():
                     puts("Firegex is not running", color=colors.red)
             case "config":
                 handle_config_command(args)
-    
-    write_compose()
+
+    if args.command not in ("config", "status"):
+        write_compose()
     
     if args.clear:
         if volume_exists():

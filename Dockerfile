@@ -10,6 +10,7 @@ ADD ./frontend/package.json .
 ADD ./frontend/bun.lock .
 RUN bun i
 COPY ./frontend/ .
+COPY ./docs/*.md /docs/
 RUN bun run build
 
 # Base fedora container

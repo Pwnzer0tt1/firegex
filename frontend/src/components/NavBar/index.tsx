@@ -1,6 +1,6 @@
 import { Divider, Group, MantineColor, ScrollArea, Text, ThemeIcon, Title, UnstyledButton, Box, AppShell } from "@mantine/core";
 import { useState } from "react";
-import { TbPlugConnected } from "react-icons/tb";
+import { TbPlugConnected, TbShieldLock } from "react-icons/tb";
 import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { GrDirections } from "react-icons/gr";
@@ -43,7 +43,7 @@ export default function NavBar() {
             <NavBarButton navigate="firewall" closeNav={closeNav} name="Firewall Rules" color="red" icon={<PiWallLight size={19} />} />
             <NavBarButton navigate="porthijack" closeNav={closeNav} name="Hijack Port to Proxy" color="blue" icon={<GrDirections size={19} />} />
             <NavBarButton navigate="nfproxy" closeNav={closeNav} name="Netfilter Proxy" color="lime" icon={<TbPlugConnected size={19} />} />
-            <NavBarButton navigate="tls-decrypt" closeNav={closeNav} name="TLS Decryption" color="cyan" icon={<TbPlugConnected size={19} />} />
+            <NavBarButton navigate="tls-decrypt" closeNav={closeNav} name="TLS Decryption" color="cyan" icon={<TbShieldLock size={19} />} />
             <Box px="xs" mt="lg">
                 <Title order={5}>Backup & Restore</Title>
             </Box>

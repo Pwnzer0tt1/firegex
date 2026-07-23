@@ -43,41 +43,47 @@ class IPFilterMiddleware:
         self.app = app
         
     async def __call__(self, scope, receive, send):
-        if scope["type"] in ["http", "websocket"]:
-            if ALLOWED_NETWORKS:
-                client_ip = None
-                if PROXY_IP_HEADER:
-                    headers = dict(scope.get("headers", []))
-                    header_val = headers.get(PROXY_IP_HEADER.lower().encode())
-                    if header_val:
-                        client_ip = header_val.decode().split(",")[0].strip()
-                
-                if not client_ip and scope.get("client"):
-                    client_ip = scope["client"][0]
-                    
-                if client_ip:
-                    try:
-                        ip_obj = ip_address(client_ip)
-                        if not any(ip_obj in net for net in ALLOWED_NETWORKS):
-                            if scope["type"] == "http":
-                                await send({
-                                    "type": "http.response.start",
-                                    "status": 403,
-                                    "headers": [(b"content-type", b"text/plain")],
-                                })
-                                await send({
-                                    "type": "http.response.body",
-                                    "body": b"Forbidden",
-                                })
-                            elif scope["type"] == "websocket":
-                                await send({
-                                    "type": "websocket.close",
-                                    "code": 1008
-                                })
-                            return
-                    except ValueError:
-                        pass
-                        
+        if scope["type"] in ["http", "websocket"] and ALLOWED_NETWORKS:
+            client_ip = None
+            if PROXY_IP_HEADER:
+                headers = dict(scope.get("headers", []))
+                header_val = headers.get(PROXY_IP_HEADER.lower().encode())
+                if header_val:
+                    client_ip = header_val.decode().split(",")[0].strip()
+
+            if not client_ip and scope.get("client"):
+                client_ip = scope["client"][0]
+
+            # Fail closed: an allowlist must deny whenever a client IP can't be
+            # positively determined and matched (missing IP, unparseable IP, or an
+            # IP that just isn't in the list all get denied the same way) - a
+            # malformed/missing value must never be treated as an implicit pass.
+            allowed = False
+            if client_ip:
+                try:
+                    ip_obj = ip_address(client_ip)
+                    allowed = any(ip_obj in net for net in ALLOWED_NETWORKS)
+                except ValueError:
+                    allowed = False
+
+            if not allowed:
+                if scope["type"] == "http":
+                    await send({
+                        "type": "http.response.start",
+                        "status": 403,
+                        "headers": [(b"content-type", b"text/plain")],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": b"Forbidden",
+                    })
+                elif scope["type"] == "websocket":
+                    await send({
+                        "type": "websocket.close",
+                        "code": 1008
+                    })
+                return
+
         await self.app(scope, receive, send)
 
 app = FastAPI(

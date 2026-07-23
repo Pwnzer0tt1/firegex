@@ -8,4 +8,8 @@ export default defineConfig({
   resolve: {
     tsconfigPaths: true,
   },
+  server: {
+    // Allows reading ../fgex-lib/README.md (the nfproxy docs source) from outside the project root
+    fs: { allow: ['..'] },
+  },
 })

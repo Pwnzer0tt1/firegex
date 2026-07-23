@@ -22,6 +22,7 @@ import { IoSettingsSharp } from "react-icons/io5";
 import { SettingsModal } from "./SettingsModal";
 import { FaDirections } from "react-icons/fa";
 import { PiWallLight } from "react-icons/pi";
+import { DocsButton } from "../../components/DocsButton";
 
 export const Firewall = () => {
 
@@ -351,6 +352,8 @@ export const Firewall = () => {
         <Tooltip label="Settings" position='bottom' color="cyan">
           <ActionIcon color="cyan" onClick={() => setSettingsModal(true)} size="lg" radius="md" variant="filled"><IoSettingsSharp size={18} /></ActionIcon>
         </Tooltip>
+        <Space w="xs" />
+        <DocsButton doc="firewall" />
         <Space w="xs" />
         <Tooltip label="Apply" position='bottom' color="grape">
           <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled" disabled={!valuesChanged}>
