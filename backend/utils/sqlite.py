@@ -144,18 +144,28 @@ class SQLite():
         try:
             cur.execute("BEGIN")
             for table_name, rows in data.items():
-                # Verify table exists to prevent SQL injection or schema mismatches
+                # Verify the table exists to prevent SQL injection or schema mismatches
                 cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table_name,))
                 if len(cur.fetchall()) == 0:
                     continue
+                # Ignore anything that isn't a proper list of row objects
+                if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
+                    continue
                 cur.execute(f"DELETE FROM {table_name};")
                 if rows:
-                    cols = list(rows[0].keys())
+                    # Column names are identifiers and can't be parameterized, so only
+                    # keep the ones that actually exist on the table - this stops a
+                    # crafted backup from injecting arbitrary identifiers into the query.
+                    cur.execute(f'PRAGMA table_info("{table_name}");')
+                    valid_cols = {r["name"] for r in cur.fetchall()}
+                    cols = [c for c in rows[0].keys() if c in valid_cols]
+                    if not cols:
+                        continue
                     placeholders = ", ".join(["?"] * len(cols))
                     col_names = ", ".join(cols)
                     query = f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})"
                     for row in rows:
-                        cur.execute(query, [row[c] for c in cols])
+                        cur.execute(query, [row.get(c) for c in cols])
             cur.execute("COMMIT")
         except Exception as e:
             cur.execute("ROLLBACK")
