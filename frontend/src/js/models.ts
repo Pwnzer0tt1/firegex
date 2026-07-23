@@ -15,7 +15,8 @@ export type LoginResponse = {
 
 export type ServerStatusResponse = {
     status:string,
-    loggined:boolean
+    loggined:boolean,
+    version?:string
 }
 
 export type PasswordSend = {

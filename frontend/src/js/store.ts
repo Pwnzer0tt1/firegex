@@ -73,3 +73,13 @@ export const useSession = () => {
     getHomeSection,
   };
 };
+
+interface SystemState {
+  version: string | null;
+  setVersion: (version: string | null) => void;
+}
+
+export const useSystemStore = create<SystemState>()((set) => ({
+  version: null,
+  setVersion: (version) => set({ version }),
+}));

@@ -11,6 +11,8 @@ from firegex.nfproxy.models.http import (
     HttpResponseHeader,
     HttpFullRequest,
     HttpFullResponse,
+    HttpHistory,
+    HttpStreamHistory,
 )
 from firegex.nfproxy.internals.data import RawPacket
 from enum import Enum
@@ -31,6 +33,8 @@ type_annotations_associations = {
         HttpResponseHeader: HttpResponseHeader._fetch_packet,
         HttpFullRequest: HttpFullRequest._fetch_packet,
         HttpFullResponse: HttpFullResponse._fetch_packet,
+        HttpHistory: HttpHistory._fetch_packet,
+        HttpStreamHistory: HttpStreamHistory._fetch_packet,
     },
 }
 
@@ -52,5 +56,8 @@ __all__ = [
     "HttpResponseHeader",
     "HttpFullRequest",
     "HttpFullResponse",
+    "HttpHistory",
+    "HttpStreamHistory",
     "Protocols",
 ]
+

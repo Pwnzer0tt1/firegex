@@ -14,7 +14,7 @@ import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
 import NFProxy from './pages/NFProxy';
 import ServiceDetailsNFProxy from './pages/NFProxy/ServiceDetails';
-import { useAuthStore } from './js/store';
+import { useAuthStore, useSystemStore } from './js/store';
 
 const AuthShell = ({ children }: { children: React.ReactNode }) => (
   <Box style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
@@ -52,6 +52,7 @@ function App() {
   const [loadinBtn, setLoadingBtn] = useState(false);
   const queryClient = useQueryClient()
   const { access_token } = useAuthStore()
+  const { setVersion } = useSystemStore()
 
   useEffect(() => {
     socketio.auth = { token: access_token || "" }
@@ -76,6 +77,10 @@ function App() {
   const getStatus = () => {
     getstatus().then(res => {
       setSystemStatus(res)
+      setVersion(res.version || "unknown")
+      if (!res.loggined && useAuthStore.getState().getAccessToken()) {
+        useAuthStore.getState().clearAccessToken()
+      }
       setReqError(undefined)
     }).catch(err => {
       setReqError(err.toString())
