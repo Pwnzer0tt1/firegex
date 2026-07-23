@@ -15,7 +15,10 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
-LOCALHOST_IP = socket.gethostbyname(os.getenv("LOCALHOST_IP","127.0.0.1"))
+_localhost_env = os.getenv("LOCALHOST_IP", "127.0.0.1")
+if _localhost_env == "None":
+    _localhost_env = "127.0.0.1"
+LOCALHOST_IP = socket.gethostbyname(_localhost_env)
 
 socketio:AsyncServer = None
 sid_list:set = set()
@@ -25,9 +28,12 @@ ROUTERS_DIR = os.path.join(ROOT_DIR,"routers")
 ON_DOCKER = "DOCKER" in sys.argv
 DEBUG = "DEBUG" in sys.argv
 NORELOAD = "NORELOAD" in sys.argv
-FIREGEX_PORT = int(os.getenv("PORT","4444"))
-FIREGEX_HOST = os.getenv("HOST","0.0.0.0")
-FIREGEX_SOCKET_DIR = os.getenv("SOCKET_DIR", None)
+_port_env = os.getenv("PORT", "4444")
+FIREGEX_PORT = int(_port_env) if _port_env and _port_env != "None" else 4444
+_host_env = os.getenv("HOST", "0.0.0.0")
+FIREGEX_HOST = _host_env if _host_env and _host_env != "None" else "0.0.0.0"
+_socket_dir_env = os.getenv("SOCKET_DIR", None)
+FIREGEX_SOCKET_DIR = None if _socket_dir_env == "None" else _socket_dir_env
 FIREGEX_SOCKET = os.path.join(FIREGEX_SOCKET_DIR, "firegex.sock") if FIREGEX_SOCKET_DIR else None
 JWT_ALGORITHM: str = "HS256"
 def _get_version():

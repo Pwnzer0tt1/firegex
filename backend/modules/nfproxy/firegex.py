@@ -6,7 +6,6 @@ import traceback
 from fastapi import HTTPException
 import time
 from utils import run_func
-from utils import DEBUG
 from utils import nicenessify
 
 nft = FiregexTables()
@@ -65,8 +64,6 @@ class FiregexInterceptor:
         while True:
             try:
                 out_data = (await self.process.stdout.read(1024*10)).decode(errors="ignore")
-                if DEBUG:
-                    print(out_data, end="")
             except asyncio.exceptions.LimitOverrunError:
                 self.outstrem_buffer = ""
                 continue
@@ -137,7 +134,6 @@ class FiregexInterceptor:
                     raise HTTPException(status_code=500, detail="Can't read from nfq client") from e
                 if line.startswith("BLOCKED "):
                     filter_name = line.split()[1]
-                    print("BLOCKED", filter_name)
                     async with self.filter_map_lock:
                         if filter_name in self.filter_map:
                             self.filter_map[filter_name].blocked_packets+=1

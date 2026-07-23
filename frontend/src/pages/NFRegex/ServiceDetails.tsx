@@ -1,4 +1,4 @@
-import { ActionIcon, Box, Grid, LoadingOverlay, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Box, Grid, LoadingOverlay, Space, Stack, Title, Tooltip, Card, Group } from '@mantine/core';
 import { Navigate, useNavigate, useParams } from 'react-router';
 import RegexView from '../../components/RegexView';
 import AddNewRegex from '../../components/AddNewRegex';
@@ -8,9 +8,9 @@ import { Badge, Divider, Menu } from '@mantine/core';
 import { useState } from 'react';
 import { FaFilter, FaPlay, FaStop } from 'react-icons/fa';
 import { nfregex, serviceQueryKey } from '../../components/NFRegex/utils';
-import { MdDoubleArrow } from "react-icons/md"
+import { MdDoubleArrow, MdDownload, MdUpload } from "react-icons/md"
 import YesNoModal from '../../components/YesNoModal';
-import { errorNotify, isMediumScreen, okNotify, regex_ipv4 } from '../../js/utils';
+import { errorNotify, isMediumScreen, okNotify, regex_ipv4, getapi, postapi } from '../../js/utils';
 import { BsTrashFill } from 'react-icons/bs';
 import { BiRename } from 'react-icons/bi'
 import RenameForm from '../../components/NFRegex/ServiceRow/RenameForm';
@@ -20,6 +20,7 @@ import { FaArrowLeft } from "react-icons/fa";
 import { VscRegex } from 'react-icons/vsc';
 import { IoSettingsSharp } from 'react-icons/io5';
 import AddEditService from '../../components/NFRegex/AddEditService';
+import TLSAssociationBadge from '../../components/TLSAssociationBadge';
 
 export default function ServiceDetailsNFRegex() {
 
@@ -89,88 +90,132 @@ export default function ServiceDetailsNFRegex() {
     }
 
     return <>
+        <Space h="sm" />
         <LoadingOverlay visible={regexesList.isLoading} />
-        <Box className={isMedium?'center-flex':'center-flex-row'} style={{ justifyContent: "space-between"}} px="md" mt="lg">
-            <Box>
-                <Title order={1}>
-                    <Box className="center-flex">
-                        <MdDoubleArrow /><Space w="sm" />{serviceInfo.name}
-                    </Box>   
-                </Title>
-            </Box>
-            {isMedium?null:<Space h="md" />}
-            <Box className='center-flex'>
-                <Badge color={status_color} radius="md" size="xl" variant="filled" mr="sm">
-                    {serviceInfo.status}
-                </Badge>
-                <Badge size="xl" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient" radius="md" mr="sm">
-                    :{serviceInfo.port}
-                </Badge>
+        <Card
+            withBorder
+            shadow="md"
+            radius="md"
+            p="xl"
+            mb="xl"
+            bg="var(--third_color)"
+            style={{ borderColor: 'var(--fourth_color)', overflow: "visible" }} // Allows dropdowns to overflow outside
+        >
+            <Group justify="space-between" align="center" wrap={isMedium ? "nowrap" : "wrap"} gap="xl">
+                <Box>
+                    <Group gap="xs" wrap="nowrap" align="center">
+                        <Tooltip label="Go back" position="top">
+                            <ActionIcon color="cyan" variant="subtle" radius="md" onClick={() => navigate("/nfregex")}>
+                                <FaArrowLeft size={16} />
+                            </ActionIcon>
+                        </Tooltip>
+                        <MdDoubleArrow size={24} style={{ color: "var(--text-secondary)" }} />
+                        <Title order={2} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                            {serviceInfo.name}
+                        </Title>
+                    </Group>
+                    <Group gap="sm" mt="md">
+                        <Badge color={status_color} radius="sm" size="lg" variant="light">{serviceInfo.status}</Badge>
+                        <Badge size="lg" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient" radius="sm">
+                            :{serviceInfo.port}
+                        </Badge>
+                        {serviceInfo.target_type === 'tls' && (
+                            <TLSAssociationBadge tlsStreamId={serviceInfo.tls_stream_id} size="lg" />
+                        )}
+                        <Badge color={serviceInfo.ip_int.match(regex_ipv4) ? "cyan" : "pink"} radius="sm" size="lg" variant="light">
+                            {serviceInfo.target_type === 'tls' ? 'decrypted traffic to ' : ''}{serviceInfo.ip_int} on {serviceInfo.proto}
+                        </Badge>
+                    </Group>
+                </Box>
+                
+                <Box style={{ flexGrow: 1, minWidth: isMedium ? 'auto' : '100%' }}>
+                    <Group gap="xl" justify={isMedium ? "flex-start" : "space-between"}>
+                        <Group gap="xs">
+                            <Badge color="yellow" radius="sm" size="lg" variant="light" leftSection={<FaFilter size={12} style={{ marginTop: 2 }} />}>
+                                {serviceInfo.n_packets}
+                            </Badge>
+                            <Badge color="violet" radius="sm" size="lg" variant="light" leftSection={<VscRegex size={12} style={{ marginTop: 2 }} />}>
+                                {serviceInfo.n_regex}
+                            </Badge>
+                        </Group>
 
-                <MenuDropDownWithButton>
-                    <Menu.Item><b>Edit service</b></Menu.Item>
-                    <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
-                    <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
-                    <Divider />
-                    <Menu.Label><b>Danger zone</b></Menu.Label>
-                    <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                </MenuDropDownWithButton>   
-            </Box>
-        </Box>
-        {isMedium?null:<Space h="md" />}
-        <Box className={isMedium?'center-flex':'center-flex-row'} style={{ justifyContent: "space-between"}} px="md" mt="lg">
-            <Box className={isMedium?'center-flex':'center-flex-row'}>
-                <Box className='center-flex'>
-                    <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2}} /> {serviceInfo.n_packets}</Badge>
-                    <Space w="xs" />
-                    <Badge color="violet" radius="sm" size="md" variant="filled"><VscRegex style={{ marginBottom: -2}} size={13} /> {serviceInfo.n_regex}</Badge>
+                        <Group gap="sm" justify="flex-end" style={{ flexGrow: 1 }}>
+                            <Tooltip label={serviceInfo.status === "stop" ? "Cannot stop" : "Stop service"} position="bottom" color="red">
+                                <ActionIcon color="red" loading={buttonLoading} onClick={stopService} size="xl" radius="md" variant="light" disabled={serviceInfo.status === "stop"}>
+                                    <FaStop size={18} />
+                                </ActionIcon>
+                            </Tooltip>
+                            <Tooltip label={!["stop", "pause"].includes(serviceInfo.status) ? "Cannot start" : "Start service"} position="bottom" color="teal">
+                                <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading} variant="light" disabled={!["stop", "pause"].includes(serviceInfo.status)}>
+                                    <FaPlay size={18} />
+                                </ActionIcon>
+                            </Tooltip>
+                            <MenuDropDownWithButton>
+                                <Menu.Label><b>Service Tools</b></Menu.Label>
+                                <Menu.Item leftSection={<IoSettingsSharp size={16} />} onClick={() => setEditModal(true)}>Service Settings</Menu.Item>
+                                <Menu.Item leftSection={<BiRename size={16} />} onClick={() => setRenameModal(true)}>Change Name</Menu.Item>
+                                <Divider />
+                                <Menu.Label><b>Rules Management</b></Menu.Label>
+                                <Menu.Item leftSection={<MdDownload size={16} />} onClick={() => {
+                                    getapi(`nfregex/services/${serviceInfo.service_id}/export`).then(data => {
+                                        const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+                                        const url = URL.createObjectURL(blob);
+                                        const a = document.createElement("a");
+                                        a.href = url;
+                                        a.download = `firegex_nfregex_${serviceInfo.name}_backup.json`;
+                                        document.body.appendChild(a);
+                                        a.click();
+                                        document.body.removeChild(a);
+                                        URL.revokeObjectURL(url);
+                                        okNotify("Exported", "Regex rules have been exported.");
+                                    }).catch(err => errorNotify("Export Failed", err.toString()));
+                                }}>Export Rules</Menu.Item>
+                                <Menu.Item leftSection={<MdUpload size={16} />} onClick={() => {
+                                    const input = document.createElement('input');
+                                    input.type = 'file';
+                                    input.accept = '.json';
+                                    input.onchange = (e) => {
+                                        const file = (e.target as HTMLInputElement).files?.[0];
+                                        if (!file) return;
+                                        const reader = new FileReader();
+                                        reader.onload = (e) => {
+                                            try {
+                                                const data = JSON.parse(e.target?.result as string);
+                                                postapi(`nfregex/services/${serviceInfo.service_id}/import`, data).then(() => {
+                                                    okNotify("Imported", "Regex rules have been imported successfully.");
+                                                    queryClient.invalidateQueries({ queryKey: serviceQueryKey });
+                                                    queryClient.invalidateQueries({ queryKey: ["nfregex-service-regexes", serviceInfo.service_id] });
+                                                }).catch(err => errorNotify("Import Failed", err.toString()));
+                                            } catch (err: any) {
+                                                errorNotify("Invalid JSON", err.toString());
+                                            }
+                                        };
+                                        reader.readAsText(file);
+                                    };
+                                    input.click();
+                                }}>Import Rules</Menu.Item>
+                                <Divider />
+                                <Menu.Label><b>Danger zone</b></Menu.Label>
+                                <Menu.Item color="red" leftSection={<BsTrashFill size={16} />} onClick={() => setDeleteModal(true)}>Delete Service</Menu.Item>
+                            </MenuDropDownWithButton>
+                        </Group>
+                    </Group>
                 </Box>
-                {isMedium?<Space w="xs" />:<Space h="xs" />}
-                <Badge color={serviceInfo.ip_int.match(regex_ipv4)?"cyan":"pink"} radius="sm" size="md" variant="filled" mr="xs">{serviceInfo.ip_int} on {serviceInfo.proto}</Badge>
-            </Box>
-            {isMedium?null:<Space h="xl" />}
-            <Box className='center-flex'>
-                <Tooltip label="Go back" zIndex={0} color="cyan">
-                    <ActionIcon color="cyan"
-                    onClick={() => navigate("/")} size="xl" radius="md" variant="filled"
-                    aria-describedby="tooltip-back-id">
-                        <FaArrowLeft size="25px" />
-                    </ActionIcon>
+            </Group>
+        </Card>
+        {(!regexesList.data || regexesList.data.length == 0) ? (
+            <Stack align="center" gap="xl" py="xl">
+                <Title order={3} ta="center">No regex found for this service! Add one by clicking the "+" buttons</Title>
+                <Tooltip label="Add a new regex" zIndex={0} color="blue">
+                    <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
+                     aria-describedby="tooltip-AddRegex-id"><BsPlusLg size="20px" /></ActionIcon>
                 </Tooltip>
-                <Space w="md"/>
-                <Tooltip label="Stop service" zIndex={0} color="red">
-                    <ActionIcon color="red" loading={buttonLoading}
-                    onClick={stopService} size="xl" radius="md" variant="filled"
-                    disabled={serviceInfo.status === "stop"}
-                    aria-describedby="tooltip-stop-id">
-                        <FaStop size="20px" />
-                    </ActionIcon>
-                </Tooltip>
-                <Space w="md"/>
-                <Tooltip label="Start service" zIndex={0} color="teal">
-                    <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
-                                variant="filled" disabled={!["stop","pause"].includes(serviceInfo.status)?true:false}>
-                        <FaPlay size="20px" />
-                    </ActionIcon>
-                </Tooltip>
-            </Box>
-        </Box>
-        <Divider my="xl" />
-        {(!regexesList.data || regexesList.data.length == 0)?<>
-                <Space h="xl" />
-                <Title className='center-flex' style={{textAlign:"center"}} order={3}>No regex found for this service! Add one by clicking the "+" buttons</Title>
-                <Space h="xl" /> <Space h="xl" />
-                <Box className='center-flex'>
-                    <Tooltip label="Add a new regex" zIndex={0} color="blue">
-                        <ActionIcon color="blue" onClick={()=>setOpen(true)} size="xl" radius="md" variant="filled"
-                         aria-describedby="tooltip-AddRegex-id"><BsPlusLg size="20px" /></ActionIcon>
-                    </Tooltip>
-                </Box>
-            </>:
-            <Grid>
+            </Stack>
+        ) : (
+            <Grid mt="xs">
                 {regexesList.data?.map( (regexInfo) => <Grid.Col key={regexInfo.id} span={{ lg:6, xs: 12 }}><RegexView regexInfo={regexInfo} /></Grid.Col>)}
             </Grid>
-        }
+        )}
 
         {srv?<AddNewRegex opened={open} onClose={() => {setOpen(false);}} service={srv} />:null}
         <YesNoModal

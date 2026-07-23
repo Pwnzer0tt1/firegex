@@ -13,11 +13,8 @@ export type Service = {
     edited_packets:number,
     blocked_packets:number,
     fail_open:boolean,
-    tls_enabled:boolean,
-    tls_cert?:string,
-    tls_key?:string,
-    ssl_port?:number,
-    clear_port?:number,
+    target_type:string,
+    tls_stream_id:string|null,
 }
 
 export type TLSConfig = {
@@ -33,15 +30,17 @@ export type ServiceAddForm = {
     proto:string,
     ip_int:string,
     fail_open: boolean,
-    tls_enabled?: boolean,
-    tls_cert?: string | null,
-    tls_key?: string | null,
+    target_type?: string,
+    tls_stream_id?: string | null,
 }
 
 export type ServiceSettings = {
     port?:number,
+    proto?:string,
     ip_int?:string,
     fail_open?: boolean,
+    target_type?: string,
+    tls_stream_id?: string | null,
 }
 
 export type ServiceAddResponse = {

@@ -4,6 +4,7 @@ import utils
 import os
 import asyncio
 import logging
+import base64
 from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
@@ -11,7 +12,6 @@ from utils.sqlite import SQLite
 from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD
 from utils.loader import frontend_deploy, load_routers
 from utils.models import ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
-from utils.certs import CERTIFICATES_SCHEMA
 from contextlib import asynccontextmanager
 from fastapi.middleware.cors import CORSMiddleware
 import socketio
@@ -19,7 +19,7 @@ from socketio.exceptions import ConnectionRefusedError
 import hashlib
 
 # DB init
-db = SQLite('db/firegex.db', CERTIFICATES_SCHEMA)
+db = SQLite('db/firegex.db')
 sysctl = SysctlManager({
     "net.ipv4.conf.all.forwarding": True,
     "net.ipv6.conf.all.forwarding": True,
@@ -217,6 +217,62 @@ async def reset_firegex(form: ResetRequest):
         logging.error(f"Error setting sysctls: {e}")
     await reset(form)
     await refresh_frontend()
+    return {'status': 'ok'}
+
+@api.get('/export')
+async def export_db():
+    """Export all configuration databases as JSON"""
+    dbs = {}
+    if not os.path.exists('db'):
+        return dbs
+    for f in os.listdir('db'):
+        if f.endswith('.db'):
+            temp_db = SQLite(os.path.join('db', f))
+            dbs[f] = temp_db.dump()
+            
+    # Export nfproxy filters
+    if os.path.exists('db/nfproxy_filters'):
+        dbs['nfproxy_filters'] = {}
+        for f in os.listdir('db/nfproxy_filters'):
+            if f.endswith('.py'):
+                with open(os.path.join('db/nfproxy_filters', f), 'rb') as script_file:
+                    dbs['nfproxy_filters'][f] = base64.b64encode(script_file.read()).decode('utf-8')
+    return dbs
+
+@api.post('/import', response_model=StatusMessageModel)
+async def import_db(data: dict):
+    """Import all configuration databases from JSON"""
+    if not os.path.exists('db'):
+        os.makedirs('db')
+
+    # Backups never contain the password/secret (export_db strips them), so preserve
+    # the current session's own values instead of losing them on import.
+    current_password = db.get("password")
+    current_secret = db.get("secret")
+
+    for db_file, db_data in data.items():
+        if db_file.endswith('.db'):
+            temp_db = SQLite(os.path.join('db', db_file))
+            # Just load the data, we assume schemas exist or will be matched
+            # We don't delete the whole file to preserve DB_VERSION and schemas
+            temp_db.load(db_data)
+        elif db_file == 'nfproxy_filters':
+            if not os.path.exists('db/nfproxy_filters'):
+                os.makedirs('db/nfproxy_filters')
+            for f, script_content in db_data.items():
+                if f.endswith('.py'):
+                    with open(os.path.join('db/nfproxy_filters', f), 'wb') as script_file:
+                        script_file.write(base64.b64decode(script_content))
+
+    if current_password is not None:
+        db.put("password", current_password)
+    if current_secret is not None:
+        db.put("secret", current_secret)
+
+    # Restart the application state
+    await shutdown_main()
+    await startup_main()
+
     return {'status': 'ok'}
 
 app.include_router(api)

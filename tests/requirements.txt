@@ -2,3 +2,6 @@ iperf3
 requests
 matplotlib
 numpy
+cryptography
+psutil
+pydantic

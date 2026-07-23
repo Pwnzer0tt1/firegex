@@ -1,17 +1,23 @@
-
-@import url('https://fonts.googleapis.com/css2?family=Lato&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap');
 
 :root{
-  --primary_color: #242a33;
-  --secondary_color: #1A1B1E;
-  --third_color:#25262b;
-  --fourth_color: #25262b99;
+  --primary_color: #161618;
+  --secondary_color: #0a0a0c;
+  --third_color: #1e1e20;
+  --fourth_color: #2c2c2f;
+  --accent-color: #00e5ff;
+  --accent-hover: #00b8cc;
+  --text-primary: #f5f5f5;
+  --text-secondary: #9aa0a6;
   --mantine-color-body: var(--secondary_color) !important;
+  --mantine-font-family: 'Inter', sans-serif !important;
 }
 
 body {
   margin: 0;
-  font-family: 'Lato', sans-serif;
+  font-family: 'Inter', sans-serif;
+  background-color: var(--secondary_color);
+  color: var(--text-primary);
 }
 
 .center-flex{
@@ -132,19 +138,20 @@ body {
 }
 
 .firegex__porthijack__servicerow__name{
+  font-family: 'Hanken Grotesk', sans-serif;
   font-size: 1.8em;
-  font-weight: bolder;
+  font-weight: 700;
   margin-right: 10px;
   margin-bottom: 13px;
-  color:#FFF;
+  color: var(--text-primary);
 }
 
 .firegex__porthijack__servicerow__portInput *{
-  color: #FFF;
+  color: var(--accent-color);
+  font-family: 'JetBrains Mono', monospace;
   font-weight: bold;
   font-size: 1em;
   margin-top: -1px;
-  text-decoration: underline;
 }
 
 .firegex__nfregex__row{
@@ -155,13 +162,21 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    background-color: transparent;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    transition: all 0.2s ease;
+}
+
+.firegex__nfregex__row:hover{
 }
 
 .firegex__nfregex__name{
+    font-family: 'Hanken Grotesk', sans-serif;
     font-size: 1.6em;
-    font-weight: bolder;
+    font-weight: 700;
     text-transform: capitalize;
-    color:#FFF;
+    color: var(--text-primary);
     max-width: 300px;
     overflow: hidden;
     margin-left: -20px;
@@ -175,12 +190,13 @@ body {
 .firegex__navbar__unstyled_button {
   display: block;
   width: 100%;
-  padding: var(--mantine-spacing-xs);
-  border-radius: var(--mantine-radius-sm);
-  color: var(--mantine-color-dark-0);
+  padding: 12px 16px;
+  border-radius: 8px;
+  color: var(--text-secondary);
   background-color: transparent;
-  
-  opacity: 1;
+  font-weight: 500;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
 }
 
 .firegex__navbar__unstyled_button.disabled {
@@ -188,16 +204,20 @@ body {
 }
 
 .firegex__navbar__unstyled_button.selected{
-  background-color: var(--mantine-color-dark-6);
+  background-color: var(--third_color);
+  color: var(--accent-color);
+  border-color: var(--fourth_color);
 }
 
 .firegex__navbar__unstyled_button:hover {
-  background-color: var(--mantine-color-dark-6);
+  background-color: var(--third_color);
+  color: var(--text-primary);
 }
 
 .firegex__footer{
   margin-top: 50px;
   background-color: var(--primary_color);
+  border-top: 1px solid var(--third_color);
   display: flex;
   justify-content: center;
   align-items: center;
@@ -227,9 +247,29 @@ body {
   align-items: center;
   justify-content: center;
   display: flex;
-  background-color: var(--fourth_color);
-  border-radius: 10px;
-  border: #444 3px solid;
+  background-color: transparent;
+  border-radius: 8px;
+  border: 1px solid var(--fourth_color);
+  margin-bottom: 16px;
+}
+
+.mantine-CodeHighlight-root, .mantine-CodeHighlight-pre {
+  background-color: transparent !important;
+}
+
+.firegex__clickable_row {
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.firegex__clickable_row:hover {
+  border-color: var(--accent-color);
+  background-color: rgba(255, 255, 255, 0.03);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.firegex__clickable_row:active {
+  background-color: rgba(255, 255, 255, 0.05);
 }
 
 @media (max-width: 599px) {

@@ -97,7 +97,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		pyq->pkt->drop();// This is needed because the callback has to take the updated pkt pointer!
 	}
 
-	void filter_action(NfQueue::PktRequest<PyProxyQueue>* pkt, Stream& stream, const string& data){
+	void filter_action(NfQueue::PktRequest<PyProxyQueue>* pkt, Stream& stream, const string& data, bool is_client){
 		auto stream_search = sctx.streams_ctx.find(pkt->sid);
 		pyfilter_ctx* stream_match;
 		if (stream_search == sctx.streams_ctx.end()){
@@ -129,7 +129,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 			stream_match = stream_search->second;
 		}		
 
-		auto result = stream_match->handle_packet(pkt, data);
+		auto result = stream_match->handle_packet(pkt, data, is_client);
 		switch(result.action){
 			case PyFilterResponse::ACCEPT:
 				return pkt->accept();
@@ -169,21 +169,21 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	}
 
 
-	static void on_data_recv(Stream& stream, PyProxyQueue* pyq, const string& data) {
+	static void on_data_recv(Stream& stream, PyProxyQueue* pyq, const string& data, bool is_client) {
 		pyq->pkt->fix_data_payload();
-		pyq->filter_action(pyq->pkt, stream, data); //Only here the rebuilt_tcp_data is set
+		pyq->filter_action(pyq->pkt, stream, data, is_client); //Only here the rebuilt_tcp_data is set
 	}
 	
 	//Input data filtering
 	static void on_client_data(Stream& stream, PyProxyQueue* pyq) {
 		auto data = stream.client_payload();
-		on_data_recv(stream, pyq, string((char*)data.data(), data.size()));
+		on_data_recv(stream, pyq, string((char*)data.data(), data.size()), true);
 	}
 	
 	//Server data filtering
 	static void on_server_data(Stream& stream, PyProxyQueue* pyq) {
 		auto data = stream.server_payload();
-		on_data_recv(stream, pyq, string((char*)data.data(), data.size()));
+		on_data_recv(stream, pyq, string((char*)data.data(), data.size()), false);
 	}
 	
 	// A stream was terminated. The second argument is the reason why it was terminated

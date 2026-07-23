@@ -49,8 +49,15 @@ class UdpServer:
         self.server.start()
 
     def stop(self):
-        self.server.terminate()
-        self.server.join()
+        if self.server:
+            try:
+                self.server.terminate()
+                self.server.join()
+                import time
+                time.sleep(0.1)
+            except AttributeError:
+                pass
+            self.server = None
         self._regen_process()
 
     def connect_client(self):

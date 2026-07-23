@@ -1,4 +1,4 @@
-import { Button, Group, Space, TextInput, Notification, Switch, Modal, Select } from '@mantine/core';
+import { Button, Group, Space, TextInput, Notification, Switch, Modal, Card, Text, Title, SegmentedControl, Box } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useState } from 'react';
 import { RegexAddForm } from '../js/models';
@@ -68,48 +68,73 @@ function AddNewRegex({ opened, onClose, service }:{ opened:boolean, onClose:()=>
     }    
 
 
-  return <Modal size="xl" title="Add a new regex filter" opened={opened} onClose={close} closeOnClickOutside={false} centered>
-    <form onSubmit={form.onSubmit(submitRequest)}>
+    return <Modal size="lg" title="Add a new regex filter" opened={opened} onClose={close} closeOnClickOutside={false} centered>
+        <form onSubmit={form.onSubmit(submitRequest)}>
             <TextInput
                 label="Regex"
                 placeholder="[A-Z0-9]{31}="
+                size="md"
+                data-autofocus
                 {...form.getInputProps('regex')}
             />
-            <Space h="md" />
-            <Switch
-                label="Case insensitive"
-                {...form.getInputProps('is_case_insensitive', { type: 'checkbox' })}
-            />
-            <Space h="md" />
-            <Switch
-                label="Deactivate"
-                {...form.getInputProps('deactive', { type: 'checkbox' })}
-            />
-            <Space h="md" />
-            <Select
-                data={[
-                    { value: 'C', label: 'Client -> Server' },
-                    { value: 'S', label: 'Server -> Client' },
-                    { value: 'B', label: 'Both (Client <-> Server)' },
-                ]}
-                label="Choose the source of the packets to filter"
-                variant="filled"
-                {...form.getInputProps('mode')}
-            />
-            <Group align="right" mt="md">
-                <Button loading={submitLoading} type="submit">Add Filter</Button>
+            
+            <Space h="xl" />
+            <Group justify="space-between" align="center">
+                <Box>
+                    <Text fw={500} size="sm">Packet Direction</Text>
+                    <Text size="xs" c="dimmed">Choose which traffic this regex should filter</Text>
+                </Box>
+                <SegmentedControl
+                    value={form.values.mode}
+                    onChange={(val) => form.setFieldValue('mode', val)}
+                    data={[
+                        { label: 'Client → Server', value: 'C' },
+                        { label: 'Bidirectional', value: 'B' },
+                        { label: 'Server → Client', value: 'S' },
+                    ]}
+                    color="cyan"
+                    size="sm"
+                />
             </Group>
 
-            <Space h="md" />
-            
+            <Space h="xl" />
+            <Card withBorder radius="md" p="md" bg="transparent">
+                <Group justify="space-between" mb="xs">
+                    <Text fw={500} size="sm">Case Insensitive</Text>
+                    <Switch
+                        color="cyan"
+                        {...form.getInputProps('is_case_insensitive', { type: 'checkbox' })}
+                    />
+                </Group>
+                <Text size="xs" c="dimmed" mb="md">
+                    Ignore letter casing when matching this regex against packets.
+                </Text>
+
+                <Group justify="space-between" mb="xs">
+                    <Text fw={500} size="sm">Start Deactivated</Text>
+                    <Switch
+                        color="orange"
+                        {...form.getInputProps('deactive', { type: 'checkbox' })}
+                    />
+                </Group>
+                <Text size="xs" c="dimmed">
+                    Create the filter but keep it disabled initially.
+                </Text>
+            </Card>
+
+            <Group justify="flex-end" mt="xl">
+                <Button variant="default" onClick={close}>Cancel</Button>
+                <Button loading={submitLoading} type="submit" color="cyan">Add Filter</Button>
+            </Group>
+
             {error?<>
+            <Space h="md" />
             <Notification icon={<ImCross size={14} />} color="red" onClose={()=>{setError(null)}}>
                 Error: {error}
-            </Notification><Space h="md" /></>:null}
+            </Notification></>:null}
             
         </form>
     </Modal>
-
 }
 
 export default AddNewRegex;

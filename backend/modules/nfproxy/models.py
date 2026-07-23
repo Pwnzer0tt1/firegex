@@ -3,12 +3,13 @@ class Service:
         self,
         service_id: str,
         status: str,
-        port: int,
+        port: int | None,
         name: str,
         proto: str,
-        ip_int: str,
+        ip_int: str | None,
         fail_open: bool,
-        tls_enabled: bool = False,
+        target_type: str = "flow",
+        tls_stream_id: str | None = None,
         tls_cert: str | None = None,
         tls_key: str | None = None,
         **other,
@@ -20,7 +21,8 @@ class Service:
         self.proto = proto
         self.ip_int = ip_int
         self.fail_open = fail_open
-        self.tls_enabled = bool(tls_enabled)
+        self.target_type = target_type
+        self.tls_stream_id = tls_stream_id
         self.tls_cert = tls_cert
         self.tls_key = tls_key
 

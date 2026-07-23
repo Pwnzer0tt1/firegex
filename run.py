@@ -185,6 +185,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_config.add_argument('--port', "-p", type=int, required=False, help='Set default port for web service')
     parser_config.add_argument('--host', required=False, help='Set default host IP address to bind the service to')
     parser_config.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
+    parser_config.add_argument('--password', required=False, type=str, nargs='?', const='', help='Change the password of the firewall (omit the value to be prompted for it interactively)')
     parser_config.add_argument('--show', required=False, action="store_true", help='Show current configuration', default=False)
     args = parser.parse_args(args=args_to_parse)
     
@@ -214,14 +215,15 @@ def gen_args(args_to_parse: list[str]|None = None):
         args.threads = multiprocessing.cpu_count()
     
     # Use config values as fallback, but allow command line to override
-    if "port" not in args or args.port < 1:
-        args.port = config["port"]
-    
-    if "host" not in args:
-        args.host = config["host"]
-    
-    if "socket_dir" not in args:
-        args.socket_dir = config["socket_dir"]
+    if "command" in args and args.command != "config":
+        if "port" not in args or args.port is None or args.port < 1:
+            args.port = config["port"]
+        
+        if "host" not in args or args.host is None:
+            args.host = config["host"]
+        
+        if "socket_dir" not in args or args.socket_dir is None:
+            args.socket_dir = config["socket_dir"]
     
     # Save configuration if values were specified via command line and differ from config
     config_changed = False
@@ -873,12 +875,12 @@ def run_standalone():
     puts("Starting as daemon...", color=colors.green)
     
     try:
-        # Start process in background
+        out_file = open('/tmp/app.log', 'w')
         process = subprocess.Popen(
             chroot_cmd,
             shell=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=out_file,
+            stderr=out_file,
             stdin=subprocess.DEVNULL,
             preexec_fn=os.setsid  # Create new session
         )
@@ -963,6 +965,69 @@ def handle_config_command(args):
         config_changed = True
         puts(f"Socket dir set to: {args.socket_dir}", color=colors.green)
     
+    if hasattr(args, 'password') and args.password is not None:
+        new_password = args.password
+        if new_password == "":
+            # No value was passed on the command line: prompt for it interactively
+            # (masked input), so the new password never lands in shell history or `ps`.
+            while True:
+                puts("Insert a new password for firegex: ", end="", color=colors.yellow, is_bold=True, flush=True)
+                new_password = getpass.getpass("")
+                if len(new_password) < 8:
+                    puts("The password has to be at least 8 char long", color=colors.red, is_bold=True, flush=True)
+                else:
+                    break
+            puts("Confirm the password: ", end="", color=colors.yellow, is_bold=True, flush=True)
+            if getpass.getpass("") != new_password:
+                puts("Passwords don't match!", color=colors.red, is_bold=True, flush=True)
+                exit(1)
+        elif len(new_password) < 8:
+            puts("Error: The password has to be at least 8 char long", color=colors.red)
+            exit(1)
+
+        hashed = hash_psw(new_password)
+
+        if g.standalone_mode and os.path.isfile(os.path.join(g.rootfs_path, "execute/db/firegex.db")):
+            import sqlite3
+            db_path = os.path.join(g.rootfs_path, "execute/db/firegex.db")
+            try:
+                conn = sqlite3.connect(db_path)
+                try:
+                    conn.execute('INSERT INTO keys_values (key, value) VALUES (?, ?)', ('password', hashed))
+                except Exception:
+                    conn.execute('UPDATE keys_values SET value = ? WHERE key = ?', (hashed, 'password'))
+                conn.commit()
+                conn.close()
+                puts("Password changed successfully! It will take effect immediately.", color=colors.green)
+            except Exception as e:
+                puts(f"Error changing password: {e}", color=colors.red)
+                exit(1)
+        elif volume_exists():
+            # The hash is passed as a plain argv item (sys.argv[1]) rather than interpolated
+            # into the -c source, so it never needs shell/Python-string escaping.
+            py_code = (
+                "import sqlite3, sys\n"
+                "conn = sqlite3.connect('/execute/db/firegex.db')\n"
+                "hashed = sys.argv[1]\n"
+                "try:\n"
+                "    conn.execute('INSERT INTO keys_values (key, value) VALUES (?, ?)', ('password', hashed))\n"
+                "except Exception:\n"
+                "    conn.execute('UPDATE keys_values SET value = ? WHERE key = ?', (hashed, 'password'))\n"
+                "conn.commit()\n"
+                "conn.close()\n"
+            )
+            try:
+                subprocess.run(["docker", "exec", "firegex", "python3", "-c", py_code, hashed], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                puts("Password changed successfully! It will take effect immediately.", color=colors.green)
+            except subprocess.CalledProcessError:
+                puts("Error: Could not change password. Is Firegex running?", color=colors.red)
+                exit(1)
+        else:
+            puts("Error: Firegex is not running and no standalone data found.", color=colors.red)
+            exit(1)
+
+        config_changed = True
+
     if config_changed:
         if save_config(config):
             puts(f"Configuration saved to {g.configfile}", color=colors.green)

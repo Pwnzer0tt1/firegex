@@ -25,8 +25,3 @@ class IpInterface(BaseModel):
     
 class ResetRequest(BaseModel):
     delete:bool
-
-class TLSConfigForm(BaseModel):
-    tls_enabled: bool
-    tls_cert: str|None = None
-    tls_key: str|None = None

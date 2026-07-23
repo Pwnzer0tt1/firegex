@@ -1,21 +1,20 @@
-import { ActionIcon, Badge, Box, Divider, Grid, Menu, Space, Title, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Divider, Menu, Space, Title, Tooltip, Card, Group, Button, Text } from '@mantine/core';
 import { useState } from 'react';
-import { FaPlay, FaStop } from 'react-icons/fa';
+import { FaPlay, FaStop, FaTrash } from 'react-icons/fa';
 import { nfregex, Service, serviceQueryKey } from '../utils';
-import { MdDoubleArrow, MdOutlineArrowForwardIos } from "react-icons/md"
 import YesNoModal from '../../YesNoModal';
 import { errorNotify, isMediumScreen, okNotify, regex_ipv4 } from '../../../js/utils';
 import { BsTrashFill } from 'react-icons/bs';
-import { BiRename } from 'react-icons/bi'
+import { BiRename } from 'react-icons/bi';
 import RenameForm from './RenameForm';
 import { MenuDropDownWithButton } from '../../MainLayout';
 import { useQueryClient } from '@tanstack/react-query';
-import { FaFilter } from "react-icons/fa";
-import { VscRegex } from "react-icons/vsc";
 import { IoSettingsSharp } from 'react-icons/io5';
 import AddEditService from '../AddEditService';
-import { TbShieldLock } from "react-icons/tb";
-import TLSConfigModal from '../../TLSConfigModal';
+import { TbShieldLock, TbHexagon } from "react-icons/tb";
+import { MdChevronRight } from "react-icons/md";
+import TLSAssociationBadge from '../../TLSAssociationBadge';
+
 
 export default function ServiceRow({ service, onClick }:{ service:Service, onClick?:()=>void }) {
 
@@ -30,7 +29,6 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
     const [deleteModal, setDeleteModal] = useState(false)
     const [renameModal, setRenameModal] = useState(false)
     const [editModal, setEditModal] = useState(false)
-    const [tlsModal, setTlsModal] = useState(false)
     const isMedium = isMediumScreen()
 
     const stopService = async () => {
@@ -78,75 +76,86 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
     }
 
     return <>
-        <Box className='firegex__nfregex__rowbox'>
-            <Box className="firegex__nfregex__row" style={{width:"100%", flexDirection: isMedium?"row":"column"}}>
-                <Box>
-                    <Box className="center-flex" style={{ justifyContent: "flex-start" }}>
-                        <MdDoubleArrow size={30} style={{color: "white"}}/>
-                        <Title className="firegex__nfregex__name" ml="xs">
-                            {service.name}
-                        </Title>
+        <Card
+            withBorder
+            radius="md"
+            p="md"
+            w="100%"
+            bg="transparent"
+            className="firegex__clickable_row"
+            style={{ borderColor: 'var(--fourth_color)' }}
+            onClick={onClick}
+        >
+            <Group justify="space-between" align="center" wrap={isMedium ? "nowrap" : "wrap"}>
+                <Group wrap="nowrap" align="flex-start">
+                    <Box style={{ 
+                        width: 42, 
+                        height: 42, 
+                        borderRadius: 8, 
+                        backgroundColor: status_color === 'teal' ? 'rgba(32, 201, 151, 0.1)' : 'rgba(250, 82, 82, 0.1)', 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center',
+                        color: status_color === 'teal' ? 'var(--mantine-color-teal-filled)' : 'var(--mantine-color-red-filled)'
+                    }}>
+                        <TbHexagon size={24} />
                     </Box>
-                    <Box className="center-flex" style={{ gap: 8, marginTop: 15, justifyContent: "flex-start" }}>
-                        <Badge color={status_color} radius="md" size="lg" variant="filled">{service.status}</Badge>
-                        <Badge size="lg" gradient={{ from: 'indigo', to: 'cyan' }} variant="gradient" radius="md" style={{ fontSize: "110%" }}>
-                            :{service.port}
-                        </Badge>
-                        {service.tls_enabled && (
-                            <Badge color="green" radius="md" size="lg" variant="light">
-                                <TbShieldLock size={14} style={{ marginRight: 4, verticalAlign: 'middle' }} />
-                                TLS (lo:{service.clear_port})
+                    <Box>
+                        <Group gap="xs" align="center">
+                            <Text fw={600} size="md">{service.name}</Text>
+                            <Badge color={status_color} variant="light" size="xs" radius="sm">
+                                {service.status.toUpperCase()}
                             </Badge>
-                        )}
+                            {service.target_type === 'tls' && <TLSAssociationBadge tlsStreamId={service.tls_stream_id} />}
+                        </Group>
+                        <Group gap="xs" mt={4}>
+                            <Text size="xs" c="dimmed" style={{ letterSpacing: 0.5 }}>
+                                PORT: :{service.port}
+                            </Text>
+                            <Text size="xs" c="dimmed" style={{ letterSpacing: 0.5 }}>
+                                • {service.target_type === 'tls' ? 'decrypted traffic to ' : ''}{service.ip_int} ON {service.proto.toUpperCase()}
+                            </Text>
+                        </Group>
                     </Box>
-                    {isMedium?null:<Space w="xl" />}
-                </Box>
+                </Group>
                 
-                <Box className={isMedium?"center-flex":"center-flex-row"}>
-                    <Box className="center-flex-row">
-                        <Badge color={service.ip_int.match(regex_ipv4)?"cyan":"pink"} radius="sm" size="md" variant="filled">{service.ip_int} on {service.proto}</Badge>
-                        <Space h="xs" />
-                        <Box className='center-flex'>
-                            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2}} /> {service.n_packets}</Badge>
-                            <Space w="xs" />
-                            <Badge color="violet" radius="sm" size="md" variant="filled"><VscRegex style={{ marginBottom: -2}} size={13} /> {service.n_regex}</Badge>
+                <Group gap="xs" wrap="nowrap">
+                    <Group gap="xs" onClick={(e) => e.stopPropagation()}>
+                        {service.status === "stop" ? (
+                            <Button variant="default" size="xs" leftSection={<FaPlay size={10} />} onClick={startService} loading={buttonLoading}>
+                                Start
+                            </Button>
+                        ) : (
+                            <Button variant="default" size="xs" leftSection={<FaStop size={10} />} onClick={stopService} loading={buttonLoading}>
+                                Stop
+                            </Button>
+                        )}
+
+                        <Menu>
+                            <Menu.Target>
+                                <Button variant="default" size="xs" leftSection={<IoSettingsSharp size={10} />}>
+                                    Options
+                                </Button>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                                <Menu.Label>Actions</Menu.Label>
+                                <Menu.Item leftSection={<BiRename size={14} />} onClick={() => setRenameModal(true)}>Rename Service</Menu.Item>
+                                <Menu.Item leftSection={<IoSettingsSharp size={14} />} onClick={() => setEditModal(true)}>Settings</Menu.Item>
+                            </Menu.Dropdown>
+                        </Menu>
+
+                        <Button variant="default" size="xs" leftSection={<FaTrash size={10} />} onClick={() => setDeleteModal(true)}>
+                            Delete
+                        </Button>
+                    </Group>
+                    <Tooltip label="View details" position="left">
+                        <Box style={{ display: 'flex', alignItems: 'center', color: 'var(--text-secondary)' }}>
+                            <MdChevronRight size={22} />
                         </Box>
-                    </Box>
-                    {isMedium?<Space w="xl" />:<Space h="lg" />}
-                    <Box className="center-flex">
-                        <MenuDropDownWithButton>
-                            <Menu.Item><b>Edit service</b></Menu.Item>
-                            <Menu.Item leftSection={<IoSettingsSharp size={18} />} onClick={()=>setEditModal(true)}>Service Settings</Menu.Item>
-                            <Menu.Item leftSection={<BiRename size={18} />} onClick={()=>setRenameModal(true)}>Change service name</Menu.Item>
-                            <Menu.Item leftSection={<TbShieldLock size={18} />} onClick={()=>setTlsModal(true)}>Configure TLS</Menu.Item>
-                            <Divider />
-                            <Menu.Label><b>Danger zone</b></Menu.Label>
-                            <Menu.Item color="red" leftSection={<BsTrashFill size={18} />} onClick={()=>setDeleteModal(true)}>Delete Service</Menu.Item>
-                        </MenuDropDownWithButton> 
-                        <Space w="md"/>                        
-                        <Tooltip label="Stop service" zIndex={0} color="red">
-                            <ActionIcon color="red" loading={buttonLoading}
-                            onClick={stopService} size="xl" radius="md" variant="filled"
-                            disabled={service.status === "stop"}
-                            aria-describedby="tooltip-stop-id">
-                                <FaStop size="20px" />
-                            </ActionIcon>
-                        </Tooltip>
-                        <Space w="md"/>
-                        <Tooltip label="Start service" zIndex={0} color="teal">
-                            <ActionIcon color="teal" size="xl" radius="md" onClick={startService} loading={buttonLoading}
-                                        variant="filled" disabled={!["stop","pause"].includes(service.status)?true:false}>
-                                <FaPlay size="20px" />
-                            </ActionIcon>
-                        </Tooltip>
-                        {isMedium?<Space w="xl" />:<Space w="md" />} 
-                        {onClick?<Box className='firegex__service_forward_btn'>
-                            <MdOutlineArrowForwardIos onClick={onClick} style={{cursor:"pointer"}} size={25} />
-                        </Box>:null}
-                    </Box>
-                </Box>
-            </Box>
-        </Box>
+                    </Tooltip>
+                </Group>
+            </Group>
+        </Card>
         <YesNoModal
             title='Are you sure to delete this service?'
             description={`You are going to delete the service '${service.port}', causing the stopping of the firewall and deleting all the regex associated. This will cause the shutdown of your service! ⚠️`}
@@ -163,13 +172,6 @@ export default function ServiceRow({ service, onClick }:{ service:Service, onCli
             opened={editModal}
             onClose={()=>setEditModal(false)}
             edit={service}
-        />
-        <TLSConfigModal
-            opened={tlsModal}
-            onClose={() => setTlsModal(false)}
-            service={service}
-            updateTlsConfig={nfregex.updatetlsconfig}
-            queryKey={serviceQueryKey}
         />
     </>
 }

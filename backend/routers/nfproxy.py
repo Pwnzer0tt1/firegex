@@ -6,8 +6,8 @@ from modules.nfproxy.nftables import FiregexTables
 from modules.nfproxy.firewall import STATUS, FirewallManager
 from utils.sqlite import SQLite
 from utils import ip_parse, refactor_name, socketio_emit, PortType
-from utils.certs import CertsDB, populate_services_tls_config
-from utils.models import ResetRequest, StatusMessageModel, TLSConfigForm
+from modules.tls.service import activate_stream
+from utils.models import ResetRequest, StatusMessageModel
 import os
 from firegex.nfproxy.internals import get_filter_names
 from fastapi.responses import PlainTextResponse
@@ -20,27 +20,27 @@ import utils
 class ServiceModel(BaseModel):
     service_id: str
     status: str
-    port: PortType
+    port: PortType|None = None
     name: str
     proto: str
-    ip_int: str
+    ip_int: str|None = None
     n_filters: int
     edited_packets: int
     blocked_packets: int
     fail_open: bool
-    tls_enabled: bool
-    tls_cert: str|None = None
-    tls_key: str|None = None
-    ssl_port: int|None = None
-    clear_port: int|None = None
+    target_type: str
+    tls_stream_id: str|None = None
 
 class RenameForm(BaseModel):
     name:str
 
 class SettingsForm(BaseModel):
     port: PortType|None = None
+    proto: str|None = None
     ip_int: str|None = None
     fail_open: bool|None = None
+    target_type: str|None = None
+    tls_stream_id: str|None = None
 
 class PyFilterModel(BaseModel):
     name: str
@@ -51,13 +51,12 @@ class PyFilterModel(BaseModel):
 
 class ServiceAddForm(BaseModel):
     name: str
-    port: PortType
+    port: PortType|None = None
     proto: str
-    ip_int: str
+    ip_int: str|None = None
     fail_open: bool = True
-    tls_enabled: bool = False
-    tls_cert: str | None = None
-    tls_key: str | None = None
+    target_type: str = "flow"
+    tls_stream_id: str|None = None
 
 class ServiceAddResponse(BaseModel):
     status:str
@@ -72,13 +71,14 @@ db = SQLite('db/nft-pyfilters.db', {
     'services': {
         'service_id': 'VARCHAR(100) PRIMARY KEY',
         'status': 'VARCHAR(100) NOT NULL',
-        'port': 'INT NOT NULL CHECK(port > 0 and port < 65536)',
+        'target_type': 'VARCHAR(10) NOT NULL CHECK(target_type IN ("flow", "tls")) DEFAULT "flow"',
+        'tls_stream_id': 'VARCHAR(100)',
+        'port': 'INT CHECK(port > 0 and port < 65536)',
         'name': 'VARCHAR(100) NOT NULL UNIQUE',
         'proto': 'VARCHAR(3) NOT NULL CHECK (proto IN ("tcp", "http"))',
         'l4_proto': 'VARCHAR(3) NOT NULL CHECK (l4_proto IN ("tcp", "udp"))',
-        'ip_int': 'VARCHAR(100) NOT NULL',
+        'ip_int': 'VARCHAR(100)',
         'fail_open': 'BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1',
-        'tls_enabled': 'BOOLEAN NOT NULL CHECK (tls_enabled IN (0, 1)) DEFAULT 0',
     },
     'pyfilter': {
         'name': 'VARCHAR(100) NOT NULL',
@@ -125,10 +125,8 @@ async def startup():
     utils.socketio.on("nfproxy-exception-leave", leave_exception)
 
 async def shutdown():
-    db.backup()
     await firewall.close()
     db.disconnect()
-    db.restore()
 
 def gen_service_id():
     while True:
@@ -157,14 +155,15 @@ async def get_service_list():
             s.proto proto,
             s.ip_int ip_int,
             s.fail_open fail_open,
-            s.tls_enabled tls_enabled,
+            s.target_type target_type,
+            s.tls_stream_id tls_stream_id,
             COUNT(f.name) n_filters,
             COALESCE(SUM(f.blocked_packets),0) blocked_packets,
             COALESCE(SUM(f.edited_packets),0) edited_packets
         FROM services s LEFT JOIN pyfilter f ON s.service_id = f.service_id
         GROUP BY s.service_id;
     """)
-    return populate_services_tls_config(res)
+    return res
 
 @app.get('/services/{service_id}', response_model=ServiceModel)
 async def get_service_by_id(service_id: str):
@@ -178,7 +177,8 @@ async def get_service_by_id(service_id: str):
             s.proto proto,
             s.ip_int ip_int,
             s.fail_open fail_open,
-            s.tls_enabled tls_enabled,
+            s.target_type target_type,
+            s.tls_stream_id tls_stream_id,
             COUNT(f.name) n_filters,
             COALESCE(SUM(f.blocked_packets),0) blocked_packets,
             COALESCE(SUM(f.edited_packets),0) edited_packets
@@ -187,7 +187,7 @@ async def get_service_by_id(service_id: str):
     """, service_id)
     if len(res) == 0:
         raise HTTPException(status_code=400, detail="This service does not exists!")
-    return populate_services_tls_config(res)[0]
+    return res[0]
 
 @app.post('/services/{service_id}/stop', response_model=StatusMessageModel)
 async def service_stop(service_id: str):
@@ -199,6 +199,10 @@ async def service_stop(service_id: str):
 @app.post('/services/{service_id}/start', response_model=StatusMessageModel)
 async def service_start(service_id: str):
     """Request the start of a specific service"""
+    srv = db.query("SELECT target_type, tls_stream_id FROM services WHERE service_id = ?;", service_id)
+    if srv and srv[0]["target_type"] == "tls":
+        if not await activate_stream(srv[0]["tls_stream_id"]):
+            raise HTTPException(status_code=400, detail="Linked TLS stream not found")
     await firewall.get(service_id).next(STATUS.ACTIVE)
     await refresh_frontend()
     return {'status': 'ok'}
@@ -206,9 +210,6 @@ async def service_start(service_id: str):
 @app.delete('/services/{service_id}', response_model=StatusMessageModel)
 async def service_delete(service_id: str):
     """Request the deletion of a specific service"""
-    srv_res = db.query('SELECT ip_int, port FROM services WHERE service_id = ?;', service_id)
-    if srv_res:
-        CertsDB().delete_cert_and_key(srv_res[0]["ip_int"], srv_res[0]["port"])
     db.query('DELETE FROM services WHERE service_id = ?;', service_id)
     db.query('DELETE FROM pyfilter WHERE service_id = ?;', service_id)
     if os.path.exists(f"db/nfproxy_filters/{service_id}.py"):
@@ -234,7 +235,7 @@ async def service_rename(service_id: str, form: RenameForm):
 async def service_settings(service_id: str, form: SettingsForm):
     """Request to change the settings of a specific service (will cause a restart)"""
     
-    srv_check = db.query("SELECT ip_int, port, tls_enabled FROM services WHERE service_id = ?;", service_id)
+    srv_check = db.query("SELECT ip_int, port, target_type, tls_stream_id FROM services WHERE service_id = ?;", service_id)
     if len(srv_check) == 0:
         raise HTTPException(status_code=404, detail="Service not found")
     old_srv = srv_check[0]
@@ -247,9 +248,17 @@ async def service_settings(service_id: str, form: SettingsForm):
             form.ip_int = ip_parse(form.ip_int)
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid address")
-    
+
     new_ip = form.ip_int if form.ip_int is not None else old_srv["ip_int"]
     new_port = form.port if form.port is not None else old_srv["port"]
+    
+    new_target_type = form.target_type if form.target_type is not None else old_srv["target_type"]
+    new_tls_stream_id = form.tls_stream_id if form.tls_stream_id is not None else old_srv["tls_stream_id"]
+    
+    if new_target_type == "tls" and not new_tls_stream_id:
+        raise HTTPException(status_code=400, detail="TLS stream ID is required when target type is tls")
+    if new_target_type == "flow" and (new_ip is None or new_port is None):
+        raise HTTPException(status_code=400, detail="IP and Port are required when target type is flow")
     
     keys = []
     values = []
@@ -257,57 +266,28 @@ async def service_settings(service_id: str, form: SettingsForm):
     for key, value in form.model_dump(exclude_none=True).items():
         keys.append(key)
         values.append(value)
+        if key == "proto":
+            keys.append("l4_proto")
+            values.append(convert_protocol_to_l4(value))
         
     if len(keys) == 0:
         raise HTTPException(status_code=400, detail="No settings to change provided")
-    
-    if old_srv["tls_enabled"] and (new_ip != old_srv["ip_int"] or new_port != old_srv["port"]):
-        cert, key = CertsDB().get_cert_and_key(old_srv["ip_int"], old_srv["port"])
-        if cert and key:
-            CertsDB().upsert_cert_and_key(new_ip, new_port, cert, key)
-            CertsDB().delete_cert_and_key(old_srv["ip_int"], old_srv["port"])
             
     try:
         db.query(f'UPDATE services SET {", ".join([f"{key}=?" for key in keys])} WHERE service_id = ?;', *values, service_id)
     except sqlite3.IntegrityError:
-        # If migration was performed, rollback CertsDB change (upsert old, delete new)
-        if old_srv["tls_enabled"] and (new_ip != old_srv["ip_int"] or new_port != old_srv["port"]):
-            cert, key = CertsDB().get_cert_and_key(new_ip, new_port)
-            if cert and key:
-                CertsDB().upsert_cert_and_key(old_srv["ip_int"], old_srv["port"], cert, key)
-                CertsDB().delete_cert_and_key(new_ip, new_port)
         raise HTTPException(status_code=400, detail="A service with these settings already exists")
     
     old_status = firewall.get(service_id).status
     await firewall.remove(service_id)
+    if old_status == STATUS.ACTIVE and new_target_type == "tls":
+        await activate_stream(new_tls_stream_id)
     await firewall.reload()
     await firewall.get(service_id).next(old_status)
-    
+
     await refresh_frontend()
     return {'status': 'ok'}
 
-@app.put('/services/{service_id}/tls-config', response_model=StatusMessageModel)
-async def update_service_tls(service_id: str, form: TLSConfigForm):
-    """Update TLS configuration for a service"""
-    srv_res = db.query("SELECT ip_int, port FROM services WHERE service_id = ?;", service_id)
-    if len(srv_res) == 0:
-        raise HTTPException(status_code=404, detail="Service not found")
-    srv = srv_res[0]
-        
-    if form.tls_enabled:
-        if not form.tls_cert or not form.tls_key:
-            raise HTTPException(status_code=400, detail="Cert and Key are required when TLS is enabled")
-        CertsDB().upsert_cert_and_key(srv["ip_int"], srv["port"], form.tls_cert, form.tls_key)
-            
-    db.query("""
-        UPDATE services 
-        SET tls_enabled = ?
-        WHERE service_id = ?;
-    """, int(form.tls_enabled), service_id)
-    
-    await firewall.get(service_id).update_tls_config()
-    await refresh_frontend()
-    return {'status': 'ok'}
 
 @app.get('/services/{service_id}/pyfilters', response_model=list[PyFilterModel])
 async def get_service_pyfilter_list(service_id: str):
@@ -355,22 +335,25 @@ async def pyfilter_disable(service_id: str, filter_name: str):
 @app.post('/services', response_model=ServiceAddResponse)
 async def add_new_service(form: ServiceAddForm):
     """Add a new service"""
-    try:
-        form.ip_int = ip_parse(form.ip_int)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid address")
+    if form.target_type == "flow":
+        if form.ip_int is None or form.port is None:
+            raise HTTPException(status_code=400, detail="IP and Port are required when target type is flow")
+        try:
+            form.ip_int = ip_parse(form.ip_int)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid address")
+    elif form.target_type == "tls":
+        if not form.tls_stream_id:
+            raise HTTPException(status_code=400, detail="TLS stream ID is required when target type is tls")
+            
     if form.proto not in ["tcp", "http"]:
         raise HTTPException(status_code=400, detail="Invalid protocol")
-    if form.tls_enabled:
-        if not form.tls_cert or not form.tls_key:
-            raise HTTPException(status_code=400, detail="Cert and Key are required when TLS is enabled")
-        CertsDB().upsert_cert_and_key(form.ip_int, form.port, form.tls_cert, form.tls_key)
             
     srv_id = None
     try:
         srv_id = gen_service_id()
-        db.query("INSERT INTO services (service_id, name, port, status, proto, ip_int, fail_open, l4_proto, tls_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int, form.fail_open, convert_protocol_to_l4(form.proto), int(form.tls_enabled))
+        db.query("INSERT INTO services (service_id, name, port, status, proto, ip_int, fail_open, l4_proto, target_type, tls_stream_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    srv_id, refactor_name(form.name), form.port, STATUS.STOP, form.proto, form.ip_int, form.fail_open, convert_protocol_to_l4(form.proto), form.target_type, form.tls_stream_id)
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="This type of service already exists")
     await firewall.reload()

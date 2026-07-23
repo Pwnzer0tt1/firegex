@@ -22,20 +22,21 @@ class ServiceManager:
                 nft.add(self.srv)
                 self._set_status(True)
                 
-    async def disable(self):
+    async def disable(self,persist:bool=True):
         if self.active:
             async with self.lock:
                 nft.delete(self.srv)
-                self._set_status(False)
+                self._set_status(False,persist=persist)
 
     async def refresh(self, srv:Service):
         self.srv = srv
         if self.active:
             await self.restart()
-    
-    def _set_status(self,active):
+
+    def _set_status(self,active,persist:bool=True):
         self.active = active
-        self.db.query("UPDATE services SET active = ? WHERE service_id = ?;", active, self.srv.service_id)
+        if persist:
+            self.db.query("UPDATE services SET active = ? WHERE service_id = ?;", active, self.srv.service_id)
     
     async def restart(self):
         await self.disable()
@@ -49,12 +50,16 @@ class FirewallManager:
 
     async def close(self):
         for key in list(self.service_table.keys()):
-            await self.remove(key)
+            try:
+                await self.remove(key, persist=False)
+            except Exception:
+                # Don't let one broken service block shutdown of the others
+                self.service_table.pop(key, None)
 
-    async def remove(self,srv_id):
-        async with self.lock: 
+    async def remove(self,srv_id,persist:bool=True):
+        async with self.lock:
             if srv_id in self.service_table:
-                await self.service_table[srv_id].disable()
+                await self.service_table[srv_id].disable(persist=persist)
                 del self.service_table[srv_id]
     
     async def init(self):

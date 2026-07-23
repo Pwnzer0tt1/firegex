@@ -1,25 +1,17 @@
 import subprocess
 import os
 import glob
-from utils.sqlite import SQLite
-from utils.certs import CertsDB, get_tls_ports, ip_parse as certs_ip_parse
+from modules.tls.manager import TLSManager
 
 NGINX_CONF_PATH = "/tmp/firegex_nginx.conf"
 NGINX_PID_PATH = "/tmp/firegex_nginx.pid"
 NGINX_LOG_PATH = "/tmp/firegex_nginx_error.log"
 
-def _get_active_tls_services(db_name: str) -> list[dict]:
-    db = SQLite(db_name)
-    db.connect()
-    try:
-        return db.query("SELECT * FROM services WHERE status = 'active' AND tls_enabled = 1;")
-    except Exception:
-        return []
-    finally:
-        db.disconnect()
+def update_nginx() -> None:
+    manager = TLSManager()
+    streams = manager.get_active_streams()
 
-def update_nginx(services: list[dict]) -> None:
-    if not services:
+    if not streams:
         subprocess.run(["nginx", "-c", NGINX_CONF_PATH, "-s", "stop", "-e", NGINX_LOG_PATH], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         # Clean up certificates, configuration, and pid
@@ -32,17 +24,18 @@ def update_nginx(services: list[dict]) -> None:
         return
 
     servers_config = []
-    for srv in services:
-        srv_id = srv["service_id"]
+    for srv in streams:
+        srv_id = srv["id"]
         cert_path = f"/tmp/firegex_cert_{srv_id}.crt"
         key_path = f"/tmp/firegex_key_{srv_id}.key"
         
         with open(cert_path, "w") as f:
-            f.write(srv.get("tls_cert") or "")
+            f.write(srv.get("cert") or "")
         with open(key_path, "w") as f:
-            f.write(srv.get("tls_key") or "")
+            f.write(srv.get("key") or "")
             
-        ssl_port, clear_port = get_tls_ports(srv["ip_int"], srv["port"])
+        ssl_port = srv["ssl_port"]
+        clear_port = srv["clear_port"]
         
         ip_addr = srv["ip_int"].split("/")[0]
         is_ipv6 = ":" in ip_addr
@@ -88,16 +81,3 @@ def update_nginx(services: list[dict]) -> None:
     res = subprocess.run(["nginx", "-c", NGINX_CONF_PATH, "-s", "reload", "-e", NGINX_LOG_PATH], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if res.returncode != 0:
         subprocess.run(["nginx", "-c", NGINX_CONF_PATH, "-e", NGINX_LOG_PATH], check=True)
-
-def sync_nginx_state() -> None:
-    services = _get_active_tls_services('db/nft-pyfilters.db') + _get_active_tls_services('db/nft-regex.db')
-    
-    # Batch-resolve certificates using CertsDB
-    certs_map = CertsDB().get_multiple_certs_and_keys(services)
-    for srv in services:
-        cert, key = certs_map.get((certs_ip_parse(srv["ip_int"]), srv["port"]), (None, None))
-        srv["tls_cert"] = cert
-        srv["tls_key"] = key
-        
-    update_nginx(services)
-
