@@ -160,15 +160,21 @@ export default function ServiceDetailsNFProxy() {
                 <Box style={{ flexGrow: 1, minWidth: isMedium ? 'auto' : '100%' }}>
                     <Group gap="xl" justify={isMedium ? "flex-start" : "space-between"}>
                         <Group gap="xs">
-                            <Badge color="yellow" radius="sm" size="lg" variant="light" leftSection={<FaFilter size={12} style={{ marginTop: 2 }} />}>
-                                {serviceInfo.blocked_packets}
-                            </Badge>
-                            <Badge color="orange" radius="sm" size="lg" variant="light" leftSection={<FaPencilAlt size={12} style={{ marginTop: 2 }} />}>
-                                {serviceInfo.edited_packets}
-                            </Badge>
-                            <Badge color="violet" radius="sm" size="lg" variant="light" leftSection={<TbPlugConnected size={12} style={{ marginTop: 2 }} />}>
-                                {serviceInfo.n_filters}
-                            </Badge>
+                            <Tooltip label="Packets blocked by this service's filters" position="bottom" color="yellow">
+                                <Badge color="yellow" radius="sm" size="lg" variant="light" leftSection={<FaFilter size={12} style={{ marginTop: 2 }} />}>
+                                    {serviceInfo.blocked_packets}
+                                </Badge>
+                            </Tooltip>
+                            <Tooltip label="Packets mangled (modified) by this service's filters" position="bottom" color="orange">
+                                <Badge color="orange" radius="sm" size="lg" variant="light" leftSection={<FaPencilAlt size={12} style={{ marginTop: 2 }} />}>
+                                    {serviceInfo.edited_packets}
+                                </Badge>
+                            </Tooltip>
+                            <Tooltip label="Number of Python filters attached to this service" position="bottom" color="violet">
+                                <Badge color="violet" radius="sm" size="lg" variant="light" leftSection={<TbPlugConnected size={12} style={{ marginTop: 2 }} />}>
+                                    {serviceInfo.n_filters}
+                                </Badge>
+                            </Tooltip>
                         </Group>
 
                         <Group gap="sm" justify="flex-end" style={{ flexGrow: 1 }}>

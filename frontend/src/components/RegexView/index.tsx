@@ -105,9 +105,11 @@ function RegexView({ regexInfo }:{ regexInfo:RegexFilter }) {
       </Group>
 
       <Group gap="sm" mt="md">
-        <Badge size="md" color="yellow" variant="light" leftSection={<FaFilter size={12} style={{ marginTop: 2 }} />}>
-          {regexInfo.n_packets} packets
-        </Badge>
+        <Tooltip label="Packets blocked by this regex" position="bottom" color="yellow">
+          <Badge size="md" color="yellow" variant="light" leftSection={<FaFilter size={12} style={{ marginTop: 2 }} />}>
+            {regexInfo.n_packets} packets
+          </Badge>
+        </Tooltip>
         <Badge size="md" color={regexInfo.active ? "lime" : "red"} variant="light">
           {regexInfo.active ? "ACTIVE" : "DISABLED"}
         </Badge>

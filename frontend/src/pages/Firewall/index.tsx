@@ -338,7 +338,9 @@ export const Firewall = () => {
       {isMedium ? <Box className='flex-spacer' /> : <Space h="sm" />}
       <Box className='center-flex'>
         <Space w="xs" />
-        <Badge size="md" radius="sm" color="green" variant="filled"><FaDirections style={{ marginBottom: -1, marginRight: 4 }} />Rules: {rules.isLoading ? 0 : rules.data?.rules.length}</Badge>
+        <Tooltip label="Total number of firewall rules configured" position="bottom" color="green">
+          <Badge size="md" radius="sm" color="green" variant="filled"><FaDirections style={{ marginBottom: -1, marginRight: 4 }} />Rules: {rules.isLoading ? 0 : rules.data?.rules.length}</Badge>
+        </Tooltip>
         <Space w="md" />
         <Tooltip label="Add a new rule" position='bottom' color="blue">
           <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"><BsPlusLg size={18} /></ActionIcon>

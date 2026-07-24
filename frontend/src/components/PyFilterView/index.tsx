@@ -38,12 +38,16 @@ export default function PyFilterView({ filterInfo }:{ filterInfo:PyFilter }) {
         </Group>
 
         <Group gap="xs" wrap="nowrap">
-          <Badge size="sm" color="yellow" variant="light" leftSection={<FaFilter size={10} style={{ marginTop: 2 }} />}>
-            {filterInfo.blocked_packets}
-          </Badge>
-          <Badge size="sm" color="orange" variant="light" leftSection={<FaPencilAlt size={10} style={{ marginTop: 2 }} />}>
-            {filterInfo.edited_packets}
-          </Badge>
+          <Tooltip label="Packets blocked by this filter" position="bottom" color="yellow">
+            <Badge size="sm" color="yellow" variant="light" leftSection={<FaFilter size={10} style={{ marginTop: 2 }} />}>
+              {filterInfo.blocked_packets}
+            </Badge>
+          </Tooltip>
+          <Tooltip label="Packets mangled (modified) by this filter" position="bottom" color="orange">
+            <Badge size="sm" color="orange" variant="light" leftSection={<FaPencilAlt size={10} style={{ marginTop: 2 }} />}>
+              {filterInfo.edited_packets}
+            </Badge>
+          </Tooltip>
           <Space w="xs" />
           <Tooltip label={filterInfo.active ? "Deactivate" : "Activate"} color={filterInfo.active ? "orange" : "teal"}>
             <ActionIcon 

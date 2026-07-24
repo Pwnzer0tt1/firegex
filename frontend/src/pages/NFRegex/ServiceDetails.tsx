@@ -131,12 +131,16 @@ export default function ServiceDetailsNFRegex() {
                 <Box style={{ flexGrow: 1, minWidth: isMedium ? 'auto' : '100%' }}>
                     <Group gap="xl" justify={isMedium ? "flex-start" : "space-between"}>
                         <Group gap="xs">
-                            <Badge color="yellow" radius="sm" size="lg" variant="light" leftSection={<FaFilter size={12} style={{ marginTop: 2 }} />}>
-                                {serviceInfo.n_packets}
-                            </Badge>
-                            <Badge color="violet" radius="sm" size="lg" variant="light" leftSection={<VscRegex size={12} style={{ marginTop: 2 }} />}>
-                                {serviceInfo.n_regex}
-                            </Badge>
+                            <Tooltip label="Packets blocked by this service's regexes" position="bottom" color="yellow">
+                                <Badge color="yellow" radius="sm" size="lg" variant="light" leftSection={<FaFilter size={12} style={{ marginTop: 2 }} />}>
+                                    {serviceInfo.n_packets}
+                                </Badge>
+                            </Tooltip>
+                            <Tooltip label="Number of regexes configured for this service" position="bottom" color="violet">
+                                <Badge color="violet" radius="sm" size="lg" variant="light" leftSection={<VscRegex size={12} style={{ marginTop: 2 }} />}>
+                                    {serviceInfo.n_regex}
+                                </Badge>
+                            </Tooltip>
                         </Group>
 
                         <Group gap="sm" justify="flex-end" style={{ flexGrow: 1 }}>
