@@ -60,23 +60,45 @@ By default firegex will start in a multithread configuration using the number of
 The default port of firegex is 4444. At the startup you will choose a password, that is essential for your security.
 All the configuration at the startup is customizable in [firegex.py](./run.py) or directly in the firegex interface.
 
+### Managing the configuration
+
+`run.py` has a dedicated `config` subcommand to inspect or change the persisted settings (port, host, socket dir, allowed IPs, password) without needing to stop or rebuild firegex:
+
+```bash
+# Show the current configuration
+python3 run.py config --show
+
+# Change the port/host firegex will bind to on the next start
+python3 run.py config --port 8080 --host 0.0.0.0
+
+# Reset the password of an already-running instance
+# (omit the value to be prompted for it interactively instead)
+python3 run.py config --password newpassword
+```
+
+This is especially useful if you lost the current password: it's applied directly to the running instance (or the standalone rootfs) without requiring the old one.
+
 ![Firegex Network scheme](docs/Firegex_Screenshot.png)
 
 ## Functionalities
 
-- Regex filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/) with [nftables](https://netfilter.org/projects/nftables/) uses a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
-- Create basic firewall rules to allow and deny specific traffic, like ufw or iptables but using firegex graphic interface (by using [nftable](https://netfilter.org/projects/nftables/))
-- Port Hijacking allows you to redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using the loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
-- Netfilter Proxy uses [nfqueue](https://netfilter.org/projects/libnetfilter_queue/) to simulate a python proxy, you can write your own filter in python and use it to filter the traffic. There are built-in some data handler to parse protocols like HTTP, and before apply the filter you can test it with fgex command (you need to install firegex lib from pypi).
+- **[Netfilter Regex](docs/nfregex.md)**: filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/) with [nftables](https://netfilter.org/projects/nftables/) uses a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
+- **[Firewall Rules](docs/firewall.md)**: create basic firewall rules to allow and deny specific traffic, like ufw or iptables but using firegex graphic interface (by using [nftable](https://netfilter.org/projects/nftables/))
+- **[Hijack Port to Proxy](docs/porthijack.md)**: redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using the loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
+- **[Netfilter Proxy](docs/nfproxy.md)**: uses [nfqueue](https://netfilter.org/projects/libnetfilter_queue/) to simulate a python proxy, you can write your own filter in python and use it to filter the traffic. There are built-in some data handler to parse protocols like HTTP, and before apply the filter you can test it with fgex command (you need to install firegex lib from pypi).
+- **[TLS Decryption](docs/tls.md)**: a decrypt-and-reinspect bridge for services that speak TLS natively. It transparently terminates the public TLS connection, exposes the decrypted traffic on a loopback port so a Netfilter Regex/Proxy service can inspect it, then re-encrypts before forwarding to the real backend.
+
+Firegex can also be restricted to accept connections only from a set of trusted CIDR ranges (`--allowed-ips`, optionally combined with `--proxy-ip-header` when running behind a reverse proxy) — see `python3 run.py start -h`.
 
 ## Documentation
 
-Documentation about how the filters works, what features are available and how to use them are available on firegex interface.
+Each module above has its own markdown guide under [`docs/`](docs/), covering how to use it and how it works internally. The same files are rendered directly in the Firegex web interface (via the docs button on each page), so they're always in sync with what you see in the app.
 
 Heres a brief description about the firegex structure:
 
 - [Frontend (React)](frontend/README.md)
 - [Backend (FastAPI + C++)](backend/README.md)
+- [Netfilter Proxy Python library (`firegex`/`fgex` pip package)](fgex-lib/README.md)
 
 More specific information about how Firegex works, and in particular about the nfproxy module, are available here (in italian only): [https://github.com/domysh/engineering-thesis](https://github.com/domysh/engineering-thesis) (PDF in the release attachments)
 
