@@ -33,7 +33,9 @@ function PortHijack() {
             <Title order={5} className="center-flex"><ThemeIcon radius="md" size="md" variant='filled' color='blue' ><GrDirections size={20} /></ThemeIcon><Space w="xs" />Hijack port to proxy</Title>
             {isMedium?<Box className='flex-spacer' />:<Space h="sm" />}
             <Box className='center-flex'>
-                <Badge size="md" radius="sm" color="yellow" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:services.data?.length}</Badge>
+                <Tooltip label="Total number of port-hijack services configured" position="bottom" color="yellow">
+                    <Badge size="md" radius="sm" color="yellow" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:services.data?.length}</Badge>
+                </Tooltip>
                 <Space w="xs" />
                 <Tooltip label="Add a new service" position='bottom' color="blue">
                     <ActionIcon color="blue" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled"><BsPlusLg size={18} /></ActionIcon>

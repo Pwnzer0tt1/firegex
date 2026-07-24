@@ -38,11 +38,17 @@ function NFRegex({ children }: { children: any }) {
         <Box className='center-flex' >
             {isMedium?"General stats:":null}
             <Space w="xs" />
-            <Badge size="md" radius="sm" color="green" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:Array.isArray(services.data)?services.data.length:0}</Badge>
+            <Tooltip label="Total number of NFRegex services configured" position="bottom" color="green">
+                <Badge size="md" radius="sm" color="green" variant="filled"><FaServer style={{ marginBottom: -1, marginRight: 4}} />Services: {services.isLoading?0:Array.isArray(services.data)?services.data.length:0}</Badge>
+            </Tooltip>
             <Space w="xs" />
-            <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.n_packets, 0):0}</Badge>
+            <Tooltip label="Total packets blocked by all services' regexes" position="bottom" color="yellow">
+                <Badge color="yellow" radius="sm" size="md" variant="filled"><FaFilter style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.n_packets, 0):0}</Badge>
+            </Tooltip>
             <Space w="xs" />
-            <Badge size="md" radius="sm" color="violet" variant="filled"><VscRegex style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.n_regex, 0):0}</Badge>
+            <Tooltip label="Total number of regexes configured across all services" position="bottom" color="violet">
+                <Badge size="md" radius="sm" color="violet" variant="filled"><VscRegex style={{ marginBottom: -2, marginRight: 4}} />{services.isLoading?0:Array.isArray(services.data)?services.data.reduce((acc, s)=> acc+=s.n_regex, 0):0}</Badge>
+            </Tooltip>
             <Space w="xs" />
         </Box>
         {isMedium?null:<Space h="md" />}
