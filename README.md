@@ -115,14 +115,4 @@ This means that firegex is projected to avoid any possibility to have the servic
 Initiially the project was based only on regex filters, and also now the main function uses regexes, but firegex have and will have also other filtering tools. 
 
 # Credits
-- Copyright (c) 2022-2025 Pwnzer0tt1
-
-## Star History
-
-<a href="https://star-history.com/#pwnzer0tt1/firegex&Date&secret=Z2hwXzJ3TWljWkV5SzBwd216YkJNSGo2OTd0YW1wRGRHZjIwR29jbA==">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=pwnzer0tt1/firegex&type=Date&theme=dark&secret=Z2hwXzJ3TWljWkV5SzBwd216YkJNSGo2OTd0YW1wRGRHZjIwR29jbA==" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=pwnzer0tt1/firegex&type=Date&secret=Z2hwXzJ3TWljWkV5SzBwd216YkJNSGo2OTd0YW1wRGRHZjIwR29jbA==" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=pwnzer0tt1/firegex&type=Date&secret=Z2hwXzJ3TWljWkV5SzBwd216YkJNSGo2OTd0YW1wRGRHZjIwR29jbA==" />
- </picture>
-</a>
+- Copyright (c) 2022-2026 Pwnzer0tt1
