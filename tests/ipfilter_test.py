@@ -53,8 +53,8 @@ def wait_ready(timeout=90):
     return False
 
 
-def restart_with(allowed_ips=None, proxy_ip_header=None):
-    print(f"\n--- restarting firegex (allowed_ips={allowed_ips!r}, proxy_ip_header={proxy_ip_header!r}) ---")
+def restart_with(allowed_ips=None, proxy_ip_header=None, disable_auth=None):
+    print(f"\n--- restarting firegex (allowed_ips={allowed_ips!r}, proxy_ip_header={proxy_ip_header!r}, disable_auth={disable_auth!r}) ---")
     run_py("stop")
     args = ["start", "-P", "testpassword"]
     # An empty string still needs to be passed explicitly to clear a previous value.
@@ -62,6 +62,8 @@ def restart_with(allowed_ips=None, proxy_ip_header=None):
         args += ["--allowed-ips", allowed_ips]
     if proxy_ip_header is not None:
         args += ["--proxy-ip-header", proxy_ip_header]
+    if disable_auth is not None:
+        args += ["--disable-auth" if disable_auth else "--no-disable-auth"]
     run_py(*args)
     if not wait_ready():
         print("FATAL: firegex didn't come back up after restart")
@@ -135,9 +137,18 @@ if __name__ == "__main__":
         r = requests.get(BASE + "api/status", headers={"X-Forwarded-For": "not-an-ip"})
         check("malformed PROXY_IP_HEADER value -> fails closed (403)", r.status_code == 403, f"got {r.status_code}")
 
+        # 6. Built-in authentication can be disabled for a reverse proxy that owns
+        # access control. Protected API routes and the status endpoint then work
+        # without a bearer token.
+        restart_with(allowed_ips="127.0.0.1/32", disable_auth=True)
+        r = requests.get(BASE + "api/status")
+        check("DISABLE_AUTH reports a logged-in running app", r.status_code == 200 and r.json().get("status") == "run" and r.json().get("loggined") is True, f"got {r.status_code}: {r.text}")
+        r = requests.get(BASE + "api/interfaces")
+        check("DISABLE_AUTH permits protected API without bearer token", r.status_code == 200, f"got {r.status_code}")
+
     finally:
         if not args.skip_cleanup_restart:
-            restart_with(allowed_ips="")
+            restart_with(allowed_ips="", disable_auth=False)
 
     print()
     if failures:

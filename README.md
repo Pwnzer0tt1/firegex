@@ -90,6 +90,16 @@ This is especially useful if you lost the current password: it's applied directl
 
 Firegex can also be restricted to accept connections only from a set of trusted CIDR ranges (`--allowed-ips`, optionally combined with `--proxy-ip-header` when running behind a reverse proxy) — see `python3 run.py start -h`.
 
+### Reverse proxy without Firegex authentication
+
+To delegate access control entirely to a reverse proxy, start Firegex with `--disable-auth`:
+
+```bash
+python3 run.py start --host 127.0.0.1 --disable-auth
+```
+
+This disables Firegex's password, JWT, and Socket.IO authentication, and it does not ask for an initial password. Requests forwarded by the proxy, including headers such as `X-Forwarded-For`, reach Firegex normally. This grants full administrative access to every request that reaches Firegex, so bind it to loopback, a Unix socket, or otherwise restrict direct access to the proxy. Use `--no-disable-auth` to turn the built-in authentication back on.
+
 ## Documentation
 
 Each module above has its own markdown guide under [`docs/`](docs/), covering how to use it and how it works internally. The same files are rendered directly in the Firegex web interface (via the docs button on each page), so they're always in sync with what you see in the app.

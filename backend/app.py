@@ -39,6 +39,7 @@ async def lifespan(app):
 
 ALLOWED_NETWORKS = [ip_network(ip.strip(), strict=False) for ip in os.getenv("ALLOWED_IPS", "").split(",") if ip.strip()]
 PROXY_IP_HEADER = os.getenv("PROXY_IP_HEADER", "")
+DISABLE_AUTH = os.getenv("DISABLE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
 
 class IPFilterMiddleware:
     def __init__(self, app):
@@ -116,7 +117,7 @@ utils.socketio = socketio.AsyncServer(
 sio_app = socketio.ASGIApp(utils.socketio, socketio_path="/sock/socket.io", other_asgi_app=app)
 app.mount("/sock", sio_app)
 
-def APP_STATUS(): return "init" if db.get("password") is None else "run"
+def APP_STATUS(): return "run" if DISABLE_AUTH or db.get("password") is not None else "init"
 def JWT_SECRET(): return db.get("secret")
 
 def _hash_psw_sync(psw: str) -> str:
@@ -150,6 +151,8 @@ async def refresh_frontend(additional:list[str]=[]):
     await socketio_emit([]+additional)
 
 async def check_login(token: str = Depends(oauth2_scheme)):
+    if DISABLE_AUTH:
+        return True
     if not token:
         return False
     try:
@@ -161,7 +164,7 @@ async def check_login(token: str = Depends(oauth2_scheme)):
 
 @utils.socketio.on("connect")
 async def sio_connect(sid, environ, auth):
-    if not auth or not await check_login(auth.get("token")):
+    if not DISABLE_AUTH and (not auth or not await check_login(auth.get("token"))):
         raise ConnectionRefusedError("Unauthorized")
     utils.sid_list.add(sid)
 
