@@ -52,7 +52,7 @@ function App() {
   const [loadinBtn, setLoadingBtn] = useState(false);
   const queryClient = useQueryClient()
   const { access_token } = useAuthStore()
-  const { setVersion } = useSystemStore()
+  const { setVersion, setAuthDisabled } = useSystemStore()
 
   useEffect(() => {
     socketio.auth = { token: access_token || "" }
@@ -78,6 +78,7 @@ function App() {
     getstatus().then(res => {
       setSystemStatus(res)
       setVersion(res.version || "unknown")
+      setAuthDisabled(res.auth_disabled === true)
       if (!res.loggined && useAuthStore.getState().getAccessToken()) {
         useAuthStore.getState().clearAccessToken()
       }

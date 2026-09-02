@@ -16,7 +16,7 @@ function HeaderPage(props: any) {
   
   const navigator = useNavigate()
   const { navOpened, toggleNav } = useNavbarStore()
-  const { version } = useSystemStore()
+  const { version, authDisabled } = useSystemStore()
   
   const logout_action = () => {
     logout().then(r => {
@@ -56,9 +56,11 @@ function HeaderPage(props: any) {
         <Box className="flex-spacer" />        
       
         <MenuDropDownWithButton>
-          <Menu.Label>Firewall Access</Menu.Label>
-          <Menu.Item leftSection={<FaLock size={14} />} onClick={() => setChangePasswordModal(true)}>Change Password</Menu.Item>
-          <Divider />
+          {!authDisabled && <>
+            <Menu.Label>Firewall Access</Menu.Label>
+            <Menu.Item leftSection={<FaLock size={14} />} onClick={() => setChangePasswordModal(true)}>Change Password</Menu.Item>
+            <Divider />
+          </>}
           <Menu.Label>Actions</Menu.Label>
           <Menu.Item color="red" leftSection={<MdOutlineSettingsBackupRestore size={18} />} onClick={() => setResetFiregexModal(true)}>Reset Firegex</Menu.Item>
         </MenuDropDownWithButton>
@@ -70,10 +72,10 @@ function HeaderPage(props: any) {
             <AiFillHome size="25px" />
           </ActionIcon>
         </Tooltip>
-        <Tooltip label="Logout" position='bottom' color="blue">
+        {!authDisabled && <Tooltip label="Logout" position='bottom' color="blue">
           <ActionIcon color="blue" onClick={logout_action} size="xl" radius="md" variant="filled">
             <ImExit size={23} style={{marginTop:"3px", marginLeft:"2px"}}/></ActionIcon>
-        </Tooltip>        
+        </Tooltip>}        
         <ResetPasswordModal opened={changePasswordModal} onClose={() => setChangePasswordModal(false)} />
         <ResetModal opened={resetFiregexModal} onClose={() => setResetFiregexModal(false)} />
         <Space w="xl" />

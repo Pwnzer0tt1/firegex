@@ -77,9 +77,13 @@ export const useSession = () => {
 interface SystemState {
   version: string | null;
   setVersion: (version: string | null) => void;
+  authDisabled: boolean;
+  setAuthDisabled: (authDisabled: boolean) => void;
 }
 
 export const useSystemStore = create<SystemState>()((set) => ({
   version: null,
   setVersion: (version) => set({ version }),
+  authDisabled: false,
+  setAuthDisabled: (authDisabled) => set({ authDisabled }),
 }));
