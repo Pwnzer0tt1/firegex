@@ -115,6 +115,16 @@ def check_startup_password_survives_disabled_auth():
                   got == "testpassword", f"got {got!r}")
 
 
+# The middleware matches on the raw TCP peer address. That is 127.0.0.1 only when firegex
+# shares the host's network namespace (standalone mode); behind a published docker port the
+# peer is the bridge gateway instead - 172.17.0.1, 192.168.x.1, whatever the daemon picked.
+# So "an allowlist that covers the client" has to name loopback *and* the private ranges a
+# docker bridge can live in. That keeps the check meaningful: scenario 2 denies with
+# 203.0.113.0/24 (TEST-NET-3, reserved for documentation), which no real peer can ever
+# fall into, so the allow/deny pair still proves the middleware is doing its job.
+CLIENT_NETWORKS = "127.0.0.1/32,::1/128,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,fc00::/7"
+
+
 def raw_ws_handshake_rejected(path="/sock/socket.io/?EIO=4&transport=websocket", extra_headers=None, timeout=5):
     """Best-effort check: performs a raw WS upgrade handshake and reports whether the
     server completed it (101 Switching Protocols) or refused/closed the connection.
@@ -161,8 +171,8 @@ if __name__ == "__main__":
         ws_rejected = raw_ws_handshake_rejected()
         check("ALLOWED_IPS excludes client -> websocket upgrade rejected", ws_rejected is True, f"result={ws_rejected}")
 
-        # 3. Restrict to a network (CIDR) that includes the loopback test client -> allowed
-        restart_with(allowed_ips="127.0.0.1/32,::1/128")
+        # 3. Restrict to networks (CIDR) that include the test client -> allowed
+        restart_with(allowed_ips=CLIENT_NETWORKS)
         r = requests.get(BASE + "api/status")
         check("ALLOWED_IPS includes client (CIDR) -> 200", r.status_code == 200, f"got {r.status_code}")
 
@@ -172,7 +182,7 @@ if __name__ == "__main__":
         check("PROXY_IP_HEADER value matches allowlist -> 200", r.status_code == 200, f"got {r.status_code}")
         r = requests.get(BASE + "api/status", headers={"X-Forwarded-For": "8.8.8.8"})
         check("PROXY_IP_HEADER value NOT in allowlist -> 403", r.status_code == 403, f"got {r.status_code}")
-        r = requests.get(BASE + "api/status")  # header absent -> falls back to raw peer (127.0.0.1, not allowed here)
+        r = requests.get(BASE + "api/status")  # header absent -> falls back to the raw peer, which 203.0.113.55/32 never covers
         check("PROXY_IP_HEADER configured but header absent -> falls back to raw peer -> 403",
               r.status_code == 403, f"got {r.status_code}")
 
