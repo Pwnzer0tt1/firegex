@@ -13,11 +13,15 @@ Firegex is a firewall built for CTF Attack-Defense competitions: it sits in fron
 python3 run.py                      # build+start (Docker if available, else standalone chroot on Linux)
 python3 run.py --standalone         # force standalone mode (no Docker)
 python3 run.py stop [--clear]       # stop (optionally wipe the DB volume/rootfs)
-python3 run.py restart              # restart WITHOUT rebuilding (stale image if source changed)
+python3 run.py restart              # recreate the container WITHOUT rebuilding (stale image if source changed)
 python3 run.py status
 python3 run.py config --password [newpass]   # change the running instance's password; omit the value to be prompted interactively
+python3 run.py config --show        # print the persisted settings (port, host, socket dir, auth)
+python3 run.py start --unsafe-disable-auth   # no authentication at all — see "Authentication" below
 ```
-`run.py` has zero external dependencies (stdlib only) by design. `restart` does not rebuild the Docker image; after a source change use `stop` then the bare start command to force `docker compose up -d --build`.
+`run.py` has zero external dependencies (stdlib only) by design. `restart` runs `docker compose up -d --force-recreate`, so it re-reads the generated compose file and re-applies env vars (`ALLOWED_IPS`, `PROXY_IP_HEADER`, `UNSAFE_DISABLE_AUTH`) — a plain `docker compose restart` would keep the old container environment and silently ignore those. It still does **not** rebuild the image; after a source change use `stop` then the bare start command to force `docker compose up -d --build`.
+
+Most `start`/`restart` flags are persisted to `.firegex-conf.json` and become the default for later runs, so a bare `python3 run.py start` inherits whatever was last passed.
 
 ### Frontend (`frontend/`)
 ```bash
@@ -43,9 +47,11 @@ python3 nfproxy_test.py -p <pw> [--ipv6] [--tls]
 python3 ph_test.py -p <pw> -m tcp|udp [--ipv6]
 python3 tls_test.py -p <pw> [--ipv6]
 python3 api_test.py -p <pw>
-python3 nginx_test.py               # the only test that doesn't need a live instance
+python3 ipfilter_test.py            # access control (--allowed-ips/--proxy-ip-header/--unsafe-disable-auth)
 ```
-CI (`.github/workflows/docker-image.yml`) does exactly: `python3 run.py start -P testpassword` then `cd tests && ./run_tests.sh`.
+`ipfilter_test.py` is the odd one out: those settings are only read at process startup, so it drives `run.py stop`/`start` itself for each scenario and restores an unrestricted instance at the end. It is **not** part of `run_tests.sh` — run it on its own, and expect it to bounce the instance.
+
+CI (`.github/workflows/release.yml`) runs **only on `release: published`**, not on pushes or pull requests — nothing validates a PR automatically. Its `run_tests` job (`ubuntu-latest` + `ubuntu-24.04-arm`) does `python3 run.py start -P testpassword` then `cd tests && ./run_tests.sh`, and gates every publish job below it.
 
 ## Architecture
 
@@ -73,6 +79,13 @@ A `tls_streams` DB row describes one public `ip:port` to decrypt. `ssl_port`/`cl
 2. `listen loopback:clear_port` → re-encrypts (`proxy_ssl on`) and forwards to the real `ip:port`. The real backend is expected to also speak TLS (mirrors a CTF challenge service that natively does TLS) — this is not a generic "terminate TLS in front of a plaintext service" reverse proxy.
 
 The only unencrypted hop is the loopback leg between `ssl_port` and `clear_port` — an nfproxy/nfregex service must attach there (`target_type="tls"`, `tls_stream_id=...`) to see decrypted content. Both modules' `nftables.py` has a `resolve_target(srv)` helper that swaps in `(loopback_ip, clear_port)` for `target_type="tls"` services instead of the service's own `ip_int`/`port` (which mirror the stream's real destination for display only). Stopping a TLS stream cascades to stop dependent filter services (and vice versa on start); deleting a stream still referenced by a service is rejected. This cross-module logic lives in `routers/tls.py`, which imports `routers.nfproxy`/`routers.nfregex` directly (one-directional — those modules only import `modules.tls.*`, never `routers.tls`).
+
+### Authentication (`backend/app.py`)
+Every module router is mounted onto `api = APIRouter(prefix="/api", dependencies=[Depends(is_loggined)])`, so a new file in `routers/` is authenticated by construction. The whole auth surface is four places: that dependency, the Socket.IO `connect` handler (reads the token out of `auth`), and the three routes declared on `app` directly rather than on `api` — `/api/status`, `/api/login`, `/api/set-password`. Adding an unauthenticated route means declaring it on `app`, which should stay a deliberate, rare act.
+
+`--unsafe-disable-auth` (env `UNSAFE_DISABLE_AUTH`) hands access control to a reverse proxy: `check_login` returns `True`, the socket.io handler skips its check, and `APP_STATUS()` reports `run` even with no password stored. The password endpoints (`/api/login`, `/api/set-password`, `/api/change-password`) answer `403` in this mode on purpose — otherwise an anonymous caller could plant a credential that keeps working once authentication is turned back on. `run.py config --password` still works, writing the hash straight into the DB from the host, and an explicit `-P` at first start is kept so that re-enabling authentication lands on a known password instead of the open initial-setup state.
+
+Independently of that, `IPFilterMiddleware` restricts access by CIDR (`--allowed-ips`, optionally reading the client IP from `--proxy-ip-header`). It **fails closed**: a missing, unparseable, or non-matching IP is denied. Note the header variant trusts a client-supplied value, so it only holds if the proxy overwrites it.
 
 ### SQLite wrapper (`backend/utils/sqlite.py`)
 Each DB file's schema is versioned by hashing the Python schema dict; on mismatch the **entire file is deleted and recreated** (not migrated) — any schema dict change wipes that DB file on next startup, including `db/firegex.db`'s `keys_values` table (password/JWT secret). `dump()`/`load()` back the export/import backup feature; `dump()` deliberately excludes `password`/`secret` from exported `keys_values` rows, so `/api/import` explicitly re-preserves the current password/secret around the import.
