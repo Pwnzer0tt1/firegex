@@ -5,3 +5,4 @@ numpy
 cryptography
 psutil
 pydantic
+python-socketio[client]

@@ -106,7 +106,7 @@ def load_config():
         "socket_dir": None,
         "allowed_ips": None,
         "proxy_ip_header": None,
-        "disable_auth": False,
+        "unsafe_disable_auth": False,
     }
     
     if os.path.isfile(g.configfile):
@@ -168,7 +168,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_start.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_start.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
-    parser_start.add_argument('--disable-auth', action=argparse.BooleanOptionalAction, default=config.get("disable_auth", False), help='Disable Firegex password/JWT authentication (for a trusted reverse proxy only)')
+    parser_start.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=config.get("unsafe_disable_auth", False), help='UNSAFE: disable Firegex password/JWT authentication, making every request that reaches firegex a full administrator (for a trusted reverse proxy only)')
     parser_start.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_start.add_argument('--version', '-v', required=False, type=str , help='Version of the firegex image to use', default=None)
     parser_start.add_argument('--prebuilt', required=False, action="store_true", help='Use prebuilt docker image', default=False)
@@ -185,7 +185,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_restart.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_restart.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_restart.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
-    parser_restart.add_argument('--disable-auth', action=argparse.BooleanOptionalAction, default=config.get("disable_auth", False), help='Disable Firegex password/JWT authentication (for a trusted reverse proxy only)')
+    parser_restart.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=config.get("unsafe_disable_auth", False), help='UNSAFE: disable Firegex password/JWT authentication, making every request that reaches firegex a full administrator (for a trusted reverse proxy only)')
     parser_restart.add_argument('--logs', required=False, action="store_true", help='Show firegex logs', default=False)
     parser_restart.add_argument('--standalone', required=False, action="store_true", help='Force standalone mode', default=False)
     
@@ -204,7 +204,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_config.add_argument('--password', required=False, type=str, nargs='?', const='', help='Change the password of the firewall (omit the value to be prompted for it interactively)')
     parser_config.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_config.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
-    parser_config.add_argument('--disable-auth', action=argparse.BooleanOptionalAction, default=config.get("disable_auth", False), help='Persist whether Firegex password/JWT authentication is disabled')
+    parser_config.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=None, help='UNSAFE: persist whether Firegex password/JWT authentication is disabled (applied on the next start/restart)')
     parser_config.add_argument('--show', required=False, action="store_true", help='Show current configuration', default=False)
     args = parser.parse_args(args=args_to_parse)
     
@@ -246,10 +246,10 @@ def gen_args(args_to_parse: list[str]|None = None):
     
     # Save configuration if values were specified via command line and differ from config
     config_changed = False
-    if hasattr(args, 'port') and args.port != config["port"]:
+    if hasattr(args, 'port') and args.port is not None and args.port != config["port"]:
         config["port"] = args.port
         config_changed = True
-    if hasattr(args, 'host') and args.host != config["host"]:
+    if hasattr(args, 'host') and args.host is not None and args.host != config["host"]:
         config["host"] = args.host
         config_changed = True
     if hasattr(args, 'socket_dir') and args.socket_dir != config["socket_dir"]:
@@ -261,8 +261,8 @@ def gen_args(args_to_parse: list[str]|None = None):
     if hasattr(args, 'proxy_ip_header') and args.proxy_ip_header != config.get("proxy_ip_header"):
         config["proxy_ip_header"] = args.proxy_ip_header
         config_changed = True
-    if hasattr(args, 'disable_auth') and args.disable_auth != config.get("disable_auth", False):
-        config["disable_auth"] = args.disable_auth
+    if getattr(args, 'unsafe_disable_auth', None) is not None and args.unsafe_disable_auth != config.get("unsafe_disable_auth", False):
+        config["unsafe_disable_auth"] = args.unsafe_disable_auth
         config_changed = True
     
     if config_changed:
@@ -368,7 +368,7 @@ def write_compose(skip_password = True):
                             *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else []),
                             *([f"ALLOWED_IPS={args.allowed_ips}"] if getattr(args, 'allowed_ips', None) else []),
                             *([f"PROXY_IP_HEADER={args.proxy_ip_header}"] if getattr(args, 'proxy_ip_header', None) else []),
-                            *(["DISABLE_AUTH=1"] if getattr(args, 'disable_auth', False) else [])
+                            *(["UNSAFE_DISABLE_AUTH=1"] if getattr(args, 'unsafe_disable_auth', False) else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -425,7 +425,7 @@ def write_compose(skip_password = True):
                             *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else []),
                             *([f"ALLOWED_IPS={args.allowed_ips}"] if getattr(args, 'allowed_ips', None) else []),
                             *([f"PROXY_IP_HEADER={args.proxy_ip_header}"] if getattr(args, 'proxy_ip_header', None) else []),
-                            *(["DISABLE_AUTH=1"] if getattr(args, 'disable_auth', False) else [])
+                            *(["UNSAFE_DISABLE_AUTH=1"] if getattr(args, 'unsafe_disable_auth', False) else [])
                         ],
                         "volumes": [
                             "firegex_data:/execute/db"
@@ -441,14 +441,17 @@ def write_compose(skip_password = True):
             }))
       
 def get_password():
-    # Authentication is delegated to the reverse proxy in this mode, so never
-    # prompt for or persist an unused Firegex password during initial startup.
-    if getattr(args, 'disable_auth', False):
-        return None
     if volume_exists() or args.psw_on_web or (g.standalone_mode and os.path.isfile(os.path.join(g.rootfs_path, "execute/db/firegex.db"))):
         return None
     if args.startup_psw:
         return args.startup_psw
+    # Authentication is delegated to the reverse proxy in this mode, so don't block
+    # startup on an interactive prompt for a password nothing will check. An explicit
+    # --startup-psw is still honored above: without a password in the database, turning
+    # authentication back on would leave the instance in the "set the initial password"
+    # state, where anyone able to reach it can claim it.
+    if getattr(args, 'unsafe_disable_auth', False):
+        return None
     psw_set = None
     while True:
         while True:
@@ -469,6 +472,27 @@ def get_password():
 
 def volume_exists():
     return "firegex_firegex_data" in cmd_check('docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
+
+def firegex_db_exists():
+    """Whether a database (and therefore a possibly already set password) is around."""
+    if g.standalone_mode:
+        return os.path.isfile(os.path.join(g.rootfs_path, "execute/db/firegex.db"))
+    return volume_exists()
+
+def warn_if_auth_disabled():
+    if not getattr(args, 'unsafe_disable_auth', False):
+        return
+    sep()
+    puts("--- AUTHENTICATION DISABLED ---", color=colors.yellow, is_bold=True)
+    puts("Firegex will treat every request that reaches it as a full administrator.", color=colors.red)
+    puts("Only expose it behind a reverse proxy that performs the access control itself.", color=colors.red)
+    puts(f"This setting is stored in {g.configfile} and stays active on the next start:", color=colors.red)
+    puts("pass --no-unsafe-disable-auth to turn the built-in authentication back on.", color=colors.red)
+    if not firegex_db_exists() and not args.startup_psw:
+        puts("No password is set: if you re-enable authentication later, firegex will start in", color=colors.yellow)
+        puts("its initial-setup state, where anyone able to reach it can choose the password.", color=colors.yellow)
+        puts("Set one now with '-P <password>', or later with 'python3 run.py config --password'.", color=colors.yellow)
+    sep()
 
 def nfqueue_exists():
     import socket
@@ -887,6 +911,8 @@ def run_standalone():
         puts(f"Process PID: {pid}", color=colors.cyan)
         return
     
+    warn_if_auth_disabled()
+    
     # Set up environment variables
     env_vars = [
         f"PORT={args.port}",
@@ -898,8 +924,8 @@ def run_standalone():
         env_vars.append(f"ALLOWED_IPS={args.allowed_ips}")
     if getattr(args, 'proxy_ip_header', None):
         env_vars.append(f"PROXY_IP_HEADER={args.proxy_ip_header}")
-    if getattr(args, 'disable_auth', False):
-        env_vars.append("DISABLE_AUTH=1")
+    if getattr(args, 'unsafe_disable_auth', False):
+        env_vars.append("UNSAFE_DISABLE_AUTH=1")
     
     # Add password if set
     psw_set = get_password()
@@ -989,7 +1015,7 @@ def handle_config_command(args):
         puts(f"Port: {config['port']}", color=colors.white)
         puts(f"Host: {config['host']}", color=colors.white)
         puts(f"Socket dir: {config['socket_dir']}", color=colors.white)
-        puts(f"Authentication disabled: {config.get('disable_auth', False)}", color=colors.white)
+        puts(f"Authentication disabled: {config.get('unsafe_disable_auth', False)}", color=colors.white)
         puts(f"Config file: {g.configfile}", color=colors.white)
         return
     
@@ -1010,6 +1036,15 @@ def handle_config_command(args):
         config["socket_dir"] = args.socket_dir
         config_changed = True
         puts(f"Socket dir set to: {args.socket_dir}", color=colors.green)
+    
+    if getattr(args, 'unsafe_disable_auth', None) is not None:
+        config["unsafe_disable_auth"] = args.unsafe_disable_auth
+        config_changed = True
+        if args.unsafe_disable_auth:
+            puts("Authentication disabled: every request reaching firegex becomes a full administrator", color=colors.red, is_bold=True)
+        else:
+            puts("Authentication enabled", color=colors.green)
+        puts("The change is applied on the next start/restart of firegex.", color=colors.yellow)
     
     if hasattr(args, 'password') and args.password is not None:
         new_password = args.password
@@ -1185,6 +1220,7 @@ def main():
                     puts("Firegex", color=colors.yellow, end="")
                     puts(" will start on port ", end="")
                     puts(f"{args.port}", color=colors.cyan)
+                    warn_if_auth_disabled()
                     write_compose(skip_password=False)
                     if not g.build:
                         puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
@@ -1198,6 +1234,7 @@ def main():
                 composecmd(compose_cmd, g.composefile)
             case "restart":
                 if check_already_running():
+                    warn_if_auth_disabled()
                     write_compose()
                     # A plain `restart` preserves the old container environment, so
                     # changes to access-control options would not take effect.

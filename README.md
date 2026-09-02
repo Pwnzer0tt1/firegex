@@ -92,13 +92,20 @@ Firegex can also be restricted to accept connections only from a set of trusted 
 
 ### Reverse proxy without Firegex authentication
 
-To delegate access control entirely to a reverse proxy, start Firegex with `--disable-auth`:
+To delegate access control entirely to a reverse proxy, start Firegex with `--unsafe-disable-auth`:
 
 ```bash
-python3 run.py start --host 127.0.0.1 --disable-auth
+python3 run.py start --host 127.0.0.1 --unsafe-disable-auth -P 'a-password-for-later'
 ```
 
-This disables Firegex's password, JWT, and Socket.IO authentication, and it does not ask for an initial password. Requests forwarded by the proxy, including headers such as `X-Forwarded-For`, reach Firegex normally. This grants full administrative access to every request that reaches Firegex, so bind it to loopback, a Unix socket, or otherwise restrict direct access to the proxy. Use `--no-disable-auth` to turn the built-in authentication back on.
+This disables Firegex's password, JWT, and Socket.IO authentication: **every request that reaches Firegex is a full administrator**, so bind it to loopback, a Unix socket, or otherwise make sure nothing but the proxy can reach it. Requests forwarded by the proxy, including headers such as `X-Forwarded-For`, reach Firegex normally. Use `--no-unsafe-disable-auth` to turn the built-in authentication back on.
+
+A few things worth knowing before using it:
+
+- **The setting is persisted** in `.firegex-conf.json`, like `--port` or `--allowed-ips`: a later plain `python3 run.py start` keeps authentication disabled until you pass `--no-unsafe-disable-auth`. Every start prints a banner while it is active, and `python3 run.py config --show` reports it.
+- **Set a password anyway** (`-P`, or later `python3 run.py config --password`). It is unused while authentication is disabled, but it is what you fall back on if you re-enable it. Without one, `--no-unsafe-disable-auth` brings Firegex up in its initial-setup state, where anyone who can reach it chooses the password.
+- **The password cannot be changed over the API** while authentication is disabled (`/api/login`, `/api/set-password` and `/api/change-password` answer `403`) — otherwise an anonymous caller could plant a credential that keeps working once authentication is back on. `python3 run.py config --password` still works, since it writes to the database from the host.
+- **`--allowed-ips` is not a substitute for the proxy's access control.** Combined with `--proxy-ip-header` it trusts a client-supplied header, so it only holds up if the proxy overwrites that header and nothing else can reach the port directly.
 
 ## Documentation
 

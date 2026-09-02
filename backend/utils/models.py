@@ -7,6 +7,7 @@ class StatusModel(BaseModel):
     status: str
     loggined: bool
     version: str
+    auth_disabled: bool = False
 
 class PasswordForm(BaseModel):
     password: str

@@ -39,7 +39,12 @@ async def lifespan(app):
 
 ALLOWED_NETWORKS = [ip_network(ip.strip(), strict=False) for ip in os.getenv("ALLOWED_IPS", "").split(",") if ip.strip()]
 PROXY_IP_HEADER = os.getenv("PROXY_IP_HEADER", "")
-DISABLE_AUTH = os.getenv("DISABLE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
+UNSAFE_DISABLE_AUTH = os.getenv("UNSAFE_DISABLE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
+# With UNSAFE_DISABLE_AUTH every request is already a full administrator, so the password
+# endpoints would let an anonymous caller plant a credential that keeps working once
+# authentication is turned back on. The password can only be set out of band, from the
+# host, with "python3 run.py config --password".
+AUTH_DISABLED_DETAIL = "Firegex authentication is disabled: the password can only be changed from the host with 'python3 run.py config --password'"
 
 class IPFilterMiddleware:
     def __init__(self, app):
@@ -117,7 +122,7 @@ utils.socketio = socketio.AsyncServer(
 sio_app = socketio.ASGIApp(utils.socketio, socketio_path="/sock/socket.io", other_asgi_app=app)
 app.mount("/sock", sio_app)
 
-def APP_STATUS(): return "run" if DISABLE_AUTH or db.get("password") is not None else "init"
+def APP_STATUS(): return "run" if UNSAFE_DISABLE_AUTH or db.get("password") is not None else "init"
 def JWT_SECRET(): return db.get("secret")
 
 def _hash_psw_sync(psw: str) -> str:
@@ -151,7 +156,7 @@ async def refresh_frontend(additional:list[str]=[]):
     await socketio_emit([]+additional)
 
 async def check_login(token: str = Depends(oauth2_scheme)):
-    if DISABLE_AUTH:
+    if UNSAFE_DISABLE_AUTH:
         return True
     if not token:
         return False
@@ -164,7 +169,7 @@ async def check_login(token: str = Depends(oauth2_scheme)):
 
 @utils.socketio.on("connect")
 async def sio_connect(sid, environ, auth):
-    if not DISABLE_AUTH and (not auth or not await check_login(auth.get("token"))):
+    if not UNSAFE_DISABLE_AUTH and (not auth or not await check_login(auth.get("token"))):
         raise ConnectionRefusedError("Unauthorized")
     utils.sid_list.add(sid)
 
@@ -201,12 +206,15 @@ async def get_app_status(auth: bool = Depends(check_login)):
     return { 
         "status": APP_STATUS(),
         "loggined": auth,
-        "version": API_VERSION
+        "version": API_VERSION,
+        "auth_disabled": UNSAFE_DISABLE_AUTH
     }
 
 @app.post("/api/login")
 async def login_api(form: OAuth2PasswordRequestForm = Depends()):
     """Get a login token to use the firegex api"""
+    if UNSAFE_DISABLE_AUTH:
+        raise HTTPException(status_code=403, detail=AUTH_DISABLED_DETAIL)
     if APP_STATUS() != "run":
         raise HTTPException(status_code=400)
     if form.password == "":
@@ -220,6 +228,8 @@ async def login_api(form: OAuth2PasswordRequestForm = Depends()):
 @app.post('/api/set-password', response_model=ChangePasswordModel)
 async def set_password(form: PasswordForm):
     """Set the password of firegex"""
+    if UNSAFE_DISABLE_AUTH:
+        raise HTTPException(status_code=403, detail=AUTH_DISABLED_DETAIL)
     if APP_STATUS() != "init":
         raise HTTPException(status_code=400)
     if form.password == "":
@@ -231,6 +241,8 @@ async def set_password(form: PasswordForm):
 @api.post('/change-password', response_model=ChangePasswordModel)
 async def change_password(form: PasswordChangeForm):
     """Change the password of firegex"""
+    if UNSAFE_DISABLE_AUTH:
+        raise HTTPException(status_code=403, detail=AUTH_DISABLED_DETAIL)
     if APP_STATUS() != "run":
         raise HTTPException(status_code=400)
 
