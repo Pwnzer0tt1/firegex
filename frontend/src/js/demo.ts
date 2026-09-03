@@ -27,13 +27,6 @@ def block_path_traversal(packet: HttpRequest):
     if ".." in packet.url:
         return REJECT
     return ACCEPT
-
-
-@pyfilter
-def strip_debug_header(packet: HttpRequest):
-    if "X-Debug" in packet.headers:
-        del packet.headers["X-Debug"]
-    return ACCEPT
 `
 
 // ------------------------------------------------------------------ seed state
@@ -65,14 +58,12 @@ const state = {
     },
     nfproxy: {
         services: [
-            { service_id: svcProxy, name: "shop-api", status: "active", port: 9000, proto: "tcp", ip_int: "10.60.3.1", n_filters: 2, edited_packets: 3401, blocked_packets: 762, fail_open: true, target_type: "internal", tls_stream_id: null },
-            { service_id: svcQuiz, name: "quiz", status: "stop", port: 1337, proto: "tcp", ip_int: "10.60.3.1", n_filters: 2, edited_packets: 0, blocked_packets: 0, fail_open: false, target_type: "internal", tls_stream_id: null },
+            { service_id: svcProxy, name: "shop-api", status: "active", port: 9000, proto: "tcp", ip_int: "10.60.3.1", n_filters: 1, edited_packets: 0, blocked_packets: 641, fail_open: true, target_type: "internal", tls_stream_id: null },
+            { service_id: svcQuiz, name: "quiz", status: "stop", port: 1337, proto: "tcp", ip_int: "10.60.3.1", n_filters: 1, edited_packets: 0, blocked_packets: 0, fail_open: false, target_type: "internal", tls_stream_id: null },
         ] as Json[],
         pyfilters: [
             { name: "block_path_traversal", service_id: svcProxy, blocked_packets: 641, edited_packets: 0, active: true },
-            { name: "strip_debug_header", service_id: svcProxy, blocked_packets: 0, edited_packets: 3401, active: true },
             { name: "block_path_traversal", service_id: svcQuiz, blocked_packets: 0, edited_packets: 0, active: true },
-            { name: "strip_debug_header", service_id: svcQuiz, blocked_packets: 0, edited_packets: 0, active: false },
         ] as Json[],
         code: { [svcProxy]: SAMPLE_FILTER, [svcQuiz]: SAMPLE_FILTER } as Record<string, string>,
         tls: {} as Record<string, Json>,
@@ -125,7 +116,6 @@ const startTicker = () => {
         }
         for (const s of state.nfproxy.services) {
             if (s.status !== "active") continue
-            s.edited_packets += Math.floor(Math.random() * 12)
             s.blocked_packets += Math.random() < 0.4 ? 1 : 0
             changed = true
         }
@@ -252,8 +242,9 @@ const routes: [string, RegExp, Handler][] = [
     ["PUT", /^nfproxy\/services\/([^/]+)\/tls-config$/, () => ok],
     ["GET", /^nfproxy\/services\/([^/]+)\/tls-config$/, () => ({ tls_enabled: false, tls_cert: null, tls_key: null })],
     ["GET", /^nfproxy\/services\/([^/]+)\/pyfilters$/, m => state.nfproxy.pyfilters.filter(f => f.service_id === m[1])],
-    ["GET", /^nfproxy\/services\/([^/]+)\/code$/, m => ({ code: state.nfproxy.code[m[1]] ?? "" })],
-    ["POST", /^nfproxy\/services\/([^/]+)\/code$/, (m, b) => {
+    // the real endpoint is a PlainTextResponse: it returns the source, not an object
+    ["GET", /^nfproxy\/services\/([^/]+)\/code$/, m => state.nfproxy.code[m[1]] ?? ""],
+    ["PUT", /^nfproxy\/services\/([^/]+)\/code$/, (m, b) => {
         state.nfproxy.code[m[1]] = b?.code ?? ""
         emit(["nfproxy"]); return ok
     }],
