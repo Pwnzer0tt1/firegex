@@ -136,8 +136,14 @@ export const Firewall = () => {
 
 
 
-  const items = state.map((item, index) => (
-    item.table == selectedTab && <Draggable key={item.rule_id} index={index} draggableId={item.rule_id}>
+  // Draggable indexes must be contiguous inside a Droppable, so the visible rules are
+  // re-indexed for the tab while keeping their position in `state` for the actual edits.
+  const visibleRules = state
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => item.table == selectedTab)
+
+  const items = visibleRules.map(({ item, index }, visibleIndex) => (
+    <Draggable key={item.rule_id} index={visibleIndex} draggableId={item.rule_id}>
       {(provided, snapshot) => {
         const customInt = [
           { value: "0.0.0.0/0", netint: "ANY IPv4", label: "0.0.0.0/0" },
@@ -195,7 +201,12 @@ export const Firewall = () => {
           mb="md"
           w="100%"
           bg="transparent"
-          style={{ borderColor: 'var(--fourth_color)', transition: 'border-color 0.2s ease' }}
+          style={{
+            transition: 'border-color 0.2s ease',
+            // dnd puts the drag transform/transition in here: it has to win over our defaults
+            ...provided.draggableProps.style,
+            borderColor: snapshot.isDragging ? 'var(--accent-color)' : 'var(--fourth_color)',
+          }}
         >
           <Group wrap="nowrap" align="flex-start" gap="sm">
             <Box {...provided.dragHandleProps} style={{ display: 'flex', alignItems: 'center', height: rem(36) }}>
@@ -316,7 +327,7 @@ export const Firewall = () => {
         </Card>
       }}
     </Draggable>
-  )).filter(v => v);
+  ));
 
 
   return <>
@@ -380,9 +391,13 @@ export const Firewall = () => {
       </Tabs>
     </Group>
     {items.length > 0 ? <DragDropContext
-      onDragEnd={({ destination, source }) =>
-        handlers.reorder({ from: source.index, to: destination?.index || 0 })
-      }
+      onDragEnd={({ destination, source }) => {
+        if (!destination || destination.index == source.index) return
+        handlers.reorder({
+          from: visibleRules[source.index].index,
+          to: visibleRules[destination.index].index,
+        })
+      }}
     >
       <Space h="md" />
       <Droppable droppableId="dnd-list" direction="vertical">
