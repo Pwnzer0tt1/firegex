@@ -199,9 +199,11 @@ export const Firewall = () => {
           radius="md"
           p="md"
           mb="md"
-          w="100%"
           bg="transparent"
           style={{
+            // not the `w` prop: Mantine's style props would beat the width dnd measures, and
+            // `100%` against a `position: fixed` card resolves to the viewport, not the list
+            width: '100%',
             transition: 'border-color 0.2s ease',
             // dnd puts the drag transform/transition in here: it has to win over our defaults
             ...provided.draggableProps.style,
