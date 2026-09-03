@@ -207,7 +207,7 @@ export default function ServiceDetailsNFProxy() {
             </Group>
         </Card>
 
-        {filterCode.data ? <>
+        {typeof filterCode.data === "string" && filterCode.data ? <>
             <Group justify="center" gap="xs" mt="xl">
                 <ThemeIcon radius="md" size="md" variant="light" color="yellow"><FaPython size={16} /></ThemeIcon>
                 <Title order={3}>Filter code</Title>
