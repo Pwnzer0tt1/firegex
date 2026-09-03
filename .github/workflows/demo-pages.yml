@@ -62,6 +62,10 @@ jobs:
     steps:
       - name: Configure Pages
         uses: actions/configure-pages@v5
+        with:
+          # Turns Pages on (source: GitHub Actions) the first time this runs, so the
+          # repository needs no manual switch flipped in Settings.
+          enablement: true
 
       - name: Deploy
         id: deployment
