@@ -60,12 +60,11 @@ jobs:
       pages: write
       id-token: write
     steps:
+      # Pages is already enabled on this repository with source "GitHub Actions".
+      # The `enablement: true` option cannot replace that here: GITHUB_TOKEN is not
+      # allowed to create a Pages site, whatever permissions the job asks for.
       - name: Configure Pages
         uses: actions/configure-pages@v5
-        with:
-          # Turns Pages on (source: GitHub Actions) the first time this runs, so the
-          # repository needs no manual switch flipped in Settings.
-          enablement: true
 
       - name: Deploy
         id: deployment
