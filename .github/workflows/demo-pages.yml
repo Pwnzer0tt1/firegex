@@ -1,0 +1,68 @@
+# Publishes the browsable demo at https://demo.firegex.pwnzer0tt1.it - the real frontend
+# built against the in-memory backend in frontend/src/js/demo.ts, so it needs no server.
+name: Deploy demo to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'docs/**'
+      - '.github/workflows/demo-pages.yml'
+  workflow_dispatch:
+
+# Let a running deploy finish rather than publishing a half-built site, but keep only the
+# newest queued commit: intermediate ones would be overwritten seconds later anyway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: bun install --frozen-lockfile
+
+      - name: Build the demo
+        working-directory: frontend
+        run: bun run build:demo
+
+      - name: Prepare the artifact
+        working-directory: frontend/dist
+        run: |
+          # GitHub Pages serves 404.html for any path it has no file for. Handing it the
+          # SPA entrypoint is what makes deep links like /nfproxy/<id> resolve.
+          cp index.html 404.html
+          echo 'demo.firegex.pwnzer0tt1.it' > CNAME
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
