@@ -111,7 +111,11 @@ export async function genericapi(method:string,path:string,data:any = undefined,
                 const errorDefault = res.statusText
                 return res.json().then( res => reject(getErrorMessageFromServerResponse(res, errorDefault)) ).catch( _err => reject(errorDefault)) 
             }
+            // text/plain bodies (the nfproxy filter source) stay strings: a source file that
+            // happens to be valid JSON must not be parsed into a number/array/object
+            const isPlainText = (res.headers.get("content-type") ?? "").startsWith("text/plain")
             res.text().then(t => {
+                if (isPlainText) return resolve(t)
                 try{
                     resolve(JSON.parse(t))
                 }catch(e){
