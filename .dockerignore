@@ -20,7 +20,11 @@ Dockerfile
 /frontend/build/**
 /frontend/node_modules/
 /backend/modules/cppregex
-/backend/modules/proxy
+/backend/modules/cpproxy
+/backend/modules/fgex-proxy
+# Built inside the compiler stage; a host build tree would only be copied in to be
+# overwritten, and it is larger than the rest of the context put together.
+/backend/proxysrc/target/
 compose.yml
 .firegex-compose.yml
 

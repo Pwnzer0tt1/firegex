@@ -97,6 +97,66 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		pyq->pkt->drop();// This is needed because the callback has to take the updated pkt pointer!
 	}
 
+	//: How many UDP flows may hold a filter context at once. See `enforce_limit`.
+	static const size_t MAX_UDP_FLOWS = 4096;
+
+	// One datagram, judged on its own.
+	//
+	// No stream to follow and no sequence numbers to fix: a datagram is complete in
+	// itself, which is also why a rewrite here is *exact* rather than the unstable
+	// thing it is over TCP — there is nothing for a different length to desynchronise.
+	// Each flow still gets its own module globals, keyed the same way a connection is.
+	void filter_action_udp(NfQueue::PktRequest<PyProxyQueue>* pkt, const string& data){
+		auto stream_search = sctx.streams_ctx.find(pkt->sid);
+		pyfilter_ctx* stream_match;
+		if (stream_search == sctx.streams_ctx.end()){
+			shared_ptr<PyCodeConfig> conf = config;
+			PyObject* compiled_code = conf->compiled_code();
+			if (compiled_code == nullptr){
+				return pkt->accept(); // no filter configured; nothing to ask
+			}
+			try{
+				stream_match = new pyfilter_ctx(compiled_code, handle_packet_code);
+			}catch(invalid_argument& e){
+				cerr << "[error] [filter_action_udp] Failed to create the filter context" << endl;
+				print_exception_reason();
+				return pkt->accept();
+			}
+			sctx.enforce_limit(MAX_UDP_FLOWS);
+			sctx.streams_ctx.insert_or_assign(pkt->sid, stream_match);
+		}else{
+			stream_match = stream_search->second;
+		}
+
+		auto result = stream_match->handle_packet(pkt, data, pkt->is_input);
+		switch(result.action){
+			case PyFilterResponse::ACCEPT:
+				return pkt->accept();
+			// There is no connection to close, so refusing means this datagram is not
+			// delivered. The next one from the same flow is judged afresh, which is the
+			// only thing "refuse" can mean without a connection to refuse.
+			case PyFilterResponse::DROP:
+			case PyFilterResponse::REJECT:
+				print_blocked_reason(*result.filter_match_by);
+				return pkt->drop();
+			case PyFilterResponse::MANGLE:
+				pkt->mangle_custom_data(result.mangled_data->c_str(), result.mangled_data->size());
+				if (pkt->get_action() == NfQueue::FilterAction::DROP){
+					cerr << "[ERROR] [filter_action_udp] Failed to mangle: Malformed Packet... the packet was dropped" << endl;
+					print_blocked_reason(*result.filter_match_by);
+					print_exception_reason();
+				}else{
+					print_mangle_reason(*result.filter_match_by);
+				}
+				return;
+			case PyFilterResponse::EXCEPTION:
+			case PyFilterResponse::INVALID:
+				print_exception_reason();
+				sctx.clean_stream_by_id(pkt->sid);
+				return pkt->accept();
+		}
+	}
+
 	void filter_action(NfQueue::PktRequest<PyProxyQueue>* pkt, Stream& stream, const string& data, bool is_client){
 		auto stream_search = sctx.streams_ctx.find(pkt->sid);
 		pyfilter_ctx* stream_match;
@@ -146,7 +206,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 				stream.server_data_callback(bind(keep_fin_packet, this));
 				return pkt->reject();
 			case PyFilterResponse::MANGLE:
-				pkt->mangle_custom_pkt(result.mangled_packet->c_str(), result.mangled_packet->size());
+				pkt->mangle_custom_data(result.mangled_data->c_str(), result.mangled_data->size());
 				if (pkt->get_action() == NfQueue::FilterAction::DROP){
 					cerr << "[ERROR] [filter_action] Failed to mangle: Malformed Packet... the packet was dropped" << endl;
 					print_blocked_reason(*result.filter_match_by);
@@ -220,6 +280,17 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 
 	void handle_next_packet(NfQueue::PktRequest<PyProxyQueue>* _pkt) override{
 		pkt = _pkt; // Setting packet context
+
+		if (pkt->l4_proto == NfQueue::L4Proto::UDP){
+			// Straight to the filter: the stream follower is TCP's, and so is every
+			// piece of machinery above it. This used to fall into the check below and
+			// throw — with a message claiming UDP was supported.
+			filter_action_udp(pkt, string(pkt->data(), pkt->data_size()));
+			if (pkt->get_action() == NfQueue::FilterAction::NOACTION){
+				return pkt->accept();
+			}
+			return;
+		}
 
 		if (pkt->l4_proto != NfQueue::L4Proto::TCP){
 			throw invalid_argument("Only TCP and UDP are supported");

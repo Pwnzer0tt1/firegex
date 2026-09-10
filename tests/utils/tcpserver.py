@@ -6,7 +6,8 @@ import tempfile
 import traceback
 
 
-def _start_tcp_server(port, server_queue: Queue, ipv6, verbose, tls_cert=None, tls_key=None):
+def _start_tcp_server(port, server_queue: Queue, ipv6, verbose, tls_cert=None, tls_key=None,
+                      tls_alpn=None):
     sock = socket.socket(
         socket.AF_INET6 if ipv6 else socket.AF_INET, socket.SOCK_STREAM
     )
@@ -17,6 +18,12 @@ def _start_tcp_server(port, server_queue: Queue, ipv6, verbose, tls_cert=None, t
     tls_context = None
     if tls_cert and tls_key:
         tls_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        if tls_alpn:
+            tls_context.set_alpn_protocols(tls_alpn)
+        # The stand-in service presents whatever certificate the test gave it, including
+        # the under-2048-bit one that exists to prove firegex still protects a service
+        # carrying one. The distribution's policy would refuse to load it otherwise.
+        tls_context.set_ciphers("DEFAULT:@SECLEVEL=1")
         with tempfile.NamedTemporaryFile(mode="w", suffix=".crt", delete=False) as cert_file, \
              tempfile.NamedTemporaryFile(mode="w", suffix=".key", delete=False) as key_file:
             cert_file.write(tls_cert)
@@ -59,20 +66,25 @@ def _start_tcp_server(port, server_queue: Queue, ipv6, verbose, tls_cert=None, t
 
 
 class TcpServer:
-    def __init__(self, port, ipv6, proxy_port=None, verbose=False, tls_cert=None, tls_key=None):
+    def __init__(self, port, ipv6, proxy_port=None, verbose=False, tls_cert=None, tls_key=None,
+                 tls_alpn=None):
         self.proxy_port = proxy_port
         self.ipv6 = ipv6
         self.port = port
         self.verbose = verbose
         self.tls_cert = tls_cert
         self.tls_key = tls_key
+        #: Application protocols this stand-in service is willing to speak, so a test can
+        #: check that what the client is told is what the *service* chose.
+        self.tls_alpn = tls_alpn
         self._server_data_queue = Queue()
         self._regen_process()
 
     def _regen_process(self):
         self.server = Process(
             target=_start_tcp_server,
-            args=[self.port, self._server_data_queue, self.ipv6, self.verbose, self.tls_cert, self.tls_key],
+            args=[self.port, self._server_data_queue, self.ipv6, self.verbose, self.tls_cert,
+                  self.tls_key, self.tls_alpn],
         )
 
     def start(self):

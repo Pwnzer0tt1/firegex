@@ -1,5 +1,5 @@
-from firegex.nfproxy import pyfilter, ACCEPT, clear_pyfilter_registry
-from firegex.nfproxy.models import (
+from firegex.pyfilters import pyfilter, ACCEPT, ExceptionAction, collect_pyfilters
+from firegex.pyfilters.models import (
     HttpRequest,
     HttpResponse,
     HttpFullRequest,
@@ -7,17 +7,19 @@ from firegex.nfproxy.models import (
     HttpHistory,
     HttpStreamHistory,
 )
-from firegex.nfproxy.internals import compile, handle_packet
+from firegex.pyfilters.internals import compile, handle_packet
 
 
 def create_packet_info(payload: bytes, is_input: bool):
     return {
         "data": payload,
-        "raw_packet": b"\x00" * 40 + payload,
         "is_input": is_input,
         "is_ipv6": False,
         "is_tcp": True,
-        "l4_size": len(payload),
+        "src_ip": "10.0.0.9" if is_input else "10.0.0.1",
+        "src_port": 51000 if is_input else 80,
+        "dst_ip": "10.0.0.1" if is_input else "10.0.0.9",
+        "dst_port": 80 if is_input else 51000,
     }
 
 
@@ -32,11 +34,10 @@ def test_http_history_model():
 
 def test_http_history_stream_execution():
     glob = {}
-    clear_pyfilter_registry()
 
     code = """
-from firegex.nfproxy import pyfilter, ACCEPT
-from firegex.nfproxy.models import HttpFullRequest, HttpFullResponse, HttpHistory
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpFullRequest, HttpFullResponse, HttpHistory
 
 recorded_history = []
 
@@ -56,7 +57,6 @@ def filter_resp(resp: HttpFullResponse, history: HttpHistory):
 """
 
     glob["__firegex_pyfilter_enabled"] = ["filter_req", "filter_resp"]
-    glob["__firegex_proto"] = "http"
     exec(code, glob, glob)
     compile(glob)
 
@@ -97,11 +97,10 @@ def filter_resp(resp: HttpFullResponse, history: HttpHistory):
 
 def test_http_history_attribute_on_request():
     glob = {}
-    clear_pyfilter_registry()
 
     code = """
-from firegex.nfproxy import pyfilter, ACCEPT
-from firegex.nfproxy.models import HttpFullRequest, HttpFullResponse
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpFullRequest, HttpFullResponse
 
 history_lengths = []
 
@@ -117,7 +116,6 @@ def filter_resp(resp: HttpFullResponse):
 """
 
     glob["__firegex_pyfilter_enabled"] = ["filter_req", "filter_resp"]
-    glob["__firegex_proto"] = "http"
     exec(code, glob, glob)
     compile(glob)
 
@@ -141,11 +139,10 @@ def filter_resp(resp: HttpFullResponse):
 
 def test_http_history_invalid_max_size():
     glob = {}
-    clear_pyfilter_registry()
 
     code = """
-from firegex.nfproxy import pyfilter, ACCEPT
-from firegex.nfproxy.models import HttpFullRequest
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpFullRequest
 
 @pyfilter
 def filter_req(req: HttpFullRequest):
@@ -153,7 +150,6 @@ def filter_req(req: HttpFullRequest):
 """
 
     glob["__firegex_pyfilter_enabled"] = ["filter_req"]
-    glob["__firegex_proto"] = "http"
     glob["FGEX_MAX_HISTORY_SIZE"] = "invalid_number"
     exec(code, glob, glob)
     compile(glob)
@@ -165,11 +161,10 @@ def filter_req(req: HttpFullRequest):
 
 def test_http_history_parameter_order():
     glob = {}
-    clear_pyfilter_registry()
 
     code = """
-from firegex.nfproxy import pyfilter, ACCEPT
-from firegex.nfproxy.models import HttpFullRequest, HttpHistory
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpFullRequest, HttpHistory
 
 calls_log = []
 
@@ -180,7 +175,6 @@ def filter_history_first(history: HttpHistory, req: HttpFullRequest):
 """
 
     glob["__firegex_pyfilter_enabled"] = ["filter_history_first"]
-    glob["__firegex_proto"] = "http"
     exec(code, glob, glob)
     compile(glob)
 
@@ -195,12 +189,11 @@ def filter_history_first(history: HttpHistory, req: HttpFullRequest):
 
 def test_http_history_property_immutability():
     glob = {}
-    clear_pyfilter_registry()
     immutability_log = []
 
     code = """
-from firegex.nfproxy import pyfilter, ACCEPT
-from firegex.nfproxy.models import HttpFullRequest, HttpHistory
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpFullRequest, HttpHistory
 
 @pyfilter
 def filter_req(req: HttpFullRequest, history: HttpHistory):
@@ -216,7 +209,6 @@ def filter_req(req: HttpFullRequest, history: HttpHistory):
 """
 
     glob["__firegex_pyfilter_enabled"] = ["filter_req"]
-    glob["__firegex_proto"] = "http"
     glob["immutability_log"] = immutability_log
     exec(code, glob, glob)
     compile(glob)
@@ -242,11 +234,10 @@ def filter_req(req: HttpFullRequest, history: HttpHistory):
 
 def test_http_history_negative_max_size():
     glob = {}
-    clear_pyfilter_registry()
 
     code = """
-from firegex.nfproxy import pyfilter, ACCEPT
-from firegex.nfproxy.models import HttpFullRequest
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpFullRequest
 
 @pyfilter
 def filter_req(req: HttpFullRequest):
@@ -254,7 +245,6 @@ def filter_req(req: HttpFullRequest):
 """
 
     glob["__firegex_pyfilter_enabled"] = ["filter_req"]
-    glob["__firegex_proto"] = "http"
     glob["FGEX_MAX_HISTORY_SIZE"] = "-5"
     exec(code, glob, glob)
     compile(glob)
@@ -264,8 +254,8 @@ def filter_req(req: HttpFullRequest):
     handle_packet(glob)
 
 
-def test_http_history_nfproxy_import():
-    from firegex.nfproxy import HttpHistory as HH1, HttpStreamHistory as HH2
+def test_http_history_pyfilters_import():
+    from firegex.pyfilters import HttpHistory as HH1, HttpStreamHistory as HH2
     assert HH1 is HttpHistory
     assert HH2 is HttpStreamHistory
 
@@ -291,9 +281,75 @@ if __name__ == "__main__":
     test_http_history_parameter_order()
     test_http_history_property_immutability()
     test_http_history_negative_max_size()
-    test_http_history_nfproxy_import()
+    test_http_history_pyfilters_import()
     test_http_history_list_mutation()
     print("All HTTP history unit tests passed successfully!")
 
 
 
+
+
+def test_invalid_encoding_action_is_settable():
+    """The documented knob has to actually be reachable.
+
+    `FGEX_INVALID_ENCODING_ACTION` is documented as taking an `ExceptionAction`, and the
+    property that stores it accepts nothing else — but the gate that read it out of the
+    module checked `Action`, a different enum. So the documented value was silently
+    ignored and the only value that got past the gate raised in the setter: the knob
+    could not be set at all, in either direction, and the symptom was a service that
+    kept rejecting connections its filter had been told to let through.
+    """
+    from firegex.pyfilters.internals.data import DataStreamCtx
+
+    glob = {}
+    code = """
+from firegex.pyfilters import pyfilter, ACCEPT, ExceptionAction
+from firegex.pyfilters.models import HttpRequest
+
+FGEX_INVALID_ENCODING_ACTION = ExceptionAction.ACCEPT
+
+@pyfilter
+def anything(req: HttpRequest):
+    return ACCEPT
+"""
+    glob["__firegex_pyfilter_enabled"] = ["anything"]
+    exec(code, glob, glob)
+    compile(glob)
+    assert DataStreamCtx(glob, init_pkt=False).invalid_encoding_action is ExceptionAction.ACCEPT
+
+
+def test_filters_are_collected_in_definition_order():
+    """The order a file defines its filters in is the order they run in.
+
+    They used to be registered by name into a `set` on the decorator, so the order was
+    whatever hashing produced — and since the first filter to answer anything but ACCEPT
+    ends the packet, that decided which function got the block and whether an earlier
+    rewrite survived. Nothing about the file could tell you which.
+
+    The names below are deliberately not in alphabetical order, and deliberately not in
+    an order a hash would be likely to reproduce.
+    """
+    from firegex.pyfilters.internals import get_filter_names
+
+    names = ["zulu", "alpha", "mike", "bravo", "yankee", "charlie", "xray", "delta"]
+    code = "from firegex.pyfilters import pyfilter, ACCEPT\n" \
+           "from firegex.pyfilters.models import RawPacket\n" + "".join(
+               f"@pyfilter\ndef {n}(p: RawPacket):\n    return ACCEPT\n" for n in names
+           )
+    assert get_filter_names(code) == names
+
+    namespace = {}
+    exec(code, namespace, namespace)
+    assert collect_pyfilters(namespace) == names
+
+
+def test_a_filter_is_the_function_itself():
+    """`@pyfilter` marks and returns the function, it does not wrap it.
+
+    The wrapper it used to return forwarded `*args` and did nothing else, at the cost of
+    a frame in every traceback an operator has to read to find their own mistake.
+    """
+    def original(p):
+        return ACCEPT
+
+    assert pyfilter(original) is original

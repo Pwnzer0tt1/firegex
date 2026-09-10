@@ -148,6 +148,35 @@ class PktRequest {
 		return packet.data()+_header_size;
 	}
 
+	// The metadata a filter is allowed to know about the layers below it. Read-only by
+	// construction: these are copies pulled out of the headers, and there is no way
+	// back from them to the bytes they came from.
+	string src_ip(){
+		if (is_ipv6){
+			return ipv6 ? ipv6->src_addr().to_string() : string();
+		}
+		return ipv4 ? ipv4->src_addr().to_string() : string();
+	}
+
+	string dst_ip(){
+		if (is_ipv6){
+			return ipv6 ? ipv6->dst_addr().to_string() : string();
+		}
+		return ipv4 ? ipv4->dst_addr().to_string() : string();
+	}
+
+	uint16_t src_port(){
+		if (tcp) return tcp->sport();
+		if (udp) return udp->sport();
+		return 0;
+	}
+
+	uint16_t dst_port(){
+		if (tcp) return tcp->dport();
+		if (udp) return udp->dport();
+		return 0;
+	}
+
 	size_t data_size(){
 		return packet.size()-_header_size;
 	}
@@ -181,49 +210,6 @@ class PktRequest {
 			return ipv6;
 		}
 		return nullptr;
-	}
-
-	void set_packet(const char* data, size_t data_size){
-		// Parsing only the header with libtins
-		Tins::PDU *data_pdu = nullptr;
-		size_t total_size;
-		if (is_ipv6){
-			delete ipv6;
-			ipv6 = nullptr;
-			if (data_size >= 40){ // 40 == fixed size of ipv6 header
-				// Resetting payload length before parsing to libtins
-				uint16_t payload_len = htons(data_size-40);
-				memcpy(((uint8_t *)data)+4, &payload_len, 2);
-			}
-			ipv6 = new Tins::IPv6((uint8_t*)data, data_size);
-			if (tcp){
-				tcp = ipv6->find_pdu<Tins::TCP>();
-				data_pdu = tcp;
-			}else if (udp){
-				udp = ipv6->find_pdu<Tins::UDP>();
-				data_pdu = udp;
-			}else{
-				data_pdu = ipv6;
-			}
-			total_size = ipv6->size();
-		}else{
-			delete ipv4;
-			ipv4 = nullptr;
-			ipv4 = new Tins::IP((uint8_t*)data, data_size);
-			if (tcp){
-				tcp = ipv4->find_pdu<Tins::TCP>();
-				data_pdu = tcp;
-			}else if(udp){
-				udp = ipv4->find_pdu<Tins::UDP>();
-				data_pdu = udp;
-			}else{
-				data_pdu = ipv4;
-			}
-			total_size = ipv4->size();
-		}
-		_header_size = total_size - inner_data_size(data_pdu);
-		// Libtins can skip data if the lenght is changed to a bigger len (due to ip header total lenght), so we need to specify the data section manually
-		set_data(data+_header_size, data_size-_header_size);
 	}
 
 	void fix_tcp_ack(){
@@ -308,15 +294,22 @@ class PktRequest {
 		}
 	}
 
-	void mangle_custom_pkt(const char* raw_pkt, size_t raw_pkt_size){
+	// Rewrite the application payload, keeping the headers the packet arrived with.
+	//
+	// A filter can no longer see or write anything below the application layer, so
+	// there is no packet to take from it — only the payload it produced. That is also
+	// the honest shape: the proxy layer terminates the connection and writes its own
+	// headers, so a filter that could rewrite an IP header here and not there would be
+	// a filter that means two different things depending on where it was attached.
+	void mangle_custom_data(const char* data_ptr, size_t data_len){
 		if (action == FilterAction::NOACTION){
 			try{
-				set_packet(raw_pkt, raw_pkt_size);
+				set_data(data_ptr, data_len);
 				reserialize();
 				action = FilterAction::MANGLE;
 			}catch(const std::exception& e){
 				#ifdef DEBUG
-				cerr << "[DEBUG] [PktRequest.mangle_custom_pkt] " << e.what() << endl;
+				cerr << "[DEBUG] [PktRequest.mangle_custom_data] " << e.what() << endl;
 				#endif
 				action = FilterAction::DROP;
 			}

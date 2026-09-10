@@ -1,3 +1,5 @@
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
 import csv
@@ -10,6 +12,105 @@ plt.rcParams["figure.facecolor"] = "white"
 plt.rcParams["axes.edgecolor"] = "white"
 plt.rcParams["axes.linewidth"] = 1.5
 plt.rcParams["legend.facecolor"] = "white"
+
+def line_chart(files, output, title, ystep=300, ylim_to_data=False):
+    """One throughput-against-pattern-count chart.
+
+    `files` is a list of `(label, csv)`, or `(label, csv, style)` where `style` is passed
+    to `plot` — that is how a line that is not the same *kind* of measurement as the
+    others says so.
+
+    Every chart on this page is the same plot of the same measurement, so they are drawn
+    by one function: a second copy of the styling is a second chart that can disagree
+    with the first about what a line means.
+    """
+    series = []
+    for entry in files:
+        label, file = entry[0], entry[1]
+        style = entry[2] if len(entry) > 2 else {}
+        with open(file, "r") as csvfile:
+            series.append((label, [list(map(float, row)) for row in csv.reader(csvfile)], style))
+
+    # fivethirtyeight cycles six colours. Past that, two lines get the same one and the
+    # legend quietly stops being a legend — so take a longer palette when there are more
+    # series than colours rather than finding out by looking at the picture.
+    cycle = plt.rcParams["axes.prop_cycle"].by_key().get("color", [])
+    palette = cycle if len(series) <= len(cycle) else [
+        cm.tab10(i / 10) for i in range(len(series))
+    ]
+
+    fig, ax = plt.subplots()
+    ax.set_facecolor("white")
+    for i, (label, data, style) in enumerate(series):
+        ax.plot([int(d[0]) for d in data], [d[1] for d in data], label=label,
+                color=palette[i % len(palette)], **style)
+    data_dict = {label: data for label, data, _ in series}
+
+    ax.set_xlabel("N. of regex", fontname="Roboto", fontsize=12)
+    ax.set_ylabel("Throughput [MB/s]", fontname="Roboto", fontsize=12)
+    ax.legend(
+        title_fontsize=12, loc="upper center", bbox_to_anchor=(0.5, -0.1),
+        frameon=True, shadow=True, borderpad=1, fontsize=10, fancybox=True,
+        ncol=min(len(data_dict), 4),
+    )
+    widest = max(len(d) for d in data_dict.values())
+    ax.set_xticks(np.arange(0, widest, step=3))
+    if ylim_to_data:
+        ys = [d[1] for data in data_dict.values() for d in data]
+        pad = (max(ys) - min(ys)) * 0.1
+        ax.set_ylim(min(ys) - pad, max(ys) + pad)
+        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
+    else:
+        ax.set_yticks(np.arange(0, max(d[1] for data in data_dict.values() for d in data), step=ystep))
+    plt.subplots_adjust(bottom=0.2)
+    ax.set_title(title, fontweight="bold", fontname="Roboto", pad=20)
+    fig.set_size_inches(12, 8)
+    plt.savefig(output, dpi=300, bbox_inches="tight")
+    plt.close()
+
+
+# --- measured on the current machine, all in one sitting ---------------------
+# These are the only lines on this page that may be read against each other. Every one of
+# them was produced by the same command on the same host on the same day, with the filter
+# in the path for every packet (`fail_open=False`), which is what makes the comparison a
+# comparison of firegex rather than of two Linux kernels.
+#
+# One pass per version — the better of two where two were taken. Repeating a pass without
+# restarting the instance lands within ~3%; repeating it across a restart moved by up to
+# ~30%, which is wider than the gaps between the NFQUEUE versions. Read the charts for the
+# shape (flat in the number of patterns) and the tables in the README for the levels; they
+# do not support ranking one version above another. The gap between the two *layers* is
+# several times that uncertainty, and is a result.
+#
+# Split by thread count rather than drawn together. Seven lines on one pair of axes, where
+# the thread count moved a line as much as the version did, was a chart you had to decode
+# instead of read; one chart per thread count answers "which version" without also asking
+# "at how many threads".
+for threads in ("1T", "8T"):
+    line_chart(
+        [
+            (f"3.5.3 NFQUEUE {threads}", f"results/3.5.3-{threads}.csv"),
+            (f"4.0.5 NFQUEUE {threads}", f"results/4.0.5-{threads}.csv"),
+            (f"5.0.0 NFQUEUE {threads}", f"results/5.0.0-nfqueue-{threads}.csv"),
+            # Dashed, because it is the other network layer rather than another version:
+            # the same filter and the same traffic, put in the path a different way.
+            (f"5.0.0 Proxy {threads}", f"results/5.0.0-proxy-{threads}.csv",
+             {"linestyle": "--"}),
+        ],
+        f"results/Benchmark-{threads}.svg",
+        f"Firegex — regex filter, {'one thread' if threads == '1T' else 'eight threads'}",
+        ystep=1000,
+    )
+
+# --- archived, from 2025 -----------------------------------------------------
+# Everything below regenerates the charts that were committed with the numbers they were
+# measured from. They are kept as they were written, and behind a flag: matplotlib has
+# moved on since, so simply running this script used to rewrite six committed SVGs with
+# re-renders in a different font — a diff nobody asked for, in files nobody had new data
+# for. Pass --archived to redraw them on purpose.
+if "--archived" not in sys.argv:
+    print("current charts written. Pass --archived to also redraw the 2025 ones.")
+    raise SystemExit(0)
 
 files = [
     ("2.5.1 1T", "results/2.5.1-1T.csv"),

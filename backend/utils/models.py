@@ -16,6 +16,11 @@ class PasswordChangeForm(BaseModel):
     password: str
     expire: bool
 
+class AuthModeForm(BaseModel):
+    #: True turns authentication off. False is only ever a no-op here: putting it back on
+    #: is a decision that has to come from the host — see `set_auth_mode`.
+    disabled: bool
+
 class ChangePasswordModel(BaseModel):
     status: str
     access_token: str|None = None

@@ -22,7 +22,9 @@ export const regex_ipv4 = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.
 export const regex_ipv4_no_cidr = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
 export const regex_port = "^([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?$"
 export const regex_range_port = "^(([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(-([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?)?)?$"
-export const DEV_IP_BACKEND = "127.0.0.1:4444"
+// Where `bun run dev` looks for the backend. Overridable because the backend needs
+// Linux and NET_ADMIN, so it is often not on the same machine as the dev server.
+export const DEV_IP_BACKEND = import.meta.env.VITE_BACKEND ?? "127.0.0.1:4444"
 
 export const WARNING_NFPROXY_TIME_LIMIT = 1000*60*10 // 10 minutes
 
@@ -98,20 +100,32 @@ export async function genericapi(method:string,path:string,data:any = undefined,
             cache: 'no-cache',
             headers: {
               ...(data?{'Content-Type': is_form ? 'application/x-www-form-urlencoded' : 'application/json'}:{}),
-              "Authorization" : "Bearer " + useAuthStore.getState().getAccessToken()
+              // Omitted rather than sent as the string "null": an unauthenticated app was
+              // otherwise offering a credential on every request, which is a 401 the server
+              // had to be asked for and the client had to recover from.
+              ...(useAuthStore.getState().getAccessToken()
+                  ? { "Authorization": "Bearer " + useAuthStore.getState().getAccessToken() }
+                  : {})
             },
             body: data? (is_form ? (new URLSearchParams(data)).toString() : JSON.stringify(data)) : undefined
         }).then(res => {
             if(res.status === 401) {
+                // Drop the token and let the app re-render from it. Reloading the document
+                // here is what made a password screen appear "sometimes on refresh": a token
+                // left over from a database that has since been recreated 401s on the first
+                // query, the page reloads itself, and what comes back is whatever screen the
+                // server's status calls for — "choose a password", if none is set. The app
+                // already asks /api/status again when the token changes; that is the same
+                // recovery without throwing away the page the operator was looking at.
                 useAuthStore.getState().clearAccessToken();
-                window.location.reload();
-            } 
+                return reject("Session expired")
+            }
             if(res.status === 406) resolve({status:"Wrong Password"})
             if(!res.ok){
                 const errorDefault = res.statusText
                 return res.json().then( res => reject(getErrorMessageFromServerResponse(res, errorDefault)) ).catch( _err => reject(errorDefault)) 
             }
-            // text/plain bodies (the nfproxy filter source) stay strings: a source file that
+            // text/plain bodies (a filter's Python source) stay strings: a source file that
             // happens to be valid JSON must not be parsed into a number/array/object
             const isPlainText = (res.headers.get("content-type") ?? "").startsWith("text/plain")
             res.text().then(t => {
@@ -152,7 +166,7 @@ export function getMainPath(){
 
 export function HomeRedirector(){
     const section = useSessionStore.getState().getHomeSection();
-    const path = section?`/${section}`:`/nfregex`
+    const path = section?`/${section}`:`/services`
     return <Navigate to={path} replace/>
 }
 
@@ -180,6 +194,12 @@ export async function setpassword(data:PasswordSend) {
     if (access_token)
         useAuthStore.getState().setAccessToken(access_token);
     return status === "ok"?undefined:status
+}
+
+/** Hand access control to a reverse proxy. Off only — see the backend's `set_auth_mode`. */
+export async function setAuthMode(disabled: boolean) {
+    const { status } = await postapi("auth-mode", { disabled }) as ServerResponse;
+    return status === "ok" ? undefined : status
 }
 
 export async function changepassword(data:ChangePassword) {

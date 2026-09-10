@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Firegex HttpHistory Real-Time Stress Test.
-Connects to Firegex API, deploys an nfproxy HTTP service with HttpHistory filter enabled,
+Connects to Firegex API, deploys a service carrying a pyfilter that uses HttpHistory,
 starts an HTTP 200 OK backend server and continuous HTTP client requests.
 Measures real-time memory usage (Firegex cpproxy / local process) and request throughput until stopped (Ctrl+C).
 """
@@ -30,8 +30,8 @@ from tests.utils.colors import colors, puts, sep
 from tests.utils.firegexapi import FiregexAPI
 
 HTTP_STRESS_FILTER_CODE = """
-from firegex.nfproxy.models import HttpFullRequest, HttpFullResponse, HttpHistory
-from firegex.nfproxy import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpFullRequest, HttpFullResponse, HttpHistory
+from firegex.pyfilters import pyfilter, ACCEPT
 
 req_count = 0
 resp_count = 0
@@ -151,6 +151,9 @@ def main():
     parser.add_argument("--service-name", "-n", type=str, default="StressTestHistory", help="Service name (default: StressTestHistory)")
     parser.add_argument("--port", "-P", type=int, default=1337, help="Service port (default: 1337)")
     parser.add_argument("--ipv6", "-6", action="store_true", default=False, help="Use IPv6")
+    parser.add_argument("--transport", "-t", type=str, default="nfqueue",
+                        choices=["nfqueue", "proxy"],
+                        help="Network layer to run the filter on (default: nfqueue)")
     parser.add_argument("--connections", "-c", type=int, default=4, help="Number of concurrent client connections (default: 4)")
     args = parser.parse_args()
 
@@ -173,39 +176,47 @@ def main():
         sys.exit(1)
 
     # 2. Cleanup existing service if any
-    for srv in firegex.nfproxy_get_services():
-        if srv.get("name") == args.service_name or srv.get("port") == args.port:
+    for srv in firegex.services_list():
+        if srv.get("name") == args.service_name or any(
+            a.get("port") == args.port for a in srv.get("addresses", [])
+        ):
             puts(f"Cleaning up existing service ID {srv['service_id']}...", color=colors.yellow)
-            firegex.nfproxy_delete_service(srv["service_id"])
+            firegex.services_delete(srv["service_id"])
 
     # 3. Create service in Firegex
     ip_int = "::1" if args.ipv6 else "127.0.0.1"
-    service_id = firegex.nfproxy_add_service(args.service_name, args.port, "http", ip_int, fail_open=True)
+    service_id = firegex.services_add(
+        args.service_name, ip_int, args.port, args.transport, fail_open=True)
     if not service_id:
-        puts("Error: Failed to create nfproxy service in Firegex ✗", color=colors.red)
+        puts("Error: Failed to create the service in Firegex ✗", color=colors.red)
         sys.exit(1)
-    puts(f"Created nfproxy service ID: {service_id} ✔", color=colors.green)
+    puts(f"Created service ID: {service_id} ✔", color=colors.green)
 
     def cleanup_and_exit(code=0):
         puts("\nCleaning up Firegex service...", color=colors.yellow)
         try:
-            firegex.nfproxy_stop_service(service_id)
-            firegex.nfproxy_delete_service(service_id)
+            firegex.services_stop(service_id)
+            firegex.services_delete(service_id)
             puts("Successfully cleaned up Firegex service ✔", color=colors.green)
         except Exception as e:
             puts(f"Error during cleanup: {e}", color=colors.red)
         sys.exit(code)
 
-    # 4. Upload HttpHistory filter code
+    # 4. Upload the filter. No protocol is passed: the file asks for HttpHistory, and
+    # that is what makes it an HTTP filter.
     puts("Deploying HttpHistory pyfilter code to Firegex...", color=colors.cyan)
-    if not firegex.nfproxy_set_code(service_id, HTTP_STRESS_FILTER_CODE):
+    if not firegex.services_add_filter(service_id, "pyfilter", "history"):
+        puts("Error: Failed to attach the pyfilter ✗", color=colors.red)
+        cleanup_and_exit(1)
+    filter_id = firegex.services_filters(service_id)[0]["filter_id"]
+    if not firegex.services_set_code(service_id, filter_id, HTTP_STRESS_FILTER_CODE):
         puts("Error: Failed to upload pyfilter code ✗", color=colors.red)
         cleanup_and_exit(1)
     puts("Successfully deployed HttpHistory filter ✔", color=colors.green)
 
     # 5. Start Firegex Service
     puts("Starting Firegex service...", color=colors.cyan)
-    if not firegex.nfproxy_start_service(service_id):
+    if not firegex.services_start(service_id):
         puts("Error: Failed to start Firegex service ✗", color=colors.red)
         cleanup_and_exit(1)
     puts("Firegex service started successfully ✔", color=colors.green)

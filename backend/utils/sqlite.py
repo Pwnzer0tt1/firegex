@@ -133,7 +133,14 @@ class SQLite():
         for table in tables:
             tname = table["name"]
             if tname == 'keys_values':
-                res[tname] = self.query(f"SELECT * FROM {tname} WHERE key NOT IN ('password', 'secret');")
+                # Three keys never travel in a backup. `password` and `secret` are this
+                # instance's credentials, and `auth_disabled` is *whether it asks for
+                # them* — a property of where this firegex is deployed, not of the
+                # configuration being backed up. A backup that could carry it would be a
+                # backup that can turn a firewall's authentication off on restore.
+                res[tname] = self.query(
+                    f"SELECT * FROM {tname} WHERE key NOT IN ('password', 'secret', 'auth_disabled');"
+                )
             else:
                 res[tname] = self.query(f"SELECT * FROM {tname};")
         return res

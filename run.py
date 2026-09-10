@@ -21,6 +21,7 @@ class g:
     standalone_mode = False
     rootfs_path = "./firegexfs"
     pid_file = "./.firegex-standalone.pid"
+    docker_sudo = False
 os.chdir(os.path.dirname(os.path.realpath(__file__)))
 
 if os.path.isfile("./Dockerfile"):
@@ -86,15 +87,17 @@ def cmd_check(program, get_output=False, print_output=False, no_stderr=False):
 def composecmd(cmd, composefile=None):
     if composefile:
         cmd = f"-f {composefile} {cmd}"
-    if cmd_check("docker compose --version"):
-        return os.system(f"docker compose -p firegex {cmd}")
-    elif cmd_check("docker-compose --version"):
-        return os.system(f"docker-compose -p firegex {cmd}")
+    sudo = "sudo " if g.docker_sudo else ""
+    if cmd_check(f"{sudo}docker compose --version"):
+        return subprocess.run(f"{sudo}docker compose -p firegex {cmd}", shell=True)
+    elif cmd_check(f"{sudo}docker-compose --version"):
+        return subprocess.run(f"{sudo}docker-compose -p firegex {cmd}", shell=True)
     else:
         puts("Docker compose not found! please install docker compose!", color=colors.red)
 
 def check_already_running():
-    return "firegex" in cmd_check('docker ps --filter "name=^firegex$"', get_output=True)
+    sudo = "sudo " if g.docker_sudo else ""
+    return "firegex" in cmd_check(f'{sudo}docker ps --filter "name=^firegex$"', get_output=True)
 
 def load_config():
     """Load configuration from .firegex-conf.json"""
@@ -204,7 +207,8 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_config.add_argument('--password', required=False, type=str, nargs='?', const='', help='Change the password of the firewall (omit the value to be prompted for it interactively)')
     parser_config.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_config.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
-    parser_config.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=None, help='UNSAFE: persist whether Firegex password/JWT authentication is disabled (applied on the next start/restart)')
+    parser_config.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=None, help='UNSAFE: turn Firegex password/JWT authentication off or back on, on the running instance and for the next start')
+    parser_config.add_argument('--keep-auth-disabled', required=False, action="store_true", default=False, help='With --password: store the new password without turning authentication back on (for an instance kept open behind a trusted reverse proxy)')
     parser_config.add_argument('--show', required=False, action="store_true", help='Show current configuration', default=False)
     args = parser.parse_args(args=args_to_parse)
     
@@ -400,6 +404,11 @@ def write_compose(skip_password = True):
                         ],
                         "cap_add": [
                             "NET_ADMIN",
+                            # What the proxy engine opens its capture socket with, to
+                            # write a TLS service's decrypted traffic to `firegex0`.
+                            # Named rather than relied on: it is in Docker's default set
+                            # today, and a default is not a promise.
+                            "NET_RAW",
                             "SYS_NICE"
                         ]
                     }
@@ -471,13 +480,19 @@ def get_password():
 
 
 def volume_exists():
-    return "firegex_firegex_data" in cmd_check('docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
+    sudo = "sudo " if g.docker_sudo else ""
+    return "firegex_firegex_data" in cmd_check(f'{sudo}docker volume ls --filter "name=^firegex_firegex_data$"', get_output=True)
 
 def firegex_db_exists():
     """Whether a database (and therefore a possibly already set password) is around."""
     if g.standalone_mode:
         return os.path.isfile(os.path.join(g.rootfs_path, "execute/db/firegex.db"))
-    return volume_exists()
+    else:
+        return volume_exists()
+
+def delete_volume():
+    sudo = "sudo " if g.docker_sudo else ""
+    return cmd_check(f"{sudo}docker volume rm firegex_firegex_data")
 
 def warn_if_auth_disabled():
     if not getattr(args, 'unsafe_disable_auth', False):
@@ -530,9 +545,6 @@ def nfqueue_exists():
             return True
     return False
 
-
-def delete_volume():
-    return cmd_check("docker volume rm firegex_firegex_data")
 
 def write_pid_file(pid):
     """Write PID to file"""
@@ -621,7 +633,8 @@ def stop_standalone_process():
 def is_docker_rootless():
     """Check if Docker is running in rootless mode"""
     try:
-        output = cmd_check('docker info -f "{{println .SecurityOptions}}"', get_output=True)
+        sudo = "sudo " if g.docker_sudo else ""
+        output = cmd_check(f'{sudo}docker info -f "{{{{println .SecurityOptions}}}}"', get_output=True)
         return "rootless" in output.lower()
     except Exception:
         return False
@@ -645,7 +658,10 @@ def should_use_standalone():
     
     # Check if Docker is accessible
     if not cmd_check("docker ps"):
-        return True
+        if cmd_check("sudo docker ps"):
+            g.docker_sudo = True
+        else:
+            return True
     
     # Check if Docker is in rootless mode
     if is_docker_rootless():
@@ -1005,6 +1021,97 @@ def clear_standalone():
     else:
         puts("Standalone rootfs not found", color=colors.yellow)
 
+#: Written into the running instance's own database. It reads them per request, so a
+#: change lands on the next one instead of on the next restart.
+_KV_WRITE = (
+    "import sqlite3, sys\n"
+    "conn = sqlite3.connect(sys.argv[1])\n"
+    "for key, value in zip(sys.argv[2::2], sys.argv[3::2]):\n"
+    "    if conn.execute('UPDATE keys_values SET value = ? WHERE key = ?', (value, key)).rowcount == 0:\n"
+    "        conn.execute('INSERT INTO keys_values (key, value) VALUES (?, ?)', (key, value))\n"
+    "conn.commit()\n"
+    "conn.close()\n"
+)
+
+#: The same, the other way round. `None` for a key that is not there.
+_KV_READ = (
+    "import sqlite3, sys\n"
+    "conn = sqlite3.connect(sys.argv[1])\n"
+    "row = conn.execute('SELECT value FROM keys_values WHERE key = ?', (sys.argv[2],)).fetchone()\n"
+    "print(row[0] if row else '')\n"
+)
+
+DB_IN_CONTAINER = "/execute/db/firegex.db"
+
+
+def _standalone_db():
+    path = os.path.join(g.rootfs_path, "execute/db/firegex.db")
+    return path if os.path.isfile(path) else None
+
+
+def put_runtime_settings(pairs: dict) -> bool:
+    """Write settings straight into the running instance's database.
+
+    Two ways in, because there are two ways firegex runs; one function, because a setting
+    that applies under Docker and quietly does nothing standalone is a setting nobody can
+    rely on. UPDATE first and INSERT only if it changed nothing: the other order relies on
+    catching an integrity error, which leaves the caller unable to tell a key that was
+    already there from a database that was not writable.
+
+    Returns False when there is nothing running or stored to write to.
+    """
+    flat = [item for pair in pairs.items() for item in pair]
+    standalone = _standalone_db()
+    if g.standalone_mode and standalone:
+        import sqlite3
+        conn = sqlite3.connect(standalone)
+        try:
+            for key, value in pairs.items():
+                if conn.execute("UPDATE keys_values SET value = ? WHERE key = ?", (value, key)).rowcount == 0:
+                    conn.execute("INSERT INTO keys_values (key, value) VALUES (?, ?)", (key, value))
+            conn.commit()
+        finally:
+            conn.close()
+        return True
+    if volume_exists():
+        try:
+            cmd = ["sudo", "docker"] if getattr(g, "docker_sudo", False) else ["docker"]
+            subprocess.run(
+                cmd + ["exec", "firegex", "python3", "-c", _KV_WRITE, DB_IN_CONTAINER, *flat],
+                check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+            return True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return False
+    return False
+
+
+def get_runtime_setting(key: str):
+    """What the running instance currently holds for `key`, or None if it cannot be asked."""
+    standalone = _standalone_db()
+    if g.standalone_mode and standalone:
+        import sqlite3
+        conn = sqlite3.connect(standalone)
+        try:
+            row = conn.execute("SELECT value FROM keys_values WHERE key = ?", (key,)).fetchone()
+            return row[0] if row else None
+        except Exception:
+            return None
+        finally:
+            conn.close()
+    if volume_exists():
+        try:
+            cmd = ["sudo", "docker"] if getattr(g, "docker_sudo", False) else ["docker"]
+            out = subprocess.run(
+                cmd + ["exec", "firegex", "python3", "-c", _KV_READ, DB_IN_CONTAINER, key],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip()
+            return out or None
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+    return None
+
+
 def handle_config_command(args):
     """Handle config command"""
     config = load_config()
@@ -1016,6 +1123,13 @@ def handle_config_command(args):
         puts(f"Host: {config['host']}", color=colors.white)
         puts(f"Socket dir: {config['socket_dir']}", color=colors.white)
         puts(f"Authentication disabled: {config.get('unsafe_disable_auth', False)}", color=colors.white)
+        # What the next start will do, and what the running one is actually doing: they
+        # part company the moment authentication is turned off from the interface, which
+        # lasts only as long as the process.
+        live = get_runtime_setting("auth_disabled")
+        if live is not None and (live == "1") != bool(config.get("unsafe_disable_auth", False)):
+            puts(f"  (the running instance has it {'disabled' if live == '1' else 'enabled'} "
+                 f"right now — that lasts until it restarts)", color=colors.yellow)
         puts(f"Config file: {g.configfile}", color=colors.white)
         return
     
@@ -1044,7 +1158,23 @@ def handle_config_command(args):
             puts("Authentication disabled: every request reaching firegex becomes a full administrator", color=colors.red, is_bold=True)
         else:
             puts("Authentication enabled", color=colors.green)
-        puts("The change is applied on the next start/restart of firegex.", color=colors.yellow)
+        # Both halves, or the two disagree until the next restart: the database is what
+        # the running process reads, the config file is what the next one comes up with.
+        applied = put_runtime_settings({"auth_disabled": "1" if args.unsafe_disable_auth else "0"})
+        if applied:
+            puts("Applied to the running instance immediately, and kept for the next start.", color=colors.green)
+        else:
+            puts("Firegex is not running: the change is kept for the next start.", color=colors.yellow)
+        # Only when nothing on this same command line is about to set one: the password
+        # block runs after this one, so warning here about a password that is two lines
+        # away from existing would be a warning about nothing.
+        setting_one_now = getattr(args, 'password', None) is not None
+        if not args.unsafe_disable_auth and not setting_one_now \
+                and get_runtime_setting("password") is None:
+            # Otherwise the interface answers with the "choose a password" screen and the
+            # operator has no idea which of the two things they did caused it.
+            puts("There is no password set, so firegex will ask for one to be chosen.", color=colors.yellow)
+            puts("Set it here instead with 'python3 run.py config --password'.", color=colors.yellow)
     
     if hasattr(args, 'password') and args.password is not None:
         new_password = args.password
@@ -1066,46 +1196,38 @@ def handle_config_command(args):
             puts("Error: The password has to be at least 8 char long", color=colors.red)
             exit(1)
 
-        hashed = hash_psw(new_password)
-
-        if g.standalone_mode and os.path.isfile(os.path.join(g.rootfs_path, "execute/db/firegex.db")):
-            import sqlite3
-            db_path = os.path.join(g.rootfs_path, "execute/db/firegex.db")
-            try:
-                conn = sqlite3.connect(db_path)
-                try:
-                    conn.execute('INSERT INTO keys_values (key, value) VALUES (?, ?)', ('password', hashed))
-                except Exception:
-                    conn.execute('UPDATE keys_values SET value = ? WHERE key = ?', (hashed, 'password'))
-                conn.commit()
-                conn.close()
-                puts("Password changed successfully! It will take effect immediately.", color=colors.green)
-            except Exception as e:
-                puts(f"Error changing password: {e}", color=colors.red)
-                exit(1)
-        elif volume_exists():
-            # The hash is passed as a plain argv item (sys.argv[1]) rather than interpolated
-            # into the -c source, so it never needs shell/Python-string escaping.
-            py_code = (
-                "import sqlite3, sys\n"
-                "conn = sqlite3.connect('/execute/db/firegex.db')\n"
-                "hashed = sys.argv[1]\n"
-                "try:\n"
-                "    conn.execute('INSERT INTO keys_values (key, value) VALUES (?, ?)', ('password', hashed))\n"
-                "except Exception:\n"
-                "    conn.execute('UPDATE keys_values SET value = ? WHERE key = ?', (hashed, 'password'))\n"
-                "conn.commit()\n"
-                "conn.close()\n"
-            )
-            try:
-                subprocess.run(["docker", "exec", "firegex", "python3", "-c", py_code, hashed], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                puts("Password changed successfully! It will take effect immediately.", color=colors.green)
-            except subprocess.CalledProcessError:
-                puts("Error: Could not change password. Is Firegex running?", color=colors.red)
-                exit(1)
-        else:
+        # The hash travels as a plain argv item rather than interpolated into source, so
+        # it never needs shell or Python-string escaping.
+        if not put_runtime_settings({"password": hash_psw(new_password)}):
             puts("Error: Firegex is not running and no standalone data found.", color=colors.red)
             exit(1)
+        puts("Password changed successfully! It will take effect immediately.", color=colors.green)
+
+        # Setting a password is asking for one to be asked for. A password that is stored
+        # and not in force is worse than no password, because it reads as one — so when
+        # authentication is off, this turns it back on rather than reporting success and
+        # leaving every caller an administrator. Both halves, or the two would disagree
+        # until the next restart: the database is what the running process reads, the
+        # config file is what the next one comes up with.
+        #
+        # Not when the same command line also said otherwise. `--unsafe-disable-auth`
+        # passed here is an explicit instruction and wins; `--keep-auth-disabled` is for
+        # the one case where storing a password without putting it in force is the point
+        # — an instance held open behind a proxy that authenticates, with a password kept
+        # ready for the day it is not.
+        asked_otherwise = (getattr(args, 'unsafe_disable_auth', None) is not None
+                           or getattr(args, 'keep_auth_disabled', False))
+        if get_runtime_setting("auth_disabled") == "1":
+            if asked_otherwise:
+                puts("Authentication stays disabled, so nothing asks for it yet.", color=colors.yellow)
+                puts("Put it in force with 'python3 run.py config --no-unsafe-disable-auth'.", color=colors.yellow)
+            else:
+                config["unsafe_disable_auth"] = False
+                put_runtime_settings({"auth_disabled": "0"})
+                puts("Authentication was disabled on this instance: turned back on, so the new "
+                     "password is asked for.", color=colors.green, is_bold=True)
+                puts("Pass --keep-auth-disabled to store a password without putting it in force.",
+                     color=colors.yellow)
 
         config_changed = True
 
@@ -1190,13 +1312,14 @@ def main():
         return
     
     # Original Docker-based logic
-    if not cmd_check("docker --version"):
+    sudo = "sudo " if g.docker_sudo else ""
+    if not cmd_check(f"{sudo}docker --version"):
         puts("Docker not found! please install docker and docker compose!", color=colors.red)
         exit()
-    elif not cmd_check("docker-compose --version") and not cmd_check("docker compose --version"):
+    elif not cmd_check(f"{sudo}docker-compose --version") and not cmd_check(f"{sudo}docker compose --version"):
         puts("Docker compose not found! please install docker compose!", color=colors.red)
         exit()
-    if not cmd_check("docker ps"):
+    if not cmd_check(f"{sudo}docker ps"):
         puts("Cannot use docker, the user hasn't the permission or docker isn't running", color=colors.red)
         exit()
     
@@ -1223,8 +1346,8 @@ def main():
                     warn_if_auth_disabled()
                     write_compose(skip_password=False)
                     if not g.build:
-                        puts("Downloading docker image from github packages 'docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
-                        cmd_check(f"docker pull ghcr.io/pwnzer0tt1/firegex:{args.version}", print_output=True)
+                        puts(f"Downloading docker image from github packages '{sudo}docker pull ghcr.io/pwnzer0tt1/firegex'", color=colors.green)
+                        cmd_check(f"{sudo}docker pull ghcr.io/pwnzer0tt1/firegex:{args.version}", print_output=True)
                     puts("Running 'docker compose up -d --build'\n", color=colors.green)
                     composecmd("up -d --build", g.composefile)
             case "compose":

@@ -1,19 +1,13 @@
 import { ActionIcon, ActionIconProps, Box, Container, Modal, ScrollArea, ScrollAreaAutosize, Title, Tooltip } from "@mantine/core";
 import { useState } from "react";
 import { FaBookBookmark } from "react-icons/fa6";
-import { NFRegexDocs } from "./NFRegex/NFRegexDocs";
-import { NFProxyDocs } from "./NFProxy/NFProxyDocs";
-import { PortHijackDocs } from "./PortHijack/PortHijackDocs";
+import { ServicesDocs } from "./Services/ServicesDocs";
 import { FirewallDocs } from "./Firewall/FirewallDocs";
-import { TLSDocs } from "./TLSDocs";
 import { EnumToPrimitiveUnion } from "../js/utils";
 
 export enum DocType{
-    NFREGEX = "nfregex",
-    NFPROXY = "nfproxy",
-    PORTHIJACK = "porthijack",
+    SERVICES = "services",
     FIREWALL = "firewall",
-    TLS = "tls",
 }
 
 
@@ -29,16 +23,10 @@ export const DocsButton = ({ doc, ...props }: { doc: EnumToPrimitiveUnion<DocTyp
         } scrollAreaComponent={ScrollArea.Autosize}>
             <Container style={{padding: "1rem", maxWidth:"90vw"}}>
                 {
-                    doc == DocType.NFREGEX ? 
-                        <NFRegexDocs />:
-                    doc == DocType.NFPROXY ?
-                        <NFProxyDocs />:
-                    doc == DocType.PORTHIJACK ?
-                        <PortHijackDocs />:
+                    doc == DocType.SERVICES ?
+                        <ServicesDocs />:
                     doc == DocType.FIREWALL ?
                         <FirewallDocs />:
-                    doc == DocType.TLS ?
-                        <TLSDocs />:
                     <Title order={3}>Docs not found</Title>
                 }
             </Container>

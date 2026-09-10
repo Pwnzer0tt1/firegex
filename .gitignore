@@ -26,7 +26,7 @@
 /backend/binsrc/cppregex
 /backend/modules/cpproxy
 /backend/binsrc/cpproxy
-/backend/modules/proxy
+/backend/modules/fgex-proxy
 /docker-compose.yml
 /firegex-compose.yml
 /.firegex-compose.yml
@@ -39,6 +39,7 @@
 
 /firegex.py
 /tests/benchmark.csv
+/tests/proxy_benchmark.csv
 /tests/comparemark.csv
 # misc
 **/.DS_Store
@@ -51,3 +52,7 @@
 **/yarn-debug.log*
 **/yarn-error.log*
 .claude
+
+# Rust proxy engine build artifacts
+/backend/proxysrc/target/
+# Copied from the repository root by fgex-lib/setup.py at build time.

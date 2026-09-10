@@ -1,0 +1,33 @@
+[package]
+name = "fgex-proxy"
+version = "0.1.0"
+edition = "2021"
+description = "Proxy datapath engine for firegex (fail-open spike)"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "io-std", "macros", "time", "sync"] }
+# Raw setsockopt: IP_TRANSPARENT and SO_ORIGINAL_DST have no safe wrapper.
+libc = "0.2"
+# Filter rules arrive as one JSON line on stdin
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# TLS terminated by the engine, so the plaintext never leaves the process.
+# `ring` rather than the default aws-lc-rs: it builds without cmake or nasm, which
+# keeps the Docker stage a plain `cargo build`.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std", "logging"] }
+rustls-pemfile = "2"
+
+[dev-dependencies]
+# Test certificates are generated, never committed.
+rcgen = "0.13"
+
+# Catching a panicking filter is what keeps the datapath alive, so the binary
+# must unwind rather than abort. This is not a tuning knob, it is load-bearing.
+[profile.release]
+panic = "unwind"
+opt-level = 3
+
+[profile.dev]
+panic = "unwind"

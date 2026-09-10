@@ -6,3 +6,4 @@ cryptography
 psutil
 pydantic
 python-socketio[client]
+pytest

@@ -53,7 +53,7 @@ function buildMarkdownComponents(sourcePath: string): Components {
 // Renders a markdown documentation source (imported elsewhere via `?raw`) with
 // Firegex's Mantine styling, so every module's docs page shares one renderer
 // and one on-disk source of truth instead of duplicating hand-written JSX.
-// `sourcePath` is the file's repo-relative path (e.g. "docs/nfproxy.md"), used
+// `sourcePath` is the file's repo-relative path (e.g. "docs/pyfilter.md"), used
 // to resolve relative cross-references to other doc files.
 export const MarkdownDocs = ({ content, sourcePath }: { content: string; sourcePath: string }) => {
     return (

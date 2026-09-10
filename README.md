@@ -84,11 +84,20 @@ This is especially useful if you lost the current password: it's applied directl
 
 ## Functionalities
 
-- **[Netfilter Regex](docs/nfregex.md)**: filtering using [NFQUEUE](https://netfilter.org/projects/libnetfilter_queue/) with [nftables](https://netfilter.org/projects/nftables/) uses a c++ file that handle the regexes and the requests, blocking the malicius requests. PCRE2 regexes are used. The requests are intercepted kernel side, so this filter works immediatly (IPv4/6 and TCP/UDP supported)
+- **[Services](docs/services.md)**: the main module. A service is one protected endpoint described in two independent parts — a **network layer** that says how its traffic is intercepted, and an ordered chain of **filters** that says what happens to it.
+  - A service protects a **list of addresses**, mixing IPv4 and IPv6 freely: one daemon routinely answers on more than one, and all of them get the same chain. Adding an address to a running service drops no connections.
+  - Network layer: **NFQUEUE** (packets lifted to userspace with [nfqueue](https://netfilter.org/projects/libnetfilter_queue/) and [nftables](https://netfilter.org/projects/nftables/), nothing terminated, the kernel keeps forwarding if a filter dies) or **proxy** (the connection is terminated and reopened, which buys exact rewriting, an ordered chain of filters, and real backpressure — while still dialling your service from the client's own address, so it never stops seeing who is talking to it).
+  - Filters: **regex**, matched by [hyperscan](https://github.com/VectorCamp/vectorscan) — the same engine on either layer, so a pattern means the same thing wherever it runs — or **Python**, your own code written against the [`firegex`](https://pypi.org/project/firegex/) library, with built-in models for HTTP and TCP streams. You never declare which protocol a Python filter speaks: asking for an `HttpRequest` is what makes it an HTTP filter, and a filter reads the addresses and ports as metadata while the payload is the only thing it can change.
+  - A regex can **block** the connection or **rewrite** what it matched (redact a leaked flag, neuter a header). Rewriting is exact on the proxy layer, which owns both connections; the NFQUEUE layer refuses it rather than desynchronising the stream.
+  - **TLS** is a switch on the service, not a separate thing to create: nginx terminates the connection, the filters inspect the plaintext, and it is re-encrypted towards your service.
+  - Or **your own proxy** as the network layer: firegex rewrites the destination on the way in and changes it back on the way out, so a proxy you wrote yourself sits in the path invisibly. The escape hatch for a protocol nothing built in understands.
+  - **TCP or UDP**, on every layer — but [UDP through the proxy does not preserve the client's address](docs/services.md#udp-on-the-proxy-layer-and-what-it-gives-up), because the kernel option that recovers a datagram's original destination is TCP-only. You get exact rewriting and per-flow filter state; your service sees firegex instead of the client. NFQUEUE filters UDP with the real packets untouched. Firegex says which trade you are making, where you make it.
+  - **The two inspecting layers are opposite trades, [compared side by side in the interface itself](docs/services.md#network-layers) while you choose**: the proxy owns both halves of a connection, so it rewrites exactly and lets the kernel reassemble, at the cost of weight and of rebuilding fail-open by hand; NFQUEUE is per packet, costs almost nothing and keeps forwarding by kernel guarantee if a filter dies, at the cost of userspace reassembly and no pattern rewriting.
+  - **Charts of what each filter has refused** — per filter, per pattern and per `@pyfilter` function, each with **its share of the blocking**. Pick the window (last 15 minutes, hour, 6h, 24h, everything kept, or two exact instants) and the shape (bars, lines, stacked area, or share); **everything on the page counts the same window**, so the chart and the table beside it can never tell different stories. Alongside it, how much traffic arrived, in the unit each layer can honestly report.
+  - **The Python editor knows the library**: completion and hover for every model and its members — marking which of them you may write to — and the file is **checked as you type by the process that will run it**, so a mistake is flagged on its own line with the reason instead of surfacing later as "worker exited". The hints are introspected from the installed library, so they cannot drift from it.
+  - A **live log** per service shows what it is doing as it does it: what refused each connection (by name and pattern, not an opaque id), whatever your Python prints, and what the datapath says about its own health.
+  - A **pattern tester** is built in, and it runs the very engine that will enforce the answer — so a pattern it accepts is one you can save, and one it rejects tells you why in the engine's own words.
 - **[Firewall Rules](docs/firewall.md)**: create basic firewall rules to allow and deny specific traffic, like ufw or iptables but using firegex graphic interface (by using [nftable](https://netfilter.org/projects/nftables/))
-- **[Hijack Port to Proxy](docs/porthijack.md)**: redirect the traffic on a specific port to another port. Thanks to this you can start your own proxy, connecting to the real service using the loopback interface. Firegex will be resposable about the routing of the packets using internally [nftables](https://netfilter.org/projects/nftables/)
-- **[Netfilter Proxy](docs/nfproxy.md)**: uses [nfqueue](https://netfilter.org/projects/libnetfilter_queue/) to simulate a python proxy, you can write your own filter in python and use it to filter the traffic. There are built-in some data handler to parse protocols like HTTP, and before apply the filter you can test it with fgex command (you need to install firegex lib from pypi).
-- **[TLS Decryption](docs/tls.md)**: a decrypt-and-reinspect bridge for services that speak TLS natively. It transparently terminates the public TLS connection, exposes the decrypted traffic on a loopback port so a Netfilter Regex/Proxy service can inspect it, then re-encrypts before forwarding to the real backend.
 
 Firegex can also be restricted to accept connections only from a set of trusted CIDR ranges (`--allowed-ips`, optionally combined with `--proxy-ip-header` when running behind a reverse proxy) — see `python3 run.py start -h`.
 
@@ -102,11 +111,17 @@ python3 run.py start --host 127.0.0.1 --unsafe-disable-auth -P 'a-password-for-l
 
 This disables Firegex's password, JWT, and Socket.IO authentication: **every request that reaches Firegex is a full administrator**, so bind it to loopback, a Unix socket, or otherwise make sure nothing but the proxy can reach it. Requests forwarded by the proxy, including headers such as `X-Forwarded-For`, reach Firegex normally. Use `--no-unsafe-disable-auth` to turn the built-in authentication back on.
 
+It can also be switched **while Firegex is running**, from either end:
+
+- **From the interface**, under the menu's *Firewall Access* section: *Turn Authentication Off* takes effect on the next request. The browser that did it keeps its session, so the same menu offers *Turn Authentication On* to undo it. A browser that arrives afterwards does not get that option — while authentication is off, anyone who can reach Firegex could otherwise set their own password and keep you out for good.
+- **From the host**, with `python3 run.py config --unsafe-disable-auth` / `--no-unsafe-disable-auth`. This is the one that sticks: it writes to the running instance *and* persists the choice for the next start. A change made from the interface lasts only until Firegex restarts, since the start-up flag is what it comes up with. `config --password` re-enables it on its own — see below.
+
 A few things worth knowing before using it:
 
-- **The setting is persisted** in `.firegex-conf.json`, like `--port` or `--allowed-ips`: a later plain `python3 run.py start` keeps authentication disabled until you pass `--no-unsafe-disable-auth`. Every start prints a banner while it is active, and `python3 run.py config --show` reports it.
-- **Set a password anyway** (`-P`, or later `python3 run.py config --password`). It is unused while authentication is disabled, but it is what you fall back on if you re-enable it. Without one, `--no-unsafe-disable-auth` brings Firegex up in its initial-setup state, where anyone who can reach it chooses the password.
-- **The password cannot be changed over the API** while authentication is disabled (`/api/login`, `/api/set-password` and `/api/change-password` answer `403`) — otherwise an anonymous caller could plant a credential that keeps working once authentication is back on. `python3 run.py config --password` still works, since it writes to the database from the host.
+- **The setting is persisted** in `.firegex-conf.json`, like `--port` or `--allowed-ips`: a later plain `python3 run.py start` keeps authentication disabled until you pass `--no-unsafe-disable-auth`. Every start prints a banner while it is active, and `python3 run.py config --show` reports it — including when the running instance currently disagrees with it.
+- **Set a password anyway** (`-P` at first start). Without one, `--no-unsafe-disable-auth` brings Firegex up in its initial-setup state, where anyone who can reach it chooses the password.
+- **`config --password` turns authentication back on**, if it was off — setting a password is asking for one to be asked for, and a password that is stored but never checked is worse than no password because it reads like one. It applies to the running instance and to the next start, both. Pass `--keep-auth-disabled` for the one case where that is not what you want: an instance held open behind a proxy that authenticates, with a password kept ready for the day it is not.
+- **The password cannot be changed over the API** while authentication is disabled (`/api/login`, `/api/set-password` and `/api/change-password` answer `403`) — otherwise an anonymous caller could plant a credential that keeps working once authentication is back on. `python3 run.py config --password` still works, since it writes to the database from the host, and it takes effect on the next request rather than on the next restart.
 - **`--allowed-ips` is not a substitute for the proxy's access control.** Combined with `--proxy-ip-header` it trusts a client-supplied header, so it only holds up if the proxy overwrites that header and nothing else can reach the port directly.
 
 ## Documentation
@@ -116,10 +131,10 @@ Each module above has its own markdown guide under [`docs/`](docs/), covering ho
 Heres a brief description about the firegex structure:
 
 - [Frontend (React)](frontend/README.md)
-- [Backend (FastAPI + C++)](backend/README.md)
-- [Netfilter Proxy Python library (`firegex`/`fgex` pip package)](fgex-lib/README.md)
+- [Backend (FastAPI + C++ and Rust datapaths)](backend/README.md)
+- [Python filter library (`firegex`/`fgex` pip package)](fgex-lib/README.md)
 
-More specific information about how Firegex works, and in particular about the nfproxy module, are available here (in italian only): [https://github.com/domysh/engineering-thesis](https://github.com/domysh/engineering-thesis) (PDF in the release attachments)
+More specific information about how Firegex works, and in particular about the Python filter engine (called `nfproxy` at the time), are available here (in italian only): [https://github.com/domysh/engineering-thesis](https://github.com/domysh/engineering-thesis) (PDF in the release attachments)
 
 ![Firegex Working Scheme](docs/FiregexInternals.png)
 

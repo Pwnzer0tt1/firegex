@@ -222,7 +222,7 @@ class Singleton(object):
 
 class NFTableManager(Singleton):
     
-    table_name = "firegex"
+    table_name = "fgex"
     
     def __init__(self, init_cmd, reset_cmd):
         self.__init_cmds = init_cmd

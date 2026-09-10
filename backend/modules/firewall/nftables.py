@@ -1,47 +1,108 @@
+"""The plain-nftables firewall, in tables of firegex's own.
+
+**Everything here is named `fgex_`, and that is not only cosmetic.** This module used to
+write into the tables called `filter` and `mangle` — the ones `iptables-nft` claims —
+putting base chains named INPUT and FORWARD beside iptables' own and setting their
+policy. Two things went wrong with that, and both were reported from real hosts:
+
+* **iptables stops working.** `iptables-nft` refuses a whole table as soon as it holds
+  one rule it cannot express in its own format, and the first thing this module writes
+  is a native `ct state` match — iptables stores that as an `xt` match blob instead. From
+  then on `iptables -L`, `iptables-save` and everything built on them answer
+  ``table `filter' is incompatible, use 'nft' tool``, on a box where Docker, ufw,
+  fail2ban or the organisers' own scripts are the ones asking. It took nothing exotic to
+  trigger: `allow_established` and `drop_invalid` are the two settings that write `ct
+  state`, and both are on in any sane configuration.
+* **Stopping firegex opened the host.** `reset()` set the policy of `filter INPUT` back
+  to `accept`, and that chain belonged to the *administrator*: a host carrying a
+  default-deny policy had it quietly removed the moment the firegex firewall was
+  disabled.
+
+Owning the tables fixes both by construction, and costs nothing: a base chain carries
+its own policy wherever it lives, so default-deny is expressed exactly as before, and a
+`drop` is terminal no matter which table's chain reached it. What changes is that
+firegex now *adds* a layer instead of taking over somebody else's — an `accept` here
+means "firegex does not block this", never "nothing else will", which is what it already
+meant in practice. Everything installed is visible under one prefix and removed by
+deleting two tables per family.
+"""
+
 from modules.firewall.models import FirewallSettings, Action, Rule, Protocol, Mode, Table
 from utils import nftables_int_to_json, ip_family, NFTableManager, is_ip_parse
 import copy
 
+#: Where a rule's `table` — which is the operator's word, stored in the database and
+#: shown in the interface — actually lands. The two are deliberately not the same string
+#: any more: "filter" and "mangle" describe what a rule *does*, and used to double as the
+#: name of somebody else's table.
+NFT_TABLES = {
+    Table.FILTER: "fgex_filter",
+    Table.MANGLE: "fgex_mangle",
+}
+
+
 class FiregexTables(NFTableManager):
-    rules_chain_in = "firegex_firewall_rules_in"
-    rules_chain_out = "firegex_firewall_rules_out"
-    rules_chain_fwd = "firegex_firewall_rules_fwd"
-    filter_table = "filter"
-    mangle_table = "mangle"
-    
+    rules_chain_in = "fgex_rules_in"
+    rules_chain_out = "fgex_rules_out"
+    rules_chain_fwd = "fgex_rules_fwd"
+    filter_table = NFT_TABLES[Table.FILTER]
+    mangle_table = NFT_TABLES[Table.MANGLE]
+
+    #: The base chains, and the one rules chain each of them hands over to. Hook and
+    #: priority are the same ones the rules used to be evaluated at, so what reaches a
+    #: rule is unchanged; only the table around it is firegex's.
+    base_chains = [
+        # (table, chain, hook, priority, follows the configured policy)
+        ("filter", "fgex_input", "input", 0, True, rules_chain_in),
+        ("filter", "fgex_forward", "forward", 0, True, rules_chain_fwd),
+        ("filter", "fgex_output", "output", 0, False, rules_chain_out),
+        ("mangle", "fgex_prerouting", "prerouting", -150, False, rules_chain_in),
+        ("mangle", "fgex_postrouting", "postrouting", -150, False, rules_chain_out),
+    ]
+
+    #: The rules chains, and which table each lives in. `fgex_rules_fwd` is filter-only:
+    #: mangle has no forward hook in this layout, which is why a mangle rule in forward
+    #: mode is refused by the router before it gets here.
+    rules_chains = [
+        ("filter", rules_chain_in), ("filter", rules_chain_out), ("filter", rules_chain_fwd),
+        ("mangle", rules_chain_in), ("mangle", rules_chain_out),
+    ]
+
+    def _table(self, which: str) -> str:
+        return self.filter_table if which == "filter" else self.mangle_table
+
+    def _skeleton(self, policy: str):
+        """Everything that has to exist before a single rule can be added.
+
+        The base chains are flushed and re-pointed rather than inspected for a jump that
+        may already be there. Each holds exactly one rule and nothing else, so rebuilding
+        is shorter than checking and cannot leave a duplicate behind; the version that
+        checked had to, because the chain belonged to iptables and emptying it was not
+        firegex's to do.
+        """
+        for family in ("ip", "ip6"):
+            for table in (self.filter_table, self.mangle_table):
+                yield {"add": {"table": {"name": table, "family": family}}}
+            for which, chain in self.rules_chains:
+                yield {"add": {"chain": {
+                    "family": family, "table": self._table(which), "name": chain,
+                }}}
+            for which, chain, hook, prio, follows_policy, target in self.base_chains:
+                table = self._table(which)
+                yield {"add": {"chain": {
+                    "family": family, "table": table, "name": chain,
+                    "type": "filter", "hook": hook, "prio": prio,
+                    "policy": policy if follows_policy else Action.ACCEPT,
+                }}}
+                yield {"flush": {"chain": {"family": family, "table": table, "name": chain}}}
+                yield {"add": {"rule": {
+                    "family": family, "table": table, "chain": chain,
+                    "expr": [{"jump": {"target": target}}],
+                }}}
+
     def init_comands(self, policy:str=Action.ACCEPT, opt:
         FirewallSettings|None = None):
-        rules = [
-            {"add":{"table":{"name":self.filter_table,"family":"ip"}}},
-            {"add":{"table":{"name":self.filter_table,"family":"ip6"}}},
-            
-            {"add":{"table":{"name":self.mangle_table,"family":"ip"}}},
-            {"add":{"table":{"name":self.mangle_table,"family":"ip6"}}},
-            
-            {"add":{"chain":{"family":"ip","table":self.filter_table, "name":"INPUT","type":"filter","hook":"input","prio":0,"policy":policy}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"INPUT","type":"filter","hook":"input","prio":0,"policy":policy}}},
-            {"add":{"chain":{"family":"ip","table":self.filter_table,"name":"FORWARD","type":"filter","hook":"forward","prio":0,"policy":policy}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"FORWARD","type":"filter","hook":"forward","prio":0,"policy":policy}}},
-            {"add":{"chain":{"family":"ip","table":self.filter_table,"name":"OUTPUT","type":"filter","hook":"output","prio":0,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"OUTPUT","type":"filter","hook":"output","prio":0,"policy":Action.ACCEPT}}},
-            
-            {"add":{"chain":{"family":"ip","table":self.mangle_table, "name":"PREROUTING","type":"filter","hook":"prerouting","prio":-150,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":"PREROUTING","type":"filter","hook":"prerouting","prio":-150,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip","table":self.mangle_table, "name":"POSTROUTING","type":"filter","hook":"postrouting","prio":-150,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":"POSTROUTING","type":"filter","hook":"postrouting","prio":-150,"policy":Action.ACCEPT}}},
-            
-            {"add":{"chain":{"family":"ip","table":self.filter_table,"name":self.rules_chain_in}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":self.rules_chain_in}}},
-            {"add":{"chain":{"family":"ip","table":self.filter_table,"name":self.rules_chain_out}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":self.rules_chain_out}}},
-            {"add":{"chain":{"family":"ip","table":self.filter_table,"name":self.rules_chain_fwd}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":self.rules_chain_fwd}}},
-            
-            {"add":{"chain":{"family":"ip","table":self.mangle_table,"name":self.rules_chain_in}}},
-            {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":self.rules_chain_in}}},
-            {"add":{"chain":{"family":"ip","table":self.mangle_table,"name":self.rules_chain_out}}},
-            {"add":{"chain":{"family":"ip6","table":self.mangle_table,"name":self.rules_chain_out}}},
-        ]
+        rules = list(self._skeleton(policy))
         if opt is None:
             return rules
         
@@ -173,63 +234,27 @@ class FiregexTables(NFTableManager):
         return rules
     
     def __init__(self):
-        super().__init__(self.init_comands(),[      
-            #Needed to reset to ALLOW when fireall is disabled (DO NOT REMOVE)                       
-            {"add":{"chain":{"family":"ip","table":self.filter_table, "name":"INPUT","type":"filter","hook":"input","prio":0,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"INPUT","type":"filter","hook":"input","prio":0,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip","table":self.filter_table,"name":"FORWARD","type":"filter","hook":"forward","prio":0,"policy":Action.ACCEPT}}},
-            {"add":{"chain":{"family":"ip6","table":self.filter_table,"name":"FORWARD","type":"filter","hook":"forward","prio":0,"policy":Action.ACCEPT}}},
-              
-            {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_in}}},
-            {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_out}}},
-            {"flush":{"chain":{"table":self.filter_table,"family":"ip", "name":self.rules_chain_fwd}}},
-            {"flush":{"chain":{"table":self.filter_table,"family":"ip6", "name":self.rules_chain_in}}},
-            {"flush":{"chain":{"table":self.filter_table,"family":"ip6", "name":self.rules_chain_out}}},
-            {"flush":{"chain":{"table":self.filter_table,"family":"ip6", "name":self.rules_chain_fwd}}},
-            
-            {"flush":{"chain":{"table":self.mangle_table,"family":"ip", "name":self.rules_chain_in}}},
-            {"flush":{"chain":{"table":self.mangle_table,"family":"ip", "name":self.rules_chain_out}}},
-            {"flush":{"chain":{"table":self.mangle_table,"family":"ip6", "name":self.rules_chain_in}}},
-            {"flush":{"chain":{"table":self.mangle_table,"family":"ip6", "name":self.rules_chain_out}}}
+        # Taking the firewall down is now deleting what firegex owns, nothing more.
+        # This used to have to put things *back*: the base chains were the host's, so
+        # stopping meant re-adding `filter INPUT` with an accept policy — which silently
+        # undid an administrator's default-deny — and flushing the rules chains one by
+        # one because deleting the table around them was not an option. `add` before
+        # `delete` is there because a batch is atomic and deleting a table that is not
+        # there fails the whole thing; adding one that already exists does nothing.
+        super().__init__(self.init_comands(), [
+            command
+            for family in ("ip", "ip6")
+            for table in (self.filter_table, self.mangle_table)
+            for command in (
+                {"add": {"table": {"name": table, "family": family}}},
+                {"delete": {"table": {"name": table, "family": family}}},
+            )
         ])
-        
-    def chain_to_firegex(self, chain:str, table:str):
-        if table == self.filter_table:
-            match chain:
-                case "INPUT":
-                    return self.rules_chain_in
-                case "OUTPUT":
-                    return self.rules_chain_out
-                case "FORWARD":
-                    return self.rules_chain_fwd
-        elif table == self.mangle_table:
-            match chain:
-                case "PREROUTING":
-                    return self.rules_chain_in
-                case "POSTROUTING":
-                    return self.rules_chain_out
-        return None
-        
-    def insert_firegex_chains(self):
-        rules:list[dict] = list(self.list_rules(tables=[self.filter_table, self.mangle_table], chains=["INPUT", "OUTPUT", "FORWARD", "PREROUTING", "POSTROUTING"]))
-        for table in [self.filter_table, self.mangle_table]:
-            for family in ["ip", "ip6"]:
-                for chain in ["INPUT", "OUTPUT", "FORWARD"] if table == self.filter_table else ["PREROUTING", "POSTROUTING"]:
-                    found = False
-                    rule_to_add = [{ "jump": { "target": self.chain_to_firegex(chain, table) }}]
-                    for r in rules:
-                        if r.get("family") == family and r.get("table") == table and r.get("chain") == chain and r.get("expr") == rule_to_add:
-                            found = True
-                            break
-                    if found:
-                        continue
-                    yield { "add":{ "rule": {
-                            "family": family,
-                            "table": table,
-                            "chain": chain,
-                            "expr": rule_to_add
-                    }}}
-    
+
+
+    def init(self):
+        super().init()
+
     def set(self, srvs:list[Rule], policy:str=Action.ACCEPT, opt:FirewallSettings = None):
         srvs = list(srvs)
         self.reset()
@@ -248,7 +273,9 @@ class FiregexTables(NFTableManager):
                 table=Table.FILTER
             ))
         
-        rules = self.init_comands(policy, opt) + list(self.insert_firegex_chains()) + self.get_rules(*srvs)
+        # No hooking step any more: the base chains are firegex's own and `_skeleton`
+        # already pointed each of them at its rules chain.
+        rules = self.init_comands(policy, opt) + self.get_rules(*srvs)
         self.cmd(*rules)
 
     def get_rules(self,*srvs:Rule):
@@ -297,7 +324,10 @@ class FiregexTables(NFTableManager):
             for fam in families:
                 rules.append({ "add":{ "rule": {
                     "family": fam,
-                    "table": srv.table,
+                    # `srv.table` is the operator's word for what the rule does, kept in
+                    # the database and in the API; the table it lands in is firegex's.
+                    # The two were one string until that string was iptables' table.
+                    "table": NFT_TABLES.get(srv.table, self.filter_table),
                     "chain": self.rules_chain_out if srv.output_mode else self.rules_chain_in if srv.input_mode else self.rules_chain_fwd,
                     "expr": ip_filters + port_filters + end_rules
                 }}})

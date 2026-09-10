@@ -78,7 +78,7 @@ string py_handle_packet_code;
 
 void init_handle_packet_code(){
 	PyObject* compiled_code = Py_CompileStringExFlags(
-		"firegex.nfproxy.internals.handle_packet(globals())\n", "<pyfilter>",
+		"firegex.pyfilters.internals.handle_packet(globals())\n", "<pyfilter>",
 	Py_file_input, NULL, 2);
 	PyObject* code_dump = PyMarshal_WriteObjectToString(compiled_code, 4);
 	Py_DECREF(compiled_code);

@@ -17,24 +17,108 @@ const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toSt
 
 const DEMO_CERT = "-----BEGIN CERTIFICATE-----\n(demo placeholder, no real key material is shipped)\n-----END CERTIFICATE-----\n"
 
-const SAMPLE_FILTER = `from firegex.nfproxy import pyfilter, ACCEPT, REJECT
-from firegex.nfproxy.models import HttpRequest
+// Three functions in one file, because that is the normal case and it is what the
+// per-function switches on the filter card are for. Nothing here declares a protocol:
+// asking for an HttpRequest is what makes this an HTTP filter, and the RawPacket one
+// sits beside it because HTTP provides both.
+const SAMPLE_FILTER = `from firegex.pyfilters import pyfilter, ACCEPT, REJECT, UNSTABLE_MANGLE
+from firegex.pyfilters.models import HttpRequest, RawPacket
 
 
 @pyfilter
-def block_path_traversal(packet: HttpRequest):
+def block_path_traversal(http_request: HttpRequest):
     """Drop any request trying to climb out of the web root."""
-    if ".." in packet.url:
+    if ".." in http_request.url:
         return REJECT
+    return ACCEPT
+
+
+@pyfilter
+def redact_flag(packet: RawPacket):
+    """Never let a flag leave, whatever the request looked like."""
+    if packet.is_input or b"FLAG{" not in packet.data:
+        return ACCEPT
+    packet.data = packet.data.replace(b"FLAG{", b"REDACTED{")
+    return UNSTABLE_MANGLE
+
+
+@pyfilter
+def log_client(packet: RawPacket):
+    """Noisy while debugging, switched off once it has served its purpose."""
+    print("chunk from", packet.client_ip, packet.client_port)
     return ACCEPT
 `
 
+const b64 = (text: string) => btoa(text)
+
+// A trimmed copy of what the backend introspects out of the library, so the demo's
+// editor offers the same completion. Short on purpose: the real one is generated.
+const DEMO_PYFILTER_API = {
+    models: [
+        {
+            name: "RawPacket", protocols: ["http", "tcp"],
+            doc: "One chunk of a connection, with what is known about where it came from. "
+                + "Everything below the application layer is metadata, and read-only.",
+            members: [
+                { name: "client_ip", doc: "The client's address, whichever way this chunk is going", writable: false },
+                { name: "client_port", doc: "The client's port, whichever way this chunk is going", writable: false },
+                { name: "data", doc: "The application payload: the only part a filter can change", writable: true },
+                { name: "data_size", doc: "How many bytes of application payload this chunk carries", writable: false },
+                { name: "dst_ip", doc: "Where this chunk is going", writable: false },
+                { name: "dst_port", doc: "The port this chunk is going to", writable: false },
+                { name: "is_input", doc: "True if the chunk is going from the client to the service", writable: false },
+                { name: "is_ipv6", doc: "True if the connection is IPv6, false if it is IPv4", writable: false },
+                { name: "is_tcp", doc: "True if the connection is TCP, false if it is UDP", writable: false },
+                { name: "server_ip", doc: "The protected service's address", writable: false },
+                { name: "server_port", doc: "The protected service's port", writable: false },
+                { name: "src_ip", doc: "Where this chunk came from", writable: false },
+                { name: "src_port", doc: "The port this chunk came from", writable: false },
+            ],
+        },
+        {
+            name: "HttpRequest", protocols: ["http"],
+            doc: "The current HTTP request, once its headers have been parsed.",
+            members: [
+                { name: "body", doc: "The request body, when it is complete", writable: false },
+                { name: "get_header", doc: "One header by name", writable: false, signature: "get_header(name)" },
+                { name: "headers", doc: "Every header of the request", writable: false },
+                { name: "method", doc: "The request method", writable: false },
+                { name: "url", doc: "The request target", writable: false },
+            ],
+        },
+        {
+            name: "TCPInputStream", protocols: ["http", "tcp"],
+            doc: "The assembled client-to-service stream. A filter using it is only called for incoming data.",
+            members: [
+                { name: "data", doc: "The entire input-direction stream assembled so far", writable: false },
+                { name: "is_ipv6", doc: "True if the connection is IPv6", writable: false },
+                { name: "total_stream_size", doc: "Size of that stream", writable: false },
+            ],
+        },
+    ],
+    verdicts: [
+        { name: "ACCEPT", value: 0, doc: "Forward this chunk. Returning None means the same thing.", values: [] },
+        { name: "REJECT", value: 2, doc: "Refuse the connection. Everything still in the stream goes with it.", values: [] },
+        { name: "DROP", value: 1, doc: "Silently drop this chunk and every one after it, without closing.", values: [] },
+        { name: "UNSTABLE_MANGLE", value: 3, doc: "Forward the payload you assigned to `data`.", values: [] },
+    ],
+    settings: [
+        { name: "FGEX_STREAM_MAX_SIZE", doc: "Bytes of one stream a model may accumulate.", values: [] },
+        { name: "FGEX_FULL_STREAM_ACTION", doc: "What happens when a stream reaches that size.",
+          values: ["FullStreamAction.FLUSH", "FullStreamAction.ACCEPT", "FullStreamAction.REJECT", "FullStreamAction.DROP"] },
+        { name: "FGEX_INVALID_ENCODING_ACTION", doc: "What happens when a parser cannot read the traffic.",
+          values: ["ExceptionAction.ACCEPT", "ExceptionAction.DROP", "ExceptionAction.REJECT", "ExceptionAction.NOACTION"] },
+    ],
+}
+
 // ------------------------------------------------------------------ seed state
 
-const tlsStreamId = uuid()
-const svcWeb = uuid(), svcApi = uuid(), svcTls = uuid()
-const svcProxy = uuid(), svcQuiz = uuid()
+const svcShop = uuid(), svcScore = uuid(), svcVault = uuid()
+const fltShopRegex = uuid(), fltShopPy = uuid(), fltScoreRegex = uuid(), fltVaultRegex = uuid()
 const svcHijack = uuid()
+
+/** The demo's services have been up for a while; a fresh one starts filtering now. */
+const demoStart = Math.floor(Date.now() / 1000) - 6 * 60 * 60
 
 const state = {
     interfaces: [
@@ -42,35 +126,51 @@ const state = {
         { name: "eth0", addr: "10.60.3.1" },
         { name: "eth0", addr: "fd66:666:3::1" },
     ],
-    nfregex: {
-        services: [
-            { name: "scoreboard", service_id: svcWeb, status: "active", port: 8080, proto: "tcp", ip_int: "10.60.3.1", n_packets: 128437, n_regex: 3, fail_open: true, target_type: "internal", tls_stream_id: null },
-            { name: "flag-submitter", service_id: svcApi, status: "active", port: 5000, proto: "tcp", ip_int: "10.60.3.1", n_packets: 41022, n_regex: 1, fail_open: false, target_type: "internal", tls_stream_id: null },
-            { name: "vault (behind TLS)", service_id: svcTls, status: "stop", port: 8443, proto: "tcp", ip_int: "10.60.3.1", n_packets: 0, n_regex: 1, fail_open: true, target_type: "tls", tls_stream_id: tlsStreamId },
-        ] as Json[],
-        regexes: [
-            { id: 1, service_id: svcWeb, regex: "L2V0Yy9wYXNzd2Q=", is_case_sensitive: true, mode: "C", n_packets: 914, active: true },
-            { id: 2, service_id: svcWeb, regex: "PHNjcmlwdD4=", is_case_sensitive: false, mode: "C", n_packets: 233, active: true },
-            { id: 3, service_id: svcWeb, regex: "W0EtWjAtOV17MzF9PQ==", is_case_sensitive: true, mode: "S", n_packets: 57, active: false },
-            { id: 4, service_id: svcApi, regex: "dW5pb24Ic2VsZWN0", is_case_sensitive: false, mode: "C", n_packets: 1180, active: true },
-            { id: 5, service_id: svcTls, regex: "L3Byb2Mvc2VsZi8=", is_case_sensitive: true, mode: "C", n_packets: 0, active: true },
-        ] as Json[],
-    },
-    nfproxy: {
-        services: [
-            { service_id: svcProxy, name: "shop-api", status: "active", port: 9000, proto: "tcp", ip_int: "10.60.3.1", n_filters: 1, edited_packets: 0, blocked_packets: 641, fail_open: true, target_type: "internal", tls_stream_id: null },
-            { service_id: svcQuiz, name: "quiz", status: "stop", port: 1337, proto: "tcp", ip_int: "10.60.3.1", n_filters: 1, edited_packets: 0, blocked_packets: 0, fail_open: false, target_type: "internal", tls_stream_id: null },
-        ] as Json[],
-        pyfilters: [
-            { name: "block_path_traversal", service_id: svcProxy, blocked_packets: 641, edited_packets: 0, active: true },
-            { name: "block_path_traversal", service_id: svcQuiz, blocked_packets: 0, edited_packets: 0, active: true },
-        ] as Json[],
-        code: { [svcProxy]: SAMPLE_FILTER, [svcQuiz]: SAMPLE_FILTER } as Record<string, string>,
-        tls: {} as Record<string, Json>,
-    },
-    porthijack: [
-        { name: "legacy ftp -> proxy", service_id: svcHijack, active: true, proto: "tcp", ip_src: "10.60.3.1", ip_dst: "127.0.0.1", public_port: 21, proxy_port: 12021 },
+    // One shape for every service: a network layer, and a chain of filters on it.
+    services: [
+        { service_id: svcShop, name: "shop-api", status: "active", proto: "tcp", transport: "proxy", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
+        { service_id: svcScore, name: "scoreboard", status: "active", proto: "tcp", transport: "nfqueue", fail_open: true, max_connections: 512, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 1847, over_limit_first: demoStart, over_limit_last: demoStart + 900, filtering_since: demoStart },
+        { service_id: svcVault, name: "vault", status: "stop", proto: "tls", transport: "proxy", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: null },
+        // Handed to a proxy the operator wrote themselves: firegex steers, nothing here inspects.
+        { service_id: svcHijack, name: "legacy-ftp", status: "active", proto: "tcp", transport: "external", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
     ] as Json[],
+    // Where each one is reachable. shop-api answers on both stacks behind one chain,
+    // which is the case that used to need two services kept in step by hand.
+    addresses: [
+        { address_id: uuid(), service_id: svcShop, ip_int: "10.60.3.1", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcShop, ip_int: "fd66:666:3::1", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcScore, ip_int: "10.60.3.1", port: 8080, proto: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcVault, ip_int: "10.60.3.1", port: 8443, proto: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcHijack, ip_int: "10.60.3.1", port: 21, proto: "tcp", proxy_ip: "127.0.0.1", proxy_port: 12021 },
+    ] as Json[],
+    filters: [
+        // shop-api shows what only the proxy layer can do: two kinds, in an order.
+        { filter_id: fltShopRegex, service_id: svcShop, position: 0, kind: "regex", proto: "tcp", name: "patterns", active: true, blocked: 368 },
+        // `http` because its code asks for an HttpRequest, not because anybody said so.
+        { filter_id: fltShopPy, service_id: svcShop, position: 1, kind: "pyfilter", proto: "http", name: "python", active: true, blocked: 641 },
+        { filter_id: fltScoreRegex, service_id: svcScore, position: 0, kind: "regex", proto: "tcp", name: "patterns", active: true, blocked: 1204 },
+        { filter_id: fltVaultRegex, service_id: svcVault, position: 0, kind: "regex", proto: "tcp", name: "patterns", active: true, blocked: 0 },
+    ] as Json[],
+    regexes: [
+        { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("\\.\\./"), mode: "C", case_sensitive: true, active: true, action: "block", replace_with: null, blocked: 341 },
+        { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("FLAG\\{[A-Za-z0-9_]+\\}"), mode: "S", case_sensitive: true, active: true, action: "block", replace_with: null, blocked: 27 },
+        // A rewriting rule, so the demo shows what only the proxy layer can do.
+        { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("X-Debug: [^\\r\\n]*"), mode: "C", case_sensitive: false, action: "rewrite", replace_with: b64("X-Debug: off"), active: true, blocked: 0 },
+        { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("/etc/passwd"), mode: "C", case_sensitive: true, active: true, action: "block", replace_with: null, blocked: 914 },
+        { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("<script>"), mode: "C", case_sensitive: false, active: true, action: "block", replace_with: null, blocked: 233 },
+        { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("[A-Z0-9]{31}="), mode: "S", case_sensitive: true, active: false, blocked: 57 },
+        { regex_id: uuid(), filter_id: fltVaultRegex, regex: b64("/proc/self/"), mode: "C", case_sensitive: true, active: true, action: "block", replace_with: null, blocked: 0 },
+    ] as Json[],
+    code: { [fltShopPy]: SAMPLE_FILTER } as Record<string, string>,
+    // One row per @pyfilter the code defines. The code says which exist; these say
+    // which run — exactly the split the real backend keeps.
+    functions: [
+        { filter_id: fltShopPy, name: "block_path_traversal", active: true, blocked: 641 },
+        { filter_id: fltShopPy, name: "redact_flag", active: true, blocked: 0 },
+        // Switched off rather than deleted: the code is still there to turn back on.
+        { filter_id: fltShopPy, name: "log_client", active: false, blocked: 0 },
+    ] as Json[],
+    certs: { [svcVault]: DEMO_CERT } as Record<string, string>,
     firewall: {
         enabled: true,
         policy: "accept",
@@ -84,17 +184,24 @@ const state = {
             multicast_dns: false, allow_upnp: false, drop_invalid: true, allow_dhcp: true,
         } as Json,
     },
-    tls: [
-        { id: tlsStreamId, name: "vault", ip_int: "10.60.3.1", port: 8443, cert: DEMO_CERT, key: "", status: "active", ssl_port: 41337, clear_port: 41338 },
-    ] as Json[],
 }
 
 // --------------------------------------------------------------- update events
 // Mirrors the backend's single "update" socket.io event: the payload is a react-query
 // key prefix, and App.tsx invalidates every query starting with it.
 
-type Listener = (payload: string[]) => void
+type Listener = (payload: any) => void
 const listeners: Record<string, Listener[]> = {}
+
+// The live log, mirroring the backend's bounded per-service tail.
+const logs: Record<string, Json[]> = {}
+let logSeq = 0
+
+const addLog = (service_id: string, level: string, text: string) => {
+    const entry = { at: Date.now(), level, text, seq: ++logSeq }
+    logs[service_id] = [...(logs[service_id] ?? []), entry].slice(-500)
+    for (const cb of listeners["log"] ?? []) cb({ service_id, entries: [entry] })
+}
 let ticker: ReturnType<typeof setInterval> | null = null
 
 const emit = (...tags: string[][]) => {
@@ -106,20 +213,21 @@ const startTicker = () => {
     if (ticker) return
     ticker = setInterval(() => {
         let changed = false
-        for (const s of state.nfregex.services) {
-            if (s.status !== "active") continue
-            s.n_packets += Math.floor(Math.random() * 40)
-            changed = true
+        const running = new Set(state.services.filter(s => s.status === "active").map(s => s.service_id))
+        for (const f of state.filters) {
+            if (!f.active || !running.has(f.service_id)) continue
+            if (Math.random() < 0.4) {
+                f.blocked += 1
+                changed = true
+                addLog(f.service_id, "block", `connection refused by ${f.name}`)
+            }
         }
-        for (const r of state.nfregex.regexes) {
-            if (r.active && Math.random() < 0.3) r.n_packets += 1
+        for (const r of state.regexes) {
+            const parent = state.filters.find(f => f.filter_id === r.filter_id)
+            if (!r.active || !parent?.active || !running.has(parent.service_id)) continue
+            if (Math.random() < 0.3) { r.blocked += 1; changed = true }
         }
-        for (const s of state.nfproxy.services) {
-            if (s.status !== "active") continue
-            s.blocked_packets += Math.random() < 0.4 ? 1 : 0
-            changed = true
-        }
-        if (changed) emit(["nfregex"], ["nfproxy"])
+        if (changed) emit(["services"])
     }, 4000)
 }
 
@@ -157,14 +265,89 @@ export const demoSocket = {
 const ok = { status: "ok" }
 const notFound = (what: string) => { throw `${what} not found` }
 
-const nfregexService = (id: string) => state.nfregex.services.find(s => s.service_id === id) ?? notFound("Service")
-const nfproxyService = (id: string) => state.nfproxy.services.find(s => s.service_id === id) ?? notFound("Service")
-const hijackService = (id: string) => state.porthijack.find(s => s.service_id === id) ?? notFound("Service")
-const tlsStream = (id: string) => state.tls.find(s => s.id === id) ?? notFound("Stream")
+const service = (id: string) => state.services.find(s => s.service_id === id) ?? notFound("Service")
+const filter = (sid: string, fid: string) =>
+    state.filters.find(f => f.filter_id === fid && f.service_id === sid) ?? notFound("Filter")
 
-const countRegexes = (id: string) => state.nfregex.regexes.filter(r => r.service_id === id).length
+const chainOf = (sid: string) =>
+    state.filters.filter(f => f.service_id === sid).sort((a, b) => a.position - b.position)
 
-type Handler = (m: RegExpMatchArray, body: Json) => any
+const addressesOf = (sid: string) => state.addresses.filter(a => a.service_id === sid)
+
+/** The backend's `_note_filtering`: the first moment a service could refuse something —
+ *  running, with an active filter — written once and never moved. */
+const noteFiltering = (sid: string) => {
+    const srv = service(sid)
+    if (srv.filtering_since != null) return
+    if (srv.status !== "active") return
+    if (!chainOf(sid).some(f => f.active)) return
+    // Aligned to its bucket, like the backend: the mark names the first minute that
+    // can hold one of this service's blocks.
+    srv.filtering_since = Math.floor(Date.now() / 1000 / 60) * 60
+}
+
+const decorate = (s: Json) => ({
+    ...s,
+    // The material itself never leaves the backend; only whether there is any.
+    has_tls_material: !!state.certs[s.service_id],
+    addresses: addressesOf(s.service_id),
+    n_filters: state.filters.filter(f => f.service_id === s.service_id).length,
+    n_blocked: state.filters.filter(f => f.service_id === s.service_id).reduce((acc, f) => acc + f.blocked, 0),
+})
+
+/**
+ * The demo cannot run hyperscan, so the tester falls back to JavaScript's own engine.
+ *
+ * That is a real difference and worth saying out loud: against a live instance the
+ * tester runs the very engine that will enforce the answer, which is the whole reason
+ * it is trustworthy. Here it can only approximate, so a pattern JavaScript accepts and
+ * hyperscan does not will look fine in the demo and be refused on a real install.
+ */
+const demoDebug = (patterns: Json[], sample: string) => {
+    let text = ""
+    try { text = atob(sample) } catch { text = "" }
+    const matches: Json[] = []
+    const errors: Json[] = []
+    const spans: { start: number, end: number, with: string | null }[] = []
+    for (const p of patterns) {
+        let re: RegExp
+        try {
+            re = new RegExp(p.expr, p.case_sensitive ? "g" : "gi")
+        } catch (err) {
+            errors.push({ id: p.id, error: `${err}` })
+            continue
+        }
+        for (const hit of text.matchAll(re)) {
+            if (hit.index === undefined) continue
+            matches.push({ id: p.id, start: hit.index, end: hit.index + hit[0].length })
+            if (p.action === "rewrite") {
+                spans.push({
+                    start: hit.index, end: hit.index + hit[0].length,
+                    with: p.replace_with ?? "",
+                })
+            }
+            if (hit[0].length === 0) break // a zero-width match would never advance
+            if (matches.length >= 1000) break
+        }
+    }
+    let rewritten: string | null = null
+    if (spans.length > 0) {
+        spans.sort((a, b) => a.start - b.start || b.end - a.end)
+        let out = "", cursor = 0
+        for (const span of spans) {
+            if (span.start < cursor) continue
+            out += text.slice(cursor, span.start) + (span.with ?? "")
+            cursor = span.end
+        }
+        rewritten = btoa(out + text.slice(cursor))
+    }
+    return {
+        matches, errors, error: null, unscannable: [],
+        rewritten, truncated: matches.length >= 1000,
+    }
+}
+
+type Handler = (m: RegExpMatchArray, body: Json, query: Record<string, string>) => any
 const routes: [string, RegExp, Handler][] = [
 
     // ---- global
@@ -172,106 +355,401 @@ const routes: [string, RegExp, Handler][] = [
     ["POST", /^login$/, () => ({ access_token: "demo-token", token_type: "bearer" })],
     ["POST", /^set-password$/, () => ok],
     ["POST", /^change-password$/, () => ({ ...ok, access_token: "demo-token" })],
+    // The demo has no authentication to turn off, and saying so is more use than
+    // pretending it worked on a page anyone can open.
+    ["POST", /^auth-mode$/, () => { throw "The demo has no authentication to turn off" }],
     ["GET", /^interfaces$/, () => state.interfaces],
-    ["POST", /^reset$/, () => { emit(["nfregex"], ["nfproxy"], ["porthijack"], ["firewall"], ["tls_streams"]); return ok }],
+    ["POST", /^reset$/, () => { emit(["services"], ["firewall"]); return ok }],
     ["GET", /^export$/, () => ({ "firegex.db": { keys_values: [] }, note: "demo export - not a real backup" })],
-    ["POST", /^import$/, () => { emit(["nfregex"], ["nfproxy"], ["porthijack"], ["firewall"], ["tls_streams"]); return ok }],
+    ["POST", /^import$/, () => { emit(["services"], ["firewall"]); return ok }],
 
-    // ---- nfregex
-    ["GET", /^nfregex\/services$/, () => state.nfregex.services],
-    ["POST", /^nfregex\/services$/, (_m, b) => {
+    // ---- services: the network layer
+    ["GET", /^services$/, () => state.services.map(decorate)],
+    ["POST", /^services$/, (_m, b) => {
         const service_id = uuid()
-        state.nfregex.services.push({ status: "active", n_packets: 0, n_regex: 0, target_type: "internal", tls_stream_id: null, ...b, service_id })
-        emit(["nfregex"])
-        return { ...ok, service_id }
+        state.services.push({
+            service_id, name: b.name, status: "stop", proto: b.proto ?? "tcp",
+            transport: b.transport ?? "proxy",
+            fail_open: b.fail_open ?? true,
+            max_connections: b.max_connections ?? 0,
+            over_limit_forwards: b.over_limit_forwards ?? false,
+            first_byte_timeout: b.first_byte_timeout ?? 0,
+            over_limit_hits: 0, over_limit_first: null, over_limit_last: null,
+        })
+        for (const a of (b.addresses ?? [])) {
+            state.addresses.push({
+                address_id: uuid(), service_id, ip_int: a.ip_int, port: a.port,
+                proto: b.proto ?? "tcp",
+                proxy_ip: a.proxy_ip ?? null, proxy_port: a.proxy_port ?? null,
+            })
+        }
+        if (b.proto === "tls" && b.tls_cert) state.certs[service_id] = b.tls_cert
+        emit(["services"])
+        return { status: "ok", service_id }
     }],
-    ["GET", /^nfregex\/services\/([^/]+)$/, m => nfregexService(m[1])],
-    ["DELETE", /^nfregex\/services\/([^/]+)$/, m => {
-        state.nfregex.services = state.nfregex.services.filter(s => s.service_id !== m[1])
-        state.nfregex.regexes = state.nfregex.regexes.filter(r => r.service_id !== m[1])
-        emit(["nfregex"]); return ok
+    ["GET", /^services\/([^/]+)$/, m => decorate(service(m[1]))],
+    ["PUT", /^services\/([^/]+)$/, (m, b) => {
+        const srv = service(m[1])
+        // The state the edit lands on is what has to hold: turning TLS on for a service
+        // that has never been given a certificate is refused here as it is by the real
+        // backend, rather than by nginx on a later start.
+        const landsOnTls = (b.proto ?? srv.proto) === "tls"
+        if (landsOnTls && !b.tls_cert && !state.certs[srv.service_id])
+            throw "A service that speaks TLS needs a certificate and a private key."
+        for (const key of ["name", "proto", "transport", "fail_open",
+                           "max_connections", "over_limit_forwards",
+                           "first_byte_timeout"]) {
+            if (b[key] !== undefined && b[key] !== null) srv[key] = b[key]
+        }
+        // The addresses carry it too, so `(ip, port, proto)` stays a usable key.
+        if (b.proto) for (const a of addressesOf(srv.service_id)) a.proto = b.proto
+        if (b.tls_cert) state.certs[srv.service_id] = b.tls_cert
+        emit(["services"]); return ok
     }],
-    ["POST", /^nfregex\/services\/([^/]+)\/(start|stop)$/, m => {
-        nfregexService(m[1]).status = m[2] === "start" ? "active" : "stop"
-        emit(["nfregex"]); return ok
-    }],
-    ["PUT", /^nfregex\/services\/([^/]+)\/rename$/, (m, b) => { nfregexService(m[1]).name = b.name; emit(["nfregex"]); return ok }],
-    ["PUT", /^nfregex\/services\/([^/]+)\/settings$/, (m, b) => { Object.assign(nfregexService(m[1]), b); emit(["nfregex"]); return ok }],
-    ["PUT", /^nfregex\/services\/([^/]+)\/tls-config$/, () => ok],
-    ["GET", /^nfregex\/services\/([^/]+)\/regexes$/, m => state.nfregex.regexes.filter(r => r.service_id === m[1])],
-    ["GET", /^nfregex\/services\/([^/]+)\/export$/, m => state.nfregex.regexes.filter(r => r.service_id === m[1])],
-    ["POST", /^nfregex\/services\/([^/]+)\/import$/, m => { emit(["nfregex"]); return ok }],
-    ["POST", /^nfregex\/regexes$/, (_m, b) => {
-        const id = Math.max(0, ...state.nfregex.regexes.map(r => r.id)) + 1
-        state.nfregex.regexes.push({ n_packets: 0, active: true, ...b, id })
-        nfregexService(b.service_id).n_regex = countRegexes(b.service_id)
-        emit(["nfregex"]); return ok
-    }],
-    ["DELETE", /^nfregex\/regexes\/(\d+)$/, m => {
-        const r = state.nfregex.regexes.find(x => x.id === Number(m[1]))
-        state.nfregex.regexes = state.nfregex.regexes.filter(x => x.id !== Number(m[1]))
-        if (r) nfregexService(r.service_id).n_regex = countRegexes(r.service_id)
-        emit(["nfregex"]); return ok
-    }],
-    ["POST", /^nfregex\/regexes\/(\d+)\/(enable|disable)$/, m => {
-        const r = state.nfregex.regexes.find(x => x.id === Number(m[1])) ?? notFound("Regex")
-        r.active = m[2] === "enable"
-        emit(["nfregex"]); return ok
-    }],
-
-    // ---- nfproxy
-    ["GET", /^nfproxy\/services$/, () => state.nfproxy.services],
-    ["POST", /^nfproxy\/services$/, (_m, b) => {
-        const service_id = uuid()
-        state.nfproxy.services.push({ status: "stop", n_filters: 0, edited_packets: 0, blocked_packets: 0, target_type: "internal", tls_stream_id: null, ...b, service_id })
-        state.nfproxy.code[service_id] = ""
-        emit(["nfproxy"]); return { ...ok, service_id }
-    }],
-    ["GET", /^nfproxy\/services\/([^/]+)$/, m => nfproxyService(m[1])],
-    ["DELETE", /^nfproxy\/services\/([^/]+)$/, m => {
-        state.nfproxy.services = state.nfproxy.services.filter(s => s.service_id !== m[1])
-        state.nfproxy.pyfilters = state.nfproxy.pyfilters.filter(f => f.service_id !== m[1])
-        emit(["nfproxy"]); return ok
-    }],
-    ["POST", /^nfproxy\/services\/([^/]+)\/(start|stop)$/, m => {
-        nfproxyService(m[1]).status = m[2] === "start" ? "active" : "stop"
-        emit(["nfproxy"]); return ok
-    }],
-    ["PUT", /^nfproxy\/services\/([^/]+)\/rename$/, (m, b) => { nfproxyService(m[1]).name = b.name; emit(["nfproxy"]); return ok }],
-    ["PUT", /^nfproxy\/services\/([^/]+)\/settings$/, (m, b) => { Object.assign(nfproxyService(m[1]), b); emit(["nfproxy"]); return ok }],
-    ["PUT", /^nfproxy\/services\/([^/]+)\/tls-config$/, () => ok],
-    ["GET", /^nfproxy\/services\/([^/]+)\/tls-config$/, () => ({ tls_enabled: false, tls_cert: null, tls_key: null })],
-    ["GET", /^nfproxy\/services\/([^/]+)\/pyfilters$/, m => state.nfproxy.pyfilters.filter(f => f.service_id === m[1])],
-    // the real endpoint is a PlainTextResponse: it returns the source, not an object
-    ["GET", /^nfproxy\/services\/([^/]+)\/code$/, m => state.nfproxy.code[m[1]] ?? ""],
-    ["PUT", /^nfproxy\/services\/([^/]+)\/code$/, (m, b) => {
-        state.nfproxy.code[m[1]] = b?.code ?? ""
-        emit(["nfproxy"]); return ok
-    }],
-    ["POST", /^nfproxy\/services\/([^/]+)\/pyfilters\/([^/]+)\/(enable|disable)$/, m => {
-        const f = state.nfproxy.pyfilters.find(x => x.service_id === m[1] && x.name === m[2]) ?? notFound("Filter")
-        f.active = m[3] === "enable"
-        emit(["nfproxy"]); return ok
+    ["DELETE", /^services\/([^/]+)$/, m => {
+        const srv = service(m[1])
+        for (const f of chainOf(srv.service_id)) {
+            state.regexes = state.regexes.filter(r => r.filter_id !== f.filter_id)
+            delete state.code[f.filter_id]
+        }
+        state.filters = state.filters.filter(f => f.service_id !== srv.service_id)
+        state.addresses = state.addresses.filter(a => a.service_id !== srv.service_id)
+        state.services = state.services.filter(s => s.service_id !== srv.service_id)
+        emit(["services"]); return ok
     }],
 
-    // ---- porthijack
-    ["GET", /^porthijack\/services$/, () => state.porthijack],
-    ["POST", /^porthijack\/services$/, (_m, b) => {
-        const service_id = uuid()
-        state.porthijack.push({ active: false, ...b, service_id })
-        emit(["porthijack"]); return { ...ok, service_id }
+    // ---- services: where they are reachable
+    ["GET", /^services\/([^/]+)\/addresses$/, m => { service(m[1]); return addressesOf(m[1]) }],
+    ["POST", /^services\/([^/]+)\/addresses$/, (m, b) => {
+        const srv = service(m[1])
+        if (srv.transport === "external" && !b.proxy_port) {
+            throw "This service hands its traffic to your own proxy, so the new address " +
+                  "needs the port that proxy listens on for it"
+        }
+        if (state.addresses.some(a => a.ip_int === b.ip_int && a.port === b.port && a.proto === srv.proto))
+            throw "one of these addresses is already protected by a service"
+        state.addresses.push({
+            address_id: uuid(), service_id: srv.service_id, ip_int: b.ip_int, port: b.port,
+            proto: srv.proto, proxy_ip: b.proxy_ip ?? null, proxy_port: b.proxy_port ?? null,
+        })
+        addLog(srv.service_id, "info",
+            `also protecting ${b.ip_int}:${b.port} (no connection was dropped)`)
+        emit(["services"]); return ok
     }],
-    ["GET", /^porthijack\/services\/([^/]+)$/, m => hijackService(m[1])],
-    ["DELETE", /^porthijack\/services\/([^/]+)$/, m => {
-        state.porthijack = state.porthijack.filter(s => s.service_id !== m[1])
-        emit(["porthijack"]); return ok
+    ["PUT", /^services\/([^/]+)\/addresses\/([^/]+)$/, (m, b) => {
+        service(m[1])
+        const addr = state.addresses.find(a => a.address_id === m[2] && a.service_id === m[1])
+            ?? notFound("Address")
+        addr.ip_int = b.ip_int; addr.port = b.port
+        addr.proxy_ip = b.proxy_ip ?? null; addr.proxy_port = b.proxy_port ?? null
+        emit(["services"]); return ok
     }],
-    ["POST", /^porthijack\/services\/([^/]+)\/(start|stop)$/, m => {
-        hijackService(m[1]).active = m[2] === "start"
-        emit(["porthijack"]); return ok
+    ["DELETE", /^services\/([^/]+)\/addresses\/([^/]+)$/, m => {
+        service(m[1])
+        if (addressesOf(m[1]).length === 1)
+            throw "This is the only address this service protects. Delete the service " +
+                  "itself, or add another address first."
+        state.addresses = state.addresses.filter(a => a.address_id !== m[2])
+        emit(["services"]); return ok
     }],
-    ["PUT", /^porthijack\/services\/([^/]+)\/rename$/, (m, b) => { hijackService(m[1]).name = b.name; emit(["porthijack"]); return ok }],
-    ["PUT", /^porthijack\/services\/([^/]+)\/change-destination$/, (m, b) => { Object.assign(hijackService(m[1]), b); emit(["porthijack"]); return ok }],
+    ["POST", /^services\/([^/]+)\/start$/, m => {
+        const srv = service(m[1])
+        // The same refusal a real instance gives, for the same reason: the NFQUEUE
+        // binaries are the filter, so they cannot host a chain.
+        const active = chainOf(srv.service_id).filter(f => f.active)
+        if (srv.transport === "external" && active.length > 0) {
+            throw `this service hands its traffic to your own proxy, so firegex inspects ` +
+                  `nothing and the ${active.length} filter(s) attached to it would never run.`
+        }
+        if (srv.transport === "nfqueue" && active.length > 8) {
+            throw `the nfqueue transport chains at most 8 filters, and this service has ` +
+                  `${active.length} active. Deactivate some, or move it to the proxy ` +
+                  `transport, which walks the chain inside one process.`
+        }
+        srv.status = "active"
+        noteFiltering(srv.service_id)
+        addLog(srv.service_id,
+            "info",
+            `started on the ${srv.transport} layer, ${active.length} filter(s) active`)
+        emit(["services"]); return ok
+    }],
+    ["POST", /^services\/([^/]+)\/stop$/, m => {
+        const srv = service(m[1])
+        srv.status = "stop"
+        addLog(srv.service_id, "info", "stopped")
+        emit(["services"]); return ok
+    }],
+    ["GET", /^services\/([^/]+)\/stats$/, (m, _b, query) => {
+        service(m[1])
+        const chain = chainOf(m[1])
+        // The real instant, not the bucket it falls in — the same reason the backend
+        // stopped truncating it: the current, partial minute would otherwise be
+        // reported as ending at the moment it began.
+        const now = Math.floor(Date.now() / 1000)
+        const keptFrom = now - 48 * 60 * 60
+        const began = service(m[1]).filtering_since as number | null
+        const to = Math.min(Number(query?.range_to) || now, now)
+        // Two floors, like the backend: what is still kept, and when this service first
+        // became able to refuse anything — hours before it existed are not quiet hours.
+        // The second one applies only to a window that reaches into its life; one that
+        // ended before it began is answered as asked, and is empty because it is.
+        const from = Math.max(Number(query?.range_from) || to - 3600, keptFrom,
+            began !== null && to >= began ? began : keptFrom)
+        // The bucket widens with the range, exactly as the backend does it, so the demo
+        // shows the same handful of bars whatever window is picked — unless a step was
+        // asked for, which wins until it would draw more bars than a chart can carry.
+        const span = Math.max(60, to - from + 60)
+        const want = Number(query?.step) || 0
+        const least = Math.ceil(span / 60 / 400)
+        const width = 60 * Math.max(1, least, want
+            ? Math.round(want / 60)
+            : Math.ceil(span / 60 / 60))
+        const first = Math.floor(from / width) * width
+        const buckets: number[] = []
+        for (let edge = first; edge <= to; edge += width) buckets.push(edge)
+
+        // A plausible shape rather than a real history, scaled to the window so the
+        // numbers move when the range does.
+        const fraction = Math.min(1, (to - from) / (48 * 60 * 60))
+        const scaled: Json[] = chain.map(f => ({
+            ...f, ranged: Math.round(f.blocked * (0.15 + 0.85 * fraction)),
+        }))
+        const total = scaled.reduce((acc, f) => acc + f.ranged, 0)
+        const shared = (rows: Json[]) => rows.map(r => ({
+            ...r, share: total ? Math.round((1000 * r.blocked) / total) / 10 : 0,
+        }))
+        const spread = (amount: number, seed: number) => {
+            const raw = buckets.map((_, i) => Math.abs(Math.sin((i + seed) / 5)) + 0.05)
+            const sum = raw.reduce((a, b) => a + b, 0)
+            return raw.map(v => Math.round((v / sum) * amount))
+        }
+        const busy = scaled.filter(f => f.ranged > 0)
+        const patterns = state.regexes
+            .filter(r => chain.some(f => f.filter_id === r.filter_id))
+            .map(r => ({
+                id: r.regex_id, name: atob(r.regex), kind: "regex",
+                filter_id: r.filter_id,
+                blocked: Math.round(r.blocked * (0.15 + 0.85 * fraction)),
+            }))
+        const functions = state.functions
+            .filter(fn => chain.some(f => f.filter_id === fn.filter_id))
+            .map(fn => ({
+                id: `${fn.filter_id}/${fn.name}`, name: fn.name, kind: "pyfilter",
+                filter_id: fn.filter_id,
+                blocked: Math.round(fn.blocked * (0.15 + 0.85 * fraction)),
+            }))
+        const srv = service(m[1])
+        // A proxy service counts connections, which is the unit a block is in, so its
+        // refused share is exact; the nfqueue layer works per packet and reports none.
+        const connections = srv.transport === "proxy" ? 30118 : null
+        return {
+            filters: shared(scaled.map(f => ({
+                id: f.filter_id, name: f.name, kind: f.kind,
+                blocked: f.ranged, all_time: f.blocked,
+            }))),
+            patterns: shared(patterns),
+            functions: shared(functions),
+            buckets,
+            bucket_seconds: width,
+            series: busy.map(f => ({
+                id: f.filter_id, name: f.name, counts: spread(f.ranged, f.blocked),
+            })),
+            total,
+            all_time: chain.reduce((acc, f) => acc + f.blocked, 0),
+            range_from: from,
+            range_to: to,
+            kept_from: keptFrom,
+            filtering_since: began,
+            traffic: {
+                packets: srv.transport === "proxy" ? 0 : 1_284_402,
+                bytes: srv.transport === "proxy" ? 0 : 903_118_774,
+                connections,
+                connections_refused: connections === null ? null : total,
+                refused_share: connections === null
+                    ? null : Math.round((10000 * total) / connections) / 100,
+            },
+        }
+    }],
+    ["GET", /^services\/([^/]+)\/logs$/, m => { service(m[1]); return logs[m[1]] ?? [] }],
+    ["DELETE", /^services\/([^/]+)\/logs$/, m => { service(m[1]); logs[m[1]] = []; return ok }],
+
+    // ---- services: the filter chain
+    ["GET", /^services\/([^/]+)\/filters$/, m => {
+        service(m[1])
+        return chainOf(m[1]).map(f => {
+            const fns = state.functions.filter(fn => fn.filter_id === f.filter_id)
+            return {
+                ...f,
+                n_regexes: state.regexes.filter(r => r.filter_id === f.filter_id).length,
+                n_functions: fns.length,
+                n_functions_active: fns.filter(fn => fn.active).length,
+            }
+        })
+    }],
+
+    // ---- services: the functions inside one pyfilter
+    ["GET", /^services\/([^/]+)\/filters\/([^/]+)\/functions$/, m => {
+        const f = filter(m[1], m[2])
+        if (f.kind !== "pyfilter") throw "This filter is not a pyfilter"
+        return state.functions.filter(fn => fn.filter_id === m[2])
+    }],
+    ["PUT", /^services\/([^/]+)\/filters\/([^/]+)\/functions\/([^/]+)$/, (m, b) => {
+        filter(m[1], m[2])
+        const fn = state.functions.find(
+            x => x.filter_id === m[2] && x.name === decodeURIComponent(m[3])
+        ) ?? notFound("Function")
+        fn.active = b.active
+        emit(["services"]); return ok
+    }],
+    ["POST", /^services\/([^/]+)\/filters$/, (m, b) => {
+        service(m[1])
+        const filter_id = uuid()
+        state.filters.push({
+            filter_id, service_id: m[1], position: chainOf(m[1]).length,
+            // A new pyfilter asks for nothing yet, so it speaks the simplest protocol
+            // there is; saving code is what settles it.
+            kind: b.kind, proto: "tcp",
+            name: b.name ?? b.kind, active: b.active ?? true, blocked: 0,
+        })
+        if (b.kind === "pyfilter") state.code[filter_id] = ""
+        noteFiltering(m[1])
+        emit(["services"]); return ok
+    }],
+    ["POST", /^services\/([^/]+)\/filters\/order$/, (m, b) => {
+        service(m[1])
+        const existing = chainOf(m[1]).map(f => f.filter_id).sort()
+        if (JSON.stringify(existing) !== JSON.stringify([...(b.filters ?? [])].sort()))
+            throw "The order must list exactly the filters this service has"
+        b.filters.forEach((id: string, position: number) => {
+            const f = state.filters.find(x => x.filter_id === id)
+            if (f) f.position = position
+        })
+        emit(["services"]); return ok
+    }],
+    ["PUT", /^services\/([^/]+)\/filters\/([^/]+)$/, (m, b) => {
+        const f = filter(m[1], m[2])
+        if (b.name !== undefined && b.name !== null) f.name = b.name
+        if (b.active !== undefined && b.active !== null) f.active = b.active
+        emit(["services"]); return ok
+    }],
+    ["DELETE", /^services\/([^/]+)\/filters\/([^/]+)$/, m => {
+        filter(m[1], m[2])
+        state.regexes = state.regexes.filter(r => r.filter_id !== m[2])
+        state.functions = state.functions.filter(fn => fn.filter_id !== m[2])
+        state.filters = state.filters.filter(f => f.filter_id !== m[2])
+        delete state.code[m[2]]
+        chainOf(m[1]).forEach((f, position) => { f.position = position })
+        emit(["services"]); return ok
+    }],
+
+    // ---- services: a pyfilter's code
+    // The real instance runs the file through the process that will execute it; the
+    // demo has no Python, so it approximates just enough to show what the editor does
+    // with the answer — and never claims a file is fine when it obviously is not.
+    ["POST", /^services\/([^/]+)\/filters\/([^/]+)\/check$/, (m, b) => {
+        filter(m[1], m[2])
+        const code: string = b.code ?? ""
+        const lines = code.split("\n")
+        const bad = lines.findIndex(l => /@pyfilter\s*$/.test(l.trim()) === false
+            && /^\s*def\s+\w+\s*\([^)]*\)\s*:/.test(l)
+            && !/:\s*\w+\s*[,)]/.test(l))
+        if (bad >= 0 && /@pyfilter/.test(lines[bad - 1] ?? "")) {
+            const name = lines[bad].match(/def\s+(\w+)/)?.[1] ?? "?"
+            const param = lines[bad].match(/\(\s*(\w+)/)?.[1] ?? "?"
+            return {
+                ok: false, filters: [],
+                error: {
+                    type: "Exception",
+                    message: `Parameter '${param}' of ${name} has no type annotation. `
+                        + "Annotate it with what the filter wants to be given — RawPacket, "
+                        + "a TCP stream, an HTTP model — because that is what decides when "
+                        + "it is called.",
+                    line: bad + 1, column: 0, text: lines[bad], traceback: "",
+                },
+            }
+        }
+        const defined = [...code.matchAll(/@pyfilter\s*\n\s*def\s+([A-Za-z_]\w*)/g)].map(x => x[1])
+        const http = /\bHttp(Request|Response|RequestHeader|ResponseHeader|FullRequest|FullResponse|History|StreamHistory)\b/.test(code)
+        return { ok: true, proto: http ? "http" : "tcp", filters: defined, error: null }
+    }],
+
+    ["GET", /^services\/pyfilter-api$/, () => DEMO_PYFILTER_API],
+
+    ["GET", /^services\/([^/]+)\/filters\/([^/]+)\/code$/, m => {
+        filter(m[1], m[2])
+        return state.code[m[2]] ?? ""
+    }],
+    ["PUT", /^services\/([^/]+)\/filters\/([^/]+)\/code$/, (m, b) => {
+        const f = filter(m[1], m[2])
+        const code: string = b.code ?? ""
+        // The real instance asks the library which protocol the file speaks, by looking
+        // at what its filters are annotated with. Here that is approximated by the model
+        // names the file mentions — enough to demonstrate that it is read, not chosen,
+        // and that mixing two application protocols is refused.
+        const http = /\bHttp(Request|Response|RequestHeader|ResponseHeader|FullRequest|FullResponse|History|StreamHistory)\b/.test(code)
+        state.code[m[2]] = code
+        f.proto = http ? "http" : "tcp"
+        // Reconciled with the code, like the real backend: a function that has gone is
+        // dropped, a new one arrives switched on, and one that survives keeps whatever
+        // the operator had set for it.
+        const defined = [...code.matchAll(/@pyfilter\s*\n\s*def\s+([A-Za-z_]\w*)/g)].map(x => x[1])
+        state.functions = state.functions.filter(
+            fn => fn.filter_id !== m[2] || defined.includes(fn.name)
+        )
+        for (const name of defined) {
+            if (!state.functions.some(fn => fn.filter_id === m[2] && fn.name === name))
+                state.functions.push({ filter_id: m[2], name, active: true, blocked: 0 })
+        }
+        emit(["services"]); return ok
+    }],
+
+    // ---- services: a regex filter's patterns
+    ["GET", /^services\/([^/]+)\/filters\/([^/]+)\/regexes$/, m => {
+        filter(m[1], m[2])
+        return state.regexes.filter(r => r.filter_id === m[2])
+    }],
+    ["POST", /^services\/([^/]+)\/filters\/([^/]+)\/regexes$/, (m, b) => {
+        const f = filter(m[1], m[2])
+        if (f.kind !== "regex") throw "This filter does not hold patterns"
+        let expr = ""
+        try { expr = atob(b.regex) } catch { throw "The pattern must be base64-encoded" }
+        try { new RegExp(expr) } catch (err) { throw `Invalid pattern: ${err}` }
+        state.regexes.push({
+            regex_id: uuid(), filter_id: m[2], regex: b.regex, mode: b.mode ?? "B",
+            case_sensitive: b.case_sensitive ?? true, active: b.active ?? true,
+            action: b.action ?? "block", replace_with: b.replace_with ?? null, blocked: 0,
+        })
+        emit(["services"]); return ok
+    }],
+    ["PUT", /^services\/([^/]+)\/filters\/([^/]+)\/regexes\/([^/]+)$/, (m, b) => {
+        filter(m[1], m[2])
+        const rx = state.regexes.find(r => r.regex_id === m[3]) ?? notFound("Pattern")
+        if (b.active !== undefined && b.active !== null) rx.active = b.active
+        if (b.regex != null && b.regex !== rx.regex) {
+            let expr = ""
+            try { expr = atob(b.regex) } catch { throw "The pattern must be base64-encoded" }
+            try { new RegExp(expr) } catch (err) { throw `Invalid pattern: ${err}` }
+            if (state.regexes.some(r => r.filter_id === m[2] && r.regex_id !== rx.regex_id
+                && r.regex === b.regex && r.case_sensitive === (b.case_sensitive ?? rx.case_sensitive)))
+                throw "This filter already holds that exact pattern"
+            rx.regex = b.regex
+            // The counters belonged to the old pattern, so they do not carry over.
+            rx.blocked = 0
+        }
+        if (b.mode != null) rx.mode = b.mode
+        if (b.case_sensitive != null) rx.case_sensitive = b.case_sensitive
+        if (b.action != null) rx.action = b.action
+        if (b.replace_with !== undefined) rx.replace_with = b.replace_with
+        emit(["services"]); return ok
+    }],
+    ["DELETE", /^services\/([^/]+)\/filters\/([^/]+)\/regexes\/([^/]+)$/, m => {
+        filter(m[1], m[2])
+        state.regexes = state.regexes.filter(r => r.regex_id !== m[3])
+        emit(["services"]); return ok
+    }],
+
+    // ---- services: the pattern tester
+    ["POST", /^services\/debug-regex$/, (_m, b) => demoDebug(b.patterns ?? [], b.sample ?? "")],
 
     // ---- firewall
     ["GET", /^firewall\/rules$/, () => ({ rules: state.firewall.rules, policy: state.firewall.policy, enabled: state.firewall.enabled })],
@@ -284,42 +762,19 @@ const routes: [string, RegExp, Handler][] = [
     ["PUT", /^firewall\/settings$/, (_m, b) => { Object.assign(state.firewall.settings, b); emit(["firewall"]); return ok }],
     ["POST", /^firewall\/(enable|disable)$/, m => { state.firewall.enabled = m[1] === "enable"; emit(["firewall"]); return ok }],
 
-    // ---- tls decrypt
-    ["GET", /^tls\/streams$/, () => state.tls],
-    ["POST", /^tls\/streams$/, (_m, b) => {
-        const id = uuid()
-        // The real backend derives both loopback ports from a hash of ip:port.
-        const h = Math.abs([...`${b.ip_int}:${b.port}`].reduce((a, c) => a * 31 + c.charCodeAt(0) | 0, 7))
-        state.tls.push({ status: "active", ssl_port: 40000 + (h % 10000), clear_port: 40001 + (h % 10000), ...b, id })
-        emit(["tls_streams"]); return { ...ok, id }
-    }],
-    ["PUT", /^tls\/streams\/([^/]+)$/, (m, b) => { Object.assign(tlsStream(m[1]), b); emit(["tls_streams"]); return ok }],
-    ["DELETE", /^tls\/streams\/([^/]+)$/, m => {
-        if (state.nfregex.services.some(s => s.tls_stream_id === m[1]) || state.nfproxy.services.some(s => s.tls_stream_id === m[1]))
-            throw "Stream is still used by a service"
-        state.tls = state.tls.filter(s => s.id !== m[1])
-        emit(["tls_streams"]); return ok
-    }],
-    ["POST", /^tls\/streams\/([^/]+)\/(start|stop)$/, m => {
-        const stream = tlsStream(m[1])
-        stream.status = m[2] === "start" ? "active" : "stop"
-        // Stopping a stream cascades to the filter services attached to it.
-        if (m[2] === "stop") {
-            for (const s of state.nfregex.services) if (s.tls_stream_id === m[1]) s.status = "stop"
-            for (const s of state.nfproxy.services) if (s.tls_stream_id === m[1]) s.status = "stop"
-        }
-        emit(["tls_streams"], ["nfregex"], ["nfproxy"]); return ok
-    }],
 ]
 
 /** Same contract as genericapi(): resolves with the parsed body, rejects with a message. */
 export async function demoApi(method: string, path: string, body: Json | undefined): Promise<any> {
-    const clean = path.replace(/^\/+|\/+$/g, "").split("?")[0]
+    const trimmed = path.replace(/^\/+|\/+$/g, "")
+    const clean = trimmed.split("?")[0]
+    // The query string reaches the handlers too, now that a range is asked for in it.
+    const query = Object.fromEntries(new URLSearchParams(trimmed.split("?")[1] ?? ""))
     await new Promise(r => setTimeout(r, 60 + Math.random() * 120)) // a plausible round trip
     for (const [verb, pattern, handler] of routes) {
         if (verb !== method.toUpperCase()) continue
         const match = clean.match(pattern)
-        if (match) return handler(match, body ?? {})
+        if (match) return handler(match, body ?? {}, query)
     }
     throw `This endpoint is not available in the demo (${method} /api/${clean})`
 }

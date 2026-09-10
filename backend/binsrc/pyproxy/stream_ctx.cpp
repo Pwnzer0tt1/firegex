@@ -39,13 +39,15 @@ const PyFilterResponse VALID_PYTHON_RESPONSE[4] = {
 struct py_filter_response {
 	PyFilterResponse action;
 	string* filter_match_by = nullptr;
-	string* mangled_packet = nullptr;
+	// The rewritten application payload, never a packet: nothing below the
+	// application layer crosses into the filter, so nothing below it comes back.
+	string* mangled_data = nullptr;
 
-	py_filter_response(PyFilterResponse action, string* filter_match_by = nullptr, string* mangled_packet = nullptr):
-		action(action), filter_match_by(filter_match_by), mangled_packet(mangled_packet){}
+	py_filter_response(PyFilterResponse action, string* filter_match_by = nullptr, string* mangled_data = nullptr):
+		action(action), filter_match_by(filter_match_by), mangled_data(mangled_data){}
 
 	~py_filter_response(){
-		delete mangled_packet;
+		delete mangled_data;
 		delete filter_match_by;
 	}
 };
@@ -111,12 +113,19 @@ struct pyfilter_ctx {
 		PyObject * packet_info = PyDict_New();
 		
 		pkt->reserialize();
+		// The application payload, and metadata about everything under it. No header
+		// bytes cross this boundary in either direction: a filter reads where the
+		// traffic came from and edits what it carries, which is the one contract both
+		// network layers can honestly offer.
+		string src_ip = pkt->src_ip(), dst_ip = pkt->dst_ip();
 		set_item_to_dict(packet_info, "data", PyBytes_FromStringAndSize(data.c_str(), data.size()));
-		set_item_to_dict(packet_info, "l4_size", PyLong_FromLong(pkt->data_size()));
-		set_item_to_dict(packet_info, "raw_packet", PyBytes_FromStringAndSize(pkt->packet.c_str(), pkt->packet.size()));
 		set_item_to_dict(packet_info, "is_input", PyBool_FromLong(is_client));
 		set_item_to_dict(packet_info, "is_ipv6", PyBool_FromLong(pkt->is_ipv6));
 		set_item_to_dict(packet_info, "is_tcp", PyBool_FromLong(pkt->l4_proto == NfQueue::L4Proto::TCP));
+		set_item_to_dict(packet_info, "src_ip", PyUnicode_FromStringAndSize(src_ip.c_str(), src_ip.size()));
+		set_item_to_dict(packet_info, "dst_ip", PyUnicode_FromStringAndSize(dst_ip.c_str(), dst_ip.size()));
+		set_item_to_dict(packet_info, "src_port", PyLong_FromLong(pkt->src_port()));
+		set_item_to_dict(packet_info, "dst_port", PyLong_FromLong(pkt->dst_port()));
 
 		// Set packet info to the global context
 		set_item_to_glob("__firegex_packet_info", packet_info);
@@ -211,22 +220,22 @@ struct pyfilter_ctx {
 			return py_filter_response(action_enum, func_name);
 		}
 		if (action_enum == PyFilterResponse::MANGLE){
-			PyObject* mangled_packet = PyDict_GetItemString(result, "mangled_packet");
-			if (mangled_packet == nullptr){
+			PyObject* mangled_data = PyDict_GetItemString(result, "mangled_data");
+			if (mangled_data == nullptr){
 				del_item_from_glob("__firegex_pyfilter_result");
 				#ifdef DEBUG
-				cerr << "[DEBUG] [handle_packet] No result mangled_packet found" << endl;
+				cerr << "[DEBUG] [handle_packet] No result mangled_data found" << endl;
 				#endif
 				return py_filter_response(PyFilterResponse::INVALID);
 			}
-			if (!PyBytes_Check(mangled_packet)){
+			if (!PyBytes_Check(mangled_data)){
 				#ifdef DEBUG
-				cerr << "[DEBUG] [handle_packet] mangled_packet is not a bytes" << endl;
+				cerr << "[DEBUG] [handle_packet] mangled_data is not a bytes" << endl;
 				#endif
 				del_item_from_glob("__firegex_pyfilter_result");
 				return py_filter_response(PyFilterResponse::INVALID);
 			}
-			string* pkt_str = new string(PyBytes_AsString(mangled_packet), PyBytes_Size(mangled_packet));
+			string* pkt_str = new string(PyBytes_AsString(mangled_data), PyBytes_Size(mangled_data));
 			del_item_from_glob("__firegex_pyfilter_result");
 			return py_filter_response(PyFilterResponse::MANGLE, func_name, pkt_str);
 		}
@@ -262,6 +271,23 @@ struct stream_ctx {
 			auto tcp_ack = tcp_ack_search->second;
 			delete tcp_ack;
 			tcp_ack_ctx.erase(tcp_ack_search->first);
+		}
+	}
+
+	// Keep the number of live filter contexts under a ceiling.
+	//
+	// A TCP flow is released when libtins sees the connection close. A datagram has no
+	// close to observe, so a UDP service under a spoofed-source flood would otherwise
+	// accumulate one set of Python module globals per forged address until the process
+	// died. Which context is dropped is arbitrary — the map is ordered by flow id, not
+	// by age — and that is the honest trade: the bound is the point, and a flow that
+	// loses its globals starts again from a clean state rather than taking the service
+	// with it.
+	void enforce_limit(size_t limit){
+		while (streams_ctx.size() >= limit && !streams_ctx.empty()){
+			auto victim = streams_ctx.begin();
+			delete victim->second;
+			streams_ctx.erase(victim);
 		}
 	}
 
