@@ -268,8 +268,28 @@ class FiregexTables(NFTableManager):
             ],
         )
 
+    def reset(self):
+        super().reset()
+        import subprocess
+        try:
+            subprocess.run(["ip", "rule", "del", "fwmark", "0x1339", "lookup", "1339"], check=False, stderr=subprocess.DEVNULL)
+            subprocess.run(["ip", "-6", "rule", "del", "fwmark", "0x1339", "lookup", "1339"], check=False, stderr=subprocess.DEVNULL)
+            # Route rules are often automatically deleted when the rule goes or don't error out if missing, but let's be explicit
+        except Exception:
+            pass
+
     def init(self):
         super().init()
+        import subprocess
+        # Configure ip rules for proxy transparent return path
+        try:
+            # We don't care about errors if rules already exist etc, but we'll try to add them
+            subprocess.run(["ip", "rule", "add", "fwmark", "0x1339", "lookup", "1339"], check=False, stderr=subprocess.DEVNULL)
+            subprocess.run(["ip", "-6", "rule", "add", "fwmark", "0x1339", "lookup", "1339"], check=False, stderr=subprocess.DEVNULL)
+            subprocess.run(["ip", "route", "add", "local", "default", "dev", "lo", "table", "1339"], check=False, stderr=subprocess.DEVNULL)
+            subprocess.run(["ip", "-6", "route", "add", "local", "default", "dev", "lo", "table", "1339"], check=False, stderr=subprocess.DEVNULL)
+        except Exception as e:
+            print("Failed to configure ip rules for transparent proxy:", e)
 
     # --- rule fragments -------------------------------------------------------
 
