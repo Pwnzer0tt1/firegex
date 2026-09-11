@@ -146,7 +146,7 @@ pub struct ProxyStats {
     /// whichever the operator chose. Cumulative, so a service that hit the wall once an
     /// hour ago still says so.
     pub over_limit: AtomicU64,
-    warned_spoof: AtomicBool,
+    pub warned_spoof: AtomicBool,
     /// Whether the limit has already been announced. Shared by both paths, so a service
     /// carrying TCP and UDP says it once rather than twice.
     pub warned_limit: AtomicBool,

@@ -377,10 +377,13 @@ class ServiceManager:
         self.reload_addresses()
         if not self.active:
             return
+        is_dual = getattr(self.transport, "is_dual_stack", False)
         if (
             self.srv.transport == transports.TRANSPORT.PROXY
+            and str(self.srv.proto) != "udp"
             and self.srv.has_ipv6
             and not was_dual
+            and not is_dual
         ):
             self.log.add(
                 LEVEL.INFO,
@@ -391,6 +394,33 @@ class ServiceManager:
         added = [addr for addr in self.srv.addresses if addr.id == address_id]
         if not added:
             return
+        if self.srv.transport == transports.TRANSPORT.PROXY:
+            from modules.services.nftables import one_address, ip_family
+            from utils import is_ip_parse, get_interface_ips
+            for addr in added:
+                l4 = str(addr.proto or self.srv.proto)
+                if l4 == "udp":
+                    is_iface = not is_ip_parse(addr.ip_int)
+                    if is_iface:
+                        ips = get_interface_ips(addr.ip_int)
+                        if not ips:
+                            raise transports.UnsupportedChain(
+                                f"interface '{addr.ip_int}' has no IP assigned for UDP proxy relay"
+                            )
+                        target_ip = one_address(ips[0])
+                    else:
+                        target_ip = one_address(addr.ip_int)
+                    target_port = addr.port
+                    family = ip_family(target_ip)
+                    key = (
+                        f"[{target_ip}]:{target_port}"
+                        if family == "ip6" else f"{target_ip}:{target_port}"
+                    )
+                    if "udp_ports" not in self._steer:
+                        self._steer["udp_ports"] = {}
+                    if key not in self._steer["udp_ports"]:
+                        port = await self.transport.add_udp_target(target_ip, target_port)
+                        self._steer["udp_ports"][key] = port
         async with self.lock:
             nft.add(self.srv, added, **self._steer)
         self.log.add(

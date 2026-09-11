@@ -1,10 +1,14 @@
 import asyncio
 from ipaddress import ip_address, ip_interface
 import os
+import re
 import socket
 import psutil
 import sys
-import nftables
+try:
+    import nftables
+except ImportError:
+    nftables = None
 from socketio import AsyncServer
 from typing import Annotated, List, Union
 from functools import wraps
@@ -187,6 +191,20 @@ def is_ip_parse(ip:str):
     except Exception:
         return False
 
+def is_interface_name(name: str) -> bool:
+    if not isinstance(name, str):
+        return False
+    name = name.strip()
+    return bool(re.match(r'^[a-zA-Z0-9_.:-]+$', name)) and 0 < len(name) <= 15
+
+def parse_ip_or_int(ip: str) -> str:
+    if is_ip_parse(ip):
+        return ip_parse(ip)
+    ip_str = str(ip).strip()
+    if is_interface_name(ip_str):
+        return ip_str
+    raise ValueError(f"'{ip}' is neither a valid IP address nor a valid interface name")
+
 def addr_parse(ip:str):
     return str(ip_address(ip))
 
@@ -200,6 +218,15 @@ def get_interfaces():
                 if interf.family in [socket.AF_INET, socket.AF_INET6]:
                     yield {"name": int_name, "addr":interf.address}
     return list(_get_interfaces())
+
+def get_interface_ips(iface_name: str) -> list[str]:
+    ips = []
+    for int_name, interfs in psutil.net_if_addrs().items():
+        if int_name == iface_name:
+            for interf in interfs:
+                if interf.family in [socket.AF_INET, socket.AF_INET6]:
+                    ips.append(interf.address)
+    return ips
 
 def nftables_int_to_json(ip_int):
     ip_int = ip_parse(ip_int)
@@ -227,7 +254,7 @@ class NFTableManager(Singleton):
     def __init__(self, init_cmd, reset_cmd):
         self.__init_cmds = init_cmd
         self.__reset_cmds = reset_cmd
-        self.nft = nftables.Nftables()
+        self.nft = nftables.Nftables() if nftables is not None else None
     
     def raw_cmd(self, *cmds):
         return self.nft.json_cmd({"nftables": list(cmds)})

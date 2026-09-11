@@ -1,17 +1,17 @@
-//! The proxy layer for UDP: a relay, and one thing it deliberately does not do.
+//! The proxy layer for UDP: relays with transparent source IP preservation.
 //!
-//! The TCP side of this engine stays invisible in two ways at once. It recovers where
+//! The TCP side of this engine stays invisible in two ways at once: it recovers where
 //! the client was originally headed with `SO_ORIGINAL_DST`, and it dials the service
-//! *from the client's own address*, so anything that logs or rate-limits by IP keeps
-//! working. Neither survives the move to UDP unchanged:
+//! *from the client's own address* via `IP_TRANSPARENT`.
 //!
+//! On UDP:
 //! * **`SO_ORIGINAL_DST` is TCP and SCTP only.** The kernel answers `ENOPROTOOPT` for a
 //!   UDP socket, so a single listener cannot ask where a datagram was going. This relay
-//!   sidesteps it by binding **one socket per protected address**, each with the
-//!   upstream already known — nothing has to be recovered because nothing was lost.
-//! * **The client's address is not preserved.** The protected service sees this engine,
-//!   not the client. That is a real loss, stated everywhere the operator can choose it,
-//!   and the reason the nfqueue layer remains the transparent way to filter UDP.
+//!   handles it by binding **one socket per protected address**, each with the
+//!   upstream already known.
+//! * **The client's address is preserved.** The relay dials the upstream service from
+//!   the client's own address using `IP_TRANSPARENT` and mark-based policy routing,
+//!   keeping source IP transparency on both TCP and UDP.
 //!
 //! What is kept is everything the filter layer cares about: each client flow is a
 //! connection with its own filter state and its own module globals, both directions are
@@ -67,6 +67,7 @@ pub struct UdpRelay {
     upstream: SocketAddr,
     chain: ChainHandle,
     self_mark: Option<u32>,
+    pub spoof_source: bool,
     /// How many flows may exist at once. `0` means no limit.
     max_flows: usize,
     /// Whether a datagram from a new source past the limit is forwarded unfiltered
@@ -85,6 +86,7 @@ impl UdpRelay {
         upstream: SocketAddr,
         chain: ChainHandle,
         self_mark: Option<u32>,
+        spoof_source: bool,
         max_flows: usize,
         over_limit_forwards: bool,
         stats: Arc<ProxyStats>,
@@ -95,6 +97,7 @@ impl UdpRelay {
             upstream,
             chain,
             self_mark,
+            spoof_source,
             max_flows,
             over_limit_forwards,
             stats,
@@ -106,22 +109,18 @@ impl UdpRelay {
     /// This is what "forwarded unfiltered" has to mean for UDP: a flow *is* the state, so
     /// admitting a datagram without creating one is admitting it without inspection —
     /// which is exactly what the operator chose when they picked it over dropping.
-    async fn forward_unfiltered(&self, data: &[u8]) -> io::Result<()> {
-        let bind: SocketAddr = if self.upstream.is_ipv6() {
-            "[::]:0".parse().unwrap()
+    async fn forward_unfiltered(&self, client: SocketAddr, data: &[u8]) -> io::Result<()> {
+        let socket = if self.spoof_source {
+            match crate::transparent::connect_as_udp(client.ip(), self.upstream, self.self_mark).await {
+                Ok(s) => s,
+                Err(_) => {
+                    crate::transparent::connect_plain_udp(self.upstream, self.self_mark).await?
+                }
+            }
         } else {
-            "0.0.0.0:0".parse().unwrap()
+            crate::transparent::connect_plain_udp(self.upstream, self.self_mark).await?
         };
-        let socket = UdpSocket::bind(bind).await?;
-        if let Some(mark) = self.self_mark {
-            // Stamped as ours for the same reason a flow's socket is: without it the
-            // rule that redirects this service's traffic catches our own send.
-            crate::transparent::set_self_mark(
-                <UdpSocket as std::os::fd::AsRawFd>::as_raw_fd(&socket),
-                mark,
-            )?;
-        }
-        socket.send_to(data, self.upstream).await?;
+        socket.send(data).await?;
         Ok(())
     }
 
@@ -186,7 +185,7 @@ impl UdpRelay {
                         }
                         // Forwarding without a flow means without filter state, which is
                         // what "unfiltered" has to mean here: a flow is the state.
-                        if let Err(e) = self.forward_unfiltered(&buf[..len]).await {
+                        if let Err(e) = self.forward_unfiltered(client, &buf[..len]).await {
                             eprintln!("[warn] [udp] cannot forward past the limit: {e}");
                         }
                         continue;
@@ -222,21 +221,25 @@ impl UdpRelay {
     /// Start relaying one client's flow: a socket towards the service, and a task
     /// carrying the answers back.
     async fn open(&self, client: SocketAddr) -> io::Result<Flow> {
-        let bind: SocketAddr = if self.upstream.is_ipv6() {
-            "[::]:0".parse().unwrap()
+        let upstream = if self.spoof_source {
+            match crate::transparent::connect_as_udp(client.ip(), self.upstream, self.self_mark).await {
+                Ok(s) => s,
+                Err(e) => {
+                    self.stats.source_spoof_failures.fetch_add(1, Ordering::Relaxed);
+                    if !self.stats.warned_spoof.swap(true, Ordering::Relaxed) {
+                        eprintln!(
+                            "[warn] [udp] cannot reach {} as {}: {e}. \
+                             Falling back to our own address — the service will not see real client IPs.",
+                            self.upstream,
+                            client.ip()
+                        );
+                    }
+                    crate::transparent::connect_plain_udp(self.upstream, self.self_mark).await?
+                }
+            }
         } else {
-            "0.0.0.0:0".parse().unwrap()
+            crate::transparent::connect_plain_udp(self.upstream, self.self_mark).await?
         };
-        let upstream = UdpSocket::bind(bind).await?;
-        if let Some(mark) = self.self_mark {
-            // Stamped as ours, or the rule that redirects this service's traffic would
-            // catch the relay's own dial and send it straight back here.
-            crate::transparent::set_self_mark(
-                <UdpSocket as std::os::fd::AsRawFd>::as_raw_fd(&upstream),
-                mark,
-            )?;
-        }
-        upstream.connect(self.upstream).await?;
         let upstream = Arc::new(upstream);
 
         let connection = next_connection_id();
@@ -328,3 +331,69 @@ async fn replies(
         }
     }
 }
+
+/// Manages running UDP relays and allows adding new relays dynamically at runtime.
+#[derive(Clone)]
+pub struct UdpManager {
+    chain: ChainHandle,
+    self_mark: Option<u32>,
+    spoof_source: bool,
+    max_flows: usize,
+    over_limit_forwards: bool,
+    stats: Arc<ProxyStats>,
+    relays: Arc<tokio::sync::Mutex<HashMap<SocketAddr, u16>>>,
+}
+
+impl UdpManager {
+    pub fn new(
+        chain: ChainHandle,
+        self_mark: Option<u32>,
+        spoof_source: bool,
+        max_flows: usize,
+        over_limit_forwards: bool,
+        stats: Arc<ProxyStats>,
+    ) -> Self {
+        Self {
+            chain,
+            self_mark,
+            spoof_source,
+            max_flows,
+            over_limit_forwards,
+            stats,
+            relays: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        }
+    }
+
+    pub async fn add_relay(&self, upstream: SocketAddr) -> io::Result<u16> {
+        let mut map = self.relays.lock().await;
+        if let Some(&port) = map.get(&upstream) {
+            return Ok(port);
+        }
+        let bind: SocketAddr = if upstream.is_ipv6() {
+            "[::]:0".parse().unwrap()
+        } else {
+            "0.0.0.0:0".parse().unwrap()
+        };
+        let relay = UdpRelay::bind(
+            bind,
+            upstream,
+            self.chain.clone(),
+            self.self_mark,
+            self.spoof_source,
+            self.max_flows,
+            self.over_limit_forwards,
+            Arc::clone(&self.stats),
+        )
+        .await?;
+
+        let port = relay.local_addr()?.port();
+        map.insert(upstream, port);
+        tokio::spawn(async move {
+            if let Err(e) = relay.serve().await {
+                eprintln!("[fatal] [udp] relay for {upstream} died: {e}");
+            }
+        });
+        Ok(port)
+    }
+}
+

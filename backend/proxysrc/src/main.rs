@@ -163,7 +163,7 @@ async fn run() {
     let deadline = std::env::var("FGEX_PROXY_FILTER_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(200);
+        .unwrap_or(2000);
     let connect_timeout = std::env::var("FGEX_PROXY_CONNECT_TIMEOUT_MS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
@@ -251,61 +251,46 @@ async fn run() {
          (spoof_source={spoof_source})"
     );
 
-    // Rulesets arrive on stdin from here on. It runs alongside the datapath rather
-    // than gating it: traffic must flow before, during and after a rule change.
-    let deadline_dur = Duration::from_millis(deadline);
-    let control_chain = chain_handle.clone();
-    tokio::spawn(async move { serve_stdin(control_chain, deadline_dur).await });
+    // UDP manager: binds and tracks UDP relays, shared between startup configuration
+    // and dynamic commands arriving on stdin.
+    let udp_manager = fgex_proxy::udp::UdpManager::new(
+        chain_handle.clone(),
+        cfg_self_mark,
+        spoof_source,
+        max_connections,
+        over_limit_forwards,
+        Arc::clone(&counters),
+    );
 
-    // How many connections have been through, reported on a timer rather than one
-    // line per connection: the backend wants a denominator, not a firehose. Counted
-    // where the connection is accepted and where a filter refuses it, so both numbers
-    // are in the same unit and their ratio means something — unlike a share computed
-    // against a packet count, which is what the kernel can offer and a block is not.
     // UDP, when the backend asks for it: a comma-separated list of protected
     // addresses, one relay each. One socket per address rather than one for all of
     // them, because `SO_ORIGINAL_DST` — which is how the TCP side learns where a
     // connection was headed — is TCP and SCTP only. With the upstream fixed per socket
     // there is nothing to recover.
-    //
-    // The client's address is *not* preserved on this path, and that is the trade the
-    // operator is shown before choosing it.
     if let Ok(spec) = std::env::var("FGEX_PROXY_UDP") {
         for target in spec.split(',').filter(|s| !s.trim().is_empty()) {
             let upstream = parse_addr("FGEX_PROXY_UDP", target.trim());
-            let bind: SocketAddr = if upstream.is_ipv6() {
-                "[::]:0".parse().unwrap()
-            } else {
-                "0.0.0.0:0".parse().unwrap()
-            };
-            let relay = match fgex_proxy::udp::UdpRelay::bind(
-                bind,
-                upstream,
-                chain_handle.clone(),
-                cfg_self_mark,
-                max_connections,
-                over_limit_forwards,
-                Arc::clone(&counters),
-            )
-            .await
-            {
-                Ok(relay) => relay,
+            match udp_manager.add_relay(upstream).await {
+                Ok(port) => {
+                    println!("UDP {upstream} {port}");
+                    use std::io::Write;
+                    let _ = std::io::stdout().flush();
+                }
                 Err(e) => {
                     eprintln!("[fatal] [main] cannot bind a UDP relay for {upstream}: {e}");
                     exit(1);
                 }
-            };
-            // One line per relay, so the backend can point each address's rule at the
-            // port that actually fronts it.
-            println!("UDP {} {}", upstream, relay.local_addr().unwrap().port());
-            let _ = std::io::stdout().flush();
-            tokio::spawn(async move {
-                if let Err(e) = relay.serve().await {
-                    eprintln!("[fatal] [udp] relay for {upstream} died: {e}");
-                }
-            });
+            }
         }
     }
+
+    // Rulesets and control commands (e.g. ADD_UDP) arrive on stdin from here on.
+    // It runs alongside the datapath rather than gating it: traffic must flow
+    // before, during and after a rule change or relay addition.
+    let deadline_dur = Duration::from_millis(deadline);
+    let control_chain = chain_handle.clone();
+    let control_udp = udp_manager.clone();
+    tokio::spawn(async move { serve_stdin(control_chain, deadline_dur, control_udp).await });
 
     // Both counters live on the proxy, not on the chain: a chain is replaced wholesale
     // every time a ruleset is pushed, and counters that reset on a rule edit would make

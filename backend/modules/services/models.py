@@ -14,6 +14,8 @@ that can host it, and the service does not have to be recreated to change either
 import base64
 import uuid
 
+from utils import is_ip_parse
+
 
 class TRANSPORT:
     """How the traffic is intercepted."""
@@ -184,8 +186,12 @@ class Address:
         }
 
     @property
+    def is_interface(self) -> bool:
+        return not is_ip_parse(self.ip_int)
+
+    @property
     def is_ipv6(self) -> bool:
-        return ":" in str(self.ip_int)
+        return ":" in str(self.ip_int) if not self.is_interface else False
 
     def __repr__(self):
         return f"<Address {self.ip_int}:{self.port}/{self.proto}>"

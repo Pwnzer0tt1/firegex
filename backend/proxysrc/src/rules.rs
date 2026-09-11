@@ -177,14 +177,17 @@ impl FilterSession for HyperscanSession {
                     .get(index as usize)
                     .cloned()
                     .unwrap_or_else(|| "unknown".to_string());
+                // Reset the stream so that subsequent scans on this session (e.g. further UDP datagrams
+                // or connections) don't fail due to HS_SCAN_TERMINATED.
+                let _ = self.scanner.reset();
                 Verdict::Reject(Some(id))
             }
             Ok(None) => Verdict::Accept,
             // A scan that errors has told us nothing about the chunk, so the chunk
-            // goes through. The stream state is suspect from here on, which is worth
-            // saying once rather than on every subsequent chunk.
+            // goes through. Reset the scanner so future chunks/datagrams can still be scanned.
             Err(e) => {
-                eprintln!("[warn] [filter] scan failed ({e}): chunk forwarded unfiltered");
+                let _ = self.scanner.reset();
+                eprintln!("[warn] [filter] scan failed ({e}): scanner reset, chunk forwarded");
                 Verdict::Accept
             }
         }

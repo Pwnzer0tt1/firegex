@@ -39,8 +39,10 @@ const LAYERS: Record<string, Layer> = {
         bad: [
             "Fail-open is rebuilt in userspace, not the kernel's",
         ],
-        udpGood: ["Datagrams are rewritten exactly — no sequence numbers to break"],
-        udpBad: ["On UDP your service sees firegex, not the client"],
+        udpGood: [
+            "Datagrams are rewritten exactly — no sequence numbers to break",
+            "Your service still sees the real client address (transparent IP spoofing)",
+        ],
     },
     [Transport.NFQUEUE]: {
         line: "Verdicts on the real packets — nothing in the path, and the kernel keeps forwarding if a filter dies.",
@@ -166,13 +168,5 @@ export default function LayerChoice({ value, onChange, proto }: {
             TLS: decrypting means terminating the connection, and only this layer does that.
             Set the protocol to TCP to use {unavailable.length > 1 ? "them" : "it"}.
         </Text> : null}
-
-        {udp && value === Transport.PROXY ? <Alert color="yellow" mt="xs" variant="light" p="xs">
-            <Text size="xs">
-                <b>UDP here does not preserve the client's address.</b> Each address gets a
-                relay of its own, so your service sees firegex — <code>SO_ORIGINAL_DST</code> is
-                TCP-only. Your filters still read the real client; NFQUEUE keeps it end to end.
-            </Text>
-        </Alert> : null}
     </>
 }

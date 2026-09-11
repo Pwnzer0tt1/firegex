@@ -19,11 +19,22 @@ afterwards, mixing address families freely.
 
 Adding an address to a running service **drops nothing**: the datapath is already up and
 already enforcing the chain, so all that happens is that one more address is pointed at
-it. (The single exception is a proxy service gaining its first IPv6 address, because the
-listener has to be reopened in a family that can accept one. The log says so.)
+it. On TCP and TLS the listener is dual-stack from the start, so adding IPv4 or IPv6
+addresses requires no restart. On UDP, a dedicated relay is created dynamically on the fly
+without interrupting existing traffic.
 
 The alternative — one service per address, with the chains copied between them — is how
 one of them silently stops being protected the first time a pattern is added to the other.
+
+### Intercepting by IP or network interface
+
+An address entry is not limited to a concrete IP (`192.168.1.10:80`, `::1:80`, CIDR `10.0.0.0/24:8080`).
+You can also specify a **network interface name directly** — such as `eth0:80`, `wg0:8080`, `tun0:53`, or `lo:80`.
+
+- **On NFQUEUE**: interface matching operates natively in nftables using `meta iifname <iface>` (in prerouting) and `meta oifname <iface>` (in postrouting). Packets arriving at or routed through that interface on the configured port are queued to userspace, regardless of the destination IP.
+- **On Proxy (TCP & TLS)**: traffic entering through the interface (`meta iifname <iface>`) is redirected to the proxy listener. The engine connects upstream preserving the destination (`SO_ORIGINAL_DST`) and spoofing the client source IP (`IP_TRANSPARENT`), while policy routing diverts return packets (`meta oifname <iface>`). Local host output redirection is skipped for interfaces to prevent hijacking unrelated outbound host connections.
+- **On Proxy (UDP)**: because UDP relays need a concrete destination to bind upstream forwarding, Firegex automatically resolves the interface's primary assigned IP. If the interface has no IP assigned, use NFQUEUE instead.
+- **External proxies**: the `external` transport requires specific IP addresses because stateless return rewrites need unambiguous source addresses, so interfaces are disallowed there.
 
 ## Transport protocol
 
@@ -31,10 +42,9 @@ TCP, UDP or TLS, chosen on the service. Every layer carries TCP and UDP; TLS is 
 proxy layer alone, because decrypting means terminating the connection — see
 [TLS](#tls).
 
-**UDP on the proxy layer does not preserve the client's address**, which is the one place
-that layer stops being invisible. See
-[UDP on the proxy layer](#udp-on-the-proxy-layer-and-what-it-gives-up); the interface
-says the same thing where you choose, and marks any service in that combination.
+**UDP on the proxy layer preserves the client's address** transparently using `IP_TRANSPARENT`
+source spoofing and policy routing, matching the behavior of TCP. See
+[UDP on the proxy layer](#udp-on-the-proxy-layer).
 
 This used to be four modules — `nfregex` was NFQUEUE welded to regexes, `nfproxy` was
 NFQUEUE welded to Python, `tls` was a separate object you had to keep in step with the
@@ -58,7 +68,7 @@ allowed to do to the traffic. Pick by those.
 | Cost | terminating a connection, once | **a userspace round trip per packet**, per filter |
 | Measured ([how](../tests/README.md#performance)) | **4035 MB/s** at 1 thread, **13 984** at 8 | 1820 at 1 thread, 2956 at 8 |
 | Short connections | the two are indistinguishable — see below | |
-| UDP | yes, **without the client's address** (see below) | yes, fully transparent |
+| UDP | yes, fully transparent (exact rewriting, source IP preserved) | yes, fully transparent |
 | TLS termination | yes | no — decrypting means terminating |
 
 ### Proxy
@@ -100,13 +110,11 @@ halves.
   `catch_unwind`, a deadline per filter, a filter that misbehaves losing its say rather
   than the traffic being held. It works — and it is code, where the other layer has a
   kernel guarantee.
-- **On UDP it stops being invisible**: the client's address is not preserved. See
-  [below](#udp-on-the-proxy-layer-and-what-it-gives-up).
 
-It stays invisible: it always dials your service **from the client's own address**, so
-anything that logs, rate-limits or bans by IP keeps working. That is not a setting,
-because a service that suddenly saw one address for the whole internet would be a
-regression nobody would attribute to us.
+It stays invisible: it always dials your service **from the client's own address** on both
+TCP and UDP, so anything that logs, rate-limits or bans by IP keeps working. That is not
+a setting, because a service that suddenly saw one address for the whole internet would be
+a regression nobody would attribute to us.
 
 ### NFQUEUE
 
@@ -115,62 +123,41 @@ Nothing is terminated.
 
 **What that buys**
 
-- **Nothing is in the path.** Your service receives the original packets, from the
-  original client, on the original connection. There is no proxy to be visible.
-- **A real kernel backstop.** With `fail_open`, `NFQA_CFG_F_FAIL_OPEN` plus `bypass` on
-  the rule mean that if the filter process dies outright — crash, kill, anything — **the
-  traffic keeps flowing**. Nothing in userspace has to be correct for that to hold.
-- **UDP**, with the real datagrams and the real client address.
+- **The kernel's fail-open backstop is real.** If a filter panics, hangs or crashes, the
+  kernel keeps forwarding untouched packets.
+- **Full transparency.** The service sees the original packets, with original headers and
+  timestamps intact.
+- **No connection termination.** Suitable for protocols that cannot be proxied or where
+  terminating the transport is prohibited.
 
 **What it costs**
 
-- **A userspace round trip per packet.** This is the one that surprises people, because
-  "no second connection, no relay" sounds cheap. Every packet — payload, handshake,
-  ACK — is copied to userspace and a verdict copied back, which is why bulk traffic
-  measures a fraction of the proxy's, and why adding threads helps it less. It is cheap
-  per *connection* and expensive per *packet*, and a stream of bytes is made of packets.
-  On short connections, where the packet count per connection is small, the two layers
-  measure the same.
-- **Reassembly is yours.** TCP is rebuilt in userspace with libtins, which is where the
-  out-of-order caveat lives: a packet that arrives out of sequence is accepted without
-  the filter being called at all.
-- **A filter costs a process.** The two binaries fuse transport and filter (`cppregex`
-  is NFQUEUE plus hyperscan, `cpproxy` is NFQUEUE plus an embedded interpreter), so a
-  chain is a chain of *processes*: each filter has its own queue and its own place in
-  the kernel's rule order, and a packet one filter accepts carries on to the next. Eight
-  is the ceiling, and a long chain costs a reassembly pass each.
-- **Reordering rebuilds the chain**, because the order *is* the arrangement of processes
-  and rules. That is a visible interruption, and the log says so. On the proxy layer the
-  same edit costs nothing.
+- **A userspace round trip per packet.** Every packet is copied across the netlink boundary,
+  which caps bulk throughput.
+- **Reassembly in userspace.** Done via libtins, with memory caps and timeout heuristics.
+- **One process per filter.** Chaining requires multiple processes and netfilter queues.
 - **Patterns cannot rewrite here.** The matcher reports where a pattern matched; it has
   no replacement path. A *Python* filter can mangle on this layer — unstably on TCP,
   where changing a payload's length desynchronises the stream (hence `UNSTABLE_MANGLE`),
   and **exactly on UDP**, where a datagram carries no sequence numbers to desynchronise.
 
-### UDP on the proxy layer, and what it gives up
-
-It works — and it is the one place where this layer stops being invisible, so it is
-worth knowing exactly what changes.
+### UDP on the proxy layer
 
 On TCP a single listener fronts every protected address and recovers where each
 connection was headed with `SO_ORIGINAL_DST`, reading the conntrack entry the redirect
 left behind. **The kernel implements that option for TCP and SCTP only**; ask it about a
-UDP socket and it answers `ENOPROTOOPT`. So UDP is relayed differently: firegex binds
-**one socket per protected address**, each with its upstream already known, and nothing
-has to be recovered per datagram.
+UDP socket and it answers `ENOPROTOOPT`. So UDP is relayed with **one dedicated socket
+per protected address**, each with its upstream already known, and nothing has to be
+recovered per datagram.
 
-The consequence is the part to weigh:
+What UDP on the proxy layer provides:
 
-- **Your service sees firegex's address, not the client's.** On TCP this layer dials
-  your service *from the client's own address*, so anything that logs, rate-limits or
-  bans by IP keeps working. On UDP it cannot, and it says so rather than pretending —
-  the service page carries a **NO CLIENT IP** badge on any service in this combination.
-- **Your filters still see the real client.** `RawPacket.client_ip` and `client_port`
-  are the actual peer: firegex knows who is talking even though it does not pass that
-  identity on. Only the protected service loses it.
-
-What you keep:
-
+- **Full source IP transparency.** Outbound datagrams towards your service are sent with
+  `IP_TRANSPARENT` using the client's own address and port, with mark-based policy routing
+  diverting return packets to the local engine. Your service sees the real client IP.
+- **Zero-downtime dynamic address addition.** Adding new addresses to a running UDP service
+  dynamically binds new relay sockets through the control channel without restarting the
+  engine or dropping existing connections.
 - **Exact rewriting, at any length.** A datagram is self-contained, so there are no
   sequence numbers for a longer or shorter payload to desynchronise. The caveat that
   makes rewriting unstable on the NFQUEUE layer simply does not apply.
@@ -178,19 +165,10 @@ What you keep:
   its own Python module globals, released after a minute of silence — UDP has no close
   to observe, so a timeout is the only thing that can end one.
 - **Both directions inspected**, and replies leave through the listener socket so
+  conntrack rewrites them to appear from the address the client dialled.
 
 `REJECT` means something narrower here: there is no connection to close, so the datagram
 is simply not forwarded, and the next one from that client is judged afresh.
-
-**If the client's identity matters more than any of that, use NFQUEUE.** It filters UDP
-with the real datagrams, from the real client, and a Python filter can rewrite them
-exactly — with the kernel still holding the traffic up if the filter dies. That is the
-transparent way to filter UDP, and this one is the way to get the proxy layer's chain
-and its exact rewriting when you would rather have those.
-
-TPROXY would have given both, and is not used: it leaves no NAT entry to key the return
-path off, so it cannot reach a service on this host at all. It was ruled out for that,
-before UDP came up.
 
 ### Holding up under load
 

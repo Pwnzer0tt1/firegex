@@ -165,6 +165,9 @@ class Transport:
     async def reload(self, chain: list[ChainLink]) -> None:
         raise NotImplementedError
 
+    async def add_udp_target(self, ip: str, port: int) -> int:
+        raise NotImplementedError
+
     async def stop(self) -> None:
         raise NotImplementedError
 
@@ -580,6 +583,16 @@ class _EmptyFilter:
         self.active = True
 
 
+def supports_ipv6() -> bool:
+    try:
+        import socket
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as s:
+            s.bind(("::", 0))
+            return True
+    except Exception:
+        return False
+
+
 class ProxyTransport(Transport):
     """The connection is terminated and reopened towards the service.
 
@@ -599,12 +612,24 @@ class ProxyTransport(Transport):
     @classmethod
     def check(cls, srv, chain: list[ChainLink]) -> None:
         super().check(srv, chain)
+        if str(srv.proto) == L4.UDP:
+            from utils import get_interface_ips, is_ip_parse
+            for addr in srv.addresses:
+                if not is_ip_parse(addr.ip_int):
+                    ips = get_interface_ips(addr.ip_int)
+                    if not ips:
+                        raise UnsupportedChain(
+                            f"interface '{addr.ip_int}' has no IP assigned for UDP proxy relay. "
+                            f"Use an IP address or NFQUEUE transport."
+                        )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._reader_task: asyncio.Task | None = None
         self._ack: asyncio.Future | None = None
+        self._cmd_lock = asyncio.Lock()
         self.port: int | None = None
+        self.is_dual_stack: bool = False
         #: One relay port per protected address, for UDP. TCP needs none of this: a
         #: single listener fronts every address and recovers where each connection was
         #: headed from conntrack, which UDP cannot do — see `udp.rs`.
@@ -615,11 +640,23 @@ class ProxyTransport(Transport):
         if str(self.srv.proto) != L4.UDP:
             return []
         from modules.services.nftables import resolve_target
+        from utils import get_interface_ips, is_ip_parse
         out = []
         for addr in self.srv.addresses:
             target = resolve_target(self.srv, addr)
             if target:
-                out.append(target)
+                target_ip, target_port = target
+                if not is_ip_parse(target_ip):
+                    ips = get_interface_ips(target_ip)
+                    if ips:
+                        out.append((ips[0], target_port))
+                    else:
+                        raise UnsupportedChain(
+                            f"interface '{target_ip}' has no IP assigned for UDP proxy relay. "
+                            f"Use an IP address or NFQUEUE transport."
+                        )
+                else:
+                    out.append(target)
         return out
 
     def _tls_env(self) -> dict:
@@ -660,12 +697,11 @@ class ProxyTransport(Transport):
     async def start(self, chain: list[ChainLink]) -> dict:
         self.check(self.srv, chain)
         # The listener has to be able to accept every family the service answers in. A
-        # redirect keeps the address family, so an IPv6 connection sent at an IPv4-only
-        # listener is simply refused — and refused connections to a service that used to
-        # work is the worst way to find that out. One v6 address is enough to make the
-        # listener v6: a dual-stack socket takes the v4 ones as mapped addresses, which
-        # the engine unmaps before it does anything with them.
-        listen = "[::]:0" if self.srv.has_ipv6 else "0.0.0.0:0"
+        # dual-stack listener ([::]:0) is used whenever IPv6 is supported on the host,
+        # so it accepts both IPv4 (as mapped addresses) and IPv6 connections from the start.
+        # This allows adding new IPv6 addresses to a running service without any restart.
+        self.is_dual_stack = self.srv.has_ipv6 or supports_ipv6()
+        listen = "[::]:0" if self.is_dual_stack else "0.0.0.0:0"
         self.process = await asyncio.create_subprocess_exec(
             PROXY_ENGINE,
             stdout=asyncio.subprocess.PIPE,
@@ -702,6 +738,7 @@ class ProxyTransport(Transport):
                     **({"FGEX_PROXY_OVER_LIMIT_FORWARD": "1"}
                        if self.srv.over_limit_forwards else {}),
                     "FGEX_PROXY_FIRST_BYTE_TIMEOUT": str(self.srv.first_byte_timeout),
+                    "FGEX_PROXY_FILTER_TIMEOUT_MS": os.getenv("FGEX_PROXY_FILTER_TIMEOUT_MS", "2000"),
                     **self._tls_env(),
                 },
             ),
@@ -795,20 +832,52 @@ class ProxyTransport(Transport):
     async def reload(self, chain: list[ChainLink]) -> None:
         if not self.process or self.process.returncode is not None:
             return
-        self._ack = asyncio.get_running_loop().create_future()
-        self.process.stdin.write((self._payload(chain) + "\n").encode())
-        await self.process.stdin.drain()
-        try:
-            ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
-        except asyncio.TimeoutError:
-            raise Exception("the proxy engine did not acknowledge the chain")
-        finally:
-            self._ack = None
-        if not ok:
-            # Deliberately not fatal to the datapath: the engine keeps enforcing the
-            # chain it already had, so a rejected edit costs the operator an error
-            # message rather than their protection.
-            raise Exception(f"the proxy engine rejected the chain: {detail}")
+        async with self._cmd_lock:
+            self._ack = asyncio.get_running_loop().create_future()
+            self.process.stdin.write((self._payload(chain) + "\n").encode())
+            await self.process.stdin.drain()
+            try:
+                ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
+            except asyncio.TimeoutError:
+                raise Exception("the proxy engine did not acknowledge the chain")
+            finally:
+                self._ack = None
+            if not ok:
+                # Deliberately not fatal to the datapath: the engine keeps enforcing the
+                # chain it already had, so a rejected edit costs the operator an error
+                # message rather than their protection.
+                raise Exception(f"the proxy engine rejected the chain: {detail}")
+
+    async def add_udp_target(self, ip: str, port: int) -> int:
+        """Bind a dedicated UDP relay for a new address without restarting the proxy engine."""
+        from modules.services.nftables import one_address
+        clean_ip = one_address(ip)
+        target = f"[{clean_ip}]:{port}" if ":" in str(clean_ip) else f"{clean_ip}:{port}"
+        if target in self.udp_ports:
+            return self.udp_ports[target]
+        if not self.process or self.process.returncode is not None:
+            raise Exception("the proxy engine is not running")
+
+        async with self._cmd_lock:
+            if target in self.udp_ports:
+                return self.udp_ports[target]
+            self._ack = asyncio.get_running_loop().create_future()
+            self.process.stdin.write(f"ADD_UDP {target}\n".encode())
+            await self.process.stdin.drain()
+            try:
+                ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
+            except asyncio.TimeoutError:
+                raise Exception(f"the proxy engine did not acknowledge ADD_UDP for {target}")
+            finally:
+                self._ack = None
+            if not ok:
+                raise Exception(f"the proxy engine rejected ADD_UDP {target}: {detail}")
+            relay_port = self.udp_ports.get(target)
+            if relay_port is None:
+                raise Exception(
+                    f"the proxy engine acknowledged ADD_UDP but did not report port for {target}"
+                )
+            return relay_port
 
     async def _read_events(self):
         try:
@@ -820,6 +889,11 @@ class ProxyTransport(Transport):
                     rest = line[4:].strip()
                     if self._ack and not self._ack.done():
                         self._ack.set_result((rest.upper().startswith("OK"), rest))
+                elif line.startswith("UDP "):
+                    parts = line.split()
+                    if len(parts) == 3:
+                        _, upstream, port_str = parts
+                        self.udp_ports[upstream] = int(port_str)
                 elif line.startswith("BLOCKED "):
                     self._emit_block(line.split()[1])
                 elif line.startswith("STATS "):
@@ -873,6 +947,11 @@ class ExternalTransport(Transport):
     @classmethod
     def check(cls, srv, chain: list[ChainLink]) -> None:
         super().check(srv, chain)
+        if any(addr.is_interface for addr in srv.addresses):
+            raise UnsupportedChain(
+                "the external transport hands traffic to an external proxy and rewrites the "
+                "source IP on return, which requires a concrete IP address rather than an interface."
+            )
         missing = [addr for addr in srv.addresses if not addr.proxy_port]
         if missing:
             raise UnsupportedChain(

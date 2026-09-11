@@ -15,10 +15,21 @@ const AutoCompleteItem = React.forwardRef<HTMLDivElement, ItemProps>(
     </Box>
 );
 
-export default function PortAndInterface({ form, int_name, port_name, label, orientation }:{ form:UseFormReturnType<any>, int_name:string, port_name:string, label?:string, orientation?:"line"|"column" }) {
-   
-
-
+export default function PortAndInterface({
+    form,
+    int_name,
+    port_name,
+    label,
+    orientation,
+    includeInterfaceNames = true,
+}: {
+    form: UseFormReturnType<any>,
+    int_name: string,
+    port_name: string,
+    label?: string,
+    orientation?: "line" | "column",
+    includeInterfaceNames?: boolean,
+}) {
    return <>
         {label?<>
             <Title order={6}>{label}</Title>
@@ -26,6 +37,7 @@ export default function PortAndInterface({ form, int_name, port_name, label, ori
             <Box className={(!orientation || orientation == "line")?'center-flex':"center-flex-row"} style={{width:"100%"}}>
                 <InterfaceInput
                     {...form.getInputProps(int_name)}
+                    includeInterfaceNames={includeInterfaceNames}
                 />
                 {(!orientation || orientation == "line")?
                     <><Space w="sm" /><span style={{marginTop:"-3px", fontSize:"1.5em"}}>:</span><Space w="sm" /></>:

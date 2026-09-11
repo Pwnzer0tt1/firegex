@@ -104,14 +104,12 @@ class RawPacket:
 
     @property
     def data(self) -> bytes:
-        """The application payload.
-
-        Read-only, like everything else here. It was the one writable member in the
-        library, and it existed for `UNSTABLE_MANGLE` alone; with that gone, assigning
-        to it would change a copy nothing forwards. A filter reads the traffic and
-        decides — it does not edit it.
-        """
+        """The application payload: the only part a filter can change."""
         return self.__data
+
+    @data.setter
+    def data(self, value: bytes):
+        self.__data = bytes(value)
 
     @property
     def data_size(self) -> int:

@@ -34,8 +34,11 @@ const emptyAddress = (): AddressValues => ({
     ip_int: "127.0.0.1", port: 80, proxy_ip: "127.0.0.1", proxy_port: 8080,
 })
 
+const isInterface = (v: string) =>
+    !v.match(regex_ipv6_no_cidr) && !v.match(regex_ipv4_no_cidr) && v.trim().length > 0 && v.trim().length <= 15 && !!v.trim().match(/^[a-zA-Z0-9_.:-]+$/)
+
 const validAddress = (v: string) =>
-    !!(v.match(regex_ipv6_no_cidr) || v.match(regex_ipv4_no_cidr))
+    !!(v.match(regex_ipv6_no_cidr) || v.match(regex_ipv4_no_cidr) || isInterface(v))
 
 /**
  * Create or edit the network layer of a service.
@@ -69,7 +72,7 @@ export default function AddEditService({ opened, onClose, edit }: {
             max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0,
             tls_cert: "", tls_key: "",
             addresses: [emptyAddress()],
-            autostart: false,
+            autostart: true,
         },
         validate: {
             name: v => v !== "" ? null : "A name is required",
@@ -94,7 +97,7 @@ export default function AddEditService({ opened, onClose, edit }: {
                     : "Not a PEM private key: no 'BEGIN PRIVATE KEY' block in it"
             },
             addresses: {
-                ip_int: v => validAddress(v) ? null : "Invalid IP address",
+                ip_int: (v, values) => validAddress(v) ? (values.transport === Transport.EXTERNAL && isInterface(v) ? "External transport requires an IP, not an interface" : null) : "Invalid IP address or interface name",
                 port: v => (v > 0 && v < 65536) ? null : "Invalid port",
                 proxy_port: (v, values) => (values.transport !== Transport.EXTERNAL || (v > 0 && v < 65536))
                     ? null : "Your proxy's port is required",
@@ -112,7 +115,7 @@ export default function AddEditService({ opened, onClose, edit }: {
             first_byte_timeout: edit.first_byte_timeout,
             tls_cert: "", tls_key: "",
             addresses: [emptyAddress()],
-            autostart: false,
+            autostart: true,
         })
         else form.reset()
     }, [opened, edit?.service_id])
@@ -211,85 +214,86 @@ export default function AddEditService({ opened, onClose, edit }: {
         <form onSubmit={form.onSubmit(submit)}
             style={{ display: 'flex', flexDirection: 'column', maxHeight: '72vh' }}>
             <Box style={{ overflowY: 'auto', flex: 1, minHeight: 0, paddingRight: 10 }}>
-            <TextInput label="Service name" placeholder="shop-api" {...form.getInputProps('name')} />
-            <Space h="md" />
-
-            <Text size="sm" fw={500}>Transport protocol</Text>
-            <Text size="xs" c="dimmed" mb={6}>
-                What the service speaks on the wire. TLS is one of them rather than a
-                switch on top of TCP: the engine decrypts it, so the filters see the
-                plaintext and no extra port is used.
-            </Text>
-            <SegmentedControl fullWidth
-                // Disabled, not removed — the same way the layer picker below says no,
-                // from the same `carries` rule. An option that vanishes leaves nothing to
-                // ask about: the operator wonders whether TLS exists at all, or whether
-                // they misremembered seeing it. Greyed out with a reason underneath, it
-                // says both that it exists and what it would take to reach it.
-                data={[
-                    { label: 'TCP', value: L4.TCP },
-                    { label: 'UDP', value: L4.UDP },
-                    {
-                        label: 'TLS',
-                        value: L4.TLS,
-                        disabled: !carries(form.values.transport, L4.TLS),
-                    },
-                ]}
-                {...form.getInputProps('proto')}
-            />
-            {/* Beside the control it is greyed out in, not further down beside the layer
-                that decides it: the question a reader has is "why can I not click that". */}
-            {!carries(form.values.transport, L4.TLS) ? <Text size="xs" c="dimmed" mt={6}>
-                TLS is unavailable on this layer: it inspects packets as they pass rather
-                than terminating the connection, and decrypting means terminating. Choose
-                the proxy layer to use it.
-            </Text> : null}
-            <Space h="md" />
-
-            {edit ? null : <>
-                <Group justify="space-between" align="center">
-                    <Box>
-                        <Text size="sm" fw={500}>Addresses to protect</Text>
-                        <Text size="xs" c="dimmed">
-                            One service, one filter chain, as many addresses as it answers on —
-                            IPv4 and IPv6 together if that is how it is reachable.
-                        </Text>
-                    </Box>
-                    <Tooltip label="Protect another address with the same chain" position="left">
-                        <ActionIcon variant="light" onClick={() => form.insertListItem('addresses', emptyAddress())}>
-                            <BsPlusLg size={14} />
-                        </ActionIcon>
-                    </Tooltip>
-                </Group>
-                <Space h="xs" />
-                {form.values.addresses.map((_, index) => <Box key={index} mb="sm">
-                    <Group align="flex-end" wrap="nowrap" gap="xs">
-                        <Box style={{ flex: 1 }}>
-                            <PortAndInterface form={form}
-                                int_name={`addresses.${index}.ip_int`}
-                                port_name={`addresses.${index}.port`} />
-                        </Box>
-                        <ActionIcon variant="subtle" color="red" mb={4}
-                            disabled={form.values.addresses.length === 1}
-                            onClick={() => form.removeListItem('addresses', index)}>
-                            <BsTrashFill size={14} />
-                        </ActionIcon>
-                    </Group>
-                    {isExternal ? <Box mt={6}>
-                        <PortAndInterface form={form}
-                            int_name={`addresses.${index}.proxy_ip`}
-                            port_name={`addresses.${index}.proxy_port`}
-                            label="…handed to your proxy at" />
-                    </Box> : null}
-                </Box>)}
+                <TextInput label="Service name" placeholder="shop-api" {...form.getInputProps('name')} />
                 <Space h="md" />
-            </>}
 
-            <LayerChoice value={form.values.transport} proto={form.values.proto}
-                onChange={v => form.setFieldValue('transport', v)} />
-            <Space h="md" />
+                <Text size="sm" fw={500}>Transport protocol</Text>
+                <Text size="xs" c="dimmed" mb={6}>
+                    What the service speaks on the wire. TLS is one of them rather than a
+                    switch on top of TCP: the engine decrypts it, so the filters see the
+                    plaintext and no extra port is used.
+                </Text>
+                <SegmentedControl fullWidth
+                    // Disabled, not removed — the same way the layer picker below says no,
+                    // from the same `carries` rule. An option that vanishes leaves nothing to
+                    // ask about: the operator wonders whether TLS exists at all, or whether
+                    // they misremembered seeing it. Greyed out with a reason underneath, it
+                    // says both that it exists and what it would take to reach it.
+                    data={[
+                        { label: 'TCP', value: L4.TCP },
+                        { label: 'UDP', value: L4.UDP },
+                        {
+                            label: 'TLS',
+                            value: L4.TLS,
+                            disabled: !carries(form.values.transport, L4.TLS),
+                        },
+                    ]}
+                    {...form.getInputProps('proto')}
+                />
+                {/* Beside the control it is greyed out in, not further down beside the layer
+                that decides it: the question a reader has is "why can I not click that". */}
+                {!carries(form.values.transport, L4.TLS) ? <Text size="xs" c="dimmed" mt={6}>
+                    TLS is unavailable on this layer: it inspects packets as they pass rather
+                    than terminating the connection, and decrypting means terminating. Choose
+                    the proxy layer to use it.
+                </Text> : null}
+                <Space h="md" />
 
-            {/* One fold for everything an operator sets once — after something went
+                {edit ? null : <>
+                    <Group justify="space-between" align="center">
+                        <Box>
+                            <Text size="sm" fw={500}>Addresses to protect</Text>
+                            <Text size="xs" c="dimmed">
+                                One service, one filter chain, as many addresses as it answers on —
+                                IPv4 and IPv6 together if that is how it is reachable.
+                            </Text>
+                        </Box>
+                        <Tooltip label="Protect another address with the same chain" position="left">
+                            <ActionIcon variant="light" onClick={() => form.insertListItem('addresses', emptyAddress())}>
+                                <BsPlusLg size={14} />
+                            </ActionIcon>
+                        </Tooltip>
+                    </Group>
+                    <Space h="xs" />
+                    {form.values.addresses.map((_, index) => <Box key={index} mb="sm">
+                        <Group align="flex-end" wrap="nowrap" gap="xs">
+                            <Box style={{ flex: 1 }}>
+                                <PortAndInterface form={form}
+                                    int_name={`addresses.${index}.ip_int`}
+                                    port_name={`addresses.${index}.port`} />
+                            </Box>
+                            <ActionIcon variant="subtle" color="red" mb={4}
+                                disabled={form.values.addresses.length === 1}
+                                onClick={() => form.removeListItem('addresses', index)}>
+                                <BsTrashFill size={14} />
+                            </ActionIcon>
+                        </Group>
+                        {isExternal ? <Box mt={6}>
+                            <PortAndInterface form={form}
+                                int_name={`addresses.${index}.proxy_ip`}
+                                port_name={`addresses.${index}.proxy_port`}
+                                label="…handed to your proxy at"
+                                includeInterfaceNames={false} />
+                        </Box> : null}
+                    </Box>)}
+                    <Space h="md" />
+                </>}
+
+                <LayerChoice value={form.values.transport} proto={form.values.proto}
+                    onChange={v => form.setFieldValue('transport', v)} />
+                <Space h="md" />
+
+                {/* One fold for everything an operator sets once — after something went
                 wrong, or before a competition — and then never looks at again. Left in
                 the open they are three more things to read past on every service that is
                 created, and the form's own submit button is already fighting for room.
@@ -302,93 +306,93 @@ export default function AddEditService({ opened, onClose, edit }: {
                 descriptors are what a limit counts. Fail-open is NFQUEUE's: it hands the
                 kernel a verdict on packets already in flight, and what it can run out of
                 is queue. The hand-off layer runs nothing of ours, so it has neither. */}
-            {isExternal ? null : <>
-                <Accordion variant="contained" chevronPosition="left"
-                    styles={{ content: { paddingInline: 'var(--mantine-spacing-sm)' } }}>
-                    <Accordion.Item value="advanced">
-                        <Accordion.Control>
-                            <Text size="sm" fw={500}>Advanced settings</Text>
-                            <Text size="xs" c="dimmed">
-                                {changed.length > 0
-                                    ? changed.join(" · ")
-                                    : "Everything at its default."}
-                            </Text>
-                        </Accordion.Control>
-                        <Accordion.Panel>
-                            {isProxy ? <>
-                                <NumberInput
-                                    label="Most connections at once"
-                                    description={form.values.max_connections > 0
-                                        ? "Counted across TCP connections and UDP flows together — they spend the same descriptors."
-                                        : "0 means no limit. Without one, connections that are opened and then say nothing can exhaust firegex and take every other service down with this one."}
-                                    min={0} step={64} allowDecimal={false}
-                                    {...form.getInputProps('max_connections')}
-                                />
-                                <Space h="sm" />
-                                <NumberInput
-                                    label="Close a connection that says nothing, after"
-                                    suffix=" s"
-                                    description={form.values.first_byte_timeout > 0
-                                        ? "Until the first byte only, in either direction — a service that greets its client satisfies it too. Once a connection has spoken it is never closed for going quiet."
-                                        : "0 means never. This is what a limit alone cannot do: a connection opened and left silent holds a descriptor here and one on your service, having asked for nothing."}
-                                    min={0} step={5} allowDecimal={false}
-                                    {...form.getInputProps('first_byte_timeout')}
-                                />
-                                {form.values.max_connections > 0 ? <>
-                                    <Space h="sm" />
-                                    <Switch
-                                        label="Forward what does not fit, unfiltered"
-                                        description={form.values.over_limit_forwards
-                                            ? "The service stays reachable past the limit, and that traffic reaches it with nothing having looked at it."
-                                            : "Off: what does not fit is refused. Nothing reaches the service unexamined, and clients are turned away while the limit holds."}
-                                        {...form.getInputProps('over_limit_forwards', { type: 'checkbox' })}
+                {isExternal ? null : <>
+                    <Accordion variant="contained" chevronPosition="left"
+                        styles={{ content: { paddingInline: 'var(--mantine-spacing-sm)' } }}>
+                        <Accordion.Item value="advanced">
+                            <Accordion.Control>
+                                <Text size="sm" fw={500}>Advanced settings</Text>
+                                <Text size="xs" c="dimmed">
+                                    {changed.length > 0
+                                        ? changed.join(" · ")
+                                        : "Everything at its default."}
+                                </Text>
+                            </Accordion.Control>
+                            <Accordion.Panel>
+                                {isProxy ? <>
+                                    <NumberInput
+                                        label="Most connections at once"
+                                        description={form.values.max_connections > 0
+                                            ? "Counted across TCP connections and UDP flows together — they spend the same descriptors."
+                                            : "0 means no limit. Without one, connections that are opened and then say nothing can exhaust firegex and take every other service down with this one."}
+                                        min={0} step={64} allowDecimal={false}
+                                        {...form.getInputProps('max_connections')}
                                     />
-                                </> : null}
-                            </> : <Switch
-                                label="Keep forwarding if the filter stops answering"
-                                description="The kernel's fail-open backstop. Turning it off means traffic stops when the filter does."
-                                {...form.getInputProps('fail_open', { type: 'checkbox' })}
-                            />}
-                        </Accordion.Panel>
-                    </Accordion.Item>
-                </Accordion>
+                                    <Space h="sm" />
+                                    <NumberInput
+                                        label="Close a connection that says nothing, after"
+                                        suffix=" s"
+                                        description={form.values.first_byte_timeout > 0
+                                            ? "Until the first byte only, in either direction — a service that greets its client satisfies it too. Once a connection has spoken it is never closed for going quiet."
+                                            : "0 means never. This is what a limit alone cannot do: a connection opened and left silent holds a descriptor here and one on your service, having asked for nothing."}
+                                        min={0} step={5} allowDecimal={false}
+                                        {...form.getInputProps('first_byte_timeout')}
+                                    />
+                                    {form.values.max_connections > 0 ? <>
+                                        <Space h="sm" />
+                                        <Switch
+                                            label="Forward what does not fit, unfiltered"
+                                            description={form.values.over_limit_forwards
+                                                ? "The service stays reachable past the limit, and that traffic reaches it with nothing having looked at it."
+                                                : "Off: what does not fit is refused. Nothing reaches the service unexamined, and clients are turned away while the limit holds."}
+                                            {...form.getInputProps('over_limit_forwards', { type: 'checkbox' })}
+                                        />
+                                    </> : null}
+                                </> : <Switch
+                                    label="Keep forwarding if the filter stops answering"
+                                    description="The kernel's fail-open backstop. Turning it off means traffic stops when the filter does."
+                                    {...form.getInputProps('fail_open', { type: 'checkbox' })}
+                                />}
+                            </Accordion.Panel>
+                        </Accordion.Item>
+                    </Accordion>
+                    <Space h="md" />
+                </>}
+
+
+                {isTls ? <>
+                    <Space h="sm" />
+                    <PemInput label="Certificate (PEM)"
+                        placeholder={edit ? "unchanged" : "-----BEGIN CERTIFICATE-----"}
+                        expect="-----BEGIN CERTIFICATE-----"
+                        value={form.values.tls_cert}
+                        onChange={v => form.setFieldValue('tls_cert', v)}
+                        error={form.errors.tls_cert} />
+                    <Space h="sm" />
+                    <PemInput label="Private key (PEM)"
+                        placeholder={edit ? "unchanged" : "-----BEGIN PRIVATE KEY-----"}
+                        expect="PRIVATE KEY-----"
+                        value={form.values.tls_key}
+                        onChange={v => form.setFieldValue('tls_key', v)}
+                        error={form.errors.tls_key} />
+                    <Text size="xs" c="dimmed" mt={6}>
+                        {stored
+                            ? "Both are already stored. They are never sent back to the browser, so leaving these empty keeps them as they are."
+                            : "The key is stored and used to configure nginx, and never sent back to the browser."}
+                    </Text>
+                </> : null}
+
+                {edit ? null : <>
+                    <Space h="md" />
+                    <Switch label="Start it immediately" {...form.getInputProps('autostart', { type: 'checkbox' })} />
+                </>}
+
+                {edit ?
+                    <Alert color="yellow" mt="md">
+                        Changing any of this restarts the service, which drops the connections it
+                        is carrying. Adding an address, or adding and reordering filters, does not.
+                    </Alert> : null}
                 <Space h="md" />
-            </>}
-
-
-            {isTls ? <>
-                <Space h="sm" />
-                <PemInput label="Certificate (PEM)"
-                    placeholder={edit ? "unchanged" : "-----BEGIN CERTIFICATE-----"}
-                    expect="-----BEGIN CERTIFICATE-----"
-                    value={form.values.tls_cert}
-                    onChange={v => form.setFieldValue('tls_cert', v)}
-                    error={form.errors.tls_cert} />
-                <Space h="sm" />
-                <PemInput label="Private key (PEM)"
-                    placeholder={edit ? "unchanged" : "-----BEGIN PRIVATE KEY-----"}
-                    expect="PRIVATE KEY-----"
-                    value={form.values.tls_key}
-                    onChange={v => form.setFieldValue('tls_key', v)}
-                    error={form.errors.tls_key} />
-                <Text size="xs" c="dimmed" mt={6}>
-                    {stored
-                        ? "Both are already stored. They are never sent back to the browser, so leaving these empty keeps them as they are."
-                        : "The key is stored and used to configure nginx, and never sent back to the browser."}
-                </Text>
-            </> : null}
-
-            {edit ? null : <>
-                <Space h="md" />
-                <Switch label="Start it immediately" {...form.getInputProps('autostart', { type: 'checkbox' })} />
-            </>}
-
-            {edit ?
-                <Alert color="yellow" mt="md">
-                    Changing any of this restarts the service, which drops the connections it
-                    is carrying. Adding an address, or adding and reordering filters, does not.
-                </Alert> : null}
-            <Space h="md" />
             </Box>
 
             {/* Outside the scrolling area, so it is reachable however long the form
@@ -396,7 +400,6 @@ export default function AddEditService({ opened, onClose, edit }: {
                 a refusal you do not see. */}
             <Box style={{
                 flexShrink: 0, paddingBlock: 'var(--mantine-spacing-sm)',
-                borderTop: '1px solid var(--mantine-color-dark-4)',
                 background: 'var(--mantine-color-body)',
             }}>
                 {error ? <Alert color="red" mb="sm" withCloseButton onClose={() => setError(null)}>

@@ -30,13 +30,12 @@ export const transportSummary = (transport: string, proto: string) => {
     if (transport === Transport.NFQUEUE)
         return "Packets are inspected and a verdict handed back; nothing is terminated. Fully transparent, and the kernel keeps forwarding if a filter dies — at the cost of a userspace round trip per packet, userspace reassembly, a process per filter, and patterns that cannot rewrite."
     return proto === L4.UDP
-        ? "Each address is relayed by a socket of its own. Rewriting is exact and filters keep per-flow state, but your service sees firegex's address rather than the client's — the kernel option that recovers a datagram's original destination is TCP-only."
+        ? "Each address is relayed by a dedicated socket. Rewriting is exact, filters keep per-flow state, and source IP transparency is preserved. Adding new addresses works dynamically without restarting the service."
         : "The connection is terminated and reopened, so rewriting is exact, the kernel reassembles, and the chain has no length limit. It also carries bulk traffic several times faster than NFQUEUE, which pays a userspace round trip per packet; what it costs is fail-open being rebuilt in userspace rather than guaranteed by the kernel. The service still sees the real client address."
 }
 
 /** Whether this combination loses the client's address, which is worth saying out loud. */
-export const losesClientAddress = (transport: string, proto: string) =>
-    transport === Transport.PROXY && proto === L4.UDP
+export const losesClientAddress = (_transport: string, _proto: string) => false
 
 /** Where a service is reachable, short enough to sit on one line. */
 export const addressSummary = (addresses: Address[]) => {

@@ -13,8 +13,11 @@ import { Address, decrypts, Service, serviceQueryKey, services, Transport } from
 
 type Values = { ip_int: string, port: number, proxy_ip: string, proxy_port: number }
 
-const validAddress = (v: string) =>
-    !!(v.match(regex_ipv6_no_cidr) || v.match(regex_ipv4_no_cidr))
+export const isInterface = (v: string) =>
+    !v.match(regex_ipv6_no_cidr) && !v.match(regex_ipv4_no_cidr) && v.trim().length > 0 && v.trim().length <= 15 && !!v.trim().match(/^[a-zA-Z0-9_.:-]+$/)
+
+export const validAddress = (v: string) =>
+    !!(v.match(regex_ipv6_no_cidr) || v.match(regex_ipv4_no_cidr) || isInterface(v))
 
 function AddressModal({ opened, onClose, service, edit }: {
     opened: boolean, onClose: () => void, service: Service, edit?: Address,
@@ -27,8 +30,9 @@ function AddressModal({ opened, onClose, service, edit }: {
     const form = useForm<Values>({
         initialValues: { ip_int: "127.0.0.1", port: 80, proxy_ip: "127.0.0.1", proxy_port: 8080 },
         validate: {
-            ip_int: v => validAddress(v) ? null : "Invalid IP address",
+            ip_int: v => validAddress(v) ? (isExternal && isInterface(v) ? "External transport requires an IP, not an interface" : null) : "Invalid IP address or interface name",
             port: v => (v > 0 && v < 65536) ? null : "Invalid port",
+            proxy_ip: v => (!isExternal || (v.match(regex_ipv6_no_cidr) || v.match(regex_ipv4_no_cidr))) ? null : "Invalid proxy IP",
             proxy_port: v => (!isExternal || (v > 0 && v < 65536)) ? null : "Your proxy's port is required",
         },
     })
@@ -74,7 +78,7 @@ function AddressModal({ opened, onClose, service, edit }: {
             {isExternal ? <>
                 <Space h="md" />
                 <PortAndInterface form={form} int_name="proxy_ip" port_name="proxy_port"
-                    label="Where your proxy listens for it" />
+                    label="Where your proxy listens for it" includeInterfaceNames={false} />
                 <Text size="xs" c="dimmed" mt={6}>
                     Its own port, not one another address already uses: the return rule puts
                     the original port back by recognising your proxy's, so two addresses
@@ -144,6 +148,11 @@ export default function AddressList({ service }: { service: Service }) {
                             it once. Repeating it on each row is noise that grows with
                             the list. */}
                         <Code>{address.ip_int}:{address.port}</Code>
+                        {isInterface(address.ip_int) ? (
+                            <Badge size="xs" variant="outline" color="blue">
+                                IFACE
+                            </Badge>
+                        ) : null}
                         {decrypts(service) ? <Tooltip position="bottom"
                             label="The engine decrypts here: clients dial this address as they always did, and the filters see the plaintext inside the process.">
                             <Badge size="xs" variant="light" color="grape"

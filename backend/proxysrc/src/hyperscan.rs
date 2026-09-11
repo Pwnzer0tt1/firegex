@@ -41,6 +41,7 @@ const HS_SUCCESS: c_int = 0;
 const HS_SCAN_TERMINATED: c_int = -3;
 
 const HS_FLAG_CASELESS: c_uint = 1;
+#[allow(dead_code)]
 const HS_FLAG_SINGLEMATCH: c_uint = 8;
 const HS_FLAG_ALLOWEMPTY: c_uint = 16;
 const HS_FLAG_SOM_LEFTMOST: c_uint = 256;
@@ -80,6 +81,13 @@ extern "C" {
     ) -> c_int;
     fn hs_close_stream(
         id: *mut hs_stream_t,
+        scratch: *mut hs_scratch_t,
+        on_event: Option<MatchEventHandler>,
+        ctxt: *mut c_void,
+    ) -> c_int;
+    fn hs_reset_stream(
+        id: *mut hs_stream_t,
+        flags: c_uint,
         scratch: *mut hs_scratch_t,
         on_event: Option<MatchEventHandler>,
         ctxt: *mut c_void,
@@ -171,7 +179,7 @@ impl Database {
         let ptrs: Vec<*const c_char> = owned.iter().map(|s| s.as_ptr()).collect();
 
         let base = match mode {
-            Mode::Stream => HS_FLAG_SINGLEMATCH | HS_FLAG_ALLOWEMPTY,
+            Mode::Stream => HS_FLAG_ALLOWEMPTY,
             // The debugger wants every match and where it started, so neither
             // SINGLEMATCH (one report per pattern) nor the default no-start-offset.
             Mode::Block => HS_FLAG_SOM_LEFTMOST | HS_FLAG_ALLOWEMPTY,
@@ -342,6 +350,32 @@ impl StreamScanner {
             }
         }
         Ok(res.hit)
+    }
+
+    /// Reset the stream to its initial state, clearing any previous match or terminated status.
+    pub fn reset(&mut self) -> Result<(), String> {
+        if self.stream.is_null() {
+            return Ok(());
+        }
+        let rc = unsafe {
+            hs_reset_stream(
+                self.stream,
+                0,
+                self.scratch.scratch,
+                None,
+                ptr::null_mut(),
+            )
+        };
+        if rc != HS_SUCCESS {
+            // If reset failed, close and reopen the stream cleanly.
+            unsafe { hs_close_stream(self.stream, self.scratch.scratch, None, ptr::null_mut()) };
+            self.stream = ptr::null_mut();
+            let reopen_rc = unsafe { hs_open_stream(self.db.db, 0, &mut self.stream) };
+            if reopen_rc != HS_SUCCESS {
+                return Err(format!("hyperscan reset stream failed ({rc}/{reopen_rc})"));
+            }
+        }
+        Ok(())
     }
 
     pub fn pattern_count(&self) -> usize {

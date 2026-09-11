@@ -695,6 +695,17 @@ if __name__ == "__main__":
         finally:
             second.stop()
 
+        # --- an address specified as a network interface ----------------------
+        # An interface name instead of a fixed IP or CIDR range. The datapath intercepts
+        # traffic directly on the interface.
+        why_iface = api.services_add_address_error(service_id, "lo", args.port + 3)
+        check("protect an address by interface name (lo)", why_iface is None, str(why_iface))
+        if why_iface is None:
+            iface_addrs = [a for a in api.services_addresses(service_id) if a["ip_int"] == "lo"]
+            check("interface address is listed", len(iface_addrs) == 1)
+            if iface_addrs:
+                check("remove interface address", api.services_delete_address(service_id, iface_addrs[0]["address_id"]))
+
         # --- a filter whose protocol is read off its own code -----------------
         # The file asks for an HttpRequest, which is what makes it an HTTP filter. The
         # service is plain TCP: the two are different questions, and confusing them is
@@ -1050,6 +1061,26 @@ if __name__ == "__main__":
                 rows = api.services_regexes(udp_id, ufid)
                 check("the block is counted against the pattern",
                       any(r["blocked"] >= 1 for r in rows), str(rows))
+
+                # --- a second UDP address on the running service -------------
+                echo2 = UdpEcho(udp_port + 1, args.ipv6)
+                echo2.start()
+                try:
+                    why = api.services_add_address_error(udp_id, ip, udp_port + 1)
+                    check("protect a second UDP address without restarting", why is None, str(why))
+                    time.sleep(1)
+                    check("benign datagram to the new UDP address gets through",
+                          echo2.exchange(b"hello second") == b"hello second")
+                    check("the same chain filters the new UDP address",
+                          echo2.exchange(b"carrying DENYME") is None)
+                    entries = api.services_logs(udp_id)
+                    check("the log says the UDP address was added without dropping anything",
+                          any("also protecting" in e["text"] for e in entries), str(entries[-4:]))
+                    gone_udp = [a for a in api.services_addresses(udp_id)
+                                if a["port"] == udp_port + 1][0]["address_id"]
+                    check("remove second UDP address", api.services_delete_address(udp_id, gone_udp))
+                finally:
+                    echo2.stop()
 
                 # --- a Python filter on UDP ----------------------------------
                 # It works on datagrams, and the models that need a stream underneath

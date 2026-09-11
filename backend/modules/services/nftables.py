@@ -25,7 +25,15 @@ NAT entry to key off and so could never reach a local service at all.
 """
 
 from modules.services.models import TRANSPORT, Address, Service
-from utils import NFTableManager, addr_parse, ip_family, ip_parse, nftables_int_to_json
+from utils import (
+    NFTableManager,
+    addr_parse,
+    get_interface_ips,
+    ip_family,
+    ip_parse,
+    is_ip_parse,
+    nftables_int_to_json,
+)
 
 # Direction marks the NFQUEUE binaries read back off a packet.
 QUEUE_MARK_INPUT = 0x1337
@@ -109,16 +117,22 @@ class InstalledRule:
         if target is None:
             return False
         target_ip, target_port = target
-        if self.port == int(target_port) and ip_parse(self.ip_int) == ip_parse(target_ip):
-            return True
+        if self.port != int(target_port):
+            return False
+        if is_ip_parse(self.ip_int) and is_ip_parse(target_ip):
+            if ip_parse(self.ip_int) == ip_parse(target_ip):
+                return True
+        elif not is_ip_parse(self.ip_int) and not is_ip_parse(target_ip):
+            if self.ip_int == target_ip:
+                return True
         # The return leg of an external hand-off matches the operator's proxy, not the
         # service. Recognising only the inbound rule would leave the outbound one behind
         # every time a service was stopped, and it would keep rewriting.
-        if srv.transport == TRANSPORT.EXTERNAL and addr.proxy_port:
+        if srv.transport == TRANSPORT.EXTERNAL and addr.proxy_port and is_ip_parse(target_ip):
             proxy_ip = one_address(addr.proxy_ip or "") or (
                 "::1" if ip_family(target_ip) == "ip6" else "127.0.0.1"
             )
-            return self.port == int(addr.proxy_port) and ip_parse(self.ip_int) == ip_parse(proxy_ip)
+            return is_ip_parse(self.ip_int) and ip_parse(self.ip_int) == ip_parse(proxy_ip)
         return False
 
     def matches_any(self, srv: Service, addresses: list[Address]) -> bool:
@@ -314,6 +328,24 @@ class FiregexTables(NFTableManager):
     COUNTER = {"counter": {"packets": 0, "bytes": 0}}
 
     def _match(self, ip: str, port: int, family: str, l4: str, addr: str, field: str) -> list:
+        if not is_ip_parse(ip):
+            iface_key = "iifname" if addr == "daddr" else "oifname"
+            return [
+                {
+                    "match": {
+                        "op": "==",
+                        "left": {"meta": {"key": iface_key}},
+                        "right": ip,
+                    }
+                },
+                {
+                    "match": {
+                        "op": "==",
+                        "left": {"payload": {"protocol": l4, "field": field}},
+                        "right": int(port),
+                    }
+                },
+            ]
         return [
             {
                 "match": {
@@ -368,7 +400,8 @@ class FiregexTables(NFTableManager):
             if target is None:
                 continue
             target_ip, target_port = target
-            family = ip_family(target_ip)
+            is_iface = not is_ip_parse(target_ip)
+            family = "ip" if is_iface else ip_family(target_ip)
             l4 = str(addr.proto)
 
             if srv.transport == TRANSPORT.NFQUEUE:
@@ -380,10 +413,24 @@ class FiregexTables(NFTableManager):
                 # at that address's port rather than at the one shared TCP listener.
                 port = proxy_port
                 if l4 == "udp":
-                    key = (
-                        f"[{one_address(target_ip)}]:{target_port}"
-                        if family == "ip6" else f"{one_address(target_ip)}:{target_port}"
-                    )
+                    if is_iface:
+                        ips = get_interface_ips(target_ip)
+                        if not ips:
+                            raise Exception(
+                                f"the proxy transport has no UDP relay listening for {target_ip}: "
+                                f"interface '{target_ip}' has no IP assigned"
+                            )
+                        resolved_ip = one_address(ips[0])
+                        resolved_family = ip_family(resolved_ip)
+                        key = (
+                            f"[{resolved_ip}]:{target_port}"
+                            if resolved_family == "ip6" else f"{resolved_ip}:{target_port}"
+                        )
+                    else:
+                        key = (
+                            f"[{one_address(target_ip)}]:{target_port}"
+                            if family == "ip6" else f"{one_address(target_ip)}:{target_port}"
+                        )
                     port = (udp_ports or {}).get(key)
                     if port is None:
                         raise Exception(
@@ -445,6 +492,8 @@ class FiregexTables(NFTableManager):
         port back, so two addresses sharing one proxy endpoint could not be told apart
         on the way out. Every address gets its own.
         """
+        if not is_ip_parse(ip):
+            raise Exception("the external transport requires a concrete IP address, not an interface")
         if not addr.proxy_port:
             raise Exception("the external transport needs the port your proxy listens on")
         # One host, not a network: a hand-off points at the single address the
@@ -484,24 +533,23 @@ class FiregexTables(NFTableManager):
         # what this host generates, which is the only way a client on this host reaches
         # a service on it. Conntrack NATs a connection once, so a rule in each is not a
         # double translation.
+        is_iface = not is_ip_parse(ip)
         redirect = (
             self._not_ours()
             + self._match(ip, port, family, l4, "daddr", "dport")
             + [self.COUNTER, {"redirect": {"port": int(proxy_port)}}]
         )
-        self.cmd(
+        cmds = [
             self._rule(self.nat_chain, redirect),
-            self._rule(self.nat_output_chain, redirect),
-            # Source preservation is not optional. A protected service that suddenly
-            # sees one address for the whole internet is a silent regression against
-            # the NFQUEUE transport, and the operator would find out from their own
-            # rate limiter rather than from us.
             self._rule(
                 self.route_chain,
                 self._match(ip, port, family, l4, "saddr", "sport")
                 + [{"mangle": {"key": {"meta": {"key": "mark"}}, "value": PROXY_MARK}}],
             ),
-        )
+        ]
+        if not is_iface:
+            cmds.append(self._rule(self.nat_output_chain, redirect))
+        self.cmd(*cmds)
 
     # --- reading back ---------------------------------------------------------
 
@@ -525,14 +573,19 @@ class FiregexTables(NFTableManager):
                 # per-service rule starts with the address. The two rules init()
                 # installs match on `socket` or on `ct`, and fall out here.
                 if "meta" in expr[0].get("match", {}).get("left", {}):
-                    expr = expr[1:]
-                if "payload" not in expr[0].get("match", {}).get("left", {}):
-                    continue
-                right = expr[0]["match"]["right"]
-                if isinstance(right, str):
-                    ip_int = str(ip_parse(right))
+                    if expr[0].get("match", {}).get("left", {}).get("meta", {}).get("key") == "mark":
+                        expr = expr[1:]
+                match_left = expr[0].get("match", {}).get("left", {})
+                if "payload" in match_left:
+                    right = expr[0]["match"]["right"]
+                    if isinstance(right, str):
+                        ip_int = str(ip_parse(right))
+                    else:
+                        ip_int = f'{right["prefix"]["addr"]}/{right["prefix"]["len"]}'
+                elif "meta" in match_left and match_left["meta"].get("key") in ("iifname", "oifname"):
+                    ip_int = str(expr[0]["match"]["right"])
                 else:
-                    ip_int = f'{right["prefix"]["addr"]}/{right["prefix"]["len"]}'
+                    continue
                 counter = next(
                     (e["counter"] for e in expr if isinstance(e, dict) and "counter" in e),
                     {},

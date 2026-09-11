@@ -38,7 +38,14 @@ from modules.services.models import (KIND, L4, MODE, PROTO, STATUS, Service,
 from modules.services.nftables import FiregexTables
 from modules.services import transports
 from modules.services.transports import PROXY_ENGINE, PYWORKER, UnsupportedChain
-from utils import PortType, ip_parse, refactor_name, socketio_emit
+from utils import (
+    PortType,
+    ip_parse,
+    is_ip_parse,
+    parse_ip_or_int,
+    refactor_name,
+    socketio_emit,
+)
 from utils.models import ResetRequest, StatusMessageModel
 
 from utils.sqlite import SQLite
@@ -724,13 +731,17 @@ def _insert_address(service_id: str, proto: str, form: AddressForm) -> str:
     Not the service's own protocol: `tls` is TCP on the wire, and an address storing it
     verbatim would let a TCP service and a TLS one claim one `ip:port` between them.
     """
+    try:
+        parsed_ip = parse_ip_or_int(form.ip_int)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     address_id = gen_id()
     db.query(
         "INSERT INTO service_addresses (address_id, service_id, ip_int, port, proto, "
         "proxy_ip, proxy_port) VALUES (?, ?, ?, ?, ?, ?, ?);",
         address_id,
         service_id,
-        ip_parse(form.ip_int),
+        parsed_ip,
         form.port,
         L4.l4_of(proto),
         form.proxy_ip or None,
@@ -829,6 +840,12 @@ async def add_service(form: ServiceAddForm):
             status_code=400,
             detail="A service handing its traffic to your own proxy needs that proxy's "
                    "port for every address",
+        )
+    if form.transport == TRANSPORT.EXTERNAL and any(not is_ip_parse(a.ip_int) for a in form.addresses):
+        raise HTTPException(
+            status_code=400,
+            detail="The external transport hands traffic to your own proxy and rewrites the "
+                   "source address on return, which requires a concrete IP address rather than an interface.",
         )
     service_id = gen_id()
     try:
@@ -983,6 +1000,12 @@ async def add_address(service_id: str, form: AddressForm):
             detail="This service hands its traffic to your own proxy, so the new "
                    "address needs the port that proxy listens on for it",
         )
+    if row["transport"] == TRANSPORT.EXTERNAL and not is_ip_parse(form.ip_int):
+        raise HTTPException(
+            status_code=400,
+            detail="The external transport hands traffic to your own proxy and rewrites the "
+                   "source address on return, which requires a concrete IP address rather than an interface.",
+        )
     try:
         address_id = _insert_address(service_id, row["proto"], form)
     except sqlite3.IntegrityError as e:
@@ -1017,6 +1040,12 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
             detail="This service hands its traffic to your own proxy, so every address "
                    "needs the port that proxy listens on for it",
         )
+    if row["transport"] == TRANSPORT.EXTERNAL and not is_ip_parse(form.ip_int):
+        raise HTTPException(
+            status_code=400,
+            detail="The external transport hands traffic to your own proxy and rewrites the "
+                   "source address on return, which requires a concrete IP address rather than an interface.",
+        )
 
     def write(ip_int, port, proxy_ip, proxy_port):
         db.query(
@@ -1038,10 +1067,15 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
         except Exception:
             pass
 
+    try:
+        parsed_ip = parse_ip_or_int(form.ip_int)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     manager = firewall.get(service_id)
     await manager.address_removed(address_id)
     try:
-        write(ip_parse(form.ip_int), form.port, form.proxy_ip or None, form.proxy_port)
+        write(parsed_ip, form.port, form.proxy_ip or None, form.proxy_port)
     except sqlite3.IntegrityError as e:
         await restore()
         raise HTTPException(status_code=400, detail=_address_taken(e))

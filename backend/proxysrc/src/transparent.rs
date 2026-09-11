@@ -11,7 +11,8 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::os::fd::{AsRawFd, RawFd};
 
-use tokio::net::{TcpListener, TcpSocket, TcpStream};
+use socket2::{Domain, Protocol, Socket, Type};
+use tokio::net::{TcpListener, TcpSocket, TcpStream, UdpSocket};
 
 // Not in libc: netfilter's own option numbers.
 const SO_ORIGINAL_DST: libc::c_int = 80;
@@ -139,7 +140,9 @@ fn original_dst_from_conntrack(stream: &TcpStream) -> io::Result<SocketAddr> {
 
 pub fn bind_listener(addr: SocketAddr) -> io::Result<TcpListener> {
     let socket = if addr.is_ipv6() {
-        TcpSocket::new_v6()?
+        let sock = TcpSocket::new_v6()?;
+        let _ = setsockopt_int(sock.as_raw_fd(), libc::IPPROTO_IPV6, libc::IPV6_V6ONLY, 0);
+        sock
     } else {
         TcpSocket::new_v4()?
     };
@@ -191,6 +194,56 @@ pub async fn connect_plain(upstream: SocketAddr, self_mark: Option<u32>) -> io::
         set_self_mark(socket.as_raw_fd(), mark)?;
     }
     socket.connect(upstream).await
+}
+
+/// Dial the service as the client over UDP: same source address, kernel-chosen source port.
+pub async fn connect_as_udp(
+    client: IpAddr,
+    upstream: SocketAddr,
+    self_mark: Option<u32>,
+) -> io::Result<UdpSocket> {
+    if client.is_ipv6() != upstream.is_ipv6() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "cannot spoof an IPv4 client towards an IPv6 service, or the reverse",
+        ));
+    }
+    let domain = if upstream.is_ipv6() {
+        Domain::IPV6
+    } else {
+        Domain::IPV4
+    };
+    let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_nonblocking(true)?;
+    set_transparent(socket.as_raw_fd(), upstream.is_ipv6())?;
+    if let Some(mark) = self_mark {
+        set_self_mark(socket.as_raw_fd(), mark)?;
+    }
+    socket.set_reuse_address(true)?;
+    let bind_addr: socket2::SockAddr = SocketAddr::new(client, 0).into();
+    socket.bind(&bind_addr)?;
+    let std_sock: std::net::UdpSocket = socket.into();
+    let tokio_sock = UdpSocket::from_std(std_sock)?;
+    tokio_sock.connect(upstream).await?;
+    Ok(tokio_sock)
+}
+
+/// Dial UDP without impersonating anyone, but still marked as ours.
+pub async fn connect_plain_udp(
+    upstream: SocketAddr,
+    self_mark: Option<u32>,
+) -> io::Result<UdpSocket> {
+    let bind: SocketAddr = if upstream.is_ipv6() {
+        "[::]:0".parse().unwrap()
+    } else {
+        "0.0.0.0:0".parse().unwrap()
+    };
+    let socket = UdpSocket::bind(bind).await?;
+    if let Some(mark) = self_mark {
+        set_self_mark(socket.as_raw_fd(), mark)?;
+    }
+    socket.connect(upstream).await?;
+    Ok(socket)
 }
 
 /// Mark a socket as ours, so the intercept rules can skip it.
