@@ -25,7 +25,7 @@ from modules.services import transports
 from modules.services import stats
 from modules.services.logs import LEVEL, forget as forget_log, log_for
 from modules.services.models import KIND, STATUS, Address, Filter, Regex, Service
-from modules.services.nftables import FiregexTables
+from modules.services.nftables import FiregexTables, NoRelayAddress, udp_relay_host
 from utils.sqlite import SQLite
 
 nft = FiregexTables()
@@ -37,6 +37,14 @@ CODE_DIR = "db/service_filters"
 #: connections are arriving faster than they leave, so a line each would be the flood
 #: arriving twice — once at the service and once in the operator's log.
 OVER_LIMIT_QUIET = 30
+
+#: How long between two reports that a filter is raising. Same reasoning as the line
+#: above, for the same shape of problem: user code that throws usually throws on every
+#: packet, so a line each is the fault arriving once per packet in a log that holds a
+#: few hundred lines. What the operator needs is that it is happening, how often, and one
+#: traceback — not the same traceback several hundred times, with everything else that
+#: was in the log pushed out behind it.
+RAISED_QUIET = 30
 
 
 def code_path(filter_id: str) -> str:
@@ -79,6 +87,8 @@ class ServiceManager:
         #: When the limit was last mentioned in the log, so a flood is reported rather
         #: than reproduced.
         self._over_limit_told = 0.0
+        self._raised_told = 0.0
+        self._raised_since = 0
         #: What the running datapath needs the rules to point at — a queue number per
         #: filter, or the port the proxy is listening on. Kept so an address added later
         #: can be steered at the same datapath instead of restarting it.
@@ -204,7 +214,30 @@ class ServiceManager:
         self.log.add(LEVEL.OUTPUT, text)
 
     def _on_exception(self, _service_id: str):
-        self.log.add(LEVEL.ERROR, "a filter raised; the traffic was forwarded unfiltered")
+        """A filter threw, and the chunk went through unfiltered.
+
+        Rate-limited, because code that throws throws on every packet: unthrottled this
+        is the same sentence a few hundred times, and the log is a bounded ring — so the
+        flood does not merely repeat itself, it evicts everything else, including the
+        first report and whatever was there before the filter broke.
+
+        The suppressed ones are counted rather than dropped. "it is still happening, 412
+        times since" is the number that says whether this is one odd request or every
+        request, which is the question the operator actually has.
+        """
+        now = time.time()
+        self._raised_since += 1
+        if now - self._raised_told < RAISED_QUIET:
+            return
+        first = self._raised_told == 0.0
+        count, self._raised_since = self._raised_since, 0
+        self._raised_told = now
+        self.log.add(
+            LEVEL.ERROR,
+            "a filter raised; the traffic was forwarded unfiltered"
+            if first and count == 1 else
+            f"a filter is still raising: {count} more since, all forwarded unfiltered",
+        )
 
     def _on_engine(self, text: str):
         """Whatever the datapath itself says about its own health.
@@ -290,11 +323,6 @@ class ServiceManager:
                 on_over_limit=self._on_over_limit,
             )
             try:
-                # Before the engine, which opens its socket to it at startup: an
-                # interface that appears afterwards is one this process will not find
-                # until it is restarted.
-                if self.srv.terminates_tls:
-                    mirror.ensure()
                 steer = await self.transport.start(self.chain())
                 self._steer = steer
                 # Clear first: a stale rule from a crashed run would otherwise sit in
@@ -377,13 +405,12 @@ class ServiceManager:
         self.reload_addresses()
         if not self.active:
             return
-        is_dual = getattr(self.transport, "is_dual_stack", False)
         if (
             self.srv.transport == transports.TRANSPORT.PROXY
             and str(self.srv.proto) != "udp"
             and self.srv.has_ipv6
             and not was_dual
-            and not is_dual
+            and not self.transport.is_dual_stack
         ):
             self.log.add(
                 LEVEL.INFO,
@@ -394,34 +421,20 @@ class ServiceManager:
         added = [addr for addr in self.srv.addresses if addr.id == address_id]
         if not added:
             return
-        if self.srv.transport == transports.TRANSPORT.PROXY:
-            from modules.services.nftables import one_address, ip_family
-            from utils import is_ip_parse, get_interface_ips
-            for addr in added:
-                l4 = str(addr.proto or self.srv.proto)
-                if l4 == "udp":
-                    is_iface = not is_ip_parse(addr.ip_int)
-                    if is_iface:
-                        ips = get_interface_ips(addr.ip_int)
-                        if not ips:
-                            raise transports.UnsupportedChain(
-                                f"interface '{addr.ip_int}' has no IP assigned for UDP proxy relay"
-                            )
-                        target_ip = one_address(ips[0])
-                    else:
-                        target_ip = one_address(addr.ip_int)
-                    target_port = addr.port
-                    family = ip_family(target_ip)
-                    key = (
-                        f"[{target_ip}]:{target_port}"
-                        if family == "ip6" else f"{target_ip}:{target_port}"
-                    )
-                    if "udp_ports" not in self._steer:
-                        self._steer["udp_ports"] = {}
-                    if key not in self._steer["udp_ports"]:
-                        port = await self.transport.add_udp_target(target_ip, target_port)
-                        self._steer["udp_ports"][key] = port
         async with self.lock:
+            # UDP is relayed by one socket per address, so a new address is a new relay
+            # — opened on the engine that is already running, before the rule that will
+            # point traffic at it exists. The engine owns the map of them: `_steer`
+            # carries that same dict, so what is opened here is what the rule finds.
+            if self.srv.transport == transports.TRANSPORT.PROXY:
+                for addr in added:
+                    if str(addr.proto or self.srv.proto) != "udp":
+                        continue
+                    try:
+                        host = udp_relay_host(addr.ip_int)
+                    except NoRelayAddress as e:
+                        raise transports.UnsupportedChain(str(e)) from e
+                    await self.transport.add_udp_target(host, addr.port)
             nft.add(self.srv, added, **self._steer)
         self.log.add(
             LEVEL.INFO,
@@ -500,6 +513,12 @@ class FirewallManager:
 
     async def init(self):
         nft.init()
+        # Before any engine, which opens its socket to it at startup: an interface that
+        # appears afterwards is one that process will not find until it is restarted.
+        # Once, here, rather than per service: a capture tool is attached to it for the
+        # length of a round, and an interface that comes and goes with the services
+        # takes the tool with it.
+        mirror.ensure()
         await self.reload()
 
     async def reload(self):
@@ -529,26 +548,23 @@ class FirewallManager:
                 if persist:
                     # A deleted service's log has nothing left to be about.
                     forget_log(srv_id)
-        self.release_capture_if_idle()
-
-    def release_capture_if_idle(self) -> None:
-        """Take the capture interface away once nothing is decrypting.
-
-        Asked of the managers rather than of the database, because what matters is which
-        services are *running*: a stopped one writes nothing, and an interface that is
-        there while nothing is decrypting is one somebody points a capture at and watches
-        stay empty.
-        """
-        if any(m.active and m.srv.terminates_tls for m in self.services.values()):
-            return
-        mirror.release()
 
     async def close(self):
+        """Stop every service. Deliberately *not* the end of the capture interface.
+
+        `reset()` closes and re-initialises without the process going anywhere, so
+        releasing here would make the device disappear and come back underneath whatever
+        was capturing from it — the exact failure it was made persistent to avoid.
+        """
         for key in list(self.services.keys()):
             try:
                 await self.remove(key, persist=False)
             except Exception:
                 self.services.pop(key, None)
+
+    def release_capture(self) -> None:
+        """Take the capture interface away, at process shutdown and nowhere else."""
+        mirror.release()
 
     def get(self, srv_id: str) -> ServiceManager:
         if srv_id not in self.services:

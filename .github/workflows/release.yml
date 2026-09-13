@@ -24,8 +24,11 @@ jobs:
       - name: Build and run firegex
         run: python3 run.py start -P testpassword
 
+      # No apt-get: the tests' dependencies are pure python. `iperf3`, matplotlib and
+      # numpy belong to the benchmarks, which CI does not run — a measurement has no
+      # pass or fail to gate a release on.
       - name: Run tests
-        run: sudo apt-get install -y iperf3 && cd tests && ./run_tests.sh
+        run: cd tests && ./run_tests.sh
 
   docker_build:
     needs: run_tests
@@ -217,8 +220,59 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  pypi_publish_firegex:
+  # `firegex` carries a C extension — the llhttp binding in `fgex-lib/llhttp/` — so it
+  # is no longer one universal wheel. A wheel is built per platform and per interpreter
+  # here, and the sdist goes up beside them: where no wheel matches, pip compiles from
+  # that. Compiling is a thing pip knows how to do; assuming a system library is already
+  # installed is not, which is why the parser ships as source rather than as a `ctypes`
+  # binding against the distribution's `libllhttp`.
+  build_firegex_wheels:
     needs: run_tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest        # manylinux + musllinux, x86_64
+          - os: ubuntu-24.04-arm     # and the same for aarch64
+          - os: macos-latest         # arm64
+          - os: macos-13             # x86_64, while GitHub still offers it
+          - os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract tag name
+        id: tag
+        shell: bash
+        run: echo TAG_NAME=$(echo $GITHUB_REF | cut -d / -f 3) >> $GITHUB_OUTPUT
+      - name: Update version
+        shell: bash
+        run: >-
+          sed -i.bak "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/setup.py;
+          sed -i.bak "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/firegex/__init__.py;
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.21.3
+        with:
+          package-dir: fgex-lib
+          output-dir: wheelhouse
+        env:
+          # The library declares `python_requires>=3.10`, so build what it claims to
+          # support and nothing else. PyPy is excluded: the datapath embeds CPython.
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_SKIP: "*-musllinux_i686 *_i686 pp*"
+          # A wheel that imports is the only kind worth publishing, and the extension is
+          # the whole reason this job exists. The checks live in a file rather than in a
+          # `-c` string because the one that matters needs a `try`: the parser has to
+          # raise its *own* exception on malformed traffic, and this clean environment —
+          # no `pyllhttp`, no developer's leftovers — is the only place that is tested.
+          CIBW_TEST_COMMAND: python {package}/wheel_smoke.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
+  pypi_publish_firegex:
+    needs: build_firegex_wheels
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -240,8 +294,16 @@ jobs:
         run: >-
           sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/setup.py;
           sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/firegex/__init__.py;
-      - name: Build package
-        run: cd fgex-lib && python -m build && mv ./dist ../
+      # The sdist is what pip falls back to where no wheel matches, so it has to carry
+      # the parser's C sources — `MANIFEST.in` is what puts them in.
+      - name: Build the sdist
+        run: cd fgex-lib && python -m build --sdist && mv ./dist ../
+      - name: Collect the wheels built for every platform
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
       - name: Publish package
         uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
         with:

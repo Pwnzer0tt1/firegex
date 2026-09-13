@@ -5,7 +5,7 @@ import { FaPlay, FaStop, FaTrash } from 'react-icons/fa';
 import { IoSettingsSharp } from 'react-icons/io5';
 import { MdChevronRight, MdMoreHoriz } from 'react-icons/md';
 import { TbHexagon, TbShieldLock } from 'react-icons/tb';
-import { errorNotify, isMediumScreen, okNotify } from '../../js/utils';
+import { bareAddress, errorNotify, isMediumScreen, okNotify } from '../../js/utils';
 import YesNoModal from '../YesNoModal';
 import AddEditService from './AddEditService';
 import { Address, decrypts, L4, Service, serviceQueryKey, services, Transport } from './utils';
@@ -28,19 +28,16 @@ export const transportSummary = (transport: string, proto: string) => {
     if (transport === Transport.EXTERNAL)
         return "Firegex only steers this traffic to a proxy you run; nothing here inspects it, so no filter can be attached."
     if (transport === Transport.NFQUEUE)
-        return "Packets are inspected and a verdict handed back; nothing is terminated. Fully transparent, and the kernel keeps forwarding if a filter dies — at the cost of a userspace round trip per packet, userspace reassembly, a process per filter, and patterns that cannot rewrite."
+        return "Packets are inspected and a verdict handed back; nothing is terminated. Fully transparent, and the kernel keeps forwarding if a filter dies — at the cost of a userspace round trip per packet, userspace reassembly, and a process per filter."
     return proto === L4.UDP
-        ? "Each address is relayed by a dedicated socket. Rewriting is exact, filters keep per-flow state, and source IP transparency is preserved. Adding new addresses works dynamically without restarting the service."
-        : "The connection is terminated and reopened, so rewriting is exact, the kernel reassembles, and the chain has no length limit. It also carries bulk traffic several times faster than NFQUEUE, which pays a userspace round trip per packet; what it costs is fail-open being rebuilt in userspace rather than guaranteed by the kernel. The service still sees the real client address."
+        ? "Each address is relayed by a dedicated socket. Filters keep per-flow state, source IP transparency is preserved, and a new address is relayed without restarting the service."
+        : "The connection is terminated and reopened, so the kernel reassembles and the chain has no length limit. It also carries bulk traffic several times faster than NFQUEUE, which pays a userspace round trip per packet; what it costs is fail-open being rebuilt in userspace rather than guaranteed by the kernel. The service still sees the real client address."
 }
-
-/** Whether this combination loses the client's address, which is worth saying out loud. */
-export const losesClientAddress = (_transport: string, _proto: string) => false
 
 /** Where a service is reachable, short enough to sit on one line. */
 export const addressSummary = (addresses: Address[]) => {
     if (!addresses || addresses.length === 0) return "no address yet"
-    const first = `${addresses[0].ip_int}:${addresses[0].port}`
+    const first = `${bareAddress(addresses[0].ip_int)}:${addresses[0].port}`
     return addresses.length === 1 ? first : `${first} +${addresses.length - 1} more`
 }
 
@@ -140,13 +137,6 @@ export default function ServiceRow({ service, onClick }: { service: Service, onC
                                     {transportLabel(service.transport)}
                                 </Badge>
                             </Tooltip>
-                            {losesClientAddress(service.transport, service.proto) ?
-                                <Tooltip position="bottom" multiline w={340}
-                                    label="Relayed per address, so your service sees firegex's address instead of the client's. The NFQUEUE layer filters UDP with the real packets untouched.">
-                                    <Badge color="orange" variant="light" size="xs" radius="sm">
-                                        NO CLIENT IP
-                                    </Badge>
-                                </Tooltip> : null}
                             {decrypts(service) ? <Tooltip label="The engine decrypts this service, so the filters see the plaintext" position="bottom">
                                 <Badge color="grape" variant="light" size="xs" radius="sm"
                                     leftSection={<TbShieldLock size={10} />}>TLS</Badge>
@@ -154,7 +144,7 @@ export default function ServiceRow({ service, onClick }: { service: Service, onC
                         </Group>
                         <Group gap="xs" mt={4}>
                             <Tooltip position="bottom" disabled={(service.addresses?.length ?? 0) < 2}
-                                label={(service.addresses ?? []).map(a => `${a.ip_int}:${a.port}`).join(", ")}>
+                                label={(service.addresses ?? []).map(a => `${bareAddress(a.ip_int)}:${a.port}`).join(", ")}>
                                 <Text size="xs" c="dimmed" style={{ letterSpacing: 0.5 }}>
                                     {addressSummary(service.addresses)} ON {service.proto.toUpperCase()}
                                 </Text>

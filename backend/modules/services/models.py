@@ -257,11 +257,6 @@ class Service:
         return L4.l4_of(self.proto)
 
     @property
-    def hands_off(self) -> bool:
-        """Whether firegex only steers this traffic rather than inspecting it."""
-        return self.transport == TRANSPORT.EXTERNAL
-
-    @property
     def has_ipv6(self) -> bool:
         """Whether any of its addresses is IPv6.
 

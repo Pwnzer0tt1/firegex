@@ -27,10 +27,10 @@ type Layer = {
 
 const LAYERS: Record<string, Layer> = {
     [Transport.PROXY]: {
-        line: "Terminates and reopens the connection — exact rewriting, and the faster of the two.",
+        line: "Terminates and reopens the connection — the faster of the two, and the only one that can decrypt TLS.",
         good: [
             "Carries bulk traffic 2-5× faster, and scales better with threads",
-            "Rewriting is exact, at any length",
+            "Python filters rewrite a payload exactly, at any length",
             "The kernel does the reassembly",
             "Any number of filters, in one process",
             "A slow filter slows the sender; nothing is dropped",
@@ -40,7 +40,7 @@ const LAYERS: Record<string, Layer> = {
             "Fail-open is rebuilt in userspace, not the kernel's",
         ],
         udpGood: [
-            "Datagrams are rewritten exactly — no sequence numbers to break",
+            "One relay socket per address — no per-datagram state to recover",
             "Your service still sees the real client address (transparent IP spoofing)",
         ],
     },
@@ -55,7 +55,7 @@ const LAYERS: Record<string, Layer> = {
             "A userspace round trip per packet: a fraction of the bulk throughput",
             "Reassembly is rebuilt in userspace",
             "One process per filter, up to eight",
-            "Patterns can only block, never rewrite",
+            "A Python filter rewriting a TCP payload desynchronises the stream",
         ],
         udpGood: ["Fully transparent on UDP, and Python rewrites datagrams exactly"],
     },

@@ -47,6 +47,7 @@ import json
 import re
 import struct
 import sys
+import time
 import traceback
 
 VERDICT_ACCEPT = 0
@@ -56,6 +57,32 @@ VERDICT_REPLACE = 2
 # a ruleset whose code does not load, instead of discovering it later as traffic that
 # quietly stopped being filtered.
 READY = 0xFF
+
+#: Written to stderr when the user's code raises, beside the traceback itself.
+#:
+#: The traceback says a filter broke and names its file and line, which is what an
+#: operator needs to fix it. It does not say what happened to the *connection*, and that
+#: is the part they have to know: it went through unfiltered. The engine cannot report it
+#: because it never learns of it — the exception is caught here and answered with ACCEPT,
+#: so nothing crosses the frame boundary to tell it apart from a filter that simply
+#: agreed. So it is marked on the diagnostics channel instead, and `Transport._pump_stderr`
+#: turns the marker back into the one sentence `_on_exception` writes for either network
+#: layer. A wire token like `BLOCKED` or `[fatal]`, and spelled the same in both places.
+EXCEPTION_MARK = "[exception] [filter]"
+
+#: How long between two tracebacks out of the same worker.
+#:
+#: A filter that throws usually throws on every packet, and a traceback is a dozen lines.
+#: Unthrottled, one broken filter writes thousands of lines a minute into a log that
+#: holds a few hundred — so the flood does not merely repeat itself, it pushes out the
+#: first traceback, which was the one worth reading, along with everything that was in
+#: the log before the filter broke.
+#:
+#: The mark is *not* throttled with it: it is one short token the engine turns into a
+#: single rate-limited sentence on the other side, and it is what carries the count. So
+#: the operator still learns how often this is happening, and gets one traceback rather
+#: than the same one several hundred times.
+TRACEBACK_QUIET = 30
 
 KIND_C2S = 0
 KIND_S2C = 1
@@ -144,6 +171,28 @@ def _where_in_source(source: str, exc: BaseException, filename: str) -> dict:
     return {"line": 0, "column": 0, "text": ""}
 
 
+#: The rename this package went through, and the one message worth saying about it.
+#:
+#: `firegex.nfproxy` was the old spelling of `firegex.pyfilters`, aliased through 4.x and
+#: removed in 5.0.0. `from firegex.nfproxy import pyfilter` is the first line of every
+#: filter written before that, and the error Python raises for it — "No module named
+#: 'firegex.nfproxy'" — is accurate and tells the operator nothing about what to write
+#: instead. They meet it here, in the editor, with the line already marked; the
+#: alternative is meeting it at the first start after an upgrade, which at a competition
+#: is the start of a round.
+RENAMED_IMPORT = "firegex.nfproxy"
+RENAMED_TO = "firegex.pyfilters"
+
+
+def _explain(exc: BaseException, message: str) -> str:
+    """Add what to do about it, where there is something to say."""
+    if isinstance(exc, ImportError) and RENAMED_IMPORT in (str(exc) or ""):
+        return (f"{message}. `{RENAMED_IMPORT}` was renamed to `{RENAMED_TO}` in 5.0.0 "
+                f"and the old name no longer resolves: change the import at the top of "
+                f"this file, and the rest of the filter works unchanged")
+    return message
+
+
 def check(path: str) -> dict:
     """Would this file load, and what does it define?
 
@@ -173,8 +222,9 @@ def check(path: str) -> dict:
                 "type": type(e).__name__,
                 # A SyntaxError's text carries "(<string>, line N)", which names a file
                 # the operator never wrote and repeats a position reported separately.
-                "message": re.sub(r"\s*\((?:<[^>]*>|[^()]*\.py), line \d+\)$", "",
-                                  str(e) or type(e).__name__),
+                "message": _explain(e, re.sub(
+                    r"\s*\((?:<[^>]*>|[^()]*\.py), line \d+\)$", "",
+                    str(e) or type(e).__name__)),
                 **_where_in_source(source, e, path),
                 "traceback": traceback.format_exc(),
             },
@@ -326,8 +376,23 @@ def main() -> int:
         if len(sys.argv) < 3:
             print("usage: pyworker.py --check <filter file>", file=sys.stderr)
             return 2
-        sys.stdout.write(json.dumps(check(sys.argv[2])))
-        sys.stdout.flush()
+        # Checking a file means *running* its module body, and `print()` is the most
+        # natural thing in the world to reach for while writing a filter. On stdout it
+        # would land in the middle of the answer: the backend parses this output as JSON,
+        # a stray line makes it unparseable, and the operator is told `the check produced
+        # no answer` about a file whose only sin was printing while it loaded.
+        #
+        # So the real stdout is put aside before the user's code can reach it, and
+        # anything the file prints goes to the diagnostics channel — the same swap the
+        # worker itself makes below, for the same reason.
+        answer = sys.stdout
+        sys.stdout = sys.stderr
+        try:
+            result = check(sys.argv[2])
+        finally:
+            sys.stdout = answer
+        answer.write(json.dumps(result))
+        answer.flush()
         return 0
     # `*` (or nothing at all) means every function the file defines, which is what a
     # hand-run worker wants; `=a,b` means exactly those, and a bare `=` means none.
@@ -358,6 +423,10 @@ def main() -> int:
     stdout.write(struct.pack(">I", 2) + bytes([READY, 0]))
     stdout.flush()
 
+    # Monotonic rather than wall clock: the machine's clock moving is not a reason to
+    # start printing tracebacks again, or to stop.
+    last_traceback = -TRACEBACK_QUIET
+
     while True:
         header = _read_exactly(stdin, 4)
         if header is None:
@@ -382,8 +451,14 @@ def main() -> int:
             verdict, matched, out = filters.run(connection, payload, kind == KIND_C2S)
         except Exception:
             # One connection's filter blowing up must not take the process down: the
-            # other connections it is serving would lose their filtering with it.
-            traceback.print_exc()
+            # other connections it is serving would lose their filtering with it. The
+            # chunk is accepted, which is the fail-open half — and the mark is what makes
+            # that visible rather than silent.
+            now = time.monotonic()
+            if now - last_traceback >= TRACEBACK_QUIET:
+                last_traceback = now
+                traceback.print_exc()
+            print(EXCEPTION_MARK, file=sys.stderr, flush=True)
             verdict, matched, out = VERDICT_ACCEPT, "", b""
         _write(stdout, verdict, matched, out)
 

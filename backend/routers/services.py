@@ -40,7 +40,6 @@ from modules.services import transports
 from modules.services.transports import PROXY_ENGINE, PYWORKER, UnsupportedChain
 from utils import (
     PortType,
-    ip_parse,
     is_ip_parse,
     parse_ip_or_int,
     refactor_name,
@@ -455,8 +454,6 @@ class DebugResponse(BaseModel):
     error: str | None = None
     #: Valid, and will run, but cannot be highlighted here.
     unscannable: list[DebugErrorModel] = []
-    #: base64: what the sample becomes, produced by the engine's own rewriting code.
-    rewritten: str | None = None
     truncated: bool
 
 
@@ -483,6 +480,9 @@ async def startup():
 
 async def shutdown():
     await firewall.close()
+    # The capture interface outlives any one service but not the process: this is the
+    # only place it goes away, so a `reset()` — which also closes — leaves it alone.
+    firewall.release_capture()
     db.disconnect()
 
 
@@ -979,7 +979,7 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
 
 @app.get("/{service_id}/addresses", response_model=list[AddressModel])
 async def get_addresses(service_id: str):
-    row = _service_or_404(service_id)
+    _service_or_404(service_id)
     return [_address_row(a) for a in _addresses(service_id)]
 
 
@@ -1141,7 +1141,6 @@ async def start_service(service_id: str):
 async def stop_service(service_id: str):
     _service_or_404(service_id)
     await firewall.get(service_id).next(STATUS.STOP)
-    firewall.release_capture_if_idle()
     await refresh_frontend()
     return {"status": "ok"}
 
@@ -1963,6 +1962,5 @@ async def debug_regexes(form: DebugForm):
         "errors": res.get("errors", []),
         "error": res.get("error"),
         "unscannable": res.get("unscannable", []),
-        "rewritten": res.get("rewritten"),
         "truncated": res.get("truncated", False),
     }

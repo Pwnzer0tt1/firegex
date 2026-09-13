@@ -1,4 +1,4 @@
-import pyllhttp
+from firegex import _llhttp
 from firegex.pyfilters.internals.exceptions import NotReadyToRun
 from firegex.pyfilters.internals.data import DataStreamCtx
 from firegex.pyfilters.internals.exceptions import (
@@ -10,7 +10,7 @@ from firegex.pyfilters.internals.exceptions import (
 from firegex.pyfilters.internals.models import FullStreamAction, ExceptionAction
 from dataclasses import dataclass, field
 from collections import deque
-from compression import zstd
+from firegex.pyfilters.internals import zstd_compat
 import gzip
 import io
 import zlib
@@ -18,7 +18,7 @@ import brotli
 import traceback
 from websockets.frames import Frame
 from websockets.extensions.permessage_deflate import PerMessageDeflate
-from pyllhttp import PAUSED_H2_UPGRADE, PAUSED_UPGRADE
+from firegex._llhttp import PAUSED_H2_UPGRADE, PAUSED_UPGRADE
 
 
 @dataclass
@@ -34,7 +34,13 @@ class InternalHTTPMessage:
     body_decoded: bool = field(default=False)
     headers_complete: bool = field(default=False)
     message_complete: bool = field(default=False)
+    #: The reason phrase, as the server wrote it. Free text.
     status: str | None = field(default=None)
+    #: The numeric status. Separate from the phrase because they are different things,
+    #: and because for a long time only the phrase was reachable at all: the binding
+    #: never exposed `llhttp`'s status code, so `status_code` on the public model handed
+    #: back the phrase while the documentation promised an int.
+    status_code: int | None = field(default=None)
     total_size: int = field(default=0)
     user_agent: str = field(default_factory=str)
     content_encoding: str = field(default=str)
@@ -149,6 +155,7 @@ class InternalCallbackHandler:
         self.buffers._current_header_value = b""
         self.msg.headers_complete = True
         self.msg.method = self.method_parsed
+        self.msg.status_code = self.status_code
         self.msg.content_length = self.content_length_parsed
         self.msg.should_upgrade = self.should_upgrade
         self.msg.keep_alive = self.keep_alive
@@ -173,12 +180,24 @@ class InternalCallbackHandler:
             if not enc:
                 continue
             if enc == "deflate":
-                try:
-                    decompress = zlib.decompressobj(-zlib.MAX_WBITS)
-                    decoding_body = decompress.decompress(decoding_body)
-                    decoding_body += decompress.flush()
-                except Exception as e:
-                    print(f"Error decompressing deflate: {e}: skipping", flush=True)
+                # Both spellings, because both are on the wire. RFC 7230 defines
+                # `deflate` as the zlib format of RFC 1950, and plenty of servers send
+                # the raw stream instead — browsers accept either, and a decoder that
+                # takes only one lets half the compressed traffic reach a filter still
+                # compressed, where a pattern finds nothing and the only trace is a line
+                # on stdout saying it skipped.
+                for wbits in (-zlib.MAX_WBITS, zlib.MAX_WBITS):
+                    try:
+                        decompress = zlib.decompressobj(wbits)
+                        decoded = decompress.decompress(decoding_body)
+                        decoded += decompress.flush()
+                    except Exception:
+                        continue
+                    decoding_body = decoded
+                    break
+                else:
+                    print("Error decompressing deflate: neither raw nor zlib-wrapped: "
+                          "skipping", flush=True)
                     decode_success = False
                     break
             elif enc == "br":
@@ -201,7 +220,7 @@ class InternalCallbackHandler:
                     break
             elif enc == "zstd":
                 try:
-                    decoding_body = zstd.decompress(decoding_body)
+                    decoding_body = zstd_compat.decompress(decoding_body)
                 except Exception as e:
                     print(f"Error decompressing zstd: {e}: skipping", flush=True)
                     decode_success = False
@@ -243,10 +262,15 @@ class InternalCallbackHandler:
 
     @property
     def http_version(self) -> str:
-        if self.major and self.minor:
-            return f"{self.major}.{self.minor}"
-        else:
+        """`"1.1"`, `"1.0"`, `""` if the parser has not read a version yet.
+
+        Written `if self.major and self.minor` before — so a minor of zero is falsy and
+        HTTP/1.0, and HTTP/2.0, both reported the empty string. A filter keying on the
+        version never saw either, and nothing said why.
+        """
+        if self.major is None or self.minor is None:
             return ""
+        return f"{self.major}.{self.minor}"
 
     @property
     def method_parsed(self) -> str:
@@ -376,19 +400,19 @@ class InternalCallbackHandler:
         return f"<InternalCallbackHandler msg={self.msg} buffers={self.buffers} save_body={self.save_body} raised_error={self.raised_error} has_begun={self.has_begun} messages={self.messages}>"
 
 
-class InternalHttpRequest(InternalCallbackHandler, pyllhttp.Request):
+class InternalHttpRequest(InternalCallbackHandler, _llhttp.Request):
     def __init__(self):
         super(InternalCallbackHandler, self).__init__()
-        super(pyllhttp.Request, self).__init__()
+        super(_llhttp.Request, self).__init__()
 
     def _is_input(self):
         return True
 
 
-class InternalHttpResponse(InternalCallbackHandler, pyllhttp.Response):
+class InternalHttpResponse(InternalCallbackHandler, _llhttp.Response):
     def __init__(self):
         super(InternalCallbackHandler, self).__init__()
-        super(pyllhttp.Response, self).__init__()
+        super(_llhttp.Response, self).__init__()
 
     def _is_input(self):
         return False
@@ -676,11 +700,19 @@ class InternalBasicHttpMetaClass:
         if (
             not internal_data.call_mem["headers_were_set"]
             and parser.msg.headers_complete
+            and not parser.msg.message_complete
             and parser.release_message_headers
         ):
-            messages_tosend.append(
-                parser.msg
-            )  # Also the current message needs to be sent due to complete headers
+            # The message still being read, handed over early because its headers are
+            # already known — which is what lets a filter act before a body arrives.
+            #
+            # `not message_complete` is the load-bearing half. `on_message_complete`
+            # appends the finished message to the queue but leaves `parser.msg` pointing
+            # at it, so without this a packet carrying two pipelined messages delivered
+            # the second one twice: once from the queue and once from here. Blocking is
+            # idempotent and survived that, which is why it went unnoticed — anything
+            # that counts did not.
+            messages_tosend.append(parser.msg)
 
         if parser._packet_to_stream():
             messages_tosend.append(
@@ -776,8 +808,23 @@ class HttpResponse(InternalBasicHttpMetaClass):
         return not internal_data.current_pkt.is_input
 
     @property
-    def status_code(self) -> int:
-        """Status code of the response"""
+    def status_code(self) -> int | None:
+        """The numeric status, e.g. `404`.
+
+        This used to hand back the reason phrase while being documented and annotated as
+        an int, so `if res.status_code == 500` never matched and nothing said why. It was
+        not carelessness: the binding did not expose llhttp's status code, and there was
+        no way to reach it. The binding ships with this package now and does.
+        """
+        return self._message.status_code
+
+    @property
+    def status_phrase(self) -> str | None:
+        """The reason phrase, e.g. `"Not Found"`.
+
+        Free text — a server may write anything here — so read it and decide on the code
+        above, a header, or the body.
+        """
         return self._message.status
 
 
@@ -786,7 +833,7 @@ class HttpResponse(InternalBasicHttpMetaClass):
         return "http_module"
 
     def __repr__(self):
-        return f"<HttpResponse status_code={self.status_code} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
+        return f"<HttpResponse status_code={self.status_code} status_phrase={self.status_phrase!r} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
 
 
 class HttpFullRequest(HttpRequest):
@@ -828,7 +875,7 @@ class HttpFullResponse(HttpResponse):
         return "http_full"
 
     def __repr__(self):
-        return f"<HttpFullResponse status_code={self.status_code} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
+        return f"<HttpFullResponse status_code={self.status_code} status_phrase={self.status_phrase!r} url={self.url} headers={self.headers} body=[{0 if not self.body else len(self.body)} bytes] http_version={self.http_version} keep_alive={self.keep_alive} should_upgrade={self.should_upgrade} headers_complete={self.headers_complete} message_complete={self.message_complete} content_length={self.content_length} stream={self.stream} ws_stream={self.ws_stream}>"
 
 
 

@@ -22,6 +22,46 @@ export const regex_ipv4 = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.
 export const regex_ipv4_no_cidr = "^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])$"
 export const regex_port = "^([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?$"
 export const regex_range_port = "^(([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])(-([1-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])?)?)?$"
+/**
+ * What an operator may type where an address is asked for.
+ *
+ * One rule, read by the pickers, the badges and every form that validates one, because
+ * the backend has exactly one too (`utils.is_interface_name` / `parse_ip_or_int`): an
+ * interface name is 1-15 characters of `[a-zA-Z0-9_.:-]` that is not already an address.
+ * The order matters — `::1` fits the charset as happily as it fits IPv6, and IPv6 is
+ * what it means.
+ */
+export const isIpAddress = (v: string, { cidr = false } = {}) =>
+    !!(v.match(cidr ? regex_ipv4 : regex_ipv4_no_cidr) || v.match(cidr ? regex_ipv6 : regex_ipv6_no_cidr))
+
+export const isInterfaceName = (v: string) =>
+    !isIpAddress(v, { cidr: true }) && !!v.trim().match(/^[a-zA-Z0-9_.:-]{1,15}$/)
+
+/**
+ * Either of them: what a service address accepts, and what the picker offers.
+ *
+ * A range is an address here too — `10.0.0.0/24:8080` is in the documented set and the
+ * backend parses it — except where one address is the whole point, which is the layer
+ * that hands traffic to a proxy of the operator's own.
+ */
+export const isAddressOrInterface = (v: string, { cidr = true } = {}) =>
+    isIpAddress(v, { cidr }) || isInterfaceName(v)
+
+/**
+ * An address as the operator typed it.
+ *
+ * The backend parses what it is given and stores it back with a prefix, so `127.0.0.1`
+ * comes out of the database as `127.0.0.1/32` — the same address, spelled in a way
+ * nobody types and that reads like a range on a row beside real ones. A host-length
+ * prefix is dropped for display; a prefix that actually covers more than one address is
+ * left exactly as it is, because there it is the whole point.
+ */
+export const bareAddress = (v: string) => {
+    const [addr, prefix] = v.split("/")
+    if (prefix === undefined) return v
+    return (addr.includes(":") ? prefix === "128" : prefix === "32") ? addr : v
+}
+
 // Where `bun run dev` looks for the backend. Overridable because the backend needs
 // Linux and NET_ADMIN, so it is often not on the same machine as the dev server.
 export const DEV_IP_BACKEND = import.meta.env.VITE_BACKEND ?? "127.0.0.1:4444"

@@ -11,7 +11,7 @@ import AddEditService from '../../components/Services/AddEditService';
 import AddressList from '../../components/Services/AddressList';
 import FilterCard from '../../components/Services/FilterCard';
 import LogPanel from '../../components/Services/LogPanel';
-import { addressSummary, losesClientAddress, ServiceMenu, transportLabel, transportSummary } from '../../components/Services/ServiceRow';
+import { addressSummary, ServiceMenu, transportLabel, transportSummary } from '../../components/Services/ServiceRow';
 import StatsPanel from '../../components/Services/StatsPanel';
 import { decrypts, Filter, FilterKind, serviceFiltersQuery, serviceQueryKey, services, servicesQuery, Transport } from '../../components/Services/utils';
 import YesNoModal from '../../components/YesNoModal';
@@ -82,13 +82,6 @@ export default function ServiceDetails() {
                                 {transportLabel(service.transport)}
                             </Badge>
                         </Tooltip>
-                        {losesClientAddress(service.transport, service.proto) ?
-                            <Tooltip position="bottom" multiline w={360}
-                                label="Relayed per address, so your service sees firegex's address instead of the client's. The NFQUEUE layer filters UDP with the real packets untouched.">
-                                <Badge color="orange" variant="light" size="sm" radius="sm">
-                                    NO CLIENT IP
-                                </Badge>
-                            </Tooltip> : null}
                         {decrypts(service) ? <Badge color="grape" variant="light" size="sm" radius="sm"
                             leftSection={<TbShieldLock size={11} />}>TLS</Badge> : null}
                     </Group>

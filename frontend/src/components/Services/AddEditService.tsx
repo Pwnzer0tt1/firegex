@@ -1,9 +1,9 @@
-import { Accordion, ActionIcon, Alert, Box, Button, Group, Modal, NumberInput, SegmentedControl, Space, Switch, Text, TextInput, Tooltip } from '@mantine/core';
+import { Accordion, ActionIcon, Alert, Box, Button, Code, Group, Modal, NumberInput, SegmentedControl, Space, Switch, Text, TextInput, Tooltip } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { BsPlusLg, BsTrashFill } from 'react-icons/bs';
-import { errorNotify, okNotify, regex_ipv4_no_cidr, regex_ipv6_no_cidr } from '../../js/utils';
+import { errorNotify, isAddressOrInterface, isInterfaceName, okNotify } from '../../js/utils';
 import PortAndInterface from '../PortAndInterface';
 import LayerChoice from './LayerChoice';
 import PemInput from './PemInput';
@@ -33,12 +33,6 @@ type FormValues = {
 const emptyAddress = (): AddressValues => ({
     ip_int: "127.0.0.1", port: 80, proxy_ip: "127.0.0.1", proxy_port: 8080,
 })
-
-const isInterface = (v: string) =>
-    !v.match(regex_ipv6_no_cidr) && !v.match(regex_ipv4_no_cidr) && v.trim().length > 0 && v.trim().length <= 15 && !!v.trim().match(/^[a-zA-Z0-9_.:-]+$/)
-
-const validAddress = (v: string) =>
-    !!(v.match(regex_ipv6_no_cidr) || v.match(regex_ipv4_no_cidr) || isInterface(v))
 
 /**
  * Create or edit the network layer of a service.
@@ -97,7 +91,12 @@ export default function AddEditService({ opened, onClose, edit }: {
                     : "Not a PEM private key: no 'BEGIN PRIVATE KEY' block in it"
             },
             addresses: {
-                ip_int: (v, values) => validAddress(v) ? (values.transport === Transport.EXTERNAL && isInterface(v) ? "External transport requires an IP, not an interface" : null) : "Invalid IP address or interface name",
+                ip_int: (v, values) => !isAddressOrInterface(v,
+                    { cidr: values.transport !== Transport.EXTERNAL })
+                    ? "Not an IP address, and not an interface name either"
+                    : (values.transport === Transport.EXTERNAL && isInterfaceName(v)
+                        ? "Your own proxy is handed one address: the return rule has to put the original port back, and an interface is not one address"
+                        : null),
                 port: v => (v > 0 && v < 65536) ? null : "Invalid port",
                 proxy_port: (v, values) => (values.transport !== Transport.EXTERNAL || (v > 0 && v < 65536))
                     ? null : "Your proxy's port is required",
@@ -250,16 +249,18 @@ export default function AddEditService({ opened, onClose, edit }: {
                 <Space h="md" />
 
                 {edit ? null : <>
-                    <Group justify="space-between" align="center">
-                        <Box>
+                    <Group justify="space-between" align="center" wrap="nowrap">
+                        <Box style={{ minWidth: 0 }}>
                             <Text size="sm" fw={500}>Addresses to protect</Text>
                             <Text size="xs" c="dimmed">
-                                One service, one filter chain, as many addresses as it answers on —
-                                IPv4 and IPv6 together if that is how it is reachable.
+                                {isExternal
+                                    ? "One service, one hand-off, as many addresses as it answers on — IPv4 and IPv6 together if that is how it is reachable."
+                                    : "One service, one filter chain, as many places as it answers on — IPv4 and IPv6 together if that is how it is reachable, and an interface name where the address is not yours to know."}
                             </Text>
                         </Box>
                         <Tooltip label="Protect another address with the same chain" position="left">
-                            <ActionIcon variant="light" onClick={() => form.insertListItem('addresses', emptyAddress())}>
+                            <ActionIcon variant="light" style={{ flexShrink: 0 }}
+                                onClick={() => form.insertListItem('addresses', emptyAddress())}>
                                 <BsPlusLg size={14} />
                             </ActionIcon>
                         </Tooltip>
@@ -270,7 +271,8 @@ export default function AddEditService({ opened, onClose, edit }: {
                             <Box style={{ flex: 1 }}>
                                 <PortAndInterface form={form}
                                     int_name={`addresses.${index}.ip_int`}
-                                    port_name={`addresses.${index}.port`} />
+                                    port_name={`addresses.${index}.port`}
+                                    includeInterfaceNames={!isExternal} />
                             </Box>
                             <ActionIcon variant="subtle" color="red" mb={4}
                                 disabled={form.values.addresses.length === 1}
@@ -286,6 +288,22 @@ export default function AddEditService({ opened, onClose, edit }: {
                                 includeInterfaceNames={false} />
                         </Box> : null}
                     </Box>)}
+                    {/* Said once under the list rather than as a validation error per row:
+                    the operator is choosing between an address and an interface while they
+                    fill it in, and being told afterwards that half of what the picker
+                    offered was never available here is the worse way to learn it. */}
+                    <Text size="xs" c="dimmed">
+                        {isExternal
+                            ? "Interface names are not offered on this layer: the return rule recognises your proxy by one address and port to put the original port back, and an interface is not one address."
+                            : <>
+                                An interface name — <Code>eth0</Code>, <Code>wg0</Code>, <Code>tun0</Code> —
+                                protects whatever address that link currently carries, which is what you
+                                want when somebody else hands it out. An address protects that one alone.
+                                {form.values.proto === L4.UDP && form.values.transport === Transport.PROXY
+                                    ? " On UDP this layer binds a relay to the interface's own address, so it has to have one; NFQUEUE needs none."
+                                    : ""}
+                            </>}
+                    </Text>
                     <Space h="md" />
                 </>}
 

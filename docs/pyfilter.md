@@ -187,13 +187,13 @@ from firegex.pyfilters.models import HttpRequest
 
 The current HTTP request. This handler is called up to twice: once when the headers are complete, and again once the body is complete (if the whole request arrives in a single TCP packet, it's called only once).
 
-- `method: bytes` — the request method.
+- `method: str` — the request method, e.g. `"GET"`. Documented as `bytes` before, which no comparison in a filter ever satisfied.
 - `url: str | None` — the request URL.
 - `headers: dict[str, str]` — request headers, keys/values exactly as received (case-sensitive); a repeated header becomes a list of values.
 - `get_header(header: str, default=None) -> str` — looks up a header case-insensitively; if the header was repeated, its values are joined with a comma (this method never returns a list).
 - `user_agent: str`
 - `content_encoding: str`
-- `content_length: int | None`
+- `content_length: int | None` — what the `Content-Length` header declared, or `None` when there was none (a chunked body, or one delimited by the connection closing).
 - `body: bytes` — `None` until the body has arrived.
 - `body_decoded` — the body decoded according to `content_encoding` (`gzip`, `br`, `deflate` and `zstd` are supported). `False` if decoding failed and `body` isn't `None`.
 - `http_version: str`
@@ -232,7 +232,8 @@ from firegex.pyfilters.models import HttpResponse
 
 The current HTTP response — same shape and calling convention as `HttpRequest` (up to twice: headers complete, then body complete), plus:
 
-- `status_code: int`
+- `status_code: int | None` — the numeric status, e.g. `404`. `None` on a request, and before the response line has been read.
+- `status_phrase: str | None` — the reason phrase beside it, e.g. `"Not Found"`. Free text: a server may write anything there, so decide on the code, a header or the body.
 
 All the other fields listed for `HttpRequest` (`headers`, `get_header`, `body`, `body_decoded`, `content_encoding`, `content_length`, `http_version`, `keep_alive`, `should_upgrade`, `upgrading_to_h2`, `upgrading_to_ws`, `ws_stream`, `stream`, `headers_complete`, `message_complete`, `total_size`, `history`, `user_agent`) apply here too.
 
@@ -370,7 +371,7 @@ def mangle_example(packet: RawPacket):
 # Higher level of abstraction: parsed HTTP requests.
 @pyfilter
 def http_filter(http: HttpRequest):
-    if http.method == b"GET" and http.url and "test" in http.url:
+    if http.method == "GET" and http.url and "test" in http.url:
         return REJECT
 
 # Using history to see previous requests on the same keep-alive stream.

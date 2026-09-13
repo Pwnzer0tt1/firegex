@@ -126,28 +126,36 @@ class Direction(str, Enum):
         return (self is Direction.C2S) == is_input
 
 
-class Action(str, Enum):
-    BLOCK = "block"
-
-
 @dataclass
 class Rule:
-    """One pattern, in the same shape firegex stores it."""
+    """One pattern, in the same shape firegex stores it.
+
+    There is no action to choose. A matching pattern refuses the connection, here and in
+    firegex, because that is the only verdict a pattern can honestly reach on a stream:
+    rewriting scanned one chunk at a time, so a match straddling two of them was never
+    rewritten, and the operator got no block, no log and no counter to say so. A ruleset
+    file may still carry `"action": "block"` — it is read and ignored — but anything else
+    is refused rather than quietly treated as a block.
+    """
 
     id: str
     pattern: str
     direction: Direction = Direction.BOTH
     case_sensitive: bool = True
-    action: Action = Action.BLOCK
 
     @classmethod
     def from_dict(cls, raw: dict) -> "Rule":
+        action = str(raw.get("action", "block")).lower()
+        if action != "block":
+            raise ValueError(
+                f"rule {raw.get('id', raw.get('regex_id', '?'))!r} asks for "
+                f"action {action!r}; a pattern can only block"
+            )
         return cls(
             id=str(raw.get("id", raw.get("regex_id", "?"))),
             pattern=raw["pattern"] if "pattern" in raw else raw["regex"],
             direction=Direction(raw.get("direction", "both")),
             case_sensitive=bool(raw.get("case_sensitive", True)),
-            action=Action(raw.get("action", "block")),
         )
 
 
@@ -228,9 +236,10 @@ class Database:
 def validate(rule: Rule) -> str | None:
     """Would firegex accept this rule? Returns hyperscan's own message if not.
 
-    Checked against the mode it would actually run in: a blocking pattern is compiled
-    for stream matching and a rewriting one for block scanning, and hyperscan does not
-    accept quite the same patterns in both.
+    Checked against the mode it will actually run in — stream matching, which is how a
+    pattern follows a connection across chunk boundaries — because hyperscan does not
+    accept quite the same patterns in every mode, and judging by the wrong one would
+    refuse a rule that works.
     """
     mode = HS_MODE_STREAM
     try:
@@ -251,38 +260,32 @@ class Ruleset:
 
     def __init__(self, rules: list[Rule]):
         self.rules = list(rules)
-        self._cache: dict[tuple[bool, Action], Database | None] = {}
+        self._cache: dict[bool, Database | None] = {}
 
-    def _db(self, is_input: bool, action: Action) -> Database | None:
-        key = (is_input, action)
-        if key not in self._cache:
-            selected = [
-                r for r in self.rules
-                if r.action is action and r.direction.covers(is_input)
-            ]
-            self._cache[key] = Database(selected, HS_MODE_BLOCK) if selected else None
-        return self._cache[key]
+    def _db(self, is_input: bool) -> Database | None:
+        if is_input not in self._cache:
+            selected = [r for r in self.rules if r.direction.covers(is_input)]
+            self._cache[is_input] = Database(selected, HS_MODE_BLOCK) if selected else None
+        return self._cache[is_input]
 
-    def apply(self, data: bytes, is_input: bool) -> tuple[str | None, bytes]:
+    def apply(self, data: bytes, is_input: bool) -> str | None:
         """Run the ruleset over one chunk, as the proxy datapath would.
 
-        Returns the id of the rule that refused it, or `None` and the payload to
-        forward — rewritten if any rewriting rule matched. Blocking is decided before
-        rewriting, so a chunk that is going to be refused is not rewritten on its way
-        there.
+        Returns the id of the rule that refused the chunk, or `None` if it may be
+        forwarded as it stands. Nothing is ever handed back changed: a pattern blocks,
+        and that is the whole of what it can do.
 
-        One caveat this cannot hide: matching here is per chunk, while a *blocking* rule
-        on a real service matches across the whole stream. A pattern split over two
-        reads is caught there and not here, so a rule that does not fire in the
-        simulator may still fire in production. Rewriting has the same scope in both,
-        because bytes already forwarded cannot be taken back either way.
+        One caveat this cannot hide: matching here is per chunk, while a rule on a real
+        service matches across the whole stream. A pattern split over two reads is
+        caught there and not here — never the other way round, so a ruleset that looks
+        clean in the simulator may still block something in production.
         """
-        blocking = self._db(is_input, Action.BLOCK)
-        if blocking:
-            hits = blocking.scan(data, limit=1)
+        db = self._db(is_input)
+        if db:
+            hits = db.scan(data, limit=1)
             if hits:
-                return hits[0].rule.id, data
-        return None, data
+                return hits[0].rule.id
+        return None
 
 
 def load_rules(raw: list[dict]) -> list[Rule]:

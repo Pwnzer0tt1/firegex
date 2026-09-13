@@ -38,10 +38,6 @@ def test_connection(host, port, use_ipv6=False):
         sock.close()
 
 @app.command("pyfilters", help="Run your Python filters against a real service, locally")
-# `nfproxy` is what this was called when it was one of several modules. Kept as a second
-# name rather than removed: it is in people's shell history and in scripts, and a command
-# that has quietly stopped existing is a worse answer than one that still works.
-@app.command("nfproxy", hidden=True)
 def pyfilters(
     filter_file: str = typer.Argument(..., help="The path to the filter file"),
     address: str = typer.Argument(..., help="The address of the target to proxy"),
@@ -155,16 +151,12 @@ def regex_test(
 
     ruleset = Ruleset(rules)
     is_input = not from_service
-    blocked_by, payload = ruleset.apply(sample, is_input)
+    blocked_by = ruleset.apply(sample, is_input)
 
     if blocked_by is not None:
         print(f"[bold red]blocked[/] by [bold]{escape(blocked_by)}[/]")
         close_cli(0)
-    if payload != sample:
-        print("[bold yellow]rewritten[/]")
-        print(escape(payload.decode(errors="replace")))
-        close_cli(0)
-    print("[bold green]passed through unchanged[/]")
+    print("[bold green]passed through[/]")
 
 
 @regex_app.command("proxy", help="Run a local proxy applying a ruleset, like `fgex pyfilters`")

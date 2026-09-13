@@ -9,7 +9,7 @@ function toHighlightLanguage(lang: string | undefined): string {
 
 const GITHUB_BLOB_BASE = "https://github.com/Pwnzer0tt1/firegex/blob/main/";
 
-// Cross-references between doc files (e.g. "nfregex.md", "../fgex-lib/README.md")
+// Cross-references between doc files (e.g. "pyfilter.md", "../fgex-lib/README.md")
 // are relative to the file's position in the repo, which only resolves correctly
 // on GitHub - inside the app they'd resolve against the current page's URL instead.
 // Repoint any relative link at the equivalent file on GitHub, given where the

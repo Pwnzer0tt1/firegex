@@ -15,7 +15,7 @@ in whatever order you put them, and you can change either without recreating the
 A service has a **list of addresses**, not one. The same daemon routinely answers on more
 than one — a v4 and a v6 address, a public and an internal one, two ports of the same
 process — and all of them deserve the same chain. Add them when you create the service or
-afterwards, mixing address families freely.
+afterwards, mixing address families — and interface names — freely.
 
 Adding an address to a running service **drops nothing**: the datapath is already up and
 already enforcing the chain, so all that happens is that one more address is pointed at
@@ -26,15 +26,26 @@ without interrupting existing traffic.
 The alternative — one service per address, with the chains copied between them — is how
 one of them silently stops being protected the first time a pattern is added to the other.
 
-### Intercepting by IP or network interface
+### An address, or the interface it arrives on
 
-An address entry is not limited to a concrete IP (`192.168.1.10:80`, `::1:80`, CIDR `10.0.0.0/24:8080`).
-You can also specify a **network interface name directly** — such as `eth0:80`, `wg0:8080`, `tun0:53`, or `lo:80`.
+An address entry is a concrete IP (`192.168.1.10:80`, `::1:80`, CIDR `10.0.0.0/24:8080`) or
+a **network interface name** (`eth0:80`, `wg0:8080`, `tun0:53`, `lo:80`). The picker lists
+both, each interface shown with the addresses it is carrying at that moment, and takes
+anything you type that is neither — the address a service will answer on does not have to
+exist on this host yet.
+
+Which of the two to use is a question about who decides the address. An IP protects that
+one place. An interface protects *whatever address that link is carrying*, matched on the
+name, which is what you want when somebody else hands the address out — a VPN the
+organisers dial you on, a DHCP lease, a tunnel that comes up mid-round. Nothing has to be
+edited when the address changes, and nothing silently stops being protected when it does.
+
+The rules are built differently for each, so the layer matters:
 
 - **On NFQUEUE**: interface matching operates natively in nftables using `meta iifname <iface>` (in prerouting) and `meta oifname <iface>` (in postrouting). Packets arriving at or routed through that interface on the configured port are queued to userspace, regardless of the destination IP.
 - **On Proxy (TCP & TLS)**: traffic entering through the interface (`meta iifname <iface>`) is redirected to the proxy listener. The engine connects upstream preserving the destination (`SO_ORIGINAL_DST`) and spoofing the client source IP (`IP_TRANSPARENT`), while policy routing diverts return packets (`meta oifname <iface>`). Local host output redirection is skipped for interfaces to prevent hijacking unrelated outbound host connections.
 - **On Proxy (UDP)**: because UDP relays need a concrete destination to bind upstream forwarding, Firegex automatically resolves the interface's primary assigned IP. If the interface has no IP assigned, use NFQUEUE instead.
-- **External proxies**: the `external` transport requires specific IP addresses because stateless return rewrites need unambiguous source addresses, so interfaces are disallowed there.
+- **External proxies**: the `external` transport takes an IP only. Its return rule recognises your proxy by one address and port to put the original port back, and an interface is not one address — so the interface half of the picker is not offered there at all.
 
 ## Transport protocol
 
@@ -63,12 +74,12 @@ allowed to do to the traffic. Pick by those.
 | Unit of work | a connection | a packet |
 | Transparency | full — dials your service **from the client's own address** | full — the real packets, on their way to your service |
 | Reassembly | the kernel's, on two real sockets | rebuilt in userspace with libtins |
-| Rewriting | **exact**, any length | patterns: no. Python: yes, unstable on TCP, exact on UDP |
+| Rewriting | patterns: no. Python: exact, any length | patterns: no. Python: unstable on TCP, exact on UDP |
 | If a filter dies | the engine rebuilds fail-open by hand | **the kernel keeps forwarding**, by itself |
 | Cost | terminating a connection, once | **a userspace round trip per packet**, per filter |
-| Measured ([how](../tests/README.md#performance)) | **4035 MB/s** at 1 thread, **13 984** at 8 | 1820 at 1 thread, 2956 at 8 |
+| Measured ([how](../tests/bench/README.md#performance)) | **4035 MB/s** at 1 thread, **13 984** at 8 | 1820 at 1 thread, 2956 at 8 |
 | Short connections | the two are indistinguishable — see below | |
-| UDP | yes, fully transparent (exact rewriting, source IP preserved) | yes, fully transparent |
+| UDP | yes, fully transparent (source IP preserved, one relay per address) | yes, fully transparent |
 | TLS termination | yes | no — decrypting means terminating |
 
 ### Proxy
@@ -78,8 +89,10 @@ halves.
 
 **What that buys**
 
-- **Exact rewriting.** Two independent connections means a replacement can be any
-  length: there are no sequence numbers shared with the client to desynchronise. This is
+- **Exact rewriting, for a Python filter.** Two independent connections means a
+  replacement can be any length: there are no sequence numbers shared with the client to
+  desynchronise. Patterns do not rewrite on any layer — see **Regex** under *Filters* below
+  for why that was withdrawn. This is
 - **Reassembly is the kernel's problem.** Both sides are ordinary sockets, so
   out-of-order and retransmitted segments are sorted out before a filter ever sees them
    — rather than being rebuilt in userspace with the caveats that come with it.
@@ -102,7 +115,7 @@ halves.
   win: measured with the layers interleaved, they overlap, and the medians land within
   3% of each other. Anyone quoting a number for this axis is quoting noise, this page
   included until it was measured properly. Both are in
-  [tests/README.md](../tests/README.md#performance), with the scripts that produce them.
+  [tests/bench/README.md](../tests/bench/README.md#performance), with the scripts that produce them.
 
 **What it costs**
 
@@ -136,10 +149,10 @@ Nothing is terminated.
   which caps bulk throughput.
 - **Reassembly in userspace.** Done via libtins, with memory caps and timeout heuristics.
 - **One process per filter.** Chaining requires multiple processes and netfilter queues.
-- **Patterns cannot rewrite here.** The matcher reports where a pattern matched; it has
-  no replacement path. A *Python* filter can mangle on this layer — unstably on TCP,
-  where changing a payload's length desynchronises the stream (hence `UNSTABLE_MANGLE`),
-  and **exactly on UDP**, where a datagram carries no sequence numbers to desynchronise.
+- **A Python filter's rewriting is unstable on TCP here.** Changing a payload's length
+  desynchronises the stream, which is what `UNSTABLE_MANGLE` is named after. On **UDP**
+  it is exact, because a datagram carries no sequence numbers to desynchronise.
+  Patterns do not rewrite on either layer.
 
 ### UDP on the proxy layer
 
@@ -158,9 +171,10 @@ What UDP on the proxy layer provides:
 - **Zero-downtime dynamic address addition.** Adding new addresses to a running UDP service
   dynamically binds new relay sockets through the control channel without restarting the
   engine or dropping existing connections.
-- **Exact rewriting, at any length.** A datagram is self-contained, so there are no
-  sequence numbers for a longer or shorter payload to desynchronise. The caveat that
-  makes rewriting unstable on the NFQUEUE layer simply does not apply.
+- **Exact rewriting, at any length, for a Python filter.** A datagram is
+  self-contained, so there are no sequence numbers for a longer or shorter payload to
+  desynchronise. The caveat that makes rewriting unstable on the NFQUEUE layer simply
+  does not apply.
 - **Per-flow filter state.** Each client address is a flow with its own filter state and
   its own Python module globals, released after a minute of silence — UDP has no close
   to observe, so a timeout is the only thing that can end one.
@@ -353,11 +367,11 @@ client's verdict.
 Each pattern has a direction — client to service, service to client, or both. A leaked
 flag shows up on the way out; an exploit on the way in.
 
-A pattern **blocks** the connection:
+A pattern **blocks** the connection. That is the only thing it does:
 
 ```
-FLAG\{[a-z0-9]+\}   service → client   → FLAG{redacted}
-X-Debug: [^\r\n]*    client → service   → X-Debug: off
+FLAG\{[a-z0-9]+\}   service → client   block
+X-Debug: [^\r\n]*    client → service   block
 ../                  both ways          block
 ```
 
@@ -371,19 +385,19 @@ it is active — leaves the counters alone. The new pattern is checked by the en
 before it is stored, and a rule that would collide with another in the same filter is
 refused rather than silently duplicated.
 
-Rewriting is proxy-only, and not because it was left unimplemented: on NFQUEUE a
-replacement of a different length desynchronises the stream, and the connection breaks
-some time later in a way nobody would trace back to the rule. Starting an NFQUEUE
-service with a rewriting pattern is refused, saying so.
+**A pattern cannot rewrite, on any layer.** It used to be able to, and the reason it no
+longer can is worth stating rather than leaving as a missing feature. Rewriting scanned
+one chunk at a time, because bytes already forwarded cannot be taken back — so a match
+straddling two chunks was never rewritten. Measured: a pattern sent whole reached the
+service redacted, and the *same* pattern split across two TCP segments reached it intact.
+Blocking, which scans in hyperscan's stream mode, caught the split version.
 
-Two things to know about a rewrite:
-
-- **The replacement is literal.** No `$1` capture references — hyperscan reports where a
-  match is, not what its groups captured, and inventing groups would mean a second engine
-  deciding them.
-- **It works within one chunk of the stream.** Bytes already forwarded cannot be taken
-  back, so a match split across two of them is not rewritten. Blocking has no such limit,
-  because a block can still refuse the connection after the fact.
+What made that unacceptable was not the miss but its silence: no block, no log line, no
+counter — just a rule the operator believed was applying. A filter that works on the
+sender's segmentation is worse than no filter, because it is trusted. Blocking is the
+verdict a pattern can honestly reach on a stream, so it is the only one offered. To
+change bytes rather than refuse them, use a Python filter, which sees the reassembled
+stream and can say so.
 
 ### Python (pyfilter)
 
@@ -438,14 +452,11 @@ pattern against it and find out mid-round that it was never valid. Here, a patte
 tester accepts is one you can save, and a pattern it rejects tells you why in hyperscan's
 own words.
 
-The same holds for rewriting: set a pattern to rewrite and the tester shows you what the
-sample **becomes**, produced by running the engine's own rewriting code over it rather
-than by describing what it would do.
-
-Two details follow from being honest rather than approximate. A pattern is judged against
-the mode it will actually run in — blocking matches live streams, rewriting scans blocks,
-and hyperscan does not accept quite the same patterns in both — so the tester's verdict is
-the one the datapath will reach. And occasionally a pattern is valid, will run, and still
+One detail follows from being honest rather than approximate. A pattern is judged against
+the mode it will actually run in — stream matching, which is how a pattern follows a
+connection across chunk boundaries, and hyperscan does not accept quite the same patterns
+in every mode — so the tester's verdict is the one the datapath will reach. And
+occasionally a pattern is valid, will run, and still
 cannot be highlighted here, because showing *where* a match starts needs the scan mode
 that accepts slightly less. The tester says so instead of silently showing no matches.
 
@@ -586,9 +597,9 @@ The ruleset file is **the same shape firegex uses**, so one file works in both p
 
 ```json
 [
-  {"id": "traversal",  "pattern": "\\.\\./", "direction": "c2s", "action": "block"},
-  {"id": "flag-leak",  "pattern": "FLAG\\{[a-z0-9]+\\}", "direction": "s2c",
-   "action": "rewrite", "with": "FLAG{redacted}"}
+  {"id": "traversal", "pattern": "\\.\\./", "direction": "c2s"},
+  {"id": "flag-leak", "pattern": "FLAG\\{[a-z0-9]+\\}", "direction": "s2c",
+   "case_sensitive": false}
 ]
 ```
 
@@ -597,11 +608,11 @@ pattern it accepts is one firegex accepts, and one it rejects reports hyperscan'
 message. Where hyperscan is not installed it says so and stops, rather than quietly
 answering with a different engine.
 
-Two honest limits. `fgex regex proxy` matches **per chunk**, while a blocking rule on a
-real service matches across the whole stream — so a pattern split over two reads is
-caught in production and not in the simulator, never the other way round. And the
-simulator terminates the connection itself, so it always has the exact rewriting the
-proxy layer has, even when you are aiming at an NFQUEUE service.
+One honest limit. `fgex regex proxy` matches **per chunk**, while a rule on a real
+service matches across the whole stream — so a pattern split over two reads is caught in
+production and not in the simulator, never the other way round. A ruleset that looks
+clean here may still block something on a live service; one that blocks here always
+would.
 
 ## Editing while it runs
 

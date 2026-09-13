@@ -25,7 +25,8 @@ import sys
 import traceback
 
 from modules.services.models import KIND, L4, PROTO, TRANSPORT, Filter, Regex
-from modules.services.nftables import MAX_CHAIN_POSITIONS, one_address
+from modules.services.nftables import (MAX_CHAIN_POSITIONS, NoRelayAddress,
+                                       resolve_target, udp_relay_host, udp_relay_key)
 from utils import DEBUG, nicenessify
 
 MODULES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -41,6 +42,12 @@ TLS_DIR = "/tmp/firegex_tls"
 # The out-of-process worker the proxy engine runs the user's Python in. The engine
 # spawns it, not us: it is the one that has to kill it when it stops answering.
 PYWORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyworker.py")
+#: What `pyworker.py` writes to stderr when the user's code raises. Spelled here as well
+#: as there on purpose: the worker is launched as a script and imports nothing from the
+#: backend, which is what keeps the user's code from sharing this process's imports.
+#: Kept in step by `tests/integration/test_resilience.py`, which asks for the sentence on
+#: both network layers.
+PYWORKER_EXCEPTION_MARK = "[exception] [filter]"
 
 #: How long to wait for a binary to acknowledge a configuration push.
 ACK_TIMEOUT = 3
@@ -127,6 +134,10 @@ class Transport:
         #: last report. The engine's own counter resets when it restarts, so somebody
         #: above has to add them up if the trace is to outlive the process.
         self.on_over_limit = on_over_limit
+        #: Whether whatever this layer listens on can accept IPv6. Declared here rather
+        #: than on the one layer that has a listener, so a caller asking a transport
+        #: what it can accept gets an answer instead of an AttributeError.
+        self.is_dual_stack: bool = False
         self.process: asyncio.subprocess.Process | None = None
         self._stderr_pump: asyncio.Task | None = None
 
@@ -204,6 +215,19 @@ class Transport:
                     text = line.decode(errors="replace")
                     if "[fatal]" in text:
                         self._last_fatal = text.split("[fatal]", 1)[1].strip()
+                    # The worker marks a filter that raised, because the verdict it sends
+                    # back is an ordinary ACCEPT and the engine cannot tell that apart
+                    # from a filter that agreed. The traceback beside this line says which
+                    # filter and where; this is what says the traffic went through
+                    # unfiltered, and it is the same sentence the queued layer's
+                    # `EXCEPTION` produces.
+                    if PYWORKER_EXCEPTION_MARK in text:
+                        # A protocol token, like `BLOCKED <id>` on the other channel:
+                        # it is turned into the sentence an operator reads and is not
+                        # forwarded raw, or the log would carry both.
+                        if self.on_exception:
+                            self.on_exception(self.srv.id)
+                        continue
                     self.on_engine(text)
             except (asyncio.CancelledError, asyncio.IncompleteReadError):
                 pass
@@ -629,34 +653,33 @@ class ProxyTransport(Transport):
         self._ack: asyncio.Future | None = None
         self._cmd_lock = asyncio.Lock()
         self.port: int | None = None
-        self.is_dual_stack: bool = False
         #: One relay port per protected address, for UDP. TCP needs none of this: a
         #: single listener fronts every address and recovers where each connection was
         #: headed from conntrack, which UDP cannot do — see `udp.rs`.
         self.udp_ports: dict[str, int] = {}
 
-    def _udp_targets(self) -> list:
-        """The addresses that each need a relay of their own. Empty for TCP."""
+    def _udp_targets(self) -> list[tuple[str, int]]:
+        """The addresses that each need a relay of their own, resolved. Empty for TCP.
+
+        Resolved here and nowhere else, so the relay the engine is asked to open, the
+        rule that points at it and the key both are filed under are derived from one
+        answer rather than from three lookups that could each land somewhere different.
+        """
         if str(self.srv.proto) != L4.UDP:
             return []
-        from modules.services.nftables import resolve_target
-        from utils import get_interface_ips, is_ip_parse
         out = []
         for addr in self.srv.addresses:
             target = resolve_target(self.srv, addr)
-            if target:
-                target_ip, target_port = target
-                if not is_ip_parse(target_ip):
-                    ips = get_interface_ips(target_ip)
-                    if ips:
-                        out.append((ips[0], target_port))
-                    else:
-                        raise UnsupportedChain(
-                            f"interface '{target_ip}' has no IP assigned for UDP proxy relay. "
-                            f"Use an IP address or NFQUEUE transport."
-                        )
-                else:
-                    out.append(target)
+            if not target:
+                continue
+            target_ip, target_port = target
+            try:
+                out.append((udp_relay_host(target_ip), target_port))
+            except NoRelayAddress as e:
+                raise UnsupportedChain(
+                    f"{e}. Give the service an IP address, or put it on the NFQUEUE "
+                    f"layer, which needs none."
+                ) from e
         return out
 
     def _tls_env(self) -> dict:
@@ -726,10 +749,7 @@ class ProxyTransport(Transport):
                     # address is not preserved on that path, which the operator is told
                     # before choosing it.
                     "FGEX_PROXY_UDP": ",".join(
-                        f"[{ip}]:{port}" if ":" in str(ip) else f"{ip}:{port}"
-                        for ip, port in (
-                            (one_address(a), p) for a, p in self._udp_targets()
-                        )
+                        udp_relay_key(ip, port) for ip, port in self._udp_targets()
                     ),
                     # One number for both halves: TCP connections and UDP flows spend
                     # the same descriptors, and two limits meaning "how much of that may
@@ -849,10 +869,13 @@ class ProxyTransport(Transport):
                 raise Exception(f"the proxy engine rejected the chain: {detail}")
 
     async def add_udp_target(self, ip: str, port: int) -> int:
-        """Bind a dedicated UDP relay for a new address without restarting the proxy engine."""
-        from modules.services.nftables import one_address
-        clean_ip = one_address(ip)
-        target = f"[{clean_ip}]:{port}" if ":" in str(clean_ip) else f"{clean_ip}:{port}"
+        """Bind a dedicated UDP relay for a new address without restarting the engine.
+
+        Idempotent, and deliberately the only way in: the map of relays is this
+        object's, so a caller that has just added an address asks for the relay and is
+        handed the port, rather than keeping a second map of its own beside this one.
+        """
+        target = udp_relay_key(udp_relay_host(ip), port)
         if target in self.udp_ports:
             return self.udp_ports[target]
         if not self.process or self.process.returncode is not None:

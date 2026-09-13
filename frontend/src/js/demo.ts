@@ -125,6 +125,7 @@ const state = {
         { name: "lo", addr: "127.0.0.1" },
         { name: "eth0", addr: "10.60.3.1" },
         { name: "eth0", addr: "fd66:666:3::1" },
+        { name: "wg0", addr: "10.10.0.3" },
     ],
     // One shape for every service: a network layer, and a chain of filters on it.
     services: [
@@ -135,11 +136,14 @@ const state = {
         { service_id: svcHijack, name: "legacy-ftp", status: "active", proto: "tcp", transport: "external", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
     ] as Json[],
     // Where each one is reachable. shop-api answers on both stacks behind one chain,
-    // which is the case that used to need two services kept in step by hand.
+    // which is the case that used to need two services kept in step by hand — and on
+    // `wg0` by name, the other half of the same idea: an address somebody else hands
+    // out is still one place this service answers.
     addresses: [
-        { address_id: uuid(), service_id: svcShop, ip_int: "10.60.3.1", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
-        { address_id: uuid(), service_id: svcShop, ip_int: "fd66:666:3::1", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
-        { address_id: uuid(), service_id: svcScore, ip_int: "10.60.3.1", port: 8080, proto: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcShop, ip_int: "10.60.3.1/32", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcShop, ip_int: "fd66:666:3::1/128", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcShop, ip_int: "wg0", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcScore, ip_int: "10.60.0.0/16", port: 8080, proto: "tcp", proxy_ip: null, proxy_port: null },
         { address_id: uuid(), service_id: svcVault, ip_int: "10.60.3.1", port: 8443, proto: "tcp", proxy_ip: null, proxy_port: null },
         { address_id: uuid(), service_id: svcHijack, ip_int: "10.60.3.1", port: 21, proto: "tcp", proxy_ip: "127.0.0.1", proxy_port: 12021 },
     ] as Json[],
@@ -152,14 +156,13 @@ const state = {
         { filter_id: fltVaultRegex, service_id: svcVault, position: 0, kind: "regex", proto: "tcp", name: "patterns", active: true, blocked: 0 },
     ] as Json[],
     regexes: [
-        { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("\\.\\./"), mode: "C", case_sensitive: true, active: true, action: "block", replace_with: null, blocked: 341 },
-        { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("FLAG\\{[A-Za-z0-9_]+\\}"), mode: "S", case_sensitive: true, active: true, action: "block", replace_with: null, blocked: 27 },
+        { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("\\.\\./"), mode: "C", case_sensitive: true, active: true, blocked: 341 },
+        { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("FLAG\\{[A-Za-z0-9_]+\\}"), mode: "S", case_sensitive: true, active: true, blocked: 27 },
         // A rewriting rule, so the demo shows what only the proxy layer can do.
-        { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("X-Debug: [^\\r\\n]*"), mode: "C", case_sensitive: false, action: "rewrite", replace_with: b64("X-Debug: off"), active: true, blocked: 0 },
-        { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("/etc/passwd"), mode: "C", case_sensitive: true, active: true, action: "block", replace_with: null, blocked: 914 },
-        { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("<script>"), mode: "C", case_sensitive: false, active: true, action: "block", replace_with: null, blocked: 233 },
+        { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("/etc/passwd"), mode: "C", case_sensitive: true, active: true, blocked: 914 },
+        { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("<script>"), mode: "C", case_sensitive: false, active: true, blocked: 233 },
         { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("[A-Z0-9]{31}="), mode: "S", case_sensitive: true, active: false, blocked: 57 },
-        { regex_id: uuid(), filter_id: fltVaultRegex, regex: b64("/proc/self/"), mode: "C", case_sensitive: true, active: true, action: "block", replace_with: null, blocked: 0 },
+        { regex_id: uuid(), filter_id: fltVaultRegex, regex: b64("/proc/self/"), mode: "C", case_sensitive: true, active: true, blocked: 0 },
     ] as Json[],
     code: { [fltShopPy]: SAMPLE_FILTER } as Record<string, string>,
     // One row per @pyfilter the code defines. The code says which exist; these say
@@ -308,7 +311,6 @@ const demoDebug = (patterns: Json[], sample: string) => {
     try { text = atob(sample) } catch { text = "" }
     const matches: Json[] = []
     const errors: Json[] = []
-    const spans: { start: number, end: number, with: string | null }[] = []
     for (const p of patterns) {
         let re: RegExp
         try {
@@ -320,30 +322,13 @@ const demoDebug = (patterns: Json[], sample: string) => {
         for (const hit of text.matchAll(re)) {
             if (hit.index === undefined) continue
             matches.push({ id: p.id, start: hit.index, end: hit.index + hit[0].length })
-            if (p.action === "rewrite") {
-                spans.push({
-                    start: hit.index, end: hit.index + hit[0].length,
-                    with: p.replace_with ?? "",
-                })
-            }
             if (hit[0].length === 0) break // a zero-width match would never advance
             if (matches.length >= 1000) break
         }
     }
-    let rewritten: string | null = null
-    if (spans.length > 0) {
-        spans.sort((a, b) => a.start - b.start || b.end - a.end)
-        let out = "", cursor = 0
-        for (const span of spans) {
-            if (span.start < cursor) continue
-            out += text.slice(cursor, span.start) + (span.with ?? "")
-            cursor = span.end
-        }
-        rewritten = btoa(out + text.slice(cursor))
-    }
     return {
         matches, errors, error: null, unscannable: [],
-        rewritten, truncated: matches.length >= 1000,
+        truncated: matches.length >= 1000,
     }
 }
 
@@ -716,8 +701,7 @@ const routes: [string, RegExp, Handler][] = [
         try { new RegExp(expr) } catch (err) { throw `Invalid pattern: ${err}` }
         state.regexes.push({
             regex_id: uuid(), filter_id: m[2], regex: b.regex, mode: b.mode ?? "B",
-            case_sensitive: b.case_sensitive ?? true, active: b.active ?? true,
-            action: b.action ?? "block", replace_with: b.replace_with ?? null, blocked: 0,
+            case_sensitive: b.case_sensitive ?? true, active: b.active ?? true, blocked: 0,
         })
         emit(["services"]); return ok
     }],
@@ -738,8 +722,6 @@ const routes: [string, RegExp, Handler][] = [
         }
         if (b.mode != null) rx.mode = b.mode
         if (b.case_sensitive != null) rx.case_sensitive = b.case_sensitive
-        if (b.action != null) rx.action = b.action
-        if (b.replace_with !== undefined) rx.replace_with = b.replace_with
         emit(["services"]); return ok
     }],
     ["DELETE", /^services\/([^/]+)\/filters\/([^/]+)\/regexes\/([^/]+)$/, m => {

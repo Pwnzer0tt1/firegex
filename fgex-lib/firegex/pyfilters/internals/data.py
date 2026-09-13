@@ -1,5 +1,4 @@
-from firegex.pyfilters.internals.models import FilterHandler
-from firegex.pyfilters.internals.models import FullStreamAction, ExceptionAction
+from firegex.pyfilters.internals.models import ExceptionAction, FullStreamAction
 
 class RawPacket:
     """One chunk of a connection, with what is known about where it came from.

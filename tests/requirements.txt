@@ -1,9 +1,27 @@
-iperf3
+# What the tests need. The benchmarks need more — iperf3, matplotlib, numpy — and those
+# are in bench/requirements.txt, so a CI run that only tests does not build a binding
+# against a C library it will never call.
+pytest
 requests
-matplotlib
-numpy
 cryptography
 psutil
 pydantic
 python-socketio[client]
-pytest
+
+# `unit/` imports the filter library straight out of `../fgex-lib`, so its runtime
+# dependencies have to be here too. Listed one by one rather than with
+# `-r ../fgex-lib/requirements.txt`, because that file lists `fgex` — the alias package,
+# which depends on a *published* `firegex` and would quietly shadow the source tree the
+# suite is meant to be testing.
+#
+# The HTTP parser is deliberately NOT here. It is a C extension that ships inside
+# firegex itself, so it has to be *built*: `run_tests.sh` does that with an editable
+# install of `../fgex-lib`. Running `pytest` by hand without it gives
+# `ImportError: cannot import name '_llhttp' from 'firegex'`.
+brotli
+websockets
+# Unconditional here, unlike in the library, which only needs it below 3.14: the
+# suite uses it to build the corpus *and* to exercise the fallback backend, so
+# without it the cross-backend agreement test silently skips on the one Python
+# that matters most.
+zstandard

@@ -6,4 +6,6 @@ watchfiles
 fgex
 websockets
 brotli
-pyllhttp
+# Python 3.14 has `compression.zstd` in the standard library; this fills the gap
+# below it. See firegex/pyfilters/internals/zstd_compat.py.
+zstandard; python_version < '3.14'

@@ -1,4 +1,4 @@
-import { ActionIcon, Switch, Alert, Badge, Box, Button, Checkbox, Code, Group, Modal, ScrollArea, SegmentedControl, Space, Stack, Text, Textarea, TextInput, Tooltip } from '@mantine/core';
+import { ActionIcon, Switch, Alert, Box, Button, Code, Group, Modal, ScrollArea, Space, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useMemo, useState } from 'react';
 import { BsPlusLg, BsTrashFill } from 'react-icons/bs';
 import { DebugResult, services } from './utils';
@@ -134,18 +134,6 @@ export default function RegexDebugger({ opened, onClose, initial }: {
     }))
     const pieces = highlight(sample, ranges)
 
-    // The engine hands back what the sample becomes; nothing here reconstructs it.
-    const rewritten = useMemo(() => {
-        if (!result?.rewritten) return null
-        try {
-            const binary = atob(result.rewritten)
-            const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
-            return new TextDecoder().decode(bytes)
-        } catch {
-            return null
-        }
-    }, [result?.rewritten])
-
     const update = (key: string, patch: Partial<Draft>) =>
         setDrafts(d => d.map(item => item.key === key ? { ...item, ...patch } : item))
 
@@ -208,20 +196,7 @@ export default function RegexDebugger({ opened, onClose, initial }: {
             </Code>
         </ScrollArea.Autosize>
 
-        {rewritten !== null ? <>
-            <Space h="md" />
-            <Text size="sm" fw={500}>After rewriting</Text>
-            <Text size="xs" c="dimmed" mb={6}>
-                Produced by the engine itself, not a guess at what it would do.
-            </Text>
-            <ScrollArea.Autosize mah={160}>
-                <Code block style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                    {rewritten}
-                </Code>
-            </ScrollArea.Autosize>
-        </> : null}
-
-        {result?.truncated ?
+    const update        {result?.truncated ?
             <Alert color="yellow" mt="md" title="Too many matches to show">
                 Only the first thousand are listed. A pattern that matches this often will
                 block on the first connection carrying any of it.

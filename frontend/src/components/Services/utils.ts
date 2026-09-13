@@ -202,9 +202,6 @@ export type Regex = {
     mode: string,
     case_sensitive: boolean,
     active: boolean,
-    action: string,
-    /** base64, and only meaningful when the action is `rewrite`. */
-    replace_with: string | null,
     blocked: number,
 }
 
@@ -312,8 +309,6 @@ export type DebugResult = {
     error?: string | null,
     /** Valid and will run, but cannot be highlighted here. */
     unscannable: DebugError[],
-    /** base64: what the sample becomes, computed by the engine's own rewriting code. */
-    rewritten?: string | null,
     truncated: boolean,
 }
 
@@ -428,12 +423,10 @@ export const services = {
         await getapi(`services/${id}/filters/${fid}/regexes`) as Regex[],
     addRegex: async (id: string, fid: string, data: {
         regex: string, mode: string, case_sensitive: boolean,
-        action?: string, replace_with?: string | null,
     }) =>
         done(await postapi(`services/${id}/filters/${fid}/regexes`, data) as ServerResponse),
     editRegex: async (id: string, fid: string, rid: string, data: {
         active?: boolean, regex?: string, mode?: string, case_sensitive?: boolean,
-        action?: string, replace_with?: string | null,
     }) =>
         done(await putapi(`services/${id}/filters/${fid}/regexes/${rid}`, data) as ServerResponse),
     deleteRegex: async (id: string, fid: string, rid: string) =>
@@ -463,10 +456,7 @@ export const services = {
 
     /** Ask the matching engine itself what a pattern would do. */
     debug: async (
-        patterns: {
-            id: string, expr: string, case_sensitive: boolean,
-            action?: string, replace_with?: string,
-        }[],
+        patterns: { id: string, expr: string, case_sensitive: boolean }[],
         sample: string,
     ) =>
         await postapi("services/debug-regex", { patterns, sample }) as DebugResult,

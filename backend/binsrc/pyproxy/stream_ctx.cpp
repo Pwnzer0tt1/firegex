@@ -5,6 +5,8 @@
 #include <iostream>
 #include <tins/tcp_ip/stream_identifier.h>
 #include <map>
+#include <atomic>
+#include <chrono>
 #include <Python.h>
 #include "../classes/netfilter.cpp"
 #include "../classes/nfqueue.cpp"
@@ -53,6 +55,35 @@ struct py_filter_response {
 };
 
 typedef Tins::TCPIP::StreamIdentifier stream_id;
+
+// How long between two tracebacks out of this process, in seconds.
+//
+// Filter code that throws throws on every packet — a typo does not fire once — and a
+// traceback is a dozen lines. Unthrottled, one broken filter writes thousands of lines a
+// minute into a log that is a bounded ring, so the flood does not merely repeat itself:
+// it pushes out the first traceback, which was the one worth reading, along with
+// everything that was in the log before the filter broke.
+//
+// The `EXCEPTION` sent to the backend is deliberately *not* throttled with it. That is
+// one token, it costs nothing, and it is what the backend counts to say "still raising,
+// N more since" — so the operator still learns how often this is happening while being
+// shown the traceback once.
+constexpr int64_t TRACEBACK_QUIET_SECONDS = 30;
+
+// Process-wide rather than per stream: the flood is one broken filter, not one broken
+// connection, and throttling per connection would let a hundred connections print a
+// hundred copies of the same fault. Relaxed ordering is enough — two threads racing here
+// print one traceback each, which is not a problem worth a lock.
+static std::atomic<int64_t> last_traceback_at{-TRACEBACK_QUIET_SECONDS * 2};
+
+inline bool traceback_is_due() {
+	const int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+	int64_t previous = last_traceback_at.load(std::memory_order_relaxed);
+	if (now - previous < TRACEBACK_QUIET_SECONDS) return false;
+	return last_traceback_at.compare_exchange_strong(
+		previous, now, std::memory_order_relaxed);
+}
 
 struct pyfilter_ctx {
 
@@ -134,8 +165,14 @@ struct pyfilter_ctx {
 		del_item_from_glob("__firegex_packet_info");
 
 		if (PyErr_Occurred()){
-			cerr << "[error] [handle_packet] Failed to execute the code " << result << endl;
-			PyErr_Print();
+			// Shown at most once every TRACEBACK_QUIET_SECONDS; the EXCEPTION below goes
+			// every time, and is what carries the count.
+			if (traceback_is_due()){
+				cerr << "[error] [handle_packet] Failed to execute the code " << result << endl;
+				PyErr_Print();
+			} else {
+				PyErr_Clear();
+			}
 			#ifdef DEBUG
 			cerr << "[DEBUG] [handle_packet] Exception raised" << endl;
 			#endif

@@ -89,6 +89,48 @@ def one_address(ip: str) -> str:
     return str(ip).split("/")[0]
 
 
+class NoRelayAddress(Exception):
+    """An address a UDP relay cannot be bound for."""
+
+
+def udp_relay_host(ip: str) -> str:
+    """The concrete address a UDP relay binds for `ip`, which may be an interface name.
+
+    A relay has to bind somewhere, and an interface name is not somewhere — so the
+    interface's own address stands in for it, resolved when it is needed rather than
+    stored, because an interface's address is the host's to change. IPv4 first and
+    link-local last: an interface almost always carries a link-local IPv6 address it was
+    never configured with, and binding the relay to that one would put the service on an
+    address nobody dials.
+    """
+    if is_ip_parse(ip):
+        return one_address(ip)
+    candidates = [one_address(addr.split("%")[0]) for addr in get_interface_ips(ip)]
+    ordered = sorted(
+        candidates,
+        key=lambda a: (ip_family(a) == "ip6", a.lower().startswith(("fe80:", "169.254."))),
+    )
+    if not ordered:
+        raise NoRelayAddress(
+            f"interface '{ip}' has no IP address assigned, so there is nothing for a "
+            f"UDP relay to bind to"
+        )
+    return ordered[0]
+
+
+def udp_relay_key(ip: str, port: int) -> str:
+    """How a UDP relay's upstream is spelled, everywhere it is spelled.
+
+    The engine reports one `UDP <upstream> <port>` line per relay and is asked for a new
+    one by the same token, so the transport's map of them, the rule that points traffic
+    at one, and the manager adding an address to a running service all have to agree on
+    it exactly. Written out at each of those it stops agreeing the first time one of
+    them is changed, and the symptom is a service whose UDP silently goes nowhere.
+    """
+    host = one_address(ip)
+    return f"[{host}]:{port}" if ip_family(host) == "ip6" else f"{host}:{port}"
+
+
 class InstalledRule:
     """A rule already in the ruleset, matched back to the service that owns it.
 
@@ -413,24 +455,7 @@ class FiregexTables(NFTableManager):
                 # at that address's port rather than at the one shared TCP listener.
                 port = proxy_port
                 if l4 == "udp":
-                    if is_iface:
-                        ips = get_interface_ips(target_ip)
-                        if not ips:
-                            raise Exception(
-                                f"the proxy transport has no UDP relay listening for {target_ip}: "
-                                f"interface '{target_ip}' has no IP assigned"
-                            )
-                        resolved_ip = one_address(ips[0])
-                        resolved_family = ip_family(resolved_ip)
-                        key = (
-                            f"[{resolved_ip}]:{target_port}"
-                            if resolved_family == "ip6" else f"{resolved_ip}:{target_port}"
-                        )
-                    else:
-                        key = (
-                            f"[{one_address(target_ip)}]:{target_port}"
-                            if family == "ip6" else f"{one_address(target_ip)}:{target_port}"
-                        )
+                    key = udp_relay_key(udp_relay_host(target_ip), target_port)
                     port = (udp_ports or {}).get(key)
                     if port is None:
                         raise Exception(

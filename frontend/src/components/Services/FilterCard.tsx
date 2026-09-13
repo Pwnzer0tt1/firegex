@@ -169,11 +169,7 @@ export default function FilterCard({ filter, serviceId, dragHandle, position, tr
                             <Code style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {decode(rx.regex)}
                             </Code>
-                            {false ?
-                                <Badge size="xs" variant="light" color="orange">
-                                    → {decode(rx.replace_with ?? "") || "(removed)"}
-                                </Badge>
-                                : <Badge size="xs" variant="light" color="red">block</Badge>}
+                            <Badge size="xs" variant="light" color="red">block</Badge>
                             <Badge size="xs" variant="outline" color="gray">{modeLabel(rx.mode)}</Badge>
                             {rx.case_sensitive ? null :
                                 <Badge size="xs" variant="outline" color="gray">any case</Badge>}
@@ -272,8 +268,6 @@ export default function FilterCard({ filter, serviceId, dragHandle, position, tr
             initial={(regexes.data ?? []).map(rx => ({
                 expr: decode(rx.regex),
                 caseSensitive: rx.case_sensitive,
-                action: rx.action,
-                replaceWith: decode(rx.replace_with ?? ""),
             }))} />
         <YesNoModal
             title="Remove this filter?"

@@ -11,10 +11,8 @@ except ImportError:
     nftables = None
 from socketio import AsyncServer
 from typing import Annotated, List, Union
-from functools import wraps
-from pydantic import BaseModel, ValidationError, Field
+from pydantic import BaseModel, Field
 import traceback
-from utils.models import StatusMessageModel
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -234,12 +232,6 @@ def nftables_int_to_json(ip_int):
     ip_addr_cidr = int(str(ip_int).split("/")[1])
     return {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}
 
-def nftables_json_to_int(ip_json_int):
-    if isinstance(ip_json_int,str):
-        return str(ip_parse(ip_json_int))
-    else:
-        return f'{ip_json_int["prefix"]["addr"]}/{ip_json_int["prefix"]["len"]}'
-    
 class Singleton(object):
     __instance = None
     def __new__(class_, *args, **kwargs):
@@ -301,36 +293,6 @@ def json_like(obj: BaseModel|List[BaseModel], unset=False, convert_keys:dict[str
     if isinstance(obj, list):
         return [_json_like(ele, unset=unset, convert_keys=convert_keys, exclude=exclude, mode=mode) for ele in obj]
     return _json_like(obj, unset=unset, convert_keys=convert_keys, exclude=exclude, mode=mode)
-
-def register_event(sio_server: AsyncServer, event_name: str, model: BaseModel, response_model: BaseModel|None = None):
-    def decorator(func):
-        @sio_server.on(event_name)  # Automatically registers the event
-        @wraps(func)
-        async def wrapper(sid, data):
-            try:
-                # Parse and validate incoming data
-                parsed_data = model.model_validate(data)
-            except ValidationError:
-                return json_like(StatusMessageModel(status=f"Invalid {event_name} request"))
-            
-            # Call the original function with the parsed data
-            result = await func(sid, parsed_data)
-            # If a response model is provided, validate the output
-            if response_model:
-                try:
-                    parsed_result = response_model.model_validate(result)
-                except ValidationError:
-                    traceback.print_exc()
-                    return json_like(StatusMessageModel(status=f"SERVER ERROR: Invalid {event_name} response"))
-            else:
-                parsed_result = result
-            # Emit the validated result
-            if parsed_result:
-                if isinstance(parsed_result, BaseModel):
-                    return json_like(parsed_result)
-                return parsed_result
-        return wrapper
-    return decorator
 
 def nicenessify(priority:int, pid:int|None=None):
     try:

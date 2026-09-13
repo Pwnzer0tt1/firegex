@@ -43,9 +43,6 @@ class SQLite():
         if were_active:
             self.connect()
             
-    def delete_backup(self):
-        self.__backup = None
-    
     def disconnect(self) -> None:
         if self.conn:
             self.conn.close()

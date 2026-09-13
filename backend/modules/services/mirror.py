@@ -10,9 +10,15 @@ All that is needed here is the device: a `dummy` interface, which is a sink that
 whatever is sent to it and goes nowhere. One for the whole instance, so every TLS
 service's plaintext arrives on the same interface and a single capture covers the lot.
 
-It exists only while some TLS service is running. Nothing is lost by removing it — the
-engine reopens its socket per process — and an interface that is there when nothing is
-decrypting is an interface somebody points a capture at and watches stay empty.
+It exists for as long as firegex does, put there by `FirewallManager.init` and taken
+away by `close`. It used to come and go with the TLS services themselves, on the argument
+that an interface present while nothing is decrypting is one somebody points a capture at
+and watches stay empty. Watching it stay empty turned out to be the better failure: a
+capture tool is attached once, at the start of a round, and an interface that disappears
+underneath it takes the tool with it — Zeek and Suricata exit rather than wait, and the
+restart of a single TLS service was enough to do it. So the device now outlives any one
+service, and the thing an operator points at in the morning is still there in the
+afternoon.
 """
 
 import subprocess
@@ -45,5 +51,5 @@ def ensure() -> bool:
 
 
 def release() -> None:
-    """Take it away again."""
+    """Take it away again, at shutdown and nowhere else."""
     _run("ip", "link", "del", DEVICE)

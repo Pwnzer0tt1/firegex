@@ -2,311 +2,102 @@
 
 ## [GO BACK](../README.md)
 
-Two different things live here. The **tests** check that a change to firegex did not break
-anything, and they are quick. The **benchmarks** measure how much traffic the filters can
-carry, and they are slow, noisy, and easy to misread — the second half of this page is
-mostly about how to read them.
+One suite, one runner. Everything here is `pytest`; the **benchmarks** live in
+[`bench/`](bench/README.md) and are not tests — they measure, so they have no pass or fail
+and `pytest` does not collect them.
 
-# Running all the tests
-
-Everything below drives a **live, already-running** firegex on Linux, as root. Start one
-first (`python3 run.py start -P testpassword` from a clone), then:
+## Running them
 
 ```bash
-./run_tests.sh [password]        # defaults to "testpassword"
-./run_tests.sh --set-pass        # for an instance still in its initial-setup state
+./run_tests.sh                    # everything this host can run
+./run_tests.sh --set-pass         # against an instance still in its initial-setup state
+./run_tests.sh mypassword         # a different password
 ```
 
-`FIREGEX_ADDRESS` points the whole suite somewhere other than `http://127.0.0.1:4444`.
+`run_tests.sh` installs the dependencies, waits for the instance to answer, and hands
+everything else straight to pytest — so anything pytest understands works there, and
+`pytest` on its own works too once the dependencies are in place.
 
-The suite runs, in order:
-
-| Script | Needs an instance | What it covers |
-|---|---|---|
-| `regex_lib_test.py` | no (needs `libhs`) | `firegex.regex`: validity per mode, direction, rewriting precedence, the ruleset file format. First, because a broken match library makes everything below fail in a way that is much harder to read. |
-| `test_http_history.py` (pytest) | no | the `firegex.pyfilters` library on its own: the HTTP models, `HttpHistory`, and the knobs a filter file may set. |
-| `api_test.py` | yes | login, password change and expiry, backup export/import, and authentication being turned off and back on at runtime. |
-| `services_test.py` | yes | the whole product: both network layers, both filter kinds, TLS, IPv6, the external hand-off, addresses added to a running service, statistics. |
-
-`services_test.py` is the one that matters, and it is run **eight times** — `proxy`,
-`nfqueue` and `external` × IPv4/IPv6, plus both layers behind TLS — because a filter that
-works on one layer and not the other is exactly the failure the unified model exists to
-prevent.
+Part of "in place" is a **build**: `unit/` imports the filter library out of
+`../fgex-lib`, and that library carries a C extension — the llhttp binding that parses
+HTTP. `run_tests.sh` builds it for you; doing it by hand once is enough:
 
 ```bash
-./services_test.py -p testpassword -t proxy|nfqueue|external [-6] [--tls] [-P PORT]
-./api_test.py -p testpassword [-a http://127.0.0.1:4444/]
+pip install -e ../fgex-lib
 ```
 
-**Run the suite twice in a row** when you have changed anything about addresses or TLS: a
-leaked `tls_streams` row only shows up on the second pass.
-
-Two scripts are deliberately **not** in `run_tests.sh`:
-
-- `ipfilter_test.py` — those settings are only read at process startup, so it stops and
-  starts the instance itself for each scenario. Run it on its own and expect it to bounce
-  what you have running.
-- `stress_test_history.py` — a soak test for `HttpHistory` under load, not a pass/fail check.
-
-The benchmarks (`benchmark.py`, `connbench.py`) are not in it either — they take minutes
-and answer a different question. See [Performance](#performance).
-
-# Running a benchmark
+Without it those tests cannot be collected at all, and pytest says
+`ImportError: cannot import name '_llhttp' from 'firegex'`.
 
 ```bash
-./benchmark.py -p testpassword -r 50 -d 1 -s 50 -t nfqueue
+pytest                            # the same thing, if you already have the dependencies
+pytest unit                       # the ones that need nothing running at all
+pytest -k udp                     # one subject
+pytest -m "not slow"              # skip the ones that sit and wait on a real timeout
+pytest --layer proxy --no-ipv6    # one network layer, one address family
+pytest --fg-address http://box:4444/ --fg-password hunter2
 ```
 
-| Flag | Meaning |
+| Option | What it does |
 |---|---|
-| `-r, --num-of-regexes` | how many patterns to build up to; one measurement per pattern count |
-| `-d, --duration` | seconds per measurement |
-| `-s, --num-of-streams` | concurrent iperf3 streams |
-| `-t, --transport` | `nfqueue` or `proxy` — which network layer to put in the path |
-| `-o, --output-file` | CSV of `pattern count, MB/s` |
+| `--fg-address` | where the instance under test is (or `FIREGEX_ADDRESS`) |
+| `--fg-password` | its password (or `FIREGEX_PASSWORD`) |
+| `--layer` | only these network layers — `proxy`, `nfqueue`, `external`; repeatable |
+| `--no-ipv6` | skip the IPv6 half of every parametrised case |
+| `--no-tls` | skip the TLS cases |
 
-It stands up a service, measures the throughput with no filter, then adds one random
-pattern at a time and measures again, using iperf3 over loopback. All the patterns live in
-**one** regex filter, because that is the property worth measuring: they are compiled into
-a single hyperscan database, so fifty of them should cost about what one costs.
+Markers: `instance` (needs a live firegex), `root` (needs root and a Linux kernel with
+nftables), `slow` (waits on a real timeout), `ipv6`, `tls`.
 
-## Reading the numbers
+## What is where
 
-Three things decide whether a number here means anything at all.
+| Directory | Needs a running instance | What it covers |
+|---|---|---|
+| `unit/` | no | `firegex.regex` against libhs, the `firegex.pyfilters` models and knobs, and the address-to-nftables translation in the backend's own modules |
+| `integration/` | yes | the product: both network layers, both filter kinds, TLS, UDP, IPv6, the hand-off, addresses on a running service, statistics, logs, limits, resilience |
+| `standalone/` | yes, and it restarts it | settings that are only read at process startup, so the test has to bounce the instance itself — **not** collected by default |
+| `helpers/` | — | the API client, the stand-in services, certificates, and the traffic channel |
+| `bench/` | yes | [measurement, not testing](bench/README.md) |
 
-**The filter has to be in the path.** `benchmark.py` creates its service with
-`fail_open=False`, and that one argument is worth more than everything else on this page.
-With fail-open on, the nft rule carries `bypass` and the queue is configured
-`NFQA_CFG_F_FAIL_OPEN`: when the queue fills — which under fifty iperf3 streams it does
-constantly — the kernel accepts packets **without inspecting them**. Measured that way the
-same build reports ~32 000 MB/s instead of ~3 000, and the extra order of magnitude is
-traffic that was never filtered. A benchmark of a filter has to make every packet go
-through the filter.
-
-**A pass is repeatable; a restart is not.** Three passes back to back against the same
-running instance land within ~3% of each other. The same configuration measured again
-after stopping and starting firegex moved by up to ~30%. So differences smaller than about
-a third are not results, and any comparison across versions — each of which needs its own
-instance — carries that uncertainty.
-
-**One second per point is noisy on purpose.** `-d 1` is what the archived runs used and
-what these use, so the curves are comparable with each other; it also means the wiggle
-between adjacent points is measurement, not behaviour. Read the level and the slope.
-
-# Performance
-
-Measured on:
-
-- MacBook Air M2, 16 GB
-- OrbStack VM, Fedora Linux 43 aarch64, Linux 7.0.14, 7 CPUs
-- `./benchmark.py -p testpassword -r 50 -d 1 -s 50 -t nfqueue` — and the same with
-  `-t proxy` for the proxy line. **The layer is part of the measurement**, so it is part of
-  every label, every filename (`5.0.0-nfqueue-8T.csv`, `5.0.0-proxy.csv`) and every table
-  row below: the two differ by more than three times, and a number without its layer is not
-  a number about firegex.
-
-The `-d 1` in that command used to be load-bearing by accident. `benchmark.py` drove
-iperf3 through the `iperf3` python binding, which captures libiperf's output by `dup2`-ing
-stdout onto an `os.pipe()` and reads it only *after* the test returns — and a Linux pipe
-holds 64 KiB. At fifty streams the JSON is 55 KB for a one-second test and 130 KB for a
-five-second one, so anything past a second filled the pipe, blocked libiperf in `write()`,
-and hung the benchmark for good: no output, no error, no timeout. It survived only because
-the recorded runs happened to use the one duration that fits. iperf3 is now run as a
-subprocess against a pipe something is draining, so `-d` is just a duration again.
-
-## By version and thread count
-
-Every line below was measured on that machine, in one sitting, with the filter in the path
-for every packet. The versions are all driving their own `tests/benchmark.py` against their
-own API — what that API is called changed across 3.x and 4.x, what is being measured did
-not: a regex filter, one hyperscan database, throughput over loopback. **5.0.0** is the
-tree these tests live in.
-
-One chart per thread count, because the thread count moved a line as much as the version
-did and seven lines on one pair of axes was something you decoded rather than read. The
-dashed line in each is 5.0.0's **proxy** layer: not another version, the other way of
-putting the same filter in the path.
-
-### One thread
-
-![One thread](results/Benchmark-1T.svg)
-
-### Eight threads
-
-![Eight threads](results/Benchmark-8T.svg)
-
-### Medians
-
-| Version | Layer | 1 thread | 8 threads | 8T / 1T |
-|---|---|---|---|---|
-| 3.5.3 | NFQUEUE | 1601 | 2620 | 1.6× |
-| 4.0.5 | NFQUEUE | 1827 | 2461 | 1.3× |
-| 5.0.0 | NFQUEUE | 1820 | 2956 | 1.6× |
-| **5.0.0** | **Proxy** | **4035** | **13984** | **3.5×** |
-
-What this supports:
-
-- **Throughput is flat in the number of patterns**, on every version, both layers, both
-  thread counts. Fifty patterns cost about what one costs. That is hyperscan doing what it
-  is here for, and it is the clearest thing on either chart.
-- **The proxy layer is the faster one, and the gap widens with threads**: 2.2× NFQUEUE at
-  one thread, **4.7× at eight**. NFQUEUE pays a userspace round trip per packet; the proxy
-  pays once per connection and then the kernel moves the bytes. Both gaps are several
-  times the measurement uncertainty below, so both are results.
-- **The proxy scales better across threads too** — 3.5× from one to eight, against ~1.5×
-  for NFQUEUE, which is bounded by how much of its work is a per-packet trip through the
-  kernel rather than something a second core can do.
-- **The NFQUEUE versions are not separable at this resolution.** The spread across passes
-  of the same version is as wide as the gap between versions. 5.0.0 measures highest and
-  most steadily and that is as much as these numbers say; the charts are not evidence that
-  it is faster than 4.0.5.
-
-The `3.5.3-8T` pass in `results/3.5.3-8T-outlier.csv` collapsed to ~500 MB/s past the
-seventeenth pattern and did not reproduce on the next pass. It is kept because leaving it
-out would make the run-to-run spread look smaller than it is.
-
-### Measured again after the nftables tables moved
-
-`results/*-rerun.csv` is the whole table above, taken a second time after the firewall
-module moved out of the shared `filter`/`mangle` tables into `fgex_filter` and
-`fgex_mangle` — the kind of change that has no business costing throughput, which is why
-it is worth showing that it did not. Same Mac, same protocol (`-r 50 -d 1 -s 50`), but
-from a container sharing the datapath's network namespace rather than from the Fedora
-machine, so read it as a second host and not as a repeat:
-
-| Layer | 1 thread | 8 threads | 8T / 1T |
-|---|---|---|---|
-| NFQUEUE | 2205 *(was 1820)* | 2940 *(was 2956)* | 1.3× *(was 1.6×)* |
-| **Proxy** | **4341** *(was 4035)* | **14590** *(was 13984)* | **3.4×** *(was 3.5×)* |
-
-The proxy is 2.0× NFQUEUE at one thread and 5.0× at eight, against 2.2× and 4.7× before.
-Every medians-level claim above survives; none of them survives to the decimal, which the
-run-to-run spread in the same table already said.
-
-**Duration is part of the protocol, and the numbers here are only comparable at `-d 1`.**
-The same four runs at the default `-d 5` land at 1.9× and 3.9× — the layers' gap narrows
-as each reading settles. Neither pair is wrong; quoting one against the other is.
-
-`--threads` reaches **both** layers: it is passed to `cppregex` and `cpproxy`, and — since
-5.0.0 — to the Rust proxy engine, which builds its tokio runtime with that many workers
-instead of taking every core whatever the operator asked for. Before that the same flag
-meant one thing on one layer and nothing on the other, and there could be only one proxy
-line on these charts.
-
-### Versions that can no longer be measured
-
-`2.3.3`, `2.4.0`, `2.5.1`, `3.0.0` and `3.2.x` pin no dependency versions and either pin
-no base image or pin `fedora:latest`, so building them today resolves to current packages.
-Their containers **do not start**: `passlib` 1.7.4 probes its bcrypt backend at import and
-today's `bcrypt` answers with `ValueError: password cannot be longer than 72 bytes`, which
-kills the application at startup. `3.4.11` builds and starts but the datapath dies partway
-through the benchmark under fifty streams.
-
-Their old numbers are still in `results/` and are rendered further down, but they were
-measured in 2025 on Fedora 41 and Linux 6.12. They are **not** comparable with anything
-above — that machine is roughly an order of magnitude away from this one on the same
-benchmark — and they are kept as a record of what was measured then, not as a baseline.
-
-## Short connections
-
-Bulk throughput is the shape a terminating proxy is best at and the shape a CTF service
-almost never sees. The cost the proxy is supposed to pay is in *opening* a connection,
-which the throughput benchmark never touches, so there is a second script for it:
-
-```bash
-./connbench.py -p testpassword [--passes 5] [-c 1500] [-s 32]
-```
-
-Open, one small request, one small response, close — measured as connections per second
-against an unfiltered baseline taken in the same run.
-
-| 5.0.0, short connections | conn/s | of unfiltered | across passes |
-|---|---|---|---|
-| unfiltered baseline | 11182 | — | 8437 – 14014 |
-| Proxy | 10181 | 91% | 9687 – 10346 |
-| NFQUEUE | 9870 | 88% | 7318 – 12117 |
-
-**There is no measurable difference.** The medians land 3% apart and the ranges overlap
-heavily, so the honest answer on this axis is "the same", and the script says so itself
-rather than printing a ratio.
-
-Getting there took three wrong answers, which is the useful part. Measuring every pass of
-one layer and then every pass of the other gave the proxy a 1.4× lead twice, then a 1.0×,
-then NFQUEUE a lead — because whichever went second inherited the machine's drift.
-`connbench.py` now measures both layers **within** each pass and alternates which goes
-first, so drift lands on both and shows up as spread instead of as a winner.
-
-None of this is an argument for always choosing the proxy. What it costs is the kernel's
-fail-open backstop, and on UDP the client's address; `-s` and `-d` on `benchmark.py` are
-there so you can measure the shape you actually care about.
-
-# Archived results (2025)
-
-Everything below was measured on the machine described at the time — a MacBook Air M2 on
-OrbStack with **Fedora 41** and Linux 6.12.13 — and is kept as the record it was. Do not
-read it against the section above.
-
-Command: `./benchmark.py -p testpassword -r 50 -d 1 -s 50`
-
-NOTE: 8-thread performance before 2.5.0 does not change, because the source and
-destination IP are always the same, so the kernel hashes every packet onto the same
-thread. See
-[this thread](https://netfilter.vger.kernel.narkive.com/sTP7613Y/meaning-of-nfqueue-s-queue-balance-option).
-In a CTF there is usually a NAT hiding the real IPs, so this is not a hypothetical.
-Firegex 2.5.0 assigns threads in userland instead, which is what makes the distribution
-work.
-
-Charts are labelled `[version]-[n_thread]T`, e.g. `2.5.0-8T`.
-
-![Firegex Benchmark](results/Benchmark-chart.svg)
-
-The advantage of multithreading is hard to see there, and much clearer with a fake load in
-the filtering path:
-
-```cpp
-volatile int x = 0;
-for (int i=0; i<50000; i++){
-    x+=1;
-}
-```
-
-![Firegex Benchmark](results/Benchmark-chart-with-load.svg)
-
-## nfregex vs nfproxy (2025)
-
-Command: `./comparemark.py nfproxy -p testpassword -d 1 -s 50 -V 100`
-
-> These are **archived**, from back when `nfregex` and `nfproxy` were separate modules.
-> Both were folded into `services` — what `nfproxy` did is now the **pyfilters** filter
-> kind — so `comparemark.py` drives an API that no longer exists, and the names below are
-> the ones the stored data was recorded under, not names anything answers to. The current
-> equivalent of this comparison is [By network layer](#by-network-layer) above.
-
-The code under test matched this pattern with Python's `re` module:
+Most of `integration/` is **parametrised over the combinations**, which is the point of
+the suite rather than a detail of it: a service is a network layer and a chain of filters
+chosen independently, so the same filters are exercised on `proxy` and on `nfqueue`, over
+IPv4 and IPv6, with and without TLS. A filter that works on one layer and not the other is
+exactly the failure the unified model exists to prevent, and it only shows up if both are
+run. Each case is a test with its own name, so a failure says which combination broke:
 
 ```
-(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])
+integration/test_filters_regex.py::test_a_matching_pattern_blocks[nfqueue-ipv6] FAILED
 ```
 
-![nfproxy benchmarks](results/whisker_nfproxy.svg)
+This used to be a shell script invoking one 1100-line program eight times with different
+flags. The first failure in a run ended it, so the seven other combinations were never
+reached, and a host without IPv6 on loopback failed rather than skipped.
 
-![nfproxy benchmarks](results/istogramma_nfproxy.svg)
+**Run the suite twice in a row** when you have changed anything about addresses or TLS:
+state left behind by the first pass only shows up on the second.
 
-nfproxy was slower than nfregex, and more flexible.
+## Two that are not in the default run
 
-![nfproxy benchmarks](results/whisker_compare.svg)
+- **`standalone/test_ip_filter.py`.** Access control by CIDR is read once, at process
+  startup, so there is no way to test it against a running instance — it drives
+  `run.py stop`/`start` itself for each scenario and restores an unrestricted instance at
+  the end. Run it on its own, and expect it to bounce whatever you have running:
+  ```bash
+  pytest standalone
+  ```
+- **`bench/`.** Minutes rather than seconds, and it answers a different question. See
+  [bench/README.md](bench/README.md).
 
-![nfproxy benchmarks](results/istrogramma_compare.svg)
+## Adding a test
 
-# Regenerating the charts
+Put it in the directory that matches what it needs, and take the fixtures from the
+conftest rather than building a service by hand — `protected` gives you a started-service
+shape for whichever layer is being parametrised, `service` cleans up whatever you create,
+and `Channel` asks a protected service a question without the test having to know whether
+TLS is in the way. A leaked service is not untidiness: it holds a port and an nftables
+rule, so the next test to want that port fails for a reason belonging to yours.
 
-`results_plotter.py` reads the CSVs in `results/` and writes the SVGs beside them:
-
-```bash
-cd tests && python3 results_plotter.py
-```
-
-That writes the two current charts, through one shared `line_chart()` helper, and stops.
-The archived charts are behind `--archived`, because matplotlib has moved on since they
-were produced and redrawing them changes six committed SVGs for no reason other than a
-different font being available.
+If a case cannot run on some hosts, **skip it with a reason** rather than letting it fail.
+A red test nobody can act on teaches less than a summary line saying which half of the
+suite this machine declined to run and why.

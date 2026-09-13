@@ -55,4 +55,11 @@
 
 # Rust proxy engine build artifacts
 /backend/proxysrc/target/
-# Copied from the repository root by fgex-lib/setup.py at build time.
+
+# pytest
+**/.pytest_cache/
+
+# The vendored HTTP parser, built in place by an editable install.
+/fgex-lib/firegex/_llhttp*.so
+/fgex-lib/firegex/_llhttp*.pyd
+/fgex-lib/build/

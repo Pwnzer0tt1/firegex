@@ -35,19 +35,17 @@ async def _pump(rules: Ruleset, reader, writer, is_input: bool, on_block):
             if not data:
                 break
             try:
-                blocked_by, payload = rules.apply(data, is_input)
+                blocked_by = rules.apply(data, is_input)
             except Exception as e:
                 # A ruleset that blows up mid-connection must not take the traffic with
                 # it; the real datapath fails open too, and so does this.
                 _log("filter", f"failed on this chunk ({escape(str(e))}), forwarding it", "ERROR")
-                blocked_by, payload = None, data
+                blocked_by = None
             if blocked_by is not None:
                 on_block(blocked_by)
                 _log("block", f"connection refused by [bold]{escape(blocked_by)}[/]", "WARNING")
                 break
-            if payload != data:
-                _log("rewrite", f"{escape(repr(data)[:60])} -> {escape(repr(payload)[:60])}")
-            writer.write(payload)
+            writer.write(data)
             await writer.drain()
     finally:
         writer.close()
