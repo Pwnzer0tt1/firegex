@@ -117,7 +117,11 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
-/// Parse one spec: `panic`, `hang`, `block:<needle>` or `replace:<from>:<to>`.
+/// Parse one spec: `panic`, `hang` or `block:<needle>`.
+///
+/// There was a `replace:<from>:<to>` here, and it went with the rewriting verdict rather
+/// than being dropped from the scaffolding on its own — there is nothing left for a test
+/// filter to ask the chain to do but accept or refuse.
 pub fn parse_filter(spec: &str) -> Result<Arc<dyn Filter>, String> {
     let spec = spec.trim();
     let (kind, rest) = match spec.split_once(':') {

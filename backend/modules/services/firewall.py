@@ -521,17 +521,20 @@ class ServiceManager:
             # carries that same dict, so what is opened here is what the rule finds.
             if self.srv.transport == transports.TRANSPORT.PROXY:
                 for addr in added:
-                    if L4.l4_of(addr.proto or self.srv.proto) != L4.UDP:
+                    if transports.fronted_by_the_listener(self.srv, addr):
                         # A TCP address is fronted by the one shared listener, which
                         # recovers where each connection was headed from conntrack — so
                         # the only thing it can need told is that this address fronts a
                         # service somewhere else. An address that is simply the service
                         # needs nothing at all, which is every address until one says so.
-                        moved = addr.target_port and addr.target_port != addr.port
-                        word = ("tls" if (str(self.srv.proto) == L4.HTTP
-                                          and str(addr.edge) == L4.TLS) else "any")
-                        onward = UPSTREAM.env(addr.upstream)
-                        if moved or word != "any" or onward != "same":
+                        #
+                        # Which of the two it is, and in exactly which words, is
+                        # `transports.announcement`'s to decide: the startup list the
+                        # engine is launched with (`FGEX_PROXY_TARGETS`) is built from the
+                        # same function, so an address that was there when the service
+                        # started and one added a minute later cannot mean two things.
+                        said = transports.announcement(self.srv, addr)
+                        if said is not None:
                             # One announcement per address, and an interface stands for
                             # every address it carries: the engine keys this map on what
                             # `SO_ORIGINAL_DST` hands back, which is never an interface
@@ -541,9 +544,9 @@ class ServiceManager:
                             for host in interface_addresses(addr.ip_int):
                                 await self.transport.publish(
                                     (host, addr.port),
-                                    word,
-                                    onward,
-                                    (host, addr.target_port) if moved else None,
+                                    said.word,
+                                    said.onward,
+                                    (host, said.target_port) if said.target_port else None,
                                 )
                         continue
                     try:
@@ -573,7 +576,7 @@ class ServiceManager:
                     # map cannot come to disagree with the rules that feed it.
                     for addr in gone:
                         if (self.srv.transport == transports.TRANSPORT.PROXY
-                                and L4.l4_of(addr.proto or self.srv.proto) == L4.TCP):
+                                and transports.fronted_by_the_listener(self.srv, addr)):
                             # Every address it was announced under, or the engine keeps
                             # fronting one this service no longer protects.
                             for host in interface_addresses(addr.ip_int):

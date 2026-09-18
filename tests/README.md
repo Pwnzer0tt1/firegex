@@ -47,7 +47,10 @@ pytest --fg-address http://box:4444/ --fg-password hunter2
 | `--no-tls` | skip the TLS cases |
 
 Markers: `instance` (needs a live firegex), `root` (needs root and a Linux kernel with
-nftables), `slow` (waits on a real timeout), `ipv6`, `tls`.
+nftables), `slow` (waits on a real timeout), `ipv6`, `tls`, `quic` (needs `aioquic` to
+speak it) and `http2` (needs `grpcio` to stand up a real HTTP/2 service). The list here
+and the one in `pytest.ini` are the same list — `--strict-markers` is on, so a marker
+that is only in one of them is an error rather than a silent no-op.
 
 ## What is where
 

@@ -1,407 +1,594 @@
-# Proxy datapath engine
+# The proxy datapath engine
 
-An alternative engine to the NFQUEUE one in `backend/binsrc/`. Instead of lifting
-packets to userspace and handing a verdict back to the kernel, it terminates the
-connection and owns both halves.
+`fgex-proxy`: one of the two network layers a service can be put on. Instead of lifting
+packets to userspace and handing a verdict back to the kernel — which is what
+`backend/binsrc/` does — it terminates the connection and owns both halves.
 
-Status: **working, and not yet the default anywhere.** A service can select it from
-the Proxy Engine page, with regex and rewrite rules that apply to live connections,
-Python filters run in a process of their own, and it has been measured against
-nfregex. What it does not have is the C++ engine's parsed HTTP models.
+It is what a service selects as its **proxy** layer in `modules/services/transports.py`,
+and it is what makes TLS, QUIC, HTTP/2 and HTTP/3 filterable at all.
 
-The two questions that could have killed the approach outright — does it still fail
-open, and does the service still see the real client — are answered below, and by
-tests rather than by argument.
+> This file is the engine's own documentation: what it does, and why it is shaped this
+> way. The product-level view — which layer to choose and what each one costs — is
+> [`docs/services.md`](../../docs/services.md), and the rules a change here has to keep
+> are in [`AGENTS.md`](../../AGENTS.md). Where any of the three disagree, `AGENTS.md`
+> wins; this file has been wrong before by being left behind while the engine moved.
 
 ## What it has to prove first
 
-The NFQUEUE engine fails open in the kernel: the nft rule carries `flags: ["bypass"]`
-and the binary asks for `NFQA_CFG_F_FAIL_OPEN`. If firegex dies, stalls, or falls
-behind, packets flow anyway. In attack/defense that is the difference between "the
-filter didn't fire" and "I lost the SLA".
+The NFQUEUE engine fails open in the kernel: the nft rule carries `flags: ["bypass"]` and
+the binary asks for `NFQA_CFG_F_FAIL_OPEN`. If firegex dies, stalls, or falls behind,
+packets flow anyway. In attack/defense that is the difference between "the filter didn't
+fire" and "I lost the SLA".
 
-A userspace proxy has no such backstop: if the process dies, the socket dies with it.
-So the property has to be rebuilt by hand, and it has to hold against user code that
-is assumed to be broken:
+A userspace proxy has no such backstop: if the process dies, the socket dies with it. So
+the property is rebuilt by hand, and it has to hold against user code that is assumed to
+be broken:
 
 | Failure | Handled by | Outcome |
 | --- | --- | --- |
-| Filter panics | `catch_unwind` on a blocking task | Chunk forwarded, filter disabled at once |
-| Filter never returns | Deadline on the blocking task | Chunk forwarded, filter disabled after N in a row |
+| Filter panics | `catch_unwind` around every call | Chunk forwarded, filter disabled at once |
+| Filter never returns | Deadline on the blocking task | Chunk forwarded, filter disabled after 3 in a row |
 | Every filter disabled | `degraded` flag | Chain skipped entirely — no copy, no thread hop |
 | Connection handler panics | One task per connection | That connection only; the listener lives |
+| Python worker hangs or dies | Killed and respawned on the next chunk | That chunk forwarded |
+| Backend goes away | stdin closing is not a shutdown | The current ruleset keeps being enforced |
 
-The degraded path is deliberately the cheapest one. Failing open must not cost more
-than working normally, or the failure mode becomes a second failure.
+The degraded path is deliberately the cheapest one. Failing open must not cost more than
+working normally, or the failure mode becomes a second failure. `panic = "unwind"` in
+`Cargo.toml` is load-bearing rather than tuning: an aborting binary cannot catch anything.
+
+`tests/fail_open.rs` asserts each row over real sockets.
 
 ## What the proxy buys
 
-- **Exact rewriting.** `Verdict::Replace` changes the payload length and the stream
-  stays correct, because there are two independent TCP connections. On NFQUEUE the
-  same operation desynchronises sequence numbers, which is why its action is still
-  called `UNSTABLE_MANGLE` there — see `docs/pyfilter.md`.
-- **Real connection metadata.** A filter is told the client's and the service's
-  address and port once per connection (`ConnectionMeta`, sent as a `KIND_OPEN`
-  frame), and can read nothing else below the application layer. That is more than a
-  header could honestly say here: this engine terminated the connection, so the
-  headers on the wire are its own.
-- **Reassembly from the kernel**, instead of `StreamFollower` and the out-of-order
-  caveat that comes with it.
+- **Every version of HTTP, filtered the same way.** HTTP/2 and HTTP/3 compress their
+  method, path and headers (HPACK, QPACK), so a layer that only forwards shows a filter a
+  compression format. This one terminates them and renders each exchange as the HTTP/1.1
+  it would have been, so one pattern and one Python file cover all three.
+- **TLS and QUIC.** The plaintext never leaves the process.
+- **Reassembly from the kernel**, instead of a stream follower and the out-of-order caveat
+  that comes with it.
+- **An ordered chain inside one process**, rather than one process and one reassembly pass
+  per filter.
+- **Real connection metadata.** A filter is told the client's and the service's address
+  and port once per connection (`ConnectionMeta`, a `KIND_OPEN` frame), and nothing below
+  the application layer beyond that. That is more than a header could honestly say here:
+  this engine terminated the connection, so the headers on the wire are its own.
 - **Backpressure for free.** A slow filter slows the sender through TCP flow control
   rather than overflowing a fixed-size queue and dropping packets.
-- **Clean closes.** A rejected connection is shut down properly instead of leaving
-  the peer to infer something from missing packets.
+- **Clean closes.** A refused connection is shut down properly instead of leaving the peer
+  to infer something from missing packets.
+
+What it costs is the kernel backstop above, and being in the path at all: the connection
+the service sees is one this process opened.
 
 ## The limitation that decided the design
 
-A blocking filter thread **cannot be cancelled**. When one blows the deadline the
-engine walks away, but the thread lives until its own code decides to stop — it holds
-a blocking-pool slot until the process restarts. The damage is bounded (a filter that
-times out repeatedly is disabled and never called again;
-`hanging_filter_fails_open_then_loses_its_say` asserts the leak stops growing), but
-bounded is not zero.
+A blocking filter thread **cannot be cancelled**. When one blows the deadline the engine
+walks away, but the thread lives until its own code decides to stop — it holds a
+blocking-pool slot until the process restarts. The damage is bounded (a filter that times
+out repeatedly is disabled and never called again) but bounded is not zero.
 
 That is why user Python runs **out of process**: a hung worker can be killed, a hung
-thread cannot. It also keeps `libpython` out of the datapath binary, which is where a
-good share of the C++ engine's complexity lives. Nothing shipped now relies on the abandoned
-thread path — regex rules run inline, the Python worker enforces its own deadline —
-but the machinery stays, because it is what a future in-process filter would need.
+thread cannot. It also keeps `libpython` out of the datapath binary, which is where a good
+share of the C++ engine's complexity lives.
+
+Compiled patterns cannot hang, so they declare `may_block() == false` and run **inline**
+against the relay's own buffers — no thread hop, no copy. That is not a micro-optimisation:
+it took ten rules from ~1260 to ~2950 MB/s in the benchmark that found it. The deadline
+machinery is still there and still the default; it is simply no longer charged to filters
+that cannot use it.
 
 ## Rules
 
-One JSON line on stdin carries the whole ruleset, one `ACK OK` / `ACK FAIL <why>`
-line comes back — the same shape `cppregex` uses for its filter codes. Blocks are
-reported as `BLOCKED <rule id>` so the backend can attribute them.
+One JSON line on stdin carries the whole ruleset, one `ACK OK` / `ACK FAIL <why>` line
+comes back — the same shape `cppregex` uses for its filter codes. Blocks are reported as
+`BLOCKED <id>` so the backend can attribute them.
 
 ```json
-[{"kind":"regex","id":"r1","pattern":"FLAG\\{[a-z]+\\}","direction":"s2c"},
- {"kind":"replace","id":"r2","pattern":"secret","with":"[redacted]"}]
+[{"kind":"regex","id":"r1","filter":"f1","pattern":"FLAG\\{[a-z]+\\}","direction":"s2c","case_sensitive":true},
+ {"kind":"python","id":"f2","code_path":"/execute/db/service_filters/f2.py",
+  "enabled":["block_traversal"],"command":["python3","/execute/modules/services/pyworker.py"],
+  "timeout_ms":1000}]
 ```
 
-Two decisions worth knowing:
+Four decisions worth knowing:
 
-- **A rejected ruleset changes nothing.** One bad pattern refuses the whole update
-  and the previous rules keep enforcing. Failing open covers a filter that breaks at
-  runtime; it is not a licence to quietly drop rules the operator asked for. The
-  backend mirrors this: a rule the engine will not compile is removed again rather
-  than left sitting in the list looking active.
-- **`regex` matches the window, `replace` matches the chunk.** Matching the chunk
-  alone would miss a pattern split across two reads, which is the evasion nfregex
-  reassembles the stream to prevent. Rewriting the window instead of the chunk would
-  resend bytes that already left. The per-direction window defaults to 1MB
-  (`FGEX_PROXY_STREAM_WINDOW`) — that is the longest pattern that can still be caught
-  across a boundary, and every byte of it is rescanned per chunk, so it is a
-  throughput knob rather than a buffer. It belongs to one connection: one client's
-  traffic can never complete another's pattern.
+- **A pattern blocks. There is no second action.** There used to be a `replace` rule, and
+  it was withdrawn because it could not keep its promise: rewriting scanned one chunk at a
+  time — bytes already forwarded cannot be taken back — so a match straddling two chunks
+  was never rewritten. Measured: a pattern sent whole arrived redacted, the same pattern
+  split across two TCP segments arrived intact, and blocking (which scans in hyperscan's
+  stream mode) caught both. The miss was not the problem; its silence was.
+- **The order the backend sent is the order that runs.** `filter` groups the patterns of
+  one link so they share a compiled database, which is what makes fifty patterns cost
+  about what one costs — and a group is exactly a filter, so grouping never crosses a
+  boundary the operator can see. An earlier version grouped every regex and then every
+  Python rule, which turned the chain into a set. `tests/rules.rs` pins both.
+- **A rejected ruleset changes nothing.** One bad pattern refuses the whole update and the
+  previous rules keep enforcing. Failing open covers a filter that breaks at runtime; it
+  is not a licence to quietly drop rules the operator asked for. Each pattern is compiled
+  alone first and thrown away, only so a failure can name *which* rule is wrong —
+  hyperscan reports the first one and stops.
+- **A block closes the connection, not the direction.** Half-closing would let a service
+  that answers without waiting for the request still reach a client whose request was
+  refused. On QUIC and HTTP/2 the refusal closes the *connection* rather than the stream,
+  for the same reason: a block a client can simply retry on the next stream is not a block.
 
-A block closes the **connection**, not the direction. Half-closing would let a
-service that answers without waiting for the request still reach a client whose
-request was refused — found by the suite, not by reading.
+Matching is hyperscan (`src/hyperscan.rs`, a binding to `libhs`), the same library
+`cppregex` uses on the other layer. There is no second regex engine in this tree, and
+adding `regex` to `Cargo.toml` would undo that.
 
 ## Python filters
 
-The thing the C++ engine has and this did not. It runs in a **child process**, and that is
-the whole point rather than an implementation detail: the engine's own deadline can
-only walk away from a blocking thread, which then holds a pool slot until the process
-restarts. A child that misses its deadline is killed and respawned on the next chunk,
-and the chunk it was holding is forwarded. `tests/pyworker.rs` asserts exactly that.
-
-The API is the one a pyfilters user already knows:
+The API is the one a `firegex` user already knows, and it is the **same library** the
+NFQUEUE binary embeds — `firegex.pyfilters`, with all of its models:
 
 ```python
-from firegex.pyfilters import pyfilter, ACCEPT, REJECT
+from firegex.pyfilters import pyfilter, ACCEPT, REJECT, HttpRequest
 
 @pyfilter
-def block_path_traversal(data: bytes, direction: str):
-    return REJECT if b"../" in data else ACCEPT
+def block_path_traversal(req: HttpRequest):
+    return REJECT if "../" in req.url else ACCEPT
 ```
 
-What a filter is handed is different, and deliberately so: a chunk of the stream and
-a direction, not one of the C++ engine's parsed models. `HttpRequest` and friends are
-the C++ engine's, and they are not here. The import is shimmed to resolve to the worker
-rather than to an installed `fgex`, because the decorator has to register into this
-worker and borrowing the names without the models would be the confusing option.
+`modules/services/pyworker.py` is the child process that runs it. A filter file's protocol
+is read off the annotations, never declared; what a filter may read and write is the same
+on both layers (`RawPacket` metadata in, payload out, nothing below the application
+layer). See [`docs/pyfilter.md`](../../docs/pyfilter.md).
 
-Frames are length-prefixed binary on the worker's stdin/stdout, tracebacks go to
-stderr where the backend already reads them. The worker announces itself once it has
-executed the user's file, which is what lets a ruleset carrying code that does not
-load be **refused when it is applied** instead of discovered later as traffic that
-quietly stopped being filtered — the backend then puts the previous file back.
+Frames are length-prefixed binary on the worker's stdin/stdout:
+`[u32 len][u8 kind][u64 connection][payload]`, big-endian, `len` covering everything after
+itself.
 
-One worker per rule, one conversation at a time. Serialising is the honest simple
-thing while a frame is a request and a response; a pool is the next step if Python
-filtering ever becomes the bottleneck.
+| kind | meaning |
+| --- | --- |
+| `0` / `1` | a chunk, client→server / server→client |
+| `2` | the connection is over — so the worker can drop its module globals |
+| `3` | the connection's metadata, one JSON object, once |
+
+The reply is `[u32 len][verdict][name len][name][payload]`. The name is whichever
+`@pyfilter` function decided, so a block is attributed as `<filter>/<function>` — the same
+token the NFQUEUE binaries report, which is what lets the backend have one way to
+attribute one.
+
+Three things are load-bearing:
+
+- **The worker announces itself** (`READY`) once it has executed the user's file. Waiting
+  for it is what lets a ruleset carrying code that does not load be refused *when it is
+  applied*, rather than discovered later as traffic that quietly stopped being filtered.
+- **The connection id is in every frame**, because the documented promise is that each
+  stream gets its own module globals. One client's state deciding another client's verdict
+  is both a false positive and a way to smuggle a pattern past a filter.
+- **`stdout` is the protocol channel**, so the worker reassigns `sys.stdout = sys.stderr`
+  before running user code: a `print()` landing in the middle of a frame gets the worker
+  killed on every packet with nothing to explain it. `tests/pyworker.rs` has a regression
+  test for exactly that.
+
+Tracebacks go to stderr, where the backend already reads them; the worker also marks them
+so the backend can say *the traffic was forwarded unfiltered* alongside the traceback,
+which is the sentence the NFQUEUE side produces from an `EXCEPTION`.
+
+One worker per rule, one conversation at a time. Serialising is the honest simple thing
+while a frame is a request and a response; a pool is the next step if Python filtering
+ever becomes the bottleneck.
 
 ## TLS
 
-The engine terminates it. It decrypts from the client, the rules see plaintext that never
-leaves the process, and it re-encrypts on the way out — `rustls`, so there is no OpenSSL
-in the build either.
+The engine terminates it: it decrypts from the client, the chain sees plaintext that never
+leaves the process, and it re-encrypts on the way out — `rustls` with the `ring` provider,
+so there is no OpenSSL in the build and the Docker stage stays a plain `cargo build`.
 
-What that replaced was nginx: one listener terminating the public connection and
+What that replaced was **nginx**: one listener terminating the public connection and
 forwarding plaintext to a second loopback port, which re-encrypted towards the real
-service, with the filter engine attached to the leg in between. It worked, and it cost a
-config generated per stream, **a pair of ports derived from hashing `ip:port`**, and one
-hop where the traffic was in the clear.
+service, with the filter engine attached to the leg in between. It cost a generated config,
+**a pair of ports derived from hashing `ip:port`** — chosen rather than assigned, so they
+could collide with something real — a `tls_streams` table, an nft chain of its own, and a
+failure mode where one unloadable certificate stopped nginx and took every TLS service on
+the instance down with it. A TLS service now occupies no port a plain one does not, and
+the blast radius is structural: each service carries its certificate into its own process.
 
-The ports are what settled it. They were chosen rather than assigned, so they could
-collide with something the operator was actually running, and a service was protected on
-them rather than on the address the world dialled. Terminating here means a TLS service
-occupies no port that a plain one does not.
+**ALPN is mirrored, and the ordering is the design.** The client's handshake is *started*
+and held at the ClientHello (`tokio_rustls::LazyConfigAcceptor`), because that message
+carries the protocols the client will speak; the upstream handshake goes next offering
+exactly that list; and whatever the service picked is the single protocol the client is
+then told. Answering something the service did not say is how a proxy breaks a protocol it
+was only carrying — a client told `h2` against an HTTP/1.1 service sends frames nothing can
+read. When the service picks nothing, the client is told nothing: no agreement is invented.
+Before this, ALPN was dropped in both directions and every client silently fell back to
+HTTP/1.1.
 
-The argument that this removes the hop in the clear is *not* the argument, and was worth
-retiring: reading loopback on the box means already having code on the box.
-
-The upstream certificate is **not verified**, mirroring the `proxy_ssl_verify off` nginx
-was configured with. That is the right call rather than laziness: the service on the
-other side is the thing firegex is defending, it is behind loopback or a private link,
-and in a competition it is invariably self-signed. Verifying it would only ever refuse to
-protect it.
+**The upstream certificate is not verified**, mirroring the `proxy_ssl_verify off` nginx
+was configured with. That is the right call rather than laziness: the service on the other
+side is the thing firegex is defending, it is behind loopback or a private link, and in a
+competition it is invariably self-signed. Verifying it would only ever refuse to protect it.
 
 Certificate and key reach the engine as **paths**, never as environment values: a private
-key in an env dump is a private key in a log. The API reports whether TLS is on and never
-returns the material.
+key in an env dump is a private key in a log.
 
-The key has to be one `ring` will sign with — RSA of at least 2048 bits, ECDSA, or
-Ed25519. nginx could be told to accept a smaller RSA key with `@SECLEVEL=1`; rustls has
-no equivalent, and a service carrying one is refused at startup with the reason.
+What cannot be carried, and is a limit rather than a missing setting: **TLS 1.0 and 1.1**,
+which rustls does not implement; the cipher list, which is fixed and forward-secret only;
+and **client certificates**, since the certificate a client would present is one only the
+service can check. The key must be one `ring` will sign with — RSA ≥ 2048, ECDSA or
+Ed25519; nginx could be told to take a 1024-bit key with `@SECLEVEL=1` and rustls has no
+equivalent, so a smaller one is refused at startup with the reason on stderr.
 
-One thing the NFQUEUE binaries never need, because they never open a second connection:
-on a path where both ends are local, `nat prerouting` is never consulted, and an intercept
-in `nat output` would catch the engine's own dial and loop it back into itself. So the
-engine stamps `SO_MARK` on every connection it opens and the intercept rules skip it.
+## QUIC, and HTTP/3
 
-### Where the plaintext goes
+**QUIC is terminated, and unlike TLS there was never a second option.** TLS over TCP can
+be carried past unopened — the bytes are framed by a transport the kernel understands — so
+filtering the ciphertext is a thing an operator could choose. Past its Initial packet QUIC
+encrypts the frames, the stream boundaries and the packet number along with the payload,
+so a packet queued to NFQUEUE is a datagram of noise.
 
-Terminating in-process means the decrypted traffic is never a packet, so there is nothing
-for a capture tool to read — which would have been a real loss along with the ports. So
-`capture.rs` writes it out: each connection's plaintext framed as the TCP stream it was,
-sent over `AF_PACKET` to a dummy interface (`firegex0`) that carries every TLS service's
-plaintext and nothing else.
+To the kernel it is UDP, so the addresses, the rules and the relay map are the code that
+was already there for datagrams; what changes is that the port is bound by something that
+terminates (`quic::QuicManager`) instead of something that forwards (`udp::UdpManager`).
+`relays::Relays` is the two-armed enum both the startup list and the control channel go
+through.
 
-They are **reconstructed** packets. The bytes are real — what the rules saw, and what was
-forwarded after any rewrite — but the framing is built here, because the framing on the
-wire was encrypted: sequence numbers from zero, no retransmissions, segmentation from
-this engine's read sizes. A SYN and a FIN are emitted so a capture tool has a stream to
-follow rather than orphan segments.
+- **The ALPN is asked of the service**, which is the one thing that could not be kept from
+  the TLS path: a QUIC ClientHello arrives inside an encrypted Initial whose processing
+  *is* the handshake, and quinn offers nothing to hold it at. So the order is reversed —
+  the service is dialled first with the candidate list (`FGEX_PROXY_QUIC_ALPN`, default
+  `h3`) and the client is advertised exactly the one it chose. The invariant survives; what
+  is lost is knowing in advance whether the client would take it, which shows up as a
+  failed handshake with a log line naming the protocol.
+- **One stream is one connection to the chain**, with its own sessions and its own module
+  globals, released when the stream ends. A filter's state follows a stream of bytes from
+  start to end, which is what a QUIC stream is and what a QUIC connection is not.
+- **A refusal closes the connection**, not the stream.
+- **Datagrams are carried, and one connection's are one flow.** `L4::QuicDatagram` is its
+  own value rather than `Quic` with a flag, because the two answer the stream question
+  differently: a datagram gets `RawPacket` and nothing else, which is the same answer the
+  plain UDP relay gives. The flow opens on the first datagram, not on the connection, so a
+  connection that negotiates the extension and never uses it costs no filter state. A
+  refused datagram is **dropped and the connection carries on** — a datagram is complete by
+  the time it is judged. `DATAGRAM_BUFFER` bounds what one connection may have waiting.
+- **They are not carried on HTTP/3, and the handshake says so** rather than the peer
+  finding out: an HTTP/3 datagram names the stream it belongs to, and the request streams
+  this proxy opens towards the service are not the ones the client opened. So the `h3`
+  accept configuration is built with a transport that does not advertise the extension.
+- **WebTransport is not carried**, and it is a bigger question than its datagrams: its
+  streams are bound to a session by a varint every one of them carries, which breaks both
+  "one stream is one connection to the chain" and the HTTP/1.1 rendering. It needs a
+  session model, not a switch.
+- **0-RTT is refused** (`max_early_data_size = 0`): early data is replayable and a refused
+  request cannot be un-delivered. And **every unvalidated client gets a Retry**, so nothing
+  is opened towards the service on the word of a source address nobody has checked.
 
-Every failure is silent and local. No interface, no socket (it needs `CAP_NET_RAW`), a
-send that fails — the traffic goes on exactly as it would have. A capture aid must never
-be able to interrupt the service it is watching.
+**HTTP/3 is rendered to the chain as the HTTP/1.1 it would have been** (`src/h3.rs`, on
+hyperium's `h3` — a binding, not a second implementation). That is the point of the whole
+exercise: QPACK would otherwise be what a filter is shown, and every pattern written for
+the TCP service beside it would silently stop matching.
 
-## Measured against nfregex
+## HTTP/2, and one rendering for every version
 
-`tests/proxy_benchmark.py` runs both engines on the same host with the same iperf3
-workload and the same patterns, adding rules one at a time — the method
-`benchmark.py` already uses, with both binaries driven directly so it needs no
-firegex instance. Figures below are MB/s on one machine; the interesting part is the
-ratio, not the absolute number.
+**`src/http1.rs` is the rendering, and `h2.rs`/`h3.rs` are what is left of each protocol
+once it is taken out.** The HTTP/1.1 view a filter is shown — the framing decision, the
+head hold, `render_request`/`render_response`, `judge` — lives in one place, and both
+protocols are adapters to somebody else's parser. Two copies would be two things a filter
+can be shown, and the day they drift the symptom is a pattern that matches over one
+version and not another with nothing to say so.
 
-| Rules | Proxy engine | nfregex (NFQUEUE) | Proxy + a Python filter |
-| --- | --- | --- | --- |
-| none | ~7600 | ~2450 | ~1310 |
-| 1 | ~4300 | ~2100–2700 | ~1200 |
-| 5 | ~2900 | ~2300–2800 | ~1140 |
-| 10 | ~2880 | ~2400–3300 | ~1200 |
+An HTTP/2 client can be put in front of a service that speaks HTTP/1.1: `h2.rs` takes its
+upstream as an `Outbound`, so it is either another HTTP/2 connection or `h1up::H1Upstream`
+where the address said the service is cleartext — exactly as on the QUIC edge.
 
-A Python filter costs roughly another halving and then stops mattering: every chunk
-is a round trip to a child process, and the regex rules that run alongside it are
-free by comparison. It is the price of being able to kill a filter that hangs, and at
-~1.2 GB/s it is far above what any service in a competition will offer.
+Three things differ from h3 and each is a way to get this wrong:
 
-TLS is measured apart, with its own client, because iperf3 does not speak it — only
-the ratio between the two rows means anything:
+- **Flow control is ours to run.** `h2` hands received bytes over and waits for them to be
+  released. Releasing on read means no backpressure and this process buying memory for
+  whichever side is faster; never releasing stalls the stream after the first window. So
+  capacity is released **after the piece has been forwarded**, and outbound writes reserve
+  capacity before writing.
+- **The end of a message rides on its last frame.** A head that *is* the whole message has
+  to be sent with `end_of_stream` on the head; sending it open and closing with an empty
+  DATA frame turns a **trailers-only** answer into one with a body — which is exactly a
+  gRPC status-only reply, and gRPC clients refuse the mangled version. `head_is_the_message`
+  asks the sender rather than inferring.
+- **One stream is one connection to the chain**, unlike HTTP/1.1 where a keep-alive
+  connection carries many requests through one set of filter state. HTTP/2 interleaves its
+  streams, and sharing state between two of them is a way to smuggle a pattern past a
+  filter by splitting it across them.
 
-| Through the engine | MB/s |
-| --- | --- |
-| plaintext | ~6900 |
-| TLS terminated and re-encrypted | ~1450 |
+Also:
 
-Both handshakes and AES on both legs, for about a fifth of the plaintext figure. That
-is the cost of the engine doing the crypto rather than nginx — worth knowing before
-choosing which of the two TLS paths to take, though it is not what should decide it.
+- **`h2c` — HTTP/2 in the clear — is recognised from the connection preface, not from a
+  setting.** Most gRPC is deployed without TLS behind a load balancer, so leaving it out
+  would have made "gRPC is filtered" half true. `sniff()` in `proxy.rs` **peeks** rather
+  than reads, so a connection that turns out to be something else is handed to the byte
+  pumps exactly as it arrived and there is no buffer to replay. It **races the service**,
+  because a protocol where the server speaks first (SMTP, SSH, most game protocols) would
+  otherwise be held waiting for a client that is correctly waiting for a banner — and it is
+  bounded (`SNIFF_WAIT`), so two silent peers cannot hold two descriptors. The same peek
+  answers the TLS question for an `http` service, which is why there is one `Opening` and
+  not two sniffs.
+- **Server push is refused in the handshake**, not by dropping what arrives, and
+  **extended CONNECT is not advertised**; a plain `CONNECT` stream is reset with a log line
+  rather than rendered, because a tunnel is opaque bytes with no HTTP/1.1 message in it.
+- **A refusal closes the connection with `Reason::CANCEL`**, deliberately not
+  `REFUSED_STREAM`, which tells a client the request was never acted on and may be retried.
+- **A bypassed chain is not terminated.** Rendering for a chain with nothing to say is work
+  paid for no answer, so a service with no filters, one whose filters have all been
+  disabled, and a connection admitted past the limit with `over_limit_forwards` all take
+  the byte pump. The cost is that such a connection stays a byte pump for its whole life
+  even if a filter is pushed a moment later.
+- **The HTTP/1.1 `Upgrade: h2c` handshake is not carried**, and that is a limit rather than
+  an unconfigured setting: the upgrade request is filtered as the HTTP/1.1 request it is,
+  but if the service answers `101` everything after it is HTTP/2 nobody rendered. RFC 9113
+  deprecated the mechanism and nginx dropped it in 1.25.1.
 
-Moving bytes, the proxy is about **3x faster**: the kernel does the reassembly and
-there is no per-packet round trip to userspace. With rules the two are **comparable** —
-nfregex's readings swing widely enough that claiming a winner at 10 rules would be
-reading noise.
+## UDP
 
-Getting there took two corrections that the benchmark, not review, made obvious:
+The TCP path recovers where a connection was headed with `SO_ORIGINAL_DST`, which the
+kernel implements **for TCP and SCTP only**. So UDP is relayed with **one socket per
+protected address**, each with its upstream fixed — nothing has to be recovered because
+nothing was lost. The engine prints one `UDP <upstream> <port>` line per relay after
+`PORT`, and the backend points each address's rule at its own port.
 
-- The first version rescanned a 1MB rolling window with every rule on every chunk.
-  Throughput fell with each rule added — 100 MB/s at ten rules, against nfregex's
-  2400 — while hyperscan on the other side did not move. Fixed by scanning only the
-  new bytes plus a bounded overlap, and by compiling all the patterns that share a
-  direction and a case setting into **one** `RegexSet`.
-- After that, one rule still cost 4x the throughput of none. The cost was not the
-  matching: it was the thread hop and the copy that every filter paid so that user
-  code which hangs cannot stall the datapath. A compiled regex cannot hang, so it now
-  declares `may_block() == false` and runs inline against the relay's own buffers.
-  That took ten rules from 1264 to ~2950 MB/s.
+Per-flow filter state is keyed by client address and released after `IDLE`: UDP has no
+close to observe, so a timeout is the only thing that ends a flow. Both directions are
+inspected. `Verdict::Reject` drops the datagram rather than closing anything. Replies leave
+through the **listener** socket so conntrack rewrites them to appear from the address the
+client dialled; sending from the upstream socket would reach a client not expecting that
+source. The relay's own dial carries the self-mark, or the redirect rule would catch it and
+loop.
 
-The deadline machinery is still there, and still the default: it is what Python
-filters will need. It is simply no longer charged to filters that cannot use it.
+New relays can be added to a running engine over the control channel, so an address added
+to a running service costs nobody their connection.
 
-## Layout
+## Holding up under load
 
-- `src/filter.rs` — verdicts, the `Filter` trait, the chain and its isolation policy.
-  `ChainHandle` swaps the chain under live connections so reconfiguring costs nobody.
-- `src/proxy.rs` — accept loop, upstream selection and the two relay pumps.
-- `src/transparent.rs` — `IP_TRANSPARENT`, original-destination recovery, and the
-  startup capability probe.
-- `src/rules.rs` — the filters the backend configures, and the JSON they arrive in.
-- `src/pyworker.rs` — the child process running the user's Python, and its deadline.
-- `src/tls.rs` — termination and re-encryption, and the verifier that deliberately
-  accepts what the protected service presents.
-- `src/control.rs` — the stdin/ACK control channel, running alongside the datapath so
-  a rule change never gates traffic.
-- `src/spec.rs` — filters built from a text spec: `panic`, `hang` and friends. Test
-  scaffolding only, so the Python suite can ask for a filter that misbehaves without
-  linking against the crate.
-- `tests/fail_open.rs` — the guarantees above, over real sockets.
-- `tests/rules.rs` — matching, direction, rewriting, grouping, and the boundary cases.
-- `tests/pyworker.rs` — a hung worker being killed, a crashed one recovering.
-- `tests/tls.rs` — decrypt, inspect, re-encrypt, and rules seeing the plaintext.
-- `../../tests/proxy_benchmark.py` — the comparison above.
-- `../../tests/proxy_engine_test.py` — the same guarantees from outside the process.
-- `../../tests/proxy_transparent_test.py` — transparency, in three network namespaces.
+**A service carries at most `FGEX_PROXY_MAX_CONNECTIONS` at once**, and the operator says
+what happens to the rest. It exists because the alternative was measured: silent
+connections cost two descriptors each — one from the client, one to the service, since the
+upstream is dialled on accept — and ~505 of them from one host exhausted the container's
+1024 and took **every** service down. UDP was cheaper still: 600 datagrams from 600 forged
+sources in 0.03 s took 400 descriptors and held them a minute after the sender left.
 
-## Source-IP transparency
+Say what it buys, and no more. **A cap does not save the service being attacked** — it
+cannot tell a connection that is silent because it is an attack from one that is silent
+because the client is slow. What it buys is that one service's attacker stops being
+everyone's: measured, 400 silent connections against a limited service left the service
+beside it answering.
 
-The service has to keep seeing the real client, or everything that logs, rate-limits
-or bans by address starts seeing one address for the whole internet. `transparent.rs`
-covers both halves:
+- One number for both halves, because TCP connections and UDP flows spend the same
+  descriptors. `0` is no limit, kept as a value rather than an absence.
+- `Slot` is a guard with a `Drop`, not a decrement at the end of `handle_connection`: that
+  function has a dozen ways out, and a counter that leaks on any one of them is a limit
+  that tightens until it refuses everything.
+- The accept loop **backs off** after a failed accept. Out of descriptors, the loop spun on
+  `accept` → `EMFILE` → print → `accept`, measured at ~40% of a core with four clients
+  knocking, writing a log line per attempt into the pipe the backend reads.
+- On QUIC, `over_limit_forwards` is honoured but is not free: the connection is still
+  terminated, decrypted and re-encrypted, because there is no such thing as forwarding a
+  QUIC connection unopened.
 
-- **Where was the client going?** Under `tproxy` the kernel leaves the original
-  destination as the accepted socket's own local address. Under dnat/redirect — the
-  shape `porthijack` already uses — it survives only in conntrack, so it is fetched
-  with `SO_ORIGINAL_DST`. Both modes are implemented; `FGEX_PROXY_INTERCEPT` picks one.
-- **Dial the service as the client.** `IP_TRANSPARENT` on the outbound socket, bound
-  to the client's address with a kernel-chosen port.
+**`FGEX_PROXY_FIRST_BYTE_TIMEOUT` is what the cap cannot be.** A cap contains a phantom
+flood; a deadline ends it — measured, with the limit full and the attacker still holding
+every socket, clients got back in once it passed. Two properties are load-bearing:
 
-`CAP_NET_ADMIN` is checked at startup, because a missing capability would otherwise
-surface only as every service quietly seeing the proxy's address. If a transparent
-dial fails at runtime the proxy falls back to its own address — traffic beats
-identity — but counts it and says so once, loudly.
+- **Either direction counts.** The flag is set by whichever pump moves a byte first, so a
+  service that greets its client satisfies it with its banner. Requiring the *client* to
+  speak would hang every server-speaks-first protocol.
+- **Only until the first byte, never again.** A connection that has spoken and gone quiet
+  is a session, and sessions think. This is not an idle timeout.
 
-### The ruleset tproxy needs
-
-Proven by `tests/proxy_transparent_test.py`, for a service outside this namespace.
-Rule order is not cosmetic: replies addressed to a client we are impersonating belong
-to an existing transparent socket and must be diverted **before** the forwarding
-decision sends them back out. The next section covers the on-host case, which the
-redirect intercept handles differently.
-
-```
-nft add rule ip <t> pre socket transparent 1 meta mark set 0x1 accept
-nft add rule ip <t> pre iif <wan> tcp dport <svc> tproxy to :<proxy> meta mark set 0x1
-
-ip rule add fwmark 0x1 lookup 100
-ip route add local 0.0.0.0/0 dev lo table 100
-```
-
-The `local` route is what makes marked packets be delivered here instead of routed by
-destination. Without it a spoofed connection does not fail, it hangs — which is why
-the test asserts a completed round trip and not just the address the service reports.
-The same route serves the redirect intercept; only the divert rule differs.
+The flag is set *before* the chain runs, because a chunk a filter goes on to refuse is
+still a connection that said something. The watchdog fires through the same stop signal a
+refusal uses, so both directions shut down cleanly — a dropped peer reads a truncation, and
+this connection has done nothing to deserve one.
 
 ## Preserving the client address
 
-The service must keep seeing the real client, or everything that logs, rate-limits or
-bans by address starts seeing one address for the whole internet. The proxy dials the
-service from the client's address; the work is in getting the reply back.
+The service must keep seeing the real client, or everything that logs, rate-limits or bans
+by address starts seeing one address for the whole internet. Source preservation is
+**unconditional**: the engine always dials the service from the client's address
+(`IP_TRANSPARENT`, with a kernel-chosen port). `CAP_NET_ADMIN` is probed at startup,
+because a missing capability would otherwise surface only as every service quietly seeing
+the proxy's address. If a transparent dial fails at runtime the engine falls back to its
+own address — traffic beats identity — but counts it and says so once, loudly.
 
-With the service on this same host, two flows look almost identical:
+The work is in getting the reply back. With the service on this same host, two flows look
+almost identical:
 
 | Flow | src | dst | must |
 | --- | --- | --- | --- |
-| Proxy answering the client | `service:port` | `client:client_port` | leave the box |
-| Service answering the proxy | `service:port` | `client:<ephemeral>` | stay local |
+| Engine answering the client | `service:port` | `client:client_port` | leave the box |
+| Service answering the engine | `service:port` | `client:<ephemeral>` | stay local |
 
-No address tells them apart — only an ephemeral port chosen at connect time, which
-nothing can be written against. **Conntrack can**: the first belongs to the
-intercepted, DNATed connection, the second is a separate entry the proxy opened
-itself. So the output chain reads
+No address tells them apart — only an ephemeral port chosen at connect time, which nothing
+can be written against. **Conntrack can**: the first belongs to the intercepted, DNATed
+connection, the second is a separate entry the engine opened itself. So the output chain
+reads `ct status dnat accept` for the first and marks everything else from a protected
+service home, and the marked packets are delivered locally by an `fwmark` rule plus a
+`local` default route. `modules/services/nftables.py` installs all of it.
 
-```
-ct status dnat accept                     # the proxy answering a client: let it out
-ip saddr <svc> tcp sport <port> mark set  # anything else from the service: bring it home
-```
+**Only the redirect intercept exists.** A `tproxy` mode was implemented and removed: the
+intercept it creates makes no NAT entry, so there is no marker to separate those two flows,
+and a divert rule broad enough to catch the service's reply also reroutes the engine's own
+SYN-ACK away from the client — the connection then hangs rather than fails. That was
+measured. Since the topology firegex actually runs in has the service on the same host or
+behind a private link, the mode that cannot serve it was not worth keeping.
 
-and the marked packets are delivered locally by the usual `fwmark` rule plus a
-`local` default route. That is what makes source preservation work in the topology
-firegex actually runs in, with no namespace of its own and no tproxy.
+The engine stamps `SO_MARK` (`SELF_MARK`, `0x133A`) on every connection it opens, and the
+intercept rules skip it — otherwise, where both ends are local, an intercept in `nat output`
+would catch the engine's own dial and loop it back into itself.
 
-The tproxy intercept creates no NAT entry and so has no such marker: there, a divert
-rule broad enough to catch the service's reply also reroutes the proxy's own SYN-ACK
-away from the client, and the connection hangs rather than fails. That was measured.
-`modules/proxyengine/routing.check_topology` refuses the combination up front, so it
-is an error at start instead of a stall under load, and points at the mode that does
-work.
+## Where the plaintext goes
 
-| | intercept reaches proxy via | preserves client IP | needs `ip` | service on this host |
-| --- | --- | --- | --- | --- |
-| `redirect` | conntrack NAT + `SO_ORIGINAL_DST` | optional | only with preserve | yes |
-| `tproxy` | `tproxy to :port` | optional | always | no |
+Terminating in-process means the decrypted traffic is never a packet, so there is nothing
+for a capture tool to read. `src/capture.rs` writes it out: each connection's plaintext
+framed as the TCP stream it was, sent over `AF_PACKET` to a dummy interface (`firegex0`)
+that carries every decrypted service's traffic and nothing else.
 
-## Running it
+They are **reconstructed** packets. The bytes are real — what the filters saw and what was
+forwarded — but the framing is built here, because the framing on the wire was encrypted:
+sequence numbers from zero, no retransmissions, segmentation from this engine's read sizes.
+A SYN and a FIN are emitted so a capture tool has a stream to follow rather than orphan
+segments. **Say so wherever it is offered: a capture from here is not evidence of what was
+on the wire.**
 
-No Rust on the host? Build and test in a container:
+On QUIC each *stream* is written as its own TCP conversation, with a synthetic client port
+from a cycling counter — every stream of one connection shares the connection's four-tuple,
+and writing them out as they are would interleave a hundred of them into one conversation
+whose bytes decode as nothing. On HTTP/3 and HTTP/2 what is written is the **rendering**,
+which is the only way this interface can keep the promise it makes everywhere else: what is
+on it is what the filters saw. It is not what left the process, and the two cannot disagree
+because they are the same bytes.
+
+Every failure is silent and local. No interface, no socket (it needs `CAP_NET_RAW`), a send
+that fails — the traffic goes on exactly as it would have. A capture aid must never be able
+to interrupt the service it is watching. The interface itself belongs to the instance and
+is created by `modules/services/mirror.py` before any engine starts.
+
+## Talking to it
+
+Two channels, both line-oriented, and the datapath never waits on either.
+
+**stdout — what the engine says.** The handshake first, then events:
+
+| line | meaning |
+| --- | --- |
+| `PORT <n>` | the port it bound. Pass `:0` and read this back; nothing keeps a registry |
+| `UDP <upstream> <port>` | one per relay, in the order they were asked for |
+| `BLOCKED <id>` | a rule refused something; `<filter>/<function>` for Python |
+| `ACK OK` / `ACK FAIL <why>` | the answer to one control line |
+| `STATS seen=… refused=… live=… over_limit=… no_first_byte=…` | every 2 s, first one immediately |
+
+Everything descriptive — `[info]`, `[warn]`, `[fatal]` — goes to **stderr**, which the
+backend captures and turns into the service's log. `_died_because` keeps the last `[fatal]`
+line, so a service that will not start reports the engine's own reason rather than "the
+proxy engine did not report a listening port".
+
+**stdin — what it is told.** One command per line:
+
+| line | meaning |
+| --- | --- |
+| `[{…}, {…}]` | the whole ruleset, replacing the previous one |
+| `ADD_UDP <addr> [same\|plain\|tls]` | bind one more relay; answers `UDP …` then `ACK` |
+| `PUBLISH <dialled> <edge> <onward> [<service>\|-]` | what is spoken at one address and where the service behind it is |
+| `WITHDRAW <dialled>` | forget one published address |
+
+stdin closing is **not** a shutdown: the backend being gone is exactly when the datapath
+outliving its control channel matters.
+
+## Environment
+
+| variable | meaning |
+| --- | --- |
+| `FGEX_PROXY_LISTEN` | **required.** `[::]:0` for dual-stack, which is what the backend passes |
+| `FGEX_PROXY_UPSTREAM` | **required.** `original` (recover it per connection) or a literal address |
+| `FGEX_PROXY_SPOOF_SOURCE` | dial the service as the client. The backend always sets it |
+| `FGEX_PROXY_TARGETS` | `<addr>[\|<edge>[\|<onward>]][=<service>]`, comma-separated; the addresses that are not simply the service |
+| `FGEX_PROXY_UDP` | `<addr>[\|<onward>]`, comma-separated; one relay each |
+| `FGEX_PROXY_TLS` / `_TLS_OPTIONAL` | terminate TLS on the TCP listener; `_OPTIONAL` means only for the connections that start a handshake |
+| `FGEX_PROXY_TLS_CERT` / `_TLS_KEY` | **paths**, never the material |
+| `FGEX_PROXY_QUIC` | bind the relays with a QUIC endpoint instead of a datagram socket |
+| `FGEX_PROXY_QUIC_ALPN` | what to offer the service, in order. Default `h3` |
+| `FGEX_PROXY_MAX_CONNECTIONS` | 0 is no limit |
+| `FGEX_PROXY_OVER_LIMIT_FORWARD` | forward what does not fit, unfiltered, instead of refusing it |
+| `FGEX_PROXY_FIRST_BYTE_TIMEOUT` | seconds; 0 is off |
+| `FGEX_PROXY_FILTER_TIMEOUT_MS` | how long a blocking filter gets. Default 2000 |
+| `FGEX_PROXY_CONNECT_TIMEOUT_MS` | upstream dial and handshakes. Default 5000 |
+| `FGEX_PROXY_SELF_MARK` | hex; default `133A`. Must match `PROXY_SELF_MARK` in the backend |
+| `FGEX_PROXY_PYWORKER` | fallback path to the worker, for a Python rule that carries no `command` |
+| `FGEX_PROXY_FILTERS` | `panic`, `hang`, `block:<needle>` — **test scaffolding only** |
+| `NTHREADS` | tokio worker threads. What `run.py --threads` sets, on both layers |
+
+`FGEX_PROXY_BINARY` is read by the *backend*, not by this, and points at the binary — which
+is what a dev build overrides.
+
+There is one more mode: **`--debug-regex`** reads one JSON request on stdin, answers on
+stdout and exits, starting no listener and touching no rules. It is what
+`POST /api/services/debug-regex` shells out to, so the in-app pattern tester is answered by
+the engine that would enforce the answer rather than by an approximation that would bless
+patterns hyperscan rejects. It reports `unscannable` for patterns that are valid, will run,
+and cannot be highlighted — validity is judged in **stream** mode, which is the mode a
+pattern actually runs in, while highlighting needs a block-mode scan that does not accept
+quite the same language.
+
+## Layout
+
+| file | what is in it |
+| --- | --- |
+| `src/main.rs` | environment, startup handshake, the runtime, the stats ticker, `--debug-regex` |
+| `src/filter.rs` | verdicts, the `Filter` trait, the chain and its isolation policy. `ChainHandle` swaps the chain under live connections |
+| `src/rules.rs` | the filters the backend configures, and the JSON they arrive in |
+| `src/hyperscan.rs` | the `libhs` binding: stream and block scanning, compilation, validation |
+| `src/proxy.rs` | accept loop, the opening peek, TLS and ALPN, the limit, the byte pumps |
+| `src/http1.rs` | **the** HTTP/1.1 rendering, and the traits both HTTP protocols implement |
+| `src/h2.rs` | HTTP/2, on hyperium's `h2` |
+| `src/h3.rs` | HTTP/3, on hyperium's `h3` |
+| `src/h1up.rs` | HTTP/1.1 *towards the service*, on hyper's client |
+| `src/quic.rs` | QUIC termination, streams, datagrams, the relay manager |
+| `src/udp.rs` | datagram relays and per-flow state |
+| `src/relays.rs` | the two-armed enum both relay kinds go through |
+| `src/tls.rs` | termination, re-encryption, ALPN mirroring, the deliberately permissive upstream verifier |
+| `src/transparent.rs` | `IP_TRANSPARENT`, `SO_ORIGINAL_DST`, the self-mark, the startup capability probe |
+| `src/capture.rs` | the reconstructed packets written to `firegex0` |
+| `src/pyworker.rs` | the child process running the user's Python, and its deadline |
+| `src/control.rs` | the stdin channel, running alongside the datapath |
+| `src/debug.rs` | `--debug-regex` |
+| `src/spec.rs` | filters built from a text spec. Test scaffolding only |
+
+Tests: `tests/fail_open.rs` (the guarantees above, over real sockets), `tests/rules.rs`
+(matching, direction, grouping, order), `tests/pyworker.rs` (a hung worker killed, a
+crashed one recovering), `tests/tls.rs`, `tests/quic.rs`, `tests/h2.rs`, `tests/h3.rs`, and
+`tests/throughput.rs` (the matcher benchmark, `--ignored`).
+
+## Building and testing
+
+Built in the Dockerfile's `compiler` stage rather than in a `rust` image on purpose: it
+links the same `libhs` the C++ binaries do, and a binary built against one distro's
+vectorscan and run against another's is a bad afternoon.
 
 ```bash
-docker run --rm -v "$PWD/backend/proxysrc":/w -w /w rust:1-slim cargo test
+docker build --target compiler -t firegex-compiler .
+docker run --rm -v "$PWD/backend:/execute" -w /execute/proxysrc firegex-compiler cargo test
+cd backend/proxysrc && cargo test            # on a host with libhs + fgex installed
+cargo test --release --test throughput -- --ignored --nocapture
 ```
 
-End-to-end against the built binary, reusing the existing test helpers:
+Mount `backend/`, **not** `backend/proxysrc/`: `tests/pyworker.rs` launches
+`../modules/services/pyworker.py`, which imports `firegex`, which imports `brotli`. Without
+both on `PYTHONPATH` the pyworker tests fail with a `ModuleNotFoundError` buried in captured
+output and read as real failures. The repo's own `fgex-lib` has to come *first* on the path,
+or a stale image's `firegex` wins.
 
-```bash
-docker run --rm -v "$PWD":/repo -w /repo/tests python:3-slim python3 proxy_engine_test.py
-```
+The product-level suite is `tests/`, driven by pytest against a running instance;
+`tests/integration/test_http_versions.py` and `tests/integration/test_grpc.py` are the two
+that say whether the rendering in here really works.
 
-Transparency needs a real kernel, root and nftables, so it runs privileged:
+## Measured against NFQUEUE
 
-```bash
-docker run --rm --privileged -v "$PWD":/repo -w /repo/tests fedora:44 sh -c \
-  "dnf install -y python3 nftables iproute >/dev/null && python3 proxy_transparent_test.py"
-```
+**The proxy is not the slow one, and the docs used to say it was.** Moving bytes it is
+about **2.2× NFQUEUE at one thread and 4.7× at eight**: NFQUEUE pays a userspace round trip
+*per packet*, while this pays once per connection and then the kernel moves the bytes. On
+short connections the two are indistinguishable.
 
-Neither test is in `run_tests.sh` yet: they need no running firegex instance, CI does
-not build this binary, and the transparency one rewrites the host's routing rules —
-the same reason `ipfilter_test.py` is run on its own. They join the suite when the
-Dockerfile builds the engine and a service can select it.
+The numbers, the method and the corrections that produced them live in
+[`tests/bench/README.md`](../../tests/bench/README.md) and `tests/bench/results/`, and that
+is deliberately the only place they are written down — a table copied into a second file is
+a table that will still be quoting a figure nobody can reproduce a year from now.
+
+The trade between the two layers is **fail-open and transparency, not speed**. Keep
+`docs/services.md`, `LayerChoice.tsx` and `transportSummary()` saying that.
 
 ## Backend side
 
-`backend/modules/proxyengine/` follows the per-module shape the other modules use:
+`backend/modules/services/` holds the other half:
 
-- `models.py` — `Service`, with `intercept` selecting the trade-off above.
-- `nftables.py` — the ruleset, in the shared `firegex` inet table. One `filter`
-  prerouting chain (divert + tproxy intercepts) and one `nat` prerouting chain
-  (redirect intercepts). The divert rule is installed once by `init()`, never
-  per service, and per-service rules append after it so it stays first.
-- `routing.py` — the policy routing tproxy needs, plus the two guards: `check()` for
-  a missing `ip` binary, `check_topology()` for the namespace constraint.
-
-- `firewall.py` — the `ServiceManager`/`FirewallManager` pair. One engine process per
-  service: it is started first because it is what picks the listening port (bind to 0,
-  read `PORT <n>` back, the same handshake `cppregex` uses for `QUEUE <n>`), and the
-  rules are written afterwards. Stopping goes the other way round.
-
-`routers/proxyengine.py` mounts it at `/api/proxyengine` through the usual
-auto-discovery, with its own `db/proxy-engine.db`. Its own module and its own DB
-file on purpose: adding a field to an existing module's schema would wipe that
-module's database, since `utils/sqlite.py` recreates rather than migrates.
-
-The Dockerfile builds the engine in a `proxyengine` stage and ships it next to
-`cppregex`/`cpproxy`, and the runtime image now installs `iproute` for the return-path
-rules. `FGEX_PROXY_BINARY` overrides the path for a dev build.
-
-## Next
-
-1. The C++ engine's parsed models (`HttpRequest` and the rest), so a filter can work above
-   raw bytes.
-2. A worker pool, if Python filtering turns out to be a bottleneck.
-3. Deciding whether the TLS module keeps its nginx. Everything it does is now possible
-   here; retiring `modules/tls/nginx.py` would be the first change in this whole line
-   of work that removes more code than it adds, and it is a product decision rather
-   than a technical one.
+- `transports.py` — `ProxyTransport` starts this binary, reads the handshake, keeps the
+  relay map and pushes the ruleset. `NfqueueTransport` and `ExternalTransport` are the
+  other two layers, behind the same interface.
+- `nftables.py` — the redirect, the divert rule and the return path, all in `table inet
+  fgex`. `NAT_PRIORITY` is `-120`, below `dstnat`, so a container runtime's published port
+  cannot rewrite the destination before firegex's rule matches it.
+- `firewall.py` — one `ServiceManager` per service: the engine is started first because it
+  is what picks the listening port, and the rules are written afterwards. Stopping goes the
+  other way round.
+- `pyworker.py` — the child process this engine spawns for a Python rule, and
+  `--check`, which is what decides whether a filter can be saved at all.
+- `mirror.py` — the `firegex0` device, created before any engine starts.

@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import traceback
+from typing import NamedTuple
 
 from modules.services.models import (KIND, L4, PROTO, TRANSPORT, UPSTREAM, Filter,
                                      Regex, quic_alpn, upstream_refusal)
@@ -110,6 +111,68 @@ class ChainLink:
     @property
     def id(self) -> str:
         return self.filter.id
+
+
+#: What an address's edge is called on the wire to the engine. Only `tls` has a name of
+#: its own, because only it is a promise: this port is the encrypted one, and a client
+#: opening it in the clear is refused. Everything else is "whatever the client turns out
+#: to be speaking", which is what one listener fronting both a cleartext port and an
+#: encrypted one has always had to do — and refusing TLS at a port nobody promised would
+#: be a rule with nothing behind it.
+_EDGE_WORD = {L4.TLS: "tls"}
+
+
+class Announcement(NamedTuple):
+    """What the engine is told about one TCP address, beyond that it exists."""
+
+    #: `tls` where the address was declared as the encrypted one, `any` otherwise.
+    word: str
+    #: What the service behind it speaks: `same`, `plain` or `tls`.
+    onward: str
+    #: Where that service is, when it is not on the port the address names.
+    target_port: int | None
+
+
+def fronted_by_the_listener(srv, addr) -> bool:
+    """Whether this address is one the single TCP listener answers for.
+
+    Asked of the transport the **kernel** matches on, which is what decides whether an
+    address gets a relay of its own: a UDP or QUIC address is bound to the service it
+    fronts when the relay is opened, so there is nothing left to tell the engine about
+    it. Written as one question because it was two — an edge test here and a `proto`
+    test there — and two spellings of one rule are what this module spends most of its
+    comments arguing against.
+    """
+    return L4.l4_of(addr.proto or srv.proto) == L4.TCP
+
+
+def announcement(srv, addr) -> Announcement | None:
+    """What the engine has to be told about one TCP address, or `None` for nothing.
+
+    `None` is the ordinary answer and the important one: an address that is simply the
+    service — dialled where it listens, carried as it arrives — is one the engine already
+    handles correctly by knowing nothing about it, because that is what transparent
+    means. Announcing it anyway would be a map entry restating the default.
+
+    One function rather than two because there are two callers and they have to agree
+    exactly: `ProxyTransport._published` builds the startup list (`FGEX_PROXY_TARGETS`)
+    and `ServiceManager.address_added` sends `PUBLISH` for an address added to a service
+    already running. They were the same three lines written twice, and the day they
+    disagree the symptom is an address that behaves one way when the service starts with
+    it and another way when it is added afterwards — which is as hard a bug to see as
+    this module has produced.
+    """
+    if not fronted_by_the_listener(srv, addr):
+        return None
+    # Only ever *chosen* on an `http` service, because that is the only protocol whose
+    # addresses are not all reached the same way; elsewhere it is the service's own.
+    word = (_EDGE_WORD.get(str(addr.edge), "any")
+            if str(srv.proto) == L4.HTTP else "any")
+    onward = UPSTREAM.env(addr.upstream)
+    moved = addr.target_port if addr.target_port and addr.target_port != addr.port else None
+    if word == "any" and onward == "same" and moved is None:
+        return None
+    return Announcement(word=word, onward=onward, target_port=moved)
 
 
 class Transport:
@@ -746,14 +809,6 @@ class ProxyTransport(Transport):
         #: headed from conntrack, which UDP cannot do — see `udp.rs`.
         self.udp_ports: dict[str, int] = {}
 
-    #: What an address's edge is called on the wire to the engine. Only `tls` has a name
-    #: of its own, because only it is a promise: this port is the encrypted one, and a
-    #: client opening it in the clear is refused. Everything else is "whatever the client
-    #: turns out to be speaking", which is what one listener fronting both a cleartext
-    #: port and an encrypted one has always had to do — and refusing TLS at a port nobody
-    #: promised would be a rule with nothing behind it.
-    _EDGE_WORD = {L4.TLS: "tls"}
-
     def _published(self) -> list[str]:
         """What this engine is told about its TCP addresses, one entry each.
 
@@ -779,24 +834,18 @@ class ProxyTransport(Transport):
         """
         out = []
         for addr in self.srv.addresses:
-            if L4.l4_of(addr.edge) != L4.TCP:
-                continue
-            # Said only where the service is reached in more than one way, because that
-            # is the only place it is a choice rather than a restatement of the service.
-            word = (self._EDGE_WORD.get(str(addr.edge), "any")
-                    if str(self.srv.proto) == L4.HTTP else "any")
-            moved = addr.target_port and addr.target_port != addr.port
-            onward = UPSTREAM.env(addr.upstream)
             # An address with nothing to say is not listed: the engine's answer for one
-            # it has never heard of is the transparent case, which is what it would be
-            # told. All three have to be silent for that, and the one that was forgotten
-            # here — what the service behind speaks — is the one with no other way in.
-            if word == "any" and not moved and onward == "same":
+            # it has never heard of is the transparent case, which is exactly what it
+            # would be told. `announcement` is where that is decided, and it is shared
+            # with `ServiceManager.address_added` so that an address present at startup
+            # and one added afterwards cannot come to mean different things.
+            said = announcement(self.srv, addr)
+            if said is None:
                 continue
             for host in interface_addresses(addr.ip_int):
-                entry = f"{udp_relay_key(host, addr.port)}|{word}|{onward}"
-                if moved:
-                    entry += f"={udp_relay_key(host, addr.target_port)}"
+                entry = f"{udp_relay_key(host, addr.port)}|{said.word}|{said.onward}"
+                if said.target_port:
+                    entry += f"={udp_relay_key(host, said.target_port)}"
                 out.append(entry)
         return out
 

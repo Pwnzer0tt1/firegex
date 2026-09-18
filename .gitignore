@@ -38,9 +38,13 @@
 /firegexfs
 
 /firegex.py
-/tests/benchmark.csv
-/tests/proxy_benchmark.csv
-/tests/comparemark.csv
+
+# A benchmark run's own output. `bench/results/` holds the ones that were kept on
+# purpose, so only the default filename a run drops beside the script is ignored —
+# the three paths here before named scripts that moved into bench/ or were deleted.
+/tests/bench/benchmark.csv
+/tests/bench/*.csv
+!/tests/bench/results/*.csv
 # misc
 **/.DS_Store
 **/.env.local

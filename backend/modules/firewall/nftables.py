@@ -251,10 +251,6 @@ class FiregexTables(NFTableManager):
             )
         ])
 
-
-    def init(self):
-        super().init()
-
     def set(self, srvs:list[Rule], policy:str=Action.ACCEPT, opt:FirewallSettings = None):
         srvs = list(srvs)
         self.reset()

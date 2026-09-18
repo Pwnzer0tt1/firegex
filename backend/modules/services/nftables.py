@@ -24,6 +24,8 @@ this very host — which is also the case that ruled tproxy out, since tproxy le
 NAT entry to key off and so could never reach a local service at all.
 """
 
+import subprocess
+
 from modules.services.models import TRANSPORT, Address, Service
 from utils import (
     NFTableManager,
@@ -395,26 +397,51 @@ class FiregexTables(NFTableManager):
             ],
         )
 
+    #: How the mark and the routing table are spelled to `ip`, derived from the constants
+    #: above rather than written out. They were four literal `"0x1339"` and `"1339"`
+    #: strings beside the two names that already held those numbers — the shape of drift
+    #: this file argues against everywhere else, and the one place where it would be
+    #: silent: the policy route would simply point at a table nothing marks.
+    PROXY_MARK_ARG = f"{PROXY_MARK:#x}"
+    PROXY_TABLE_ARG = str(PROXY_ROUTE_TABLE)
+
+    def _policy_route(self, action: str) -> None:
+        """Add or delete the rule and route that bring the engine's return traffic home.
+
+        `check=False` throughout: adding one that is already there and deleting one that
+        is not are both the state being asked for, and neither is worth an exception.
+        """
+        for family in ([], ["-6"]):
+            subprocess.run(
+                ["ip", *family, "rule", action, "fwmark", self.PROXY_MARK_ARG,
+                 "lookup", self.PROXY_TABLE_ARG],
+                check=False, stderr=subprocess.DEVNULL,
+            )
+        if action != "add":
+            # The route goes with the rule that reached it, so deleting it is belt and
+            # braces rather than a step of its own.
+            return
+        for family in ([], ["-6"]):
+            subprocess.run(
+                ["ip", *family, "route", "add", "local", "default", "dev", "lo",
+                 "table", self.PROXY_TABLE_ARG],
+                check=False, stderr=subprocess.DEVNULL,
+            )
+
     def reset(self):
         super().reset()
-        import subprocess
         try:
-            subprocess.run(["ip", "rule", "del", "fwmark", "0x1339", "lookup", "1339"], check=False, stderr=subprocess.DEVNULL)
-            subprocess.run(["ip", "-6", "rule", "del", "fwmark", "0x1339", "lookup", "1339"], check=False, stderr=subprocess.DEVNULL)
-            # Route rules are often automatically deleted when the rule goes or don't error out if missing, but let's be explicit
+            self._policy_route("del")
         except Exception:
             pass
 
     def init(self):
         super().init()
-        import subprocess
-        # Configure ip rules for proxy transparent return path
+        # The `local` default route is what makes marked packets be delivered here
+        # instead of routed by destination; without it a preserved-source connection
+        # does not fail, it hangs.
         try:
-            # We don't care about errors if rules already exist etc, but we'll try to add them
-            subprocess.run(["ip", "rule", "add", "fwmark", "0x1339", "lookup", "1339"], check=False, stderr=subprocess.DEVNULL)
-            subprocess.run(["ip", "-6", "rule", "add", "fwmark", "0x1339", "lookup", "1339"], check=False, stderr=subprocess.DEVNULL)
-            subprocess.run(["ip", "route", "add", "local", "default", "dev", "lo", "table", "1339"], check=False, stderr=subprocess.DEVNULL)
-            subprocess.run(["ip", "-6", "route", "add", "local", "default", "dev", "lo", "table", "1339"], check=False, stderr=subprocess.DEVNULL)
+            self._policy_route("add")
         except Exception as e:
             print("Failed to configure ip rules for transparent proxy:", e)
 

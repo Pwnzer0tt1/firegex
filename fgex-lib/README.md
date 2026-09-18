@@ -1,6 +1,6 @@
 # Firegex Python Library and CLI
 
-This is the Python library for [Firegex](https://github.com/Pwnzer0tt1/firegex), a firewall built for CTF Attack-Defense competitions. It provides the `firegex.pyfilters` package used to write [Python filter](../docs/pyfilter.md) Python packet filters, the `fgex` CLI, and a local proxy simulator (`proxysim`) for testing filters without a running Firegex instance.
+This is the Python library for [Firegex](https://github.com/Pwnzer0tt1/firegex), a firewall built for CTF Attack-Defense competitions. It provides `firegex.pyfilters` — the package you write [Python filters](../docs/pyfilter.md) against — `firegex.regex` for pattern rulesets, the `fgex` CLI, and local simulators for both, so a filter can be tried before it ever reaches a running Firegex.
 
 ## Installation
 
@@ -29,11 +29,21 @@ engine, because a tester that disagrees with production is worse than none.
 
 That page is also what's shown in the Firegex web UI itself (the docs button on the service pages) — both are generated from that single file, so they can never drift out of sync.
 
-## Firegex's other filtering modules
+## The rest of Firegex
 
-This library only covers Netfilter Proxy. Firegex ships several other independent modules, each with its own guide:
+This package is the part you write filters *with*. What runs them is a Firegex instance,
+started from a clone with `python3 run.py` — there is deliberately no deploy command here,
+because any second description of that script's arguments would drift from it.
 
-- **[Services](../docs/services.md)** — fast, PCRE2/hyperscan-based regex matching against raw traffic.
-- **[Hijack Port to Proxy](../docs/porthijack.md)** — redirect traffic to your own external proxy without touching the target service.
+Two guides cover everything an instance does:
+
+- **[Services](../docs/services.md)** — a service is a **network layer** (NFQUEUE, the
+  terminating proxy, or a hand-off to a proxy you wrote) plus an ordered chain of
+  **filters** (hyperscan patterns, or the Python you write with this library). TLS, QUIC
+  and every version of HTTP are protocols a service can speak rather than separate things
+  to set up.
 - **[Firewall Rules](../docs/firewall.md)** — plain nftables allow/drop/reject rules.
-- **[Services](../docs/services.md)** — decrypt-and-reinspect bridge for services that speak TLS natively.
+
+The modules this library used to list — `nfregex`, `nfproxy`, `porthijack` and `tls` —
+were folded into services as choices rather than modules in 5.0.0, which is also when
+`firegex.nfproxy` became `firegex.pyfilters`.

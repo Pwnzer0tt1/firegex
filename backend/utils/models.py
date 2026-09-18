@@ -17,8 +17,11 @@ class PasswordChangeForm(BaseModel):
     expire: bool
 
 class AuthModeForm(BaseModel):
-    #: True turns authentication off. False is only ever a no-op here: putting it back on
-    #: is a decision that has to come from the host — see `set_auth_mode`.
+    #: True turns authentication off, False turns it back on. The two are **not**
+    #: symmetrical and the endpoint says so rather than this form: turning it off is an
+    #: administrator's deployment choice, while turning it on — asked while it is off,
+    #: when every caller is already an administrator — takes a token this instance signed
+    #: *before* it was turned off, and a password to ask for. See `set_auth_mode`.
     disabled: bool
 
 class ChangePasswordModel(BaseModel):

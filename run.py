@@ -550,8 +550,7 @@ def firegex_db_exists():
     """Whether a database (and therefore a possibly already set password) is around."""
     if g.standalone_mode:
         return os.path.isfile(os.path.join(g.rootfs_path, "execute/db/firegex.db"))
-    else:
-        return volume_exists()
+    return volume_exists()
 
 def delete_volume():
     sudo = "sudo " if g.docker_sudo else ""
