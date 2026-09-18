@@ -10,6 +10,8 @@ from utils import nicenessify
 
 nft = FiregexTables()
 
+MODULE = "nfregex"
+
 async def test_regex_validity(regex: str) -> bool:
     proxy_binary_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),"../cppregex")
     process = await asyncio.create_subprocess_exec(
@@ -82,15 +84,20 @@ class FiregexInterceptor:
         self.ack_status = None
         self.ack_fail_what = "Queue response timed-out"
         self.ack_lock = asyncio.Lock()
+        self.watchdog_task: asyncio.Task = None
+        self.exit_callback = None
+        self.stopped = False
     
     @classmethod
-    async def start(cls, srv: Service):
+    async def start(cls, srv: Service, on_exit=None):
         self = cls()
         self.srv = srv
+        self.exit_callback = on_exit
         self.filter_map_lock = asyncio.Lock()
         self.update_config_lock = asyncio.Lock()
         queue_range = await self._start_binary()
         self.update_task = asyncio.create_task(self.update_blocked())
+        self.watchdog_task = asyncio.create_task(self._watch_process())
         nft.add(self.srv, queue_range)
         if not self.ack_lock.locked():
             await self.ack_lock.acquire()
@@ -147,7 +154,43 @@ class FiregexInterceptor:
         except Exception:
             traceback.print_exc()
 
-    async def stop(self):
+
+    async def _watch_process(self):
+        """Detects an unexpected death of the interceptor binary.
+
+        The nftables rules are installed independently of this process and
+        survive it, so a crashed interceptor leaves the service completely
+        unfiltered (silently accepted when the service is fail_open, dropped
+        otherwise) while the UI keeps reporting it as active. Nothing used to
+        notice: the stdout reader just saw EOF and returned.
+        """
+        try:
+            returncode = await self.process.wait()
+        except asyncio.CancelledError:
+            return
+        if self.stopped:
+            return  # We killed it ourselves
+        print(f"[error] [{MODULE}] The interceptor of service {self.srv.id} exited unexpectedly with code {returncode}")
+        if self.exit_callback:
+            try:
+                await run_func(self.exit_callback, returncode)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                traceback.print_exc()
+
+    async def stop(self, expected: bool = True):
+        """Tears the interceptor down.
+
+        `expected` tells the watchdog whether this shutdown was asked for: an
+        internal failure passes False so that the crash is still reported and
+        the service can be recovered, instead of looking like a clean stop.
+        """
+        self.stopped = expected
+        # The watchdog itself calls stop() through the exit callback: cancelling
+        # the running task from inside would abort the recovery.
+        if self.watchdog_task and self.watchdog_task is not asyncio.current_task():
+            self.watchdog_task.cancel()
         self.update_task.cancel()
         if self.process and self.process.returncode is None:
             self.process.kill()

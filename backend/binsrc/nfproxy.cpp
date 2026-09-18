@@ -85,13 +85,31 @@ Final note: is not raccomanded to use variables that starts with __firegex_ in y
 
 
 
+/*  Upper bound for a filter code blob. Without it a desynchronised or corrupt
+    length prefix makes us try to allocate an arbitrary amount of memory. */
+const uint32_t MAX_PYFILTER_CODE_SIZE = 64 * 1024 * 1024;
+
 void config_updater (){
 	while (true){
 		PyThreadState* state = PyEval_SaveThread(); // Release GIL while doing IO operation
 		uint32_t code_size;
-		memcpy(&code_size, control_socket.recv(4).c_str(), 4);
-		code_size = be32toh(code_size);
-		string code = control_socket.recv(code_size);
+		string code;
+		try{
+			string raw_code_size = control_socket.recv(4);
+			memcpy(&code_size, raw_code_size.c_str(), 4);
+			code_size = be32toh(code_size);
+			if (code_size > MAX_PYFILTER_CODE_SIZE){
+				throw runtime_error("Announced filter code size is out of range");
+			}
+			code = control_socket.recv(code_size);
+		}catch(const std::exception& e){
+			// The control socket is the only link with the backend: if it is
+			// gone there is nothing left to filter for, so exit cleanly instead
+			// of letting the exception terminate the process.
+			PyEval_AcquireThread(state);
+			cerr << "[fatal] [updater] Control socket error: " << e.what() << endl;
+			exit(EXIT_FAILURE);
+		}
 		#ifdef DEBUG
 		cerr << "[DEBUG] [updater] Received code: " << code << endl;
 		#endif
@@ -104,6 +122,9 @@ void config_updater (){
 		}catch(const std::exception& e){
 			cerr << "[error] [updater] Failed to build new configuration!" << endl;
 			control_socket << "ACK FAIL " << e.what() << endl;
+		}catch(...){
+			cerr << "[error] [updater] Failed to build new configuration!" << endl;
+			control_socket << "ACK FAIL unknown error" << endl;
 		}
 	}
 }
@@ -133,7 +154,18 @@ int main(int argc, char *argv[]) {
 	cerr << "[info] [main] Queue: " << queue.queue_num() << " threads assigned: " << n_of_threads << endl;
 
 	thread qthr([&](){
-		queue.start();
+		/*  An exception escaping a std::thread is std::terminate(): exit
+		    explicitly instead, so the backend sees a failed process it can
+		    react to rather than an abort. */
+		try{
+			queue.start();
+		}catch(const std::exception& e){
+			cerr << "[fatal] [main] Queue loop stopped: " << e.what() << endl;
+			exit(EXIT_FAILURE);
+		}catch(...){
+			cerr << "[fatal] [main] Queue loop stopped with an unknown error" << endl;
+			exit(EXIT_FAILURE);
+		}
 	});
 	config_updater();
 	qthr.join();

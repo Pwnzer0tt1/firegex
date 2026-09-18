@@ -80,7 +80,7 @@ class RegexRules{
 
 	private:
 		static inline uint16_t glob_seq = 0;
-		uint16_t version;
+		uint16_t version = 0;
 		vector<pair<string, decoded_regex>> decoded_input_rules;
 		vector<pair<string, decoded_regex>> decoded_output_rules;
 		bool is_stream = true;
@@ -104,7 +104,7 @@ class RegexRules{
 			vector<const char*> regex_match_rules(n_of_regex);
 			vector<unsigned int> regex_array_ids(n_of_regex);
 			vector<unsigned int> regex_flags(n_of_regex);
-			for(int i = 0; i < n_of_regex; i++){
+			for(size_t i = 0; i < n_of_regex; i++){
 				regex_match_rules[i] = decoded[i].second.regex.c_str();
 				regex_array_ids[i] = i;
 				regex_flags[i] = HS_FLAG_SINGLEMATCH | HS_FLAG_ALLOWEMPTY;
@@ -114,7 +114,7 @@ class RegexRules{
 			}
 			#ifdef DEBUG
 			cerr << "[DEBUG] [RegexRules.fill_ruleset] compiling " << n_of_regex << " regexes..." << endl;
-			for (int i = 0; i < n_of_regex; i++){
+			for (size_t i = 0; i < n_of_regex; i++){
 				cerr << "[DEBUG] [RegexRules.fill_ruleset] regex[" << i << "]: " << decoded[i].first << " " << decoded[i].second.regex << endl;
 				cerr << "[DEBUG] [RegexRules.fill_ruleset] regex_match_rules[" << i << "]: " << regex_match_rules[i] << endl;
 				cerr << "[DEBUG] [RegexRules.fill_ruleset] regex_flags[" << i << "]: " << regex_flags[i] << endl;
@@ -139,7 +139,7 @@ class RegexRules{
 			}
 			ruleset.hs_db = rebuilt_db;
 			ruleset.regexes = vector<string>(n_of_regex);
-			for(int i = 0; i < n_of_regex; i++){
+			for(size_t i = 0; i < n_of_regex; i++){
 				ruleset.regexes[i] = decoded[i].first;
 			}
 		}
@@ -147,24 +147,25 @@ class RegexRules{
 	public:
 		RegexRules(vector<string> raw_rules, bool is_stream){
 			this->is_stream = is_stream;
+			/*  `throw current_exception()` used to be used here: that throws a
+			    std::exception_ptr *object*, which does not derive from
+			    std::exception, so the `catch(const std::exception&)` in the
+			    config updater never matched it and an invalid regex terminated
+			    the whole process. A bare `throw;` rethrows the original. */
 			for(string ele : raw_rules){
-				try{
-					decoded_regex rule = decode_regex(ele);
-					if (rule.direction == FilterDirection::CTOS){
-						decoded_input_rules.push_back(make_pair(ele, rule));
-					}else{
-						decoded_output_rules.push_back(make_pair(ele, rule));
-					}
-				}catch(...){
-					throw current_exception();
+				decoded_regex rule = decode_regex(ele);
+				if (rule.direction == FilterDirection::CTOS){
+					decoded_input_rules.push_back(make_pair(ele, rule));
+				}else{
+					decoded_output_rules.push_back(make_pair(ele, rule));
 				}
 			}
-			fill_ruleset(decoded_input_rules, input_ruleset);
 			try{
+				fill_ruleset(decoded_input_rules, input_ruleset);
 				fill_ruleset(decoded_output_rules, output_ruleset);
 			}catch(...){
 				free_dbs();
-				throw current_exception();
+				throw;
 			}
 			this->version = ++glob_seq; // 0 version is the null version
 		}
@@ -173,10 +174,12 @@ class RegexRules{
 			return version;
 		}
 
-		RegexRules(bool is_stream){
-			vector<string> no_rules;
-			RegexRules(no_rules, is_stream);
-		}
+		/*  These two have to *delegate*: writing `RegexRules(...)` as a plain
+		    statement in the body just builds a temporary and throws it away,
+		    leaving this instance with an uninitialised version and with the
+		    is_stream argument silently ignored (which is why MATCH_MODE=block,
+		    used by every udp service, never took effect). */
+		RegexRules(bool is_stream): RegexRules(vector<string>(), is_stream) {}
 
 		bool stream_mode(){
 			return is_stream;
@@ -184,9 +187,7 @@ class RegexRules{
 
 
 
-		RegexRules(){
-			RegexRules(true);
-		}
+		RegexRules(): RegexRules(true) {}
 		
 		~RegexRules(){
 			free_dbs();

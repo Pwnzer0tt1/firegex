@@ -76,19 +76,42 @@ public:
         return *this;
     }
 
+    // Stream sockets are free to accept fewer bytes than asked for, so a single
+    // write() can silently truncate a message and desynchronise the protocol.
     void send(const std::string& data) {
-        if (::write(sockfd, data.c_str(), data.size()) == -1) {
-            throw std::runtime_error(std::string("write error: ") + std::strerror(errno));
+        size_t sent = 0;
+        while (sent < data.size()) {
+            ssize_t written = ::write(sockfd, data.c_str() + sent, data.size() - sent);
+            if (written < 0) {
+                if (errno == EINTR) continue;
+                throw std::runtime_error(std::string("write error: ") + std::strerror(errno));
+            }
+            if (written == 0) {
+                throw std::runtime_error("write error: connection closed by peer");
+            }
+            sent += static_cast<size_t>(written);
         }
     }
 
+    /*  Reads exactly `size` bytes. The previous single read() returned whatever
+        happened to be buffered, which for the nfproxy control protocol meant a
+        short read on the 4 byte length prefix (reading past the end of the
+        returned string) or on the filter code itself, leaving the leftover
+        bytes to be parsed as the next length prefix. */
     std::string recv(size_t size) {
         std::string buffer(size, '\0');
-        ssize_t bytesRead = ::read(sockfd, &buffer[0], size);
-        if (bytesRead <= 0) {
-            throw std::runtime_error(std::string("read error: ") + std::strerror(errno));
+        size_t total = 0;
+        while (total < size) {
+            ssize_t bytesRead = ::read(sockfd, &buffer[total], size - total);
+            if (bytesRead < 0) {
+                if (errno == EINTR) continue;
+                throw std::runtime_error(std::string("read error: ") + std::strerror(errno));
+            }
+            if (bytesRead == 0) {
+                throw std::runtime_error("read error: connection closed by peer");
+            }
+            total += static_cast<size_t>(bytesRead);
         }
-        buffer.resize(bytesRead);  // resize to actual bytes read
         return buffer;
     }
 
@@ -101,22 +124,21 @@ public:
 
     // Overload for manipulators (e.g., std::endl)
     UnixClientConnection& operator<<(std::ostream& (*manip)(std::ostream&)) {
-        // Check if the manipulator is std::endl (or equivalent flush)
-        if (manip == static_cast<std::ostream& (*)(std::ostream&)>(std::endl)){
+        // The flush test used to be `if (static_cast<...>(std::flush))`, i.e. the
+        // address of a function, which is always true: every manipulator flushed
+        // and std::endl flushed twice.
+        if (manip == static_cast<std::ostream& (*)(std::ostream&)>(std::endl)) {
             streamBuffer << '\n';  // Add a newline
-            std::string packet = streamBuffer.str();
-            streamBuffer.str("");  // Clear the buffer
-            // Send the accumulated data as one packet
-            send(packet);
-        }
-        if (static_cast<std::ostream& (*)(std::ostream&)>(std::flush)) {
-            std::string packet = streamBuffer.str();
-            streamBuffer.str("");  // Clear the buffer
-            // Send the accumulated data as one packet
-            send(packet);
-        } else {
+        } else if (manip != static_cast<std::ostream& (*)(std::ostream&)>(std::flush)) {
             // For other manipulators, simply pass them to the buffer
             streamBuffer << manip;
+            return *this;
+        }
+        std::string packet = streamBuffer.str();
+        streamBuffer.str("");  // Clear the buffer
+        // Send the accumulated data as one packet
+        if (!packet.empty()) {
+            send(packet);
         }
         return *this;
     }
@@ -174,7 +196,10 @@ private:
     std::queue<T> private_std_queue;
     std::condition_variable condNotEmpty;
     std::condition_variable condNotFull;
-    size_t count; // Guard with Mutex
+    // Must be initialised: an indeterminate value either disables the backpressure
+    // entirely (the queue then grows until the process is OOM killed) or, if it
+    // happens to equal MAX, blocks the netlink thread on the very first packet.
+    size_t count = 0; // Guard with Mutex
 public:
 
     void put(T new_value)

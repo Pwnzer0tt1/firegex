@@ -29,8 +29,8 @@ RUN dnf -y update && dnf install -y python3.14-devel @development-tools gcc-c++ 
     vectorscan-devel libtins-devel libpcap-devel boost-devel
 
 COPY ./backend/binsrc /execute/binsrc
-RUN g++ binsrc/nfregex.cpp -o cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
-RUN g++ binsrc/nfproxy.cpp -o cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3.14 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
+RUN g++ binsrc/nfregex.cpp -o cppregex -std=c++23 -O3 -Wall -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
+RUN g++ binsrc/nfproxy.cpp -o cpproxy -std=c++23 -O3 -Wall -lnetfilter_queue -lpython3.14 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
 
 #Building main conteiner
 FROM --platform=$TARGETARCH base AS final

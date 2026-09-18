@@ -1,16 +1,23 @@
 import asyncio
+import time
+import traceback
 from modules.nfproxy.firegex import FiregexInterceptor
 from modules.nfproxy.nftables import FiregexTables, FiregexFilter
 from modules.nfproxy.models import Service, PyFilter
 from utils.sqlite import SQLite
-from utils.sqlite import SQLite
-from utils import run_func
+from utils import run_func, socketio_emit
 
 class STATUS:
     STOP = "stop"
     ACTIVE = "active"
 
 nft = FiregexTables()
+
+MODULE = "nfproxy"
+# How many times a service may be brought back up before it is declared broken,
+# and after how long without a crash the counter goes back to zero.
+MAX_RESTART_ATTEMPTS = 5
+CRASH_COUNTER_RESET_SECONDS = 60
 
 class ServiceManager:
     def __init__(self, srv: Service, db, outstream_func=None, exception_func=None):
@@ -20,6 +27,8 @@ class ServiceManager:
         self.filters: dict[str, FiregexFilter] = {}
         self.lock = asyncio.Lock()
         self.interceptor = None
+        self._crash_count = 0
+        self._last_crash_time = 0.0
         self.outstream_function = outstream_func
         self.last_exception_time = 0
         async def excep_internal_handler(srv, exc_time):
@@ -68,10 +77,45 @@ class ServiceManager:
         else:
             return ""
 
+
+    async def _on_interceptor_exit(self, returncode: int):
+        """Recovers from an unexpected death of the interceptor binary.
+
+        Restarting rebuilds both the process and its nftables rules; it is
+        attempted a bounded number of times so that a systematically crashing
+        interceptor does not turn into a restart loop. When the budget is
+        exhausted the service is stopped for good, which at least removes the
+        rules and makes the failure visible instead of leaving a service that
+        claims to be active while filtering nothing.
+        """
+        async with self.lock:
+            if self.interceptor is None or self.status != STATUS.ACTIVE:
+                return  # Already being stopped on purpose
+            # The process is already gone, but its sockets and reader tasks are
+            # not: release them before building a replacement.
+            await self.interceptor.stop()
+            self.interceptor = None
+            now = time.monotonic()
+            if now - self._last_crash_time > CRASH_COUNTER_RESET_SECONDS:
+                self._crash_count = 0
+            self._last_crash_time = now
+            self._crash_count += 1
+            if self._crash_count > MAX_RESTART_ATTEMPTS:
+                print(f"[error] [{MODULE}] Service {self.srv.id} crashed {self._crash_count} times (last exit code {returncode}), giving up and stopping it")
+                await self.stop()
+            else:
+                print(f"[warning] [{MODULE}] Restarting the interceptor of service {self.srv.id} after exit code {returncode} ({self._crash_count}/{MAX_RESTART_ATTEMPTS})")
+                try:
+                    await self.start()
+                except Exception:
+                    traceback.print_exc()
+                    await self.stop()
+        await socketio_emit([MODULE])
+
     async def start(self):
         if not self.interceptor:
             nft.delete(self.srv)
-            self.interceptor = await FiregexInterceptor.start(self.srv, outstream_func=self.outstream_function, exception_func=self.exception_function)
+            self.interceptor = await FiregexInterceptor.start(self.srv, outstream_func=self.outstream_function, exception_func=self.exception_function, on_exit=self._on_interceptor_exit)
             await self._update_filters_from_db()
             self._set_status(STATUS.ACTIVE)
 

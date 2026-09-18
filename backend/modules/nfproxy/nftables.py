@@ -24,6 +24,22 @@ def resolve_target(srv: Service) -> tuple[str, int] | None:
         return loopback_ip, clear_port
     return srv.ip_int, srv.port
 
+
+def build_queue_statement(srv: Service, init: int, end: int) -> dict:
+    """Builds the nftables `queue` statement for a service.
+
+    The `bypass` flag tells the kernel to accept packets when no process is
+    bound to the queue, which is what happens after the interceptor binary
+    dies. Tying it to the service's fail_open setting keeps the two halves of
+    the policy consistent: without fail_open a dead interceptor must not
+    silently let the traffic through unfiltered.
+    """
+    statement = {"num": str(init) if init == end else {"range": [init, end]}}
+    if srv.fail_open:
+        statement["flags"] = ["bypass"]
+    return {"queue": statement}
+
+
 class FiregexFilter:
     def __init__(self, proto:str, port:int, ip_int:str, target:str, id:int):
         self.id = id
@@ -104,7 +120,7 @@ class FiregexTables(NFTableManager):
                         {'match': {'left': {'payload': {'protocol': ip_family(target_ip), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(target_ip)}},
                         {'match': {"left": { "payload": {"protocol": convert_protocol_to_l4(str(srv.proto)), "field": "dport"}}, "op": "==", "right": int(target_port)}},
                         {"mangle": {"key": {"meta": {"key": "mark"}},"value": 0x1338}},
-                        {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
+                        build_queue_statement(srv, init, end)
                 ]
             }}},
             {"insert":{"rule":{ # Send non-TLS inbound traffic to NFQUEUE (Server -> Client)
@@ -115,7 +131,7 @@ class FiregexTables(NFTableManager):
                         {'match': {'left': {'payload': {'protocol': ip_family(target_ip), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(target_ip)}},
                         {'match': {"left": { "payload": {"protocol": convert_protocol_to_l4(str(srv.proto)), "field": "sport"}}, "op": "==", "right": int(target_port)}},
                         {"mangle": {"key": {"meta": {"key": "mark"}},"value": 0x1337}},
-                        {"queue": {"num": str(init) if init == end else {"range":[init, end] }, "flags": ["bypass"]}}
+                        build_queue_statement(srv, init, end)
                     ]
             }}}
         )
