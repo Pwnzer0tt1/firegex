@@ -8,7 +8,7 @@ import { TbHexagon, TbShieldLock } from 'react-icons/tb';
 import { bareAddress, errorNotify, isMediumScreen, okNotify } from '../../js/utils';
 import YesNoModal from '../YesNoModal';
 import AddEditService from './AddEditService';
-import { Address, decrypts, L4, Service, serviceQueryKey, services, Transport } from './utils';
+import { Address, decrypts, L4, protoLabel, Service, serviceQueryKey, services, Transport, Upstream } from './utils';
 
 /** What the network layer means, in one line, where the operator is choosing. */
 export const transportLabel = (transport: string) => ({
@@ -29,6 +29,10 @@ export const transportSummary = (transport: string, proto: string) => {
         return "Firegex only steers this traffic to a proxy you run; nothing here inspects it, so no filter can be attached."
     if (transport === Transport.NFQUEUE)
         return "Packets are inspected and a verdict handed back; nothing is terminated. Fully transparent, and the kernel keeps forwarding if a filter dies — at the cost of a userspace round trip per packet, userspace reassembly, and a process per filter."
+    if (proto === L4.HTTP)
+        return "Every version of HTTP through one chain: HTTP/1.1 and HTTP/2 on the TCP addresses — in the clear or under TLS, whichever each client opens with — and HTTP/3 on the UDP ones. All three are shown to the filters as the same HTTP/1.1, so one pattern and one Python filter cover them; without that, HTTP/2 and HTTP/3 put the request line and the headers in a compression format no filter could read. The service still sees the real client address."
+    if (proto === L4.QUIC)
+        return "QUIC is terminated here: the engine decrypts it, and each stream inside is filtered on its own with its own state. It has to be — past the first packet QUIC encrypts its frames and its stream boundaries as well as the payload, so no other layer can see anything. One endpoint per address, and the service still sees the real client address."
     return proto === L4.UDP
         ? "Each address is relayed by a dedicated socket. Filters keep per-flow state, source IP transparency is preserved, and a new address is relayed without restarting the service."
         : "The connection is terminated and reopened, so the kernel reassembles and the chain has no length limit. It also carries bulk traffic several times faster than NFQUEUE, which pays a userspace round trip per packet; what it costs is fail-open being rebuilt in userspace rather than guaranteed by the kernel. The service still sees the real client address."
@@ -137,16 +141,28 @@ export default function ServiceRow({ service, onClick }: { service: Service, onC
                                     {transportLabel(service.transport)}
                                 </Badge>
                             </Tooltip>
-                            {decrypts(service) ? <Tooltip label="The engine decrypts this service, so the filters see the plaintext" position="bottom">
+                            {/* The plaintext leg is worth saying here and not only in
+                            the form: a service whose backend speaks in the clear is one
+                            firegex is *adding* encryption to, which changes what stopping
+                            firegex does to it. */}
+                            {decrypts(service) ? <Tooltip position="bottom" multiline w={320}
+                                label={(service.proto === L4.HTTP
+                                    ? "Every version of HTTP, decrypted where it is encrypted and rendered to the filters as one"
+                                    : "The engine decrypts this service, so the filters see the plaintext")
+                                    + ((service.addresses ?? []).some(a => a.upstream === Upstream.TCP)
+                                        ? ". Behind at least one of its addresses the service answers in the clear, so firegex is what encrypts it."
+                                        : "")}>
                                 <Badge color="grape" variant="light" size="xs" radius="sm"
-                                    leftSection={<TbShieldLock size={10} />}>TLS</Badge>
+                                    leftSection={<TbShieldLock size={10} />}>
+                                    {protoLabel(service.proto)}
+                                </Badge>
                             </Tooltip> : null}
                         </Group>
                         <Group gap="xs" mt={4}>
                             <Tooltip position="bottom" disabled={(service.addresses?.length ?? 0) < 2}
                                 label={(service.addresses ?? []).map(a => `${bareAddress(a.ip_int)}:${a.port}`).join(", ")}>
                                 <Text size="xs" c="dimmed" style={{ letterSpacing: 0.5 }}>
-                                    {addressSummary(service.addresses)} ON {service.proto.toUpperCase()}
+                                    {addressSummary(service.addresses)} ON {protoLabel(service.proto)}
                                 </Text>
                             </Tooltip>
                             <Text size="xs" c="dimmed" style={{ letterSpacing: 0.5 }}>

@@ -125,7 +125,7 @@ def any_layer(request) -> Layer:
 #: Fixtures that only mean anything if the datapath is actually in this process's path.
 #: A test that asks for none of them — checking a refusal, a validation message, the
 #: shape of a statistics reply — is testing the API and works from anywhere.
-NEEDS_INTERCEPTION = {"protected", "stand_in", "udp_stand_in"}
+NEEDS_INTERCEPTION = {"protected", "stand_in", "udp_stand_in", "quic_stand_in"}
 
 
 @pytest.fixture(scope="session")
@@ -255,8 +255,59 @@ def udp_stand_in():
     started = []
 
     def _serve(ipv6: bool = False, port: int | None = None) -> UdpEcho:
-        echo = UdpEcho(port or free_port(ipv6), ipv6)
+        echo = UdpEcho(port or free_port(ipv6, udp=True), ipv6)
         echo.start()
+        started.append(echo)
+        return echo
+
+    yield _serve
+
+    for echo in started:
+        try:
+            echo.stop()
+        except Exception:
+            pass
+
+
+@pytest.fixture
+def http_stand_in():
+    """An HTTP/1.1 service, for the edges that are carried to one."""
+    from helpers.httpserver import HttpService
+    started = []
+
+    def _serve(ipv6: bool = False, port: int | None = None) -> "HttpService":
+        service = HttpService(port or free_port(ipv6), ipv6)
+        service.start()
+        started.append(service)
+        return service
+
+    yield _serve
+
+    for service in started:
+        try:
+            service.stop()
+        except Exception:
+            pass
+
+
+@pytest.fixture
+def quic_stand_in(certificate):
+    """An HTTP/3 service for firegex to protect.
+
+    It carries its own certificate, and firegex is given the same one: the engine
+    terminates QUIC from the client and opens a new QUIC connection to the service, so
+    there are two handshakes and both of them need one.
+    """
+    from helpers.quicserver import QuicEcho
+    started = []
+
+    def _serve(ipv6: bool = False, port: int | None = None) -> "QuicEcho":
+        cert, key = certificate("::1" if ipv6 else "127.0.0.1")
+        # A UDP probe: this one is going to bind a QUIC endpoint, and a port free for TCP
+        # says nothing about whether it is free for UDP.
+        echo = QuicEcho(port or free_port(ipv6, udp=True), cert, key, ipv6)
+        echo.start()
+        echo.material = (cert, key)
         started.append(echo)
         return echo
 

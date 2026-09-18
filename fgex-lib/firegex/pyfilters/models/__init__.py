@@ -13,6 +13,9 @@ from firegex.pyfilters.models.http import (
     HttpFullResponse,
     HttpHistory,
     HttpStreamHistory,
+    GrpcMessage,
+    GrpcRequest,
+    GrpcResponse,
 )
 from firegex.pyfilters.internals.data import RawPacket
 
@@ -41,6 +44,13 @@ type_annotations_associations = {
         HttpFullResponse: HttpFullResponse._fetch_packet,
         HttpHistory: HttpHistory._fetch_packet,
         HttpStreamHistory: HttpStreamHistory._fetch_packet,
+        # gRPC is not a protocol beside HTTP, it is a body format inside it — so its
+        # models live here rather than under a protocol of their own. That is what keeps
+        # them free: a new protocol would mean a new value in `filters.proto`, and
+        # changing that schema deletes and recreates the services database.
+        GrpcMessage: GrpcMessage._fetch_packet,
+        GrpcRequest: GrpcRequest._fetch_packet,
+        GrpcResponse: GrpcResponse._fetch_packet,
     },
 }
 
@@ -58,6 +68,9 @@ __all__ = [
     "HttpFullRequest",
     "HttpFullResponse",
     "HttpHistory",
+    "GrpcMessage",
+    "GrpcRequest",
+    "GrpcResponse",
     "HttpStreamHistory",
 ]
 

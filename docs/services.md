@@ -26,6 +26,70 @@ without interrupting existing traffic.
 The alternative — one service per address, with the chains copied between them — is how
 one of them silently stops being protected the first time a pattern is added to the other.
 
+### What one address can say
+
+An address is normally **where the service is**: firegex intercepts what the client
+dialled and dials it back as the client, so the service sees the connection it would have
+seen. That is what transparent means here, and it is what every address does unless you
+say otherwise.
+
+Everything else lives behind the **⚙ button on the address**, and only what applies to
+the service being configured is offered:
+
+| | When it is offered | What it does |
+|---|---|---|
+| **What clients speak here** — clear · TLS · HTTP/3 | HTTPS services, on the row itself | Not an extra: it is what the address *is* |
+| **The service is on another port** | the Proxy layer | Clients arrive at this address; firegex dials the service on that port instead |
+| **Send to the service** — what arrived · plaintext · TLS | any service firegex decrypts | What firegex speaks to the service, which need not be what the client spoke. *Plaintext* is what puts an ordinary cleartext site behind HTTPS, HTTP/2 and HTTP/3 with only firegex holding a certificate |
+| **Hand it to your proxy at** | the hand-off layer | Where your own proxy is listening for this address |
+
+What is set is repeated back under the address as a **tag**, and clicking a tag opens the
+panel it came from. Folded is not hidden: an option you cannot see you set is one that
+will surprise you at the worst moment. The same tags are shown beside the address on the
+service's page, in the same words, and open the same settings.
+
+**An address is a way in, and one more way in is one more address.** The option above is
+not "also expose it on :443" — it says the opposite thing: *clients arrive here, and the
+service is over there*. So a cleartext service on `:80` reached over TLS on `:443` is two
+addresses, `:443` carrying the option that points at `:80`, and not one address on `:80`
+with `443` typed into it. Written that way round it is intercepted where it already
+listens and published nowhere, which is the one mistake this option makes easy.
+
+*The service is on another port* is the Proxy layer's rather than any protocol's: that layer
+terminates the connection and opens the one to the service, so it is free to open it
+somewhere else. NFQUEUE passes judgement on packets already on their way and opens
+nothing; the hand-off layer gives the traffic to the proxy you run yourself, which decides
+for itself where the service is. On both it is refused rather than stored, because a port
+nothing reads would tell you your service is published while it is merely intercepted.
+
+So a service answering HTTP/1.1 in the clear on `:80`, and nothing else, is three rows:
+
+| Address | Clients speak | Sent on to | Sent as |
+|---|---|---|---|
+| `10.0.0.1:80` | clear | — | what arrived |
+| `10.0.0.1:443` | TLS | `:80` | plaintext |
+| `10.0.0.1:4433` | HTTP/3 | `:80` | plaintext |
+
+Firegex terminates what each client speaks, shows the filters the same HTTP/1.1 whichever
+it was, runs **one chain** over all three, and hands the service the HTTP/1.1 it has always
+understood. The service is not moved, reconfigured, or told about any of it — and only
+firegex holds a certificate.
+
+Three things to know:
+
+- **On a published address firegex is not transparent**, which is the point of it. The
+  service sees a connection to `:80` — from the client's own address, as always — rather
+  than to the port the client dialled.
+- **Declaring TLS is a promise**, and the engine keeps it: a client that opens that port
+  in the clear is refused rather than carried to a service expecting HTTPS. *In the clear*
+  is the permissive default and terminates a client that brings TLS anyway, decided per
+  connection, because refusing one at a port nobody promised would be a rule with nothing
+  behind it.
+- **All of it can be changed afterwards**, from the pencil beside the address on the
+  service's page. Editing an address takes its rules back and reinstalls them, which is
+  what makes the whole row rewritable and not only the address; only that one address
+  stops being steered while it happens, and a refusal puts the row back untouched.
+
 ### An address, or the interface it arrives on
 
 An address entry is a concrete IP (`192.168.1.10:80`, `::1:80`, CIDR `10.0.0.0/24:8080`) or
@@ -43,15 +107,41 @@ edited when the address changes, and nothing silently stops being protected when
 The rules are built differently for each, so the layer matters:
 
 - **On NFQUEUE**: interface matching operates natively in nftables using `meta iifname <iface>` (in prerouting) and `meta oifname <iface>` (in postrouting). Packets arriving at or routed through that interface on the configured port are queued to userspace, regardless of the destination IP.
-- **On Proxy (TCP & TLS)**: traffic entering through the interface (`meta iifname <iface>`) is redirected to the proxy listener. The engine connects upstream preserving the destination (`SO_ORIGINAL_DST`) and spoofing the client source IP (`IP_TRANSPARENT`), while policy routing diverts return packets (`meta oifname <iface>`). Local host output redirection is skipped for interfaces to prevent hijacking unrelated outbound host connections.
+- **On Proxy (TCP & TLS)**: traffic entering through the interface (`meta iifname <iface>`) is redirected to the proxy listener. The engine connects upstream preserving the destination (`SO_ORIGINAL_DST`) and spoofing the client source IP (`IP_TRANSPARENT`), while policy routing diverts return packets (`meta oifname <iface>`). **Protecting a link protects everything that crosses it on that port** — including traffic that is only passing through. On a bridge like `docker0` that means the containers' own outgoing connections: a service protecting `docker0:443` takes every container's outbound HTTPS into firegex, which terminates it with that service's certificate, and the containers see a certificate that does not match the site they asked for. That is the interface doing what it says; it is not narrowed for you, because a link is also how you protect a service on **another machine** that this host routes for, which is the case the address is not yours to know. If you want only what is addressed to this host, name the address instead of the link. An interface stands for whatever addresses it carries, and firegex resolves them wherever it needs an address rather than a match — so an HTTPS edge, a published port and a client on this host all work the same whether you write `eth0` or the address itself. Traffic this host generates towards those addresses is redirected too, matched by address rather than by interface name — a connection from the host to one of its own addresses is routed through loopback, so there is no interface on it to match. That is what makes protecting `lo` also protect a client running beside the service.
 - **On Proxy (UDP)**: because UDP relays need a concrete destination to bind upstream forwarding, Firegex automatically resolves the interface's primary assigned IP. If the interface has no IP assigned, use NFQUEUE instead.
 - **External proxies**: the `external` transport takes an IP only. Its return rule recognises your proxy by one address and port to put the original port back, and an interface is not one address — so the interface half of the picker is not offered there at all.
 
-## Transport protocol
+## What the service speaks
 
-TCP, UDP or TLS, chosen on the service. Every layer carries TCP and UDP; TLS is on the
-proxy layer alone, because decrypting means terminating the connection — see
-[TLS](#tls).
+One choice per service: **TCP**, **UDP**, **TLS**, **QUIC** or **HTTP**. It tells firegex
+what is on the wire, which is what decides what the filters can be shown.
+
+| | Pick it for | The filters are shown | It needs |
+|---|---|---|---|
+| **TCP** | anything unencrypted on TCP — a web service on `:80`, a game protocol, a shell | the bytes as they travel; HTTP/1.1 parsed, and HTTP/2 in the clear recognised from its preface and rendered as HTTP/1.1 | nothing but the addresses |
+| **UDP** | anything unencrypted on UDP — a game server, DNS, something homemade | one datagram at a time, both directions, `RawPacket` only | nothing but the addresses |
+| **TLS** | a port where *everything* arrives encrypted | the decrypted stream, the same models a cleartext service gives | a certificate and key; the proxy layer. [What the service behind speaks](#what-the-service-behind-speaks) is its own question |
+| **QUIC** | a QUIC service, in practice HTTP/3 | one stream at a time with its own state; HTTP/3 rendered as HTTP/1.1 | a certificate and key; the proxy layer |
+| **HTTP** | one daemon reached **more than one way at once** — `:80`, `:443` and `:443` over UDP | every version as the same HTTP/1.1, gRPC included | a certificate and key, including for the cleartext addresses; the proxy layer |
+
+**The interface asks this as two questions**, because the list of five looks like five
+alternatives on one axis and is not:
+
+> **Is the traffic encrypted?** in the clear · encrypted 🔒
+> **Encrypted with what?** TLS · QUIC · HTTPS — or, in the clear: **TCP** · **UDP**
+
+The first answer is the one the certificate hangs off, which is why it wears the lock; the
+second only ever offers protocols of that kind. `HTTP` is shown as **HTTPS** there, because
+beside TLS and QUIC an option labelled "HTTP" reads as the cleartext web protocol — which
+is the confusion this picker was rebuilt around. It is `http` in the API and in a backup.
+
+**A plain web service is `TCP`.** Filtering HTTP needs nothing special: HTTP/1.1 is parsed
+as it goes past, HTTP/2 in the clear is recognised from its connection preface, and
+patterns match the plaintext because the plaintext is what is on the wire.
+
+Every layer carries TCP and UDP; the three that have to be decrypted are on the proxy
+layer alone, because decrypting means terminating the connection — see [TLS](#tls),
+[QUIC](#quic) and [HTTP](#http-every-version-through-one-chain).
 
 **UDP on the proxy layer preserves the client's address** transparently using `IP_TRANSPARENT`
 source spoofing and policy routing, matching the behavior of TCP. See
@@ -80,7 +170,7 @@ allowed to do to the traffic. Pick by those.
 | Measured ([how](../tests/bench/README.md#performance)) | **4035 MB/s** at 1 thread, **13 984** at 8 | 1820 at 1 thread, 2956 at 8 |
 | Short connections | the two are indistinguishable — see below | |
 | UDP | yes, fully transparent (source IP preserved, one relay per address) | yes, fully transparent |
-| TLS termination | yes | no — decrypting means terminating |
+| TLS and QUIC | yes, terminated here | no — decrypting means terminating |
 
 ### Proxy
 
@@ -284,6 +374,51 @@ so the fields are empty when you come back to edit and leaving them that way kee
 is already there. Switching a service *to* TLS when it has never been given either is
 refused there and then.
 
+#### What the service behind speaks
+
+**It is asked of each address**, under its ⚙ button, and not of the service: what leaves
+towards the service is a property of the way in. One daemon reached over TLS on one port
+and in the clear on another is re-encrypted for the first and handed the plaintext for the
+second.
+
+| | What firegex does |
+|---|---|
+| **As it arrives** | It speaks what arrived. The default, and what every address did before there was a choice: a connection terminated here goes back out encrypted. Firegex is *carrying* its encryption. |
+| **In the clear** | It is an ordinary HTTP/1.1 service. Firegex terminates what the client used and forwards the plaintext, so **only firegex needs a certificate**. |
+| **TLS** | It speaks HTTP/1.1 under its own TLS, whatever the client used to get here. |
+
+The second one is why this exists. A service that speaks HTTP and nothing else can be put
+behind an encrypted edge with firegex providing the encryption: clients reach it over TLS
+— or over **HTTP/3**, see below — on the port it already listens on in the clear.
+
+Two things follow from choosing anything but *as it arrives*, and both are worth knowing
+before a round:
+
+- **ALPN is no longer mirrored** on that address. The protocol a client is told is
+  normally the one the service picked, and a service reached over HTTP/1.1 picks nothing.
+  On TLS the client is told nothing and settles on HTTP/1.1; on QUIC, firegex answers `h3`
+  — for itself, not for the service, because it is firegex that is speaking HTTP/3.
+- **Stopping firegex stops the encryption**, because the encryption was firegex's. A
+  client dialling that port with TLS then reaches a service answering in the clear.
+
+##### HTTP/3 in front of a service that has never heard of it
+
+This is the one place in the engine where what leaves is **not** the version that
+arrived, and it is only ever an explicit choice. An HTTP/3 exchange is already rendered as
+the HTTP/1.1 it would have been, because that is what the filters have to be shown — so
+that same rendering can be sent on to a service that speaks HTTP/1.1. Nothing is invented:
+what the service receives is byte for byte what the chain inspected.
+
+One QUIC stream is one request, and HTTP/1.1 has no multiplexing, so each exchange opens
+its own connection to the service — dialled from the client's own address like every other
+dial firegex makes.
+
+What cannot be done, and is a limit rather than a missing setting: a QUIC edge carrying
+anything **other than HTTP/3**. Opaque bytes on a QUIC stream have no HTTP/1.1 form, so
+there is nothing to send a service that speaks one. In practice that means an instance
+whose `FGEX_PROXY_QUIC_ALPN` is not `h3`: the choice is refused there, on `QUIC` and
+`HTTPS` services alike, with the ALPN named.
+
 #### What is carried through, and what cannot be
 
 **ALPN is the service's answer, carried.** Terminating a connection means answering for
@@ -297,6 +432,47 @@ invent an agreement between two ends that did not reach one.
 That means HTTP/2 works if your service speaks it, and does not appear if it does not.
 Before this, ALPN was dropped in both directions — every client fell back to HTTP/1.1
 whatever it asked for, and a client that insists on `h2` failed.
+
+> **HTTP/2 is terminated and rendered, exactly as HTTP/3 is.** HTTP/2 puts the method,
+> the path and the headers in an **HPACK-compressed** HEADERS frame, so a firegex that
+> only forwarded it showed a filter a compression format: a pattern written against a
+> request line matched nothing, and a filter asking for an `HttpRequest` was handed the
+> `PRI * HTTP/2.0` preface and then frames it could not read, so it was never called and
+> nothing said so. Only a body travelled in the clear. Since gRPC *is* HTTP/2, gRPC could
+> not be filtered at all.
+>
+> On a connection that negotiates `h2`, the engine now terminates it and shows the chain
+> each exchange as the HTTP/1.1 it would have been — the same rendering HTTP/3 gets (see
+> [below](#http3-is-shown-to-the-filters-as-http11)), from the same code. One pattern and
+> one Python filter cover HTTP/1.1, HTTP/2 and HTTP/3. There is nothing to turn off on
+> your service any more.
+>
+> Since gRPC is HTTP/2, that is also what makes gRPC filterable: the method name is the
+> path, the metadata are headers and the status is a trailer section, all of them visible
+> to a pattern and to a Python filter. For the message bodies themselves there is a
+> `GrpcMessage` model that takes the length prefix off — see
+> [the pyfilter documentation](pyfilter.md#grpc-messages).
+>
+> **HTTP/2 in the clear** (`h2c`, prior knowledge) is recognised too, on a plain `tcp`
+> service with no certificate anywhere: such a client opens with a fixed 24-byte preface
+> that no other protocol begins with. What is *not* handled is the old HTTP/1.1
+> `Upgrade: h2c` handshake — the upgrade request is filtered as the HTTP/1.1 request it
+> is, but if your service answers `101` everything after that is HTTP/2 nobody rendered.
+> RFC 9113 deprecated that mechanism and nginx dropped it in 1.25.1, so in practice no
+> service accepts it.
+>
+> Two shapes are **refused rather than rendered**, because a tunnel has no HTTP exchange
+> in it to show and inventing one would be worse than saying no: **server push**, which
+> is turned off in the handshake with your service so it knows rather than watching its
+> pushes disappear, and **CONNECT** streams, including the extended CONNECT that
+> WebTransport uses.
+>
+> One difference to know about if you write stateful Python filters: **each HTTP/2 stream
+> is its own connection to a filter**, with its own module globals, where an HTTP/1.1
+> keep-alive connection carries many requests through one. HTTP/2 interleaves its
+> streams, so sharing state between them would let one client's bytes decide another's
+> verdict — and would let an attacker split a pattern across two streams to get past a
+> filter.
 
 **TLS versions are negotiated per leg**, which is what terminating means: a client on
 TLS 1.2 can reach a service on TLS 1.3. Both legs do **TLS 1.2 and 1.3 only**. TLS 1.0 and
@@ -323,7 +499,7 @@ equivalent switch.
 
 The plaintext never becomes a packet — that is exactly what removed the two ports — so
 the engine writes it out itself. **`firegex0` carries the decrypted traffic of every TLS
-service and nothing else:**
+and QUIC service and nothing else:**
 
 ```bash
 sudo tcpdump -i firegex0 -w decrypted.pcap
@@ -332,8 +508,7 @@ sudo tcpdump -i firegex0 -w decrypted.pcap
 No filter expression, no port to look up, and one capture covering the whole instance
 rather than one per service. Wireshark takes the same interface live, or opens the file
 afterwards. Run it on the **host** running firegex: the container shares the host's
-network namespace, so the interface is there. It exists only while some TLS service is
-running.
+network namespace, so the interface is there.
 
 What arrives there is a **reconstruction**. The bytes are real — exactly what the filters
 saw and exactly what was forwarded, after any rewriting — but the framing around them is
@@ -348,6 +523,203 @@ so once at startup.
 
 What comes out is decrypted traffic, which makes the file exactly as sensitive as the
 private key that would have produced it.
+
+### QUIC
+
+QUIC is the fourth thing a service can speak, and the one with the least room for
+argument about where it lives.
+
+TLS over TCP can at least be carried past unopened: the bytes are framed by a transport
+the kernel understands, so a layer that forwards still has a packet to match and a rule
+to match it with, and filtering the ciphertext is a thing you can choose to do. QUIC
+leaves not even that. Past the Initial packet it encrypts the **frames, the stream
+boundaries and the packet number** along with the payload, so a packet queued to
+userspace is a datagram of noise. Terminating it is not the better option, it is the only
+one — which is why the QUIC option greys out on the other two layers, exactly as TLS
+does, and says so.
+
+On the wire QUIC is **UDP**, and that is what the rules match: a QUIC service's addresses
+are steered the same way a datagram service's are, one endpoint bound per protected
+address. What changes is what is behind the port — something that terminates rather than
+something that forwards.
+
+Give it a certificate and a private key, as for TLS. QUIC carries TLS 1.3 inside itself,
+so there is no unencrypted QUIC to fall back to and no version to negotiate.
+
+**A stream is what the filters see.** A QUIC connection carries many streams at once, and
+each one is handed to the chain as its own connection: its own filter state, its own set
+of module globals for a Python filter, released when that stream ends. That is the honest
+mapping — a filter's state follows a stream of bytes from its start to its end, which is
+what a QUIC stream is and what a QUIC connection is not — and on HTTP/3 it lands where
+you would expect, one request to a stream.
+
+**A refusal ends the connection, not the stream.** Blocking one stream would leave the
+client free to ask again on the next one, which is not what blocking means anywhere else
+in firegex; it is the same thing that happens on HTTP/1.1 with keep-alive, where a
+refused request takes the connection with it. The client is told why, in the close
+reason, rather than being left to time out.
+
+#### HTTP/3 is shown to the filters as HTTP/1.1
+
+A filter is supposed to be written once. `HttpRequest` on a QUIC service has to mean what
+it means on the TCP service beside it, and a hyperscan pattern written for one has to
+match on the other — otherwise moving a service to QUIC silently switches its filters
+off.
+
+But HTTP/3 puts the method, the path and the headers in a **QPACK-compressed HEADERS
+frame**. A filter shown the bytes of the stream would be shown a compression format, and
+every pattern would stop matching. So firegex terminates HTTP/3 too, and renders each
+exchange as the HTTP/1.1 message it would have been. That is what the chain is shown, and
+what goes on towards your service is HTTP/3 again, re-encoded.
+
+The same bargain the [decrypted capture](#watching-the-decrypted-traffic) makes: **the
+bytes are real and the framing is reconstructed.** Concretely —
+
+- the request line says `HTTP/1.1`, because that is the only version an HTTP/1 parser
+  will read, and what was on the wire was HTTP/3;
+- `Host` is rendered from the `:authority` pseudo-header, which is where HTTP/3 puts it;
+- a body whose length the message declared is shown under its own `Content-Length`;
+- a body whose length it did not declare is shown **chunked**, which is what that message
+  is in HTTP/1.1 — and the head is held back until it is known whether a body is coming
+  at all, so that a request without one is never shown a `Transfer-Encoding` it did not
+  carry. A filter looking for that header is usually looking for smuggling, and one
+  invented by the proxy in front of it would be the worst possible answer. Held *briefly*:
+  a declared length settles the question outright, a message with no body has already
+  ended its stream, and the only thing left waiting is a sender holding the stream open —
+  which after 100 ms is rendered chunked rather than held, because a bidirectional
+  exchange the service speaks first in (gRPC's among them) would otherwise deadlock, each
+  end waiting for the other;
+- a **trailer section is always shown to the filters**, and that is what decides the
+  framing of a message that has one and no body — in HTTP/1.1 a trailer section belongs to
+  a chunked message and nowhere else, which is exactly a gRPC trailers-only answer. The
+  one message whose rendering cannot carry a trailer section is one that declared its
+  length, since its HTTP/1.1 body ends where the header said it would; there the trailers
+  are **dropped rather than forwarded**, because a piece of a message no filter was shown
+  is a piece that travelled unfiltered. The engine logs it when it happens;
+- hop-by-hop headers do not appear, because HTTP/3 forbids sending them.
+
+#### What is carried through, and what cannot be
+
+**ALPN is the service's answer, carried — asked in the other order.** On TLS over TCP the
+client's hello is held open, the service is asked with exactly the list the client
+offered, and the client is told what came back. In QUIC the hello arrives inside an
+encrypted Initial packet whose processing *is* the handshake, so there is nothing to hold
+it at. The order is therefore reversed: firegex opens its connection to the service
+first, offering the protocols it was told to offer, and tells the client the one thing
+the service agreed to. The invariant that matters is unchanged — the client is never told
+a protocol the service did not choose — and what is lost is knowing in advance whether
+the client would have accepted it. When it would not, its handshake fails and the log
+says which protocol the service picked.
+
+That list is `h3`, which is what a QUIC service speaks nine times in ten. An instance in
+front of something else sets `FGEX_PROXY_QUIC_ALPN` as a comma-separated list in
+preference order:
+
+```bash
+python3 run.py restart --env FGEX_PROXY_QUIC_ALPN=h3,doq
+```
+
+`run.py` stores it and puts it back on every later start — editing the generated compose
+file by hand does not survive one, because `run.py` rewrites that file each time. The
+list is **per instance, not per service**, and it is a superset rather than a choice:
+every QUIC service is offered all of it and each one picks what it actually speaks, so
+listing every protocol the instance carries is the way to run more than one kind of QUIC
+service at once.
+
+**0-RTT is not offered.** Early data is replayable by anyone who watched it go past, and
+a filter that refused a request has no way to un-deliver the copy your service already
+acted on. A round trip is the price of that not being true.
+
+**QUIC datagrams are carried, except on HTTP/3.** A datagram is unreliable and unordered,
+which is to say it is not a stream — so a filter is handed a `RawPacket` for it and
+nothing else, exactly as on a UDP service, and the stream and HTTP models stay out of the
+way rather than being built on something that cannot support them. One connection's
+datagrams are **one flow**: a filter keeping state sees them in order of arrival and can
+still catch a pattern split across two of them, which is what the flow is for. A refused
+datagram is **dropped and the connection carries on** — there is no conversation to end,
+and taking the connection down would cost every stream on it for one message that was
+already complete when it was judged.
+
+Over HTTP/3 they are not carried, and the handshake says so rather than letting a peer
+find out by watching them disappear. An HTTP/3 datagram names the stream it belongs to,
+and the request streams firegex opens towards your service are not the ones your client
+opened, so the name would point at the wrong stream on the far side. **WebTransport is not
+carried** for a further reason: its streams are bound to a session by a marker each of
+them carries, which is a different shape from "one stream, one filter" and would need a
+session model rather than a setting.
+
+**A new client is asked to prove its address.** The first Initial packet from an address
+is answered with a Retry, so that nothing is opened towards your service on the word of a
+source address nobody has checked — otherwise a forged source turns the relay into an
+amplifier, which is the datagram flood the connection cap exists for with a handshake in
+front of it. It costs an honest client one round trip.
+
+**The decrypted traffic is mirrored to `firegex0`, one TCP stream per QUIC stream** — and
+over HTTP/3 that is one per request. What you read there is the same HTTP/1.1 the filters
+were shown, which is the only honest thing it could be: what crossed the wire was a
+compressed header block inside an encrypted packet, and there is no tool that would read
+it back as an exchange.
+
+One thing to know before reading a port out of that capture: **the client port is
+invented**. Every stream of one QUIC connection shares the client's real port, so each is
+given one of its own — otherwise a hundred streams arrive as one conversation whose bytes
+decode as nothing. The addresses are real and the service's port is real; the client's
+names a stream, not a socket.
+
+**The connection limit is honoured; forwarding the excess unfiltered is not free here.**
+On TCP a connection past the limit is relayed with no chain at all, costing nothing. A
+QUIC connection past the limit is still terminated, decrypted and re-encrypted, because
+there is no such thing as forwarding a QUIC connection unopened — what "unfiltered"
+saves is the inspection, not the termination.
+
+### HTTP: every version through one chain
+
+`HTTP` is the one protocol on that list that does not say what is on the wire. It says
+what the *service* is, and each of its addresses says how it is reached:
+
+| Address | What reaches it |
+|---|---|
+| **TCP** | HTTP/1.1 and HTTP/2 — in the clear or under TLS, whichever each client opens with |
+| **UDP** | HTTP/3, over QUIC |
+
+One service, one filter chain, one certificate. Add `10.0.0.1:80` as TCP, `10.0.0.1:443`
+as TCP and `10.0.0.1:443` as UDP, and every client that can reach your web service goes
+through the same filters.
+
+**Why it exists.** HTTP/1.1 and HTTP/2 live on TCP and HTTP/3 lives on UDP, so covering
+all three used to take two or three separate firegex services with the same patterns and
+the same Python pasted into each of them. Keeping those in step by hand is exactly how one
+of them quietly stops being protected — which is the same reason a service takes a *list*
+of addresses rather than making you create one service per address.
+
+**Whether a connection is TLS is decided per connection**, from what the client actually
+sent, not from a setting. So one `http` service in front of a daemon that answers in the
+clear on `:80` and under TLS on `:443` carries both, and what leaves towards your service
+matches what arrived: a cleartext connection is forwarded in the clear, an encrypted one
+is re-encrypted. It is the same rule ALPN mirroring follows — firegex carries what the two
+ends are doing rather than deciding it for them.
+
+**The service behind may answer in the clear too**, including on the HTTP/3 edge — see
+[what the service behind speaks](#what-the-service-behind-speaks). Every edge is then
+forwarded as HTTP/1.1, which is what an ordinary web service reached on `:80`, `:443` and
+`:443/udp` at once looks like: three protocols in front, one behind, one chain over all
+of them.
+
+**A certificate is required**, including for the cleartext addresses beside it. A service
+that only ever answers in the clear should be a `TCP` one: HTTP/1.1 is filtered there as
+it always was, and HTTP/2 in the clear is recognised from its connection preface. The TLS
+and HTTP/3 edges are the whole of what `HTTP` adds, and neither exists without a
+certificate.
+
+**Proxy layer only.** An `HTTP` service is reached over TLS on one port and QUIC on
+another, and the NFQUEUE and hand-off layers can read neither — nor, in fact, the
+cleartext edge, because HTTP/2 in the clear is HPACK-compressed and rendering it means
+terminating the connection.
+
+Everything the [TLS](#tls) and [QUIC](#quic) sections say about what is and is not
+supported applies here unchanged: the same TLS versions and ciphers, no client
+certificates, no 0-RTT, no HTTP/3 datagrams and no WebTransport, and the same
+`firegex0` capture of the decrypted traffic.
 
 ## Filters
 

@@ -113,8 +113,11 @@ const DEMO_PYFILTER_API = {
 
 // ------------------------------------------------------------------ seed state
 
-const svcShop = uuid(), svcScore = uuid(), svcVault = uuid()
+const svcShop = uuid(), svcScore = uuid(), svcVault = uuid(), svcArena = uuid()
 const fltShopRegex = uuid(), fltShopPy = uuid(), fltScoreRegex = uuid(), fltVaultRegex = uuid()
+const fltArenaRegex = uuid()
+const svcWeb = uuid()
+const fltWebPy = uuid()
 const svcHijack = uuid()
 
 /** The demo's services have been up for a while; a fresh one starts filtering now. */
@@ -132,6 +135,16 @@ const state = {
         { service_id: svcShop, name: "shop-api", status: "active", proto: "tcp", transport: "proxy", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
         { service_id: svcScore, name: "scoreboard", status: "active", proto: "tcp", transport: "nfqueue", fail_open: true, max_connections: 512, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 1847, over_limit_first: demoStart, over_limit_last: demoStart + 900, filtering_since: demoStart },
         { service_id: svcVault, name: "vault", status: "stop", proto: "tls", transport: "proxy", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: null },
+        // QUIC: UDP on the wire, terminated here because nothing else can see inside it.
+        // Its filters are written against HTTP because its traffic is HTTP/3, which the
+        // engine shows the chain as the HTTP/1.1 it would have been.
+        { service_id: svcArena, name: "arena-h3", status: "active", proto: "quic", transport: "proxy", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
+        // One service for every version of HTTP: HTTP/1.1 and HTTP/2 on the TCP
+        // addresses, in the clear on one port and under TLS on the other, and HTTP/3 on
+        // the UDP one beside them. One certificate and one chain — which is the whole
+        // point, because covering the three used to take two or three services with the
+        // same filter copied between them by hand.
+        { service_id: svcWeb, name: "shop-web", status: "active", proto: "http", transport: "proxy", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
         // Handed to a proxy the operator wrote themselves: firegex steers, nothing here inspects.
         { service_id: svcHijack, name: "legacy-ftp", status: "active", proto: "tcp", transport: "external", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
     ] as Json[],
@@ -140,12 +153,20 @@ const state = {
     // `wg0` by name, the other half of the same idea: an address somebody else hands
     // out is still one place this service answers.
     addresses: [
-        { address_id: uuid(), service_id: svcShop, ip_int: "10.60.3.1/32", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
-        { address_id: uuid(), service_id: svcShop, ip_int: "fd66:666:3::1/128", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
-        { address_id: uuid(), service_id: svcShop, ip_int: "wg0", port: 9000, proto: "tcp", proxy_ip: null, proxy_port: null },
-        { address_id: uuid(), service_id: svcScore, ip_int: "10.60.0.0/16", port: 8080, proto: "tcp", proxy_ip: null, proxy_port: null },
-        { address_id: uuid(), service_id: svcVault, ip_int: "10.60.3.1", port: 8443, proto: "tcp", proxy_ip: null, proxy_port: null },
-        { address_id: uuid(), service_id: svcHijack, ip_int: "10.60.3.1", port: 21, proto: "tcp", proxy_ip: "127.0.0.1", proxy_port: 12021 },
+        { address_id: uuid(), service_id: svcShop, ip_int: "10.60.3.1/32", port: 9000, proto: "tcp", edge: "tcp", target_port: null, upstream: "same", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcShop, ip_int: "fd66:666:3::1/128", port: 9000, proto: "tcp", edge: "tcp", target_port: null, upstream: "same", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcShop, ip_int: "wg0", port: 9000, proto: "tcp", edge: "tcp", target_port: null, upstream: "same", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcScore, ip_int: "10.60.0.0/16", port: 8080, proto: "tcp", edge: "tcp", target_port: null, upstream: "same", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcVault, ip_int: "10.60.3.1", port: 8443, proto: "tcp", edge: "tls", target_port: null, upstream: "same", proxy_ip: null, proxy_port: null },
+        // `udp`, because that is what the kernel matches for a QUIC service.
+        { address_id: uuid(), service_id: svcArena, ip_int: "10.60.3.1", port: 4433, proto: "udp", edge: "quic", target_port: null, upstream: "same", proxy_ip: null, proxy_port: null },
+        // The three edges of one HTTP service, and what they say: in the clear on :80,
+        // TLS on :443, HTTP/3 on :443/udp. The last two are *publications* — the service
+        // itself only ever answered HTTP/1.1 on :80, and has not moved.
+        { address_id: uuid(), service_id: svcWeb, ip_int: "10.60.3.1", port: 80, proto: "tcp", edge: "tcp", target_port: null, upstream: "same", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcWeb, ip_int: "10.60.3.1", port: 443, proto: "tcp", edge: "tls", target_port: 80, upstream: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcWeb, ip_int: "10.60.3.1", port: 443, proto: "udp", edge: "quic", target_port: 80, upstream: "tcp", proxy_ip: null, proxy_port: null },
+        { address_id: uuid(), service_id: svcHijack, ip_int: "10.60.3.1", port: 21, proto: "tcp", edge: "tcp", target_port: null, upstream: "same", proxy_ip: "127.0.0.1", proxy_port: 12021 },
     ] as Json[],
     filters: [
         // shop-api shows what only the proxy layer can do: two kinds, in an order.
@@ -154,6 +175,11 @@ const state = {
         { filter_id: fltShopPy, service_id: svcShop, position: 1, kind: "pyfilter", proto: "http", name: "python", active: true, blocked: 641 },
         { filter_id: fltScoreRegex, service_id: svcScore, position: 0, kind: "regex", proto: "tcp", name: "patterns", active: true, blocked: 1204 },
         { filter_id: fltVaultRegex, service_id: svcVault, position: 0, kind: "regex", proto: "tcp", name: "patterns", active: true, blocked: 0 },
+        { filter_id: fltArenaRegex, service_id: svcArena, position: 0, kind: "regex", proto: "tcp", name: "patterns", active: true, blocked: 52 },
+        // The same file that would run on a plain HTTP/1.1 service, unchanged — which is
+        // the point of an `http` service: HTTP/1.1, HTTP/2 and HTTP/3 are all shown to it
+        // as the same HTTP/1.1, so one filter covers the three edges below.
+        { filter_id: fltWebPy, service_id: svcWeb, position: 0, kind: "pyfilter", proto: "http", name: "python", active: true, blocked: 1190 },
     ] as Json[],
     regexes: [
         { regex_id: uuid(), filter_id: fltShopRegex, regex: b64("\\.\\./"), mode: "C", case_sensitive: true, active: true, blocked: 341 },
@@ -163,17 +189,21 @@ const state = {
         { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("<script>"), mode: "C", case_sensitive: false, active: true, blocked: 233 },
         { regex_id: uuid(), filter_id: fltScoreRegex, regex: b64("[A-Z0-9]{31}="), mode: "S", case_sensitive: true, active: false, blocked: 57 },
         { regex_id: uuid(), filter_id: fltVaultRegex, regex: b64("/proc/self/"), mode: "C", case_sensitive: true, active: true, blocked: 0 },
+        // Written the way it would be for an HTTP service on TCP, because that is what
+        // the chain is shown: on the wire this path was a QPACK-compressed header block.
+        { regex_id: uuid(), filter_id: fltArenaRegex, regex: b64("GET /internal/"), mode: "C", case_sensitive: true, active: true, blocked: 52 },
     ] as Json[],
-    code: { [fltShopPy]: SAMPLE_FILTER } as Record<string, string>,
+    code: { [fltShopPy]: SAMPLE_FILTER, [fltWebPy]: SAMPLE_FILTER } as Record<string, string>,
     // One row per @pyfilter the code defines. The code says which exist; these say
     // which run — exactly the split the real backend keeps.
     functions: [
         { filter_id: fltShopPy, name: "block_path_traversal", active: true, blocked: 641 },
+        { filter_id: fltWebPy, name: "block_path_traversal", active: true, blocked: 1190 },
         { filter_id: fltShopPy, name: "redact_flag", active: true, blocked: 0 },
         // Switched off rather than deleted: the code is still there to turn back on.
         { filter_id: fltShopPy, name: "log_client", active: false, blocked: 0 },
     ] as Json[],
-    certs: { [svcVault]: DEMO_CERT } as Record<string, string>,
+    certs: { [svcVault]: DEMO_CERT, [svcArena]: DEMO_CERT } as Record<string, string>,
     firewall: {
         enabled: true,
         policy: "accept",
@@ -364,11 +394,15 @@ const routes: [string, RegExp, Handler][] = [
         for (const a of (b.addresses ?? [])) {
             state.addresses.push({
                 address_id: uuid(), service_id, ip_int: a.ip_int, port: a.port,
-                proto: b.proto ?? "tcp",
+                proto: b.proto === "http" ? (a.edge === "quic" ? "udp" : "tcp")
+                    : b.proto === "quic" ? "udp" : b.proto === "udp" ? "udp" : "tcp",
+                edge: b.proto === "http" ? (a.edge ?? "tcp") : (b.proto ?? "tcp"),
+                target_port: a.target_port ?? null,
+                upstream: a.upstream ?? "same",
                 proxy_ip: a.proxy_ip ?? null, proxy_port: a.proxy_port ?? null,
             })
         }
-        if (b.proto === "tls" && b.tls_cert) state.certs[service_id] = b.tls_cert
+        if (b.tls_cert) state.certs[service_id] = b.tls_cert
         emit(["services"])
         return { status: "ok", service_id }
     }],

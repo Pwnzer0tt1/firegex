@@ -7,6 +7,27 @@ cryptography
 psutil
 pydantic
 python-socketio[client]
+# The only way to speak QUIC from Python, and the integration tests for that layer have
+# to speak it: what they check is the half the engine's own tests cannot reach — the
+# rules that steer a QUIC address, the relay bound per address, and a filter attached
+# through the API. Everything that needs it skips with a reason when it is absent, so a
+# machine without it still runs the rest.
+aioquic
+# And the only way to speak gRPC from Python, which is what says HTTP/2 is filtered: a
+# gRPC service is a real HTTP/2 service, its method name is an HPACK-compressed `:path`,
+# and its status is a trailer section — the three things a firegex that only forwarded
+# HTTP/2 could not show a filter. Everything that needs it skips with a reason when it is
+# absent, so a machine without it still runs the rest.
+grpcio
+
+# `unit/test_nftables_addresses.py` imports the **backend** — the address-to-nftables
+# translation is the backend's, and testing a copy of it would be testing a copy. That
+# drags in `backend/utils`, which raises FastAPI's `HTTPException`, so FastAPI has to be
+# here even though nothing in this suite serves a request. Without it the file cannot be
+# collected, and a collection error is not one test failing: pytest stops the entire run
+# before anything has executed. It went unnoticed for as long as it did because a machine
+# that has ever run the backend outside the container already has it.
+fastapi
 
 # `unit/` imports the filter library straight out of `../fgex-lib`, so its runtime
 # dependencies have to be here too. Listed one by one rather than with

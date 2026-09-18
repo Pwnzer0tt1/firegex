@@ -11,6 +11,7 @@ import getpass
 import tarfile
 import hashlib
 import secrets
+import shlex
 
 pref = "\033["
 reset = f"{pref}0m"
@@ -99,6 +100,43 @@ def check_already_running():
     sudo = "sudo " if g.docker_sudo else ""
     return "firegex" in cmd_check(f'{sudo}docker ps --filter "name=^firegex$"', get_output=True)
 
+#: What run.py sets for itself. An override here would either be silently overwritten or
+#: silently win depending on which list is read first, so it is refused by name — the
+#: option that owns the setting is the one to use.
+MANAGED_ENV = {
+    "PORT", "HOST", "NTHREADS", "PSW_HASH_SET", "SOCKET_DIR", "FIREGEX_VERSION",
+    "ALLOWED_IPS", "PROXY_IP_HEADER", "UNSAFE_DISABLE_AUTH",
+}
+
+
+def merge_env(stored, given):
+    """Fold `KEY=VALUE` arguments into what is already stored.
+
+    `KEY=VALUE` sets one and `KEY=` removes it; everything else is kept, because these
+    are settings an operator writes once and does not retype, and a bare `run.py start`
+    inherits the rest of its flags the same way.
+    """
+    out = dict(stored or {})
+    for item in given or []:
+        if "=" not in item:
+            puts(f"Error: --env takes KEY=VALUE, not {item!r}", color=colors.red)
+            exit(1)
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            puts("Error: --env needs a variable name before the '='", color=colors.red)
+            exit(1)
+        if key in MANAGED_ENV:
+            puts(f"Error: {key} is set by run.py itself — use its own option instead",
+                 color=colors.red)
+            exit(1)
+        if value == "":
+            out.pop(key, None)
+        else:
+            out[key] = value
+    return out
+
+
 def load_config():
     """Load configuration from .firegex-conf.json"""
     import json
@@ -110,6 +148,13 @@ def load_config():
         "allowed_ips": None,
         "proxy_ip_header": None,
         "unsafe_disable_auth": False,
+        # Anything the engine or the backend reads straight out of the environment and
+        # run.py has no opinion about: the filter deadline, the QUIC ALPN list, the
+        # stream size cap. Kept here because run.py **rewrites** the compose file on
+        # every start, so a variable hand-edited into it is gone by the next one — which
+        # is what the documentation telling an operator to set FGEX_PROXY_QUIC_ALPN
+        # "in the container's environment" silently ran into.
+        "env": {},
     }
     
     if os.path.isfile(g.configfile):
@@ -127,6 +172,8 @@ def load_config():
                     config["port"] = default_config["port"]
                 if config.get("host") is None:
                     config["host"] = default_config["host"]
+                if not isinstance(config.get("env"), dict):
+                    config["env"] = {}
                 return config
         except (json.JSONDecodeError, IOError) as e:
             puts(f"Warning: Failed to load config file {g.configfile}: {e}", color=colors.yellow)
@@ -169,6 +216,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_start.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_start.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
+    parser_start.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_QUIC_ALPN. Stored, so later runs keep it.')
     parser_start.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_start.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_start.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=config.get("unsafe_disable_auth", False), help='UNSAFE: disable Firegex password/JWT authentication, making every request that reaches firegex a full administrator (for a trusted reverse proxy only)')
@@ -186,6 +234,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_restart.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_restart.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_restart.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
+    parser_restart.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_QUIC_ALPN. Stored, so later runs keep it.')
     parser_restart.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_restart.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_restart.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=config.get("unsafe_disable_auth", False), help='UNSAFE: disable Firegex password/JWT authentication, making every request that reaches firegex a full administrator (for a trusted reverse proxy only)')
@@ -205,6 +254,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_config.add_argument('--host', required=False, help='Set default host IP address to bind the service to')
     parser_config.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_config.add_argument('--password', required=False, type=str, nargs='?', const='', help='Change the password of the firewall (omit the value to be prompted for it interactively)')
+    parser_config.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_QUIC_ALPN. Stored, so later runs keep it.')
     parser_config.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_config.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_config.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=None, help='UNSAFE: turn Firegex password/JWT authentication off or back on, on the running instance and for the next start')
@@ -268,6 +318,15 @@ def gen_args(args_to_parse: list[str]|None = None):
     if getattr(args, 'unsafe_disable_auth', None) is not None and args.unsafe_disable_auth != config.get("unsafe_disable_auth", False):
         config["unsafe_disable_auth"] = args.unsafe_disable_auth
         config_changed = True
+    if getattr(args, 'env', None):
+        merged = merge_env(config.get("env"), args.env)
+        if merged != config.get("env", {}):
+            config["env"] = merged
+            config_changed = True
+    # On every command, not only the ones that can change it: the compose file is written
+    # from `args`, and a `restart` that dropped these would be a restart that quietly
+    # unset them.
+    args.env_vars = dict(config.get("env") or {})
     
     if config_changed:
         save_config(config)
@@ -372,7 +431,10 @@ def write_compose(skip_password = True):
                             *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else []),
                             *([f"ALLOWED_IPS={args.allowed_ips}"] if getattr(args, 'allowed_ips', None) else []),
                             *([f"PROXY_IP_HEADER={args.proxy_ip_header}"] if getattr(args, 'proxy_ip_header', None) else []),
-                            *(["UNSAFE_DISABLE_AUTH=1"] if getattr(args, 'unsafe_disable_auth', False) else [])
+                            *(["UNSAFE_DISABLE_AUTH=1"] if getattr(args, 'unsafe_disable_auth', False) else []),
+                            # Whatever the operator asked to be here and run.py has no
+                            # opinion about. Last, so it reads as the addition it is.
+                            *(f"{k}={v}" for k, v in sorted(getattr(args, 'env_vars', {}).items())),
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -434,7 +496,8 @@ def write_compose(skip_password = True):
                             *([f"FIREGEX_VERSION={get_git_version()}"] if get_git_version() else []),
                             *([f"ALLOWED_IPS={args.allowed_ips}"] if getattr(args, 'allowed_ips', None) else []),
                             *([f"PROXY_IP_HEADER={args.proxy_ip_header}"] if getattr(args, 'proxy_ip_header', None) else []),
-                            *(["UNSAFE_DISABLE_AUTH=1"] if getattr(args, 'unsafe_disable_auth', False) else [])
+                            *(["UNSAFE_DISABLE_AUTH=1"] if getattr(args, 'unsafe_disable_auth', False) else []),
+                            *(f"{k}={v}" for k, v in sorted(getattr(args, 'env_vars', {}).items())),
                         ],
                         "volumes": [
                             "firegex_data:/execute/db"
@@ -952,6 +1015,11 @@ def run_standalone():
     if args.socket_dir:
         env_vars.append("SOCKET_DIR=/run/firegex")
     
+    # The same extras the container gets, because standalone is the same firegex without
+    # docker and an operator should not have to find that out.
+    for key, value in sorted(getattr(args, 'env_vars', {}).items()):
+        env_vars.append(shlex.quote(f"{key}={value}"))
+    
     # Prepare environment string for chroot
     env_string = " ".join([f"{var}" for var in env_vars])
     
@@ -1130,6 +1198,9 @@ def handle_config_command(args):
         if live is not None and (live == "1") != bool(config.get("unsafe_disable_auth", False)):
             puts(f"  (the running instance has it {'disabled' if live == '1' else 'enabled'} "
                  f"right now — that lasts until it restarts)", color=colors.yellow)
+        extra = config.get("env") or {}
+        puts(f"Extra environment: {', '.join(f'{k}={v}' for k, v in sorted(extra.items())) if extra else 'none'}",
+             color=colors.white)
         puts(f"Config file: {g.configfile}", color=colors.white)
         return
     
@@ -1229,6 +1300,20 @@ def handle_config_command(args):
                 puts("Pass --keep-auth-disabled to store a password without putting it in force.",
                      color=colors.yellow)
 
+        config_changed = True
+
+    # Folded in before this command was reached, like every other persisted flag; said
+    # out loud here, or `config --env ...` would report having changed nothing while
+    # having changed something.
+    if getattr(args, 'env', None):
+        extra = config.get("env") or {}
+        for item in args.env:
+            key = item.split("=", 1)[0].strip()
+            if key in extra:
+                puts(f"{key} set to: {extra[key]}", color=colors.green)
+            else:
+                puts(f"{key} removed", color=colors.green)
+        puts("It reaches the container on the next start or restart.", color=colors.yellow)
         config_changed = True
 
     if config_changed:

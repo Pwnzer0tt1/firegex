@@ -124,6 +124,7 @@ async fn terminates_tls_and_relays_to_a_plain_service() {
         TlsSetup {
             server: Some(tls::server_config(&cert, &key).unwrap()),
             upstream: None,
+            optional: false,
         },
     )
     .await;
@@ -145,6 +146,7 @@ async fn decrypts_inspects_and_re_encrypts() {
         TlsSetup {
             server: Some(tls::server_config(&cert, &key).unwrap()),
             upstream: Some(tls::client_config().unwrap()),
+            optional: false,
         },
     )
     .await;
@@ -165,6 +167,7 @@ async fn rules_see_the_plaintext() {
         TlsSetup {
             server: Some(tls::server_config(&cert, &key).unwrap()),
             upstream: Some(tls::client_config().unwrap()),
+            optional: false,
         },
     )
     .await;

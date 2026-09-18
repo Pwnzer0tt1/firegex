@@ -28,11 +28,19 @@ PASSWORD="${FIREGEX_PASSWORD:-testpassword}"
 
 # The first argument is a password, or `--set-pass`, or neither — anything else is
 # pytest's and is passed on untouched.
+#
+# A bare word is the password **unless it names something to run**. `unit`,
+# `integration/test_udp.py` and `integration/test_udp.py::test_one` are all paths this
+# directory really has, and every one of them was being taken as a password and shifted
+# away — so `./run_tests.sh unit`, which the help above advertises, quietly ran the whole
+# suite against an instance whose password it believed was "unit" and answered with
+# hundreds of authentication errors. A password that happens to collide with a path goes
+# in `FIREGEX_PASSWORD`, which is what that variable is for.
 if [[ $# -gt 0 ]]; then
     case "$1" in
         --set-pass) SET_PASSWORD=1; shift ;;
         -*)         ;;
-        *)          PASSWORD="$1"; shift ;;
+        *)          [[ -e "${1%%::*}" ]] || { PASSWORD="$1"; shift; } ;;
     esac
 fi
 

@@ -142,3 +142,33 @@ def test_one_broken_tls_service_is_one_broken_tls_service(api, service, stand_in
     time.sleep(SETTLE)
     assert tls_connect_send_recv(neighbour.port, False, b"still here") == b"still here", \
         "the broken service took its neighbour down with it"
+
+
+def test_a_cleartext_service_can_be_exposed_under_tls(api, service, stand_in,
+                                                      certificate):
+    """Firegex as the thing that *adds* the encryption.
+
+    The other direction of the same machinery: the client's TLS is terminated here and
+    **not** put back on the way out, so the service goes on answering in the clear on the
+    port it already listened on while the world reaches it over TLS. Everything else is
+    unchanged — the filters see the same plaintext they always did, which is what the
+    block below is here to say.
+
+    On this edge the engine needed nothing for it: with no upstream client configuration
+    the dial towards the service is an ordinary socket, which is what it already did for a
+    service speaking nothing encrypted. The QUIC edge is where it became real work, and
+    that is pinned in `test_http_versions.py`.
+    """
+    cert, key = certificate("127.0.0.1")
+    # Plaintext on purpose: a stand-in with no certificate of its own is exactly the
+    # service this exists for, and it is what the upstream leg would fail against.
+    server = stand_in()
+    service_id = service(f"plainup-{server.port}", "127.0.0.1", server.port, "proxy",
+                         proto="tls", tls_cert=cert, tls_key=key, upstream="tcp")
+    add_regex_filter(api, service_id, "BLOCKME")
+    start_and_settle(api, service_id)
+    channel = Channel(server, server.port, False, tls=True)
+    assert channel.gets_through(b"harmless traffic"), \
+        "a TLS client could not reach the cleartext service behind it"
+    assert channel.is_blocked(b"carrying BLOCKME"), \
+        "the filters stopped seeing the plaintext once the upstream leg was in the clear"

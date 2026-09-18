@@ -124,15 +124,40 @@ That is deliberate. The two network layers cannot honestly offer the same thing 
 
 #### Which models work on UDP
 
-`RawPacket` is the only model that does not need a connection underneath it. Everything
-else — an assembled `TCPInputStream`, a parsed `HttpRequest` — reaches for something only
-TCP has, and on a datagram the library declines to build it, which means **the filter is
-never called**.
+`RawPacket` is the only model that does not need a stream underneath it. Everything
+else — an assembled `TCPInputStream`, a parsed `HttpRequest` — reaches for something a
+datagram does not have, and on one the library declines to build it, which means **the
+filter is never called**.
 
 So a Python filter runs on a UDP service, on either network layer, as long as it asks
 for a `RawPacket`. Saving one that asks for anything else against a UDP service is
 refused, naming the model: a filter sitting in the chain doing nothing, with nothing
 saying so, is the failure this whole module is arranged to prevent.
+
+**HTTP/2 is not a gap any more, and it used to be the one that mattered.** A filter asking
+for an `HttpRequest` works on HTTP/1.x, on HTTP/2 and on HTTP/3 alike. It did not work on
+a connection that negotiated `h2`: those headers are HPACK-compressed, so the parser was
+handed a compression format and the filter was never called — no block, no log, no
+counter. The engine terminates HTTP/2 now and shows the chain the HTTP/1.1 each exchange
+would have been, from the same code that does it for HTTP/3, so the same file covers every
+version. Since gRPC is HTTP/2, that is also what makes gRPC filterable.
+
+**One thing about HTTP/2 to know if your filter keeps state.** Each HTTP/2 stream is its
+own connection to a filter, with its own module globals — where an HTTP/1.1 keep-alive
+connection carries many requests through one set of them. HTTP/2 interleaves its streams,
+so sharing state between them would let one client's bytes decide another client's
+verdict, and would let an attacker split a pattern across two streams to get past a
+filter. One request, one state, is the honest mapping; it is the same rule an HTTP/3
+request stream follows.
+
+**QUIC is not that case, even though it is UDP on the wire.** A QUIC stream is ordered
+and reliable, the engine terminates the connection to see inside it, and each stream
+reaches the chain as its own connection — so every model works there exactly as it does
+on TCP. On an HTTP/3 service the exchange is rendered as the HTTP/1.1 it would have been
+before the chain sees it, so `HttpRequest` and the rest mean what they always meant; the
+[services documentation](services.md#http3-is-shown-to-the-filters-as-http11) says what
+that rendering does and does not promise. The question a model asks is therefore "is
+there a stream", not "is this TCP", and `RawPacket` answers both separately.
 
 Rewriting a datagram is **exact**, on both layers: there are no sequence numbers for a
 different length to desynchronise.
@@ -152,7 +177,15 @@ One chunk of the connection, and what is known about it. The **only** data struc
 - `data_size: int` — how many bytes of payload this chunk carries.
 - `is_input: bool` — `True` for client → service, `False` for service → client. `is_output` is its inverse.
 - `is_ipv6: bool` — `True` for IPv6, `False` for IPv4.
-- `is_tcp: bool` — `True` for TCP, `False` for UDP.
+- `is_tcp: bool` — `True` for TCP. `False` for a datagram, and `False` for QUIC.
+- `l4: str` — what carries this connection: `"tcp"`, `"udp"`, `"quic"` for a stream
+  inside a QUIC connection, or `"quic-datagram"` for a DATAGRAM frame in one.
+- `is_stream: bool` — whether these bytes arrive in order, once each, as part of a
+  stream: true for TCP and for a QUIC stream, false for either kind of datagram. This is
+  what every model above `RawPacket` actually needs, and the two came apart when QUIC
+  arrived — it is a stream *and* it is UDP, so one flag answering both questions gets one
+  of them wrong. A filter asking for a stream model is simply not called for a datagram,
+  so one file can carry both.
 - `src_ip: str`, `dst_ip: str`, `src_port: int`, `dst_port: int` — where this chunk came from and where it is going (read-only).
 - `client_ip`, `client_port`, `server_ip`, `server_port` — the same two endpoints named by role instead of by direction, so a filter does not have to branch on `is_input` to find out who the client is (read-only).
 - `was_mangled: bool` — whether an earlier filter in the chain already rewrote this chunk.
@@ -284,6 +317,58 @@ def check_previous_requests(resp: HttpResponse):
 ```
 
 The number of entries kept per stream is capped by the `FGEX_MAX_HISTORY_SIZE` global (default `100`) — see [Other global options](#other-global-options) below; once the cap is reached, the oldest entry is dropped as a new one is added.
+
+### gRPC messages
+
+**HTTP only.** `GrpcMessage`, `GrpcRequest` and `GrpcResponse` hand you **one gRPC message
+at a time**, with its length prefix taken off.
+
+gRPC is HTTP/2, and firegex renders every version of HTTP to the filters as HTTP/1.1 — so
+everything *around* a call already arrives through the models above: the method is the
+path on an `HttpRequest`, the metadata are its headers, the status is in the trailer
+section. What did not arrive was the body. A gRPC body is a sequence of messages, each one
+a flag byte, a four-byte length and then the protobuf; a filter reading `request.body` read
+that framing glued to the payload, and a pattern could match across the boundary between
+two messages — a false positive with nothing to point at.
+
+```python
+from firegex.pyfilters import pyfilter, ACCEPT, REJECT
+from firegex.pyfilters.models import GrpcMessage
+
+@pyfilter
+def refuse_a_payload(message: GrpcMessage):
+    if b"../" in message.payload:
+        return REJECT
+    return ACCEPT
+```
+
+| Member | What it is |
+|---|---|
+| `payload` | This message's bytes, without the length prefix |
+| `compressed` | Whether this message's own flag byte says it is compressed |
+| `is_request` | Whether it went from the client towards the service |
+| `method` | The gRPC method, which is the HTTP path: `/package.Service/Method` |
+| `grpc_status` | The status, where the message carrying it stated one |
+
+`GrpcRequest` and `GrpcResponse` are the same thing narrowed to one direction, so you do
+not have to check `is_request` yourself.
+
+**It is called per message, not per body**, and that is the part that matters: a
+server-streaming or bidirectional call has a body that does not finish until the stream
+closes, so a model that waited for a finished body would call your filter once, at the
+end — a log entry rather than a block. Each message is handed over as it completes, and a
+message split across two packets is held until it is whole: deciding on half a payload is
+how a pattern gets defeated by splitting it.
+
+Two things it deliberately does **not** do. It does not decompress a message whose flag
+byte says it is compressed — what it is compressed with is the two peers' agreement
+(`grpc-encoding`), and guessing is how a filter comes to read something that is not there,
+so you get `compressed` and the raw bytes. And it does not decode the protobuf: without
+your `.proto` there is no schema, so `payload` is bytes and a pattern against them is what
+a ruleset has.
+
+A filter asking for one of these is simply **not called** on traffic that is not gRPC, the
+way every other model declines when what it needs is not there.
 
 ## Stream limiter
 

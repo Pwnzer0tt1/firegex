@@ -14,7 +14,7 @@ use std::io::Write;
 use std::time::{Duration, Instant};
 
 use fgex_proxy::filter::{
-    next_connection_id, ChainSessions, ConnectionMeta, Direction, FilterChain, Verdict,
+    next_connection_id, ChainSessions, ConnectionMeta, Direction, FilterChain, Verdict, L4,
 };
 use fgex_proxy::rules::parse_ruleset;
 
@@ -391,7 +391,7 @@ def only_from_that_client(packet: RawPacket):
     let meta = ConnectionMeta {
         client: "10.0.0.9:51000".parse().unwrap(),
         server: "10.0.0.1:8080".parse().unwrap(),
-        tcp: true,
+        l4: L4::Tcp,
     };
     assert_eq!(
         feed_from(&c, &[b"hello"], Some(meta)).await,

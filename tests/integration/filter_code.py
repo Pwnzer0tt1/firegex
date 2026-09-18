@@ -179,3 +179,18 @@ def no_annotation(packet):
 
 #: Not valid Python at all.
 SYNTAX_ERROR = "def broken(:\n    pass\n"
+
+
+#: A filter that reads gRPC messages rather than the body they arrive in.
+#:
+#: The same file works on a unary call and on a streaming one, because the model hands
+#: over one message as each completes rather than waiting for the body to end — which on
+#: a bidirectional RPC it does not do until the stream closes.
+GRPC = """from firegex.pyfilters import pyfilter, ACCEPT, REJECT
+from firegex.pyfilters.models import GrpcMessage
+
+
+@pyfilter
+def refuse_forbidden_payload(message: GrpcMessage):
+    return REJECT if b"NOT-THIS-ONE" in message.payload else ACCEPT
+"""

@@ -103,6 +103,24 @@ pub fn client_config() -> Result<Arc<ClientConfig>, String> {
     Ok(Arc::new(config))
 }
 
+/// The same thing for QUIC, where TLS 1.3 is not a preference.
+///
+/// QUIC carries its handshake in 1.3 and only 1.3, and a config still offering 1.2 is
+/// refused outright by `QuicClientConfig` rather than quietly negotiating down — so the
+/// version list is narrowed here, where the reason can be written next to it, instead of
+/// at the call site as a conversion error nobody can act on.
+pub fn quic_client_config() -> Result<ClientConfig, String> {
+    let provider = provider();
+    Ok(
+        ClientConfig::builder_with_provider(Arc::clone(&provider))
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .map_err(|e| format!("cannot configure QUIC: {e}"))?
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAnyServer(provider)))
+            .with_no_client_auth(),
+    )
+}
+
 /// The process-wide crypto provider, installed once.
 fn provider() -> Arc<rustls::crypto::CryptoProvider> {
     if let Some(installed) = rustls::crypto::CryptoProvider::get_default() {

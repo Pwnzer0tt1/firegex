@@ -13,7 +13,7 @@ import FilterCard from '../../components/Services/FilterCard';
 import LogPanel from '../../components/Services/LogPanel';
 import { addressSummary, ServiceMenu, transportLabel, transportSummary } from '../../components/Services/ServiceRow';
 import StatsPanel from '../../components/Services/StatsPanel';
-import { decrypts, Filter, FilterKind, serviceFiltersQuery, serviceQueryKey, services, servicesQuery, Transport } from '../../components/Services/utils';
+import { decrypts, Filter, FilterKind, protoLabel, serviceFiltersQuery, serviceQueryKey, services, servicesQuery, Transport } from '../../components/Services/utils';
 import YesNoModal from '../../components/YesNoModal';
 import { errorNotify, okNotify } from '../../js/utils';
 
@@ -83,10 +83,12 @@ export default function ServiceDetails() {
                             </Badge>
                         </Tooltip>
                         {decrypts(service) ? <Badge color="grape" variant="light" size="sm" radius="sm"
-                            leftSection={<TbShieldLock size={11} />}>TLS</Badge> : null}
+                            leftSection={<TbShieldLock size={11} />}>
+                            {protoLabel(service.proto)}
+                        </Badge> : null}
                     </Group>
                     <Text size="xs" c="dimmed" mt={2}>
-                        {addressSummary(service.addresses)} on {service.proto.toUpperCase()}
+                        {addressSummary(service.addresses)} on {protoLabel(service.proto)}
                     </Text>
                 </Box>
             </Group>

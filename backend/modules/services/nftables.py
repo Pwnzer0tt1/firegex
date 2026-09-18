@@ -48,6 +48,29 @@ QUEUE_MARK_OUTPUT = 0x1338
 #: growing except that every position costs two chains whether or not anyone uses it.
 MAX_CHAIN_POSITIONS = 8
 
+#: Where the proxy layer's redirect sits in the prerouting and output hooks.
+#:
+#: **Before `dstnat` (-100), and that is the whole point.** Docker and podman publish a
+#: container's port by appending their own chain to `nat PREROUTING`, which `iptables-nft`
+#: registers at exactly `dstnat` — the priority this used to share. Two base chains at one
+#: priority in two tables are ordered by neither of them, and measured on a host where the
+#: DNAT went first: it rewrote the destination to the container's address, firegex's rule
+#: (which matches the *published* address) stopped matching, its counter stayed at zero,
+#: and traffic carrying a blocked pattern was answered by the container. The service still
+#: read `ACTIVE`. Protection that disappears without saying so is the worst failure this
+#: module has, and a race nobody arbitrates is not a thing to leave to luck.
+#:
+#: So the redirect runs first and the published port is captured before anybody can
+#: rewrite it — which is the property the NFQUEUE layer already had for free by living at
+#: `raw`, three hundred below any of this. The engine's own dial is not caught by the
+#: rule it would otherwise match (`SELF_MARK`), so whatever DNAT the container runtime
+#: installs still does its job on the way out, exactly as before.
+#:
+#: The floor is conntrack at -200: a `nat` chain registered before it has no connection to
+#: attach a translation to. Anything between the two behaves identically; this one is far
+#: enough from both to leave room.
+NAT_PRIORITY = -120
+
 # Shared by the divert rule and the return rule; policy routing keys off it.
 PROXY_MARK = 0x1339
 # Routing table holding the `local` default that makes marked packets be delivered
@@ -65,6 +88,13 @@ PROXY_SELF_MARK = 0x133A
 def resolve_target(srv: Service, addr: Address) -> tuple[str, int] | None:
     """Where one address's rules should point: at the address itself.
 
+    This is the address the **world knocks on**, which is what a rule has to match, and
+    it is not always where the service is — see [`service_at`]. The two were one answer
+    for as long as firegex was transparent and only transparent, and making this one
+    return the other quietly redirected the service's own port twice and left the
+    published one unprotected, which is a service that looks configured and answers
+    nothing.
+
     It used to be somewhere else for a TLS service. nginx terminated the connection on
     one derived loopback port and re-encrypted from a second, and the rules were pointed
     at the plaintext leg in between — which is why protecting one address cost two ports
@@ -77,6 +107,23 @@ def resolve_target(srv: Service, addr: Address) -> tuple[str, int] | None:
     the right answer for an address that cannot be resolved.
     """
     return addr.ip_int, addr.port
+
+
+def service_at(srv: Service, addr: Address) -> tuple[str, int] | None:
+    """Where the service reached through one address actually is.
+
+    The address itself, unless that address is a **publication**: one daemon answering
+    HTTP/1.1 in the clear on `:80` can be reached over TLS on `:443` and over HTTP/3 on a
+    UDP port, all three sent back to the port it already listens on. Firegex is then not
+    transparent on those addresses, which is the point of them and the reason it is said
+    per address rather than per service.
+
+    Everything that *dials* asks this — the UDP and QUIC relays, whose upstream is fixed
+    when they are bound, and the TCP listener, which is told through `FGEX_PROXY_TARGETS`
+    because one listener fronts every address and recovers each connection's destination
+    from conntrack. Everything that *matches* asks [`resolve_target`].
+    """
+    return addr.ip_int, (addr.target_port or addr.port)
 
 
 def one_address(ip: str) -> str:
@@ -116,6 +163,28 @@ def udp_relay_host(ip: str) -> str:
             f"UDP relay to bind to"
         )
     return ordered[0]
+
+
+#: Written on the output-hook rules an interface address installs, so they can be found
+#: again. There is nothing in the packet that names the interface there — see
+#: `interface_addresses` — so the rule says which interface it belongs to itself.
+IFACE_COMMENT = "iface "
+
+
+def interface_addresses(ip: str) -> list[str]:
+    """Every address an interface carries right now, as a rule can match them.
+
+    Link-local is left out for the reason `udp_relay_host` takes it last: an interface
+    almost always carries an `fe80::` it was never configured with, and nothing dials a
+    service there.
+    """
+    if is_ip_parse(ip):
+        return [one_address(ip)]
+    return [
+        one_address(addr.split("%")[0])
+        for addr in get_interface_ips(ip)
+        if not addr.lower().startswith(("fe80:", "169.254."))
+    ]
 
 
 def udp_relay_key(ip: str, port: int) -> str:
@@ -275,10 +344,12 @@ class FiregexTables(NFTableManager):
                         }
                     }
                 },
-                _chain(self.nat_chain, "nat", "prerouting", -100),
+                _chain(self.nat_chain, "nat", "prerouting", NAT_PRIORITY),
                 # Locally generated traffic never reaches the nat prerouting hook, and
                 # a client on this host protecting a service on this host is exactly that.
-                _chain(self.nat_output_chain, "nat", "output", -100),
+                # Same priority for the same reason: a container runtime publishes a port
+                # in `nat OUTPUT` as well, so the race is the same one on this hook.
+                _chain(self.nat_output_chain, "nat", "output", NAT_PRIORITY),
                 # `route`, so changing the mark forces the packet to be re-routed.
                 _chain(self.route_chain, "route", "output", -150),
                 # Installed once. A packet on the intercepted (redirected) connection
@@ -405,7 +476,8 @@ class FiregexTables(NFTableManager):
             },
         ]
 
-    def _rule(self, chain: str, expr: list, insert: bool = False) -> dict:
+    def _rule(self, chain: str, expr: list, insert: bool = False,
+              comment: str | None = None) -> dict:
         verb = "insert" if insert else "add"
         return {
             verb: {
@@ -414,6 +486,7 @@ class FiregexTables(NFTableManager):
                     "table": self.table_name,
                     "chain": chain,
                     "expr": expr,
+                    **({"comment": comment} if comment else {}),
                 }
             }
         }
@@ -455,7 +528,11 @@ class FiregexTables(NFTableManager):
                 # at that address's port rather than at the one shared TCP listener.
                 port = proxy_port
                 if l4 == "udp":
-                    key = udp_relay_key(udp_relay_host(target_ip), target_port)
+                    # Keyed by where the relay *sends*, which is how the engine reported
+                    # it: a published address and the service behind it are two ports,
+                    # and the relay is filed under the second.
+                    service_ip, service_port = service_at(srv, addr)
+                    key = udp_relay_key(udp_relay_host(service_ip), service_port)
                     port = (udp_ports or {}).get(key)
                     if port is None:
                         raise Exception(
@@ -559,21 +636,65 @@ class FiregexTables(NFTableManager):
         # a service on it. Conntrack NATs a connection once, so a rule in each is not a
         # double translation.
         is_iface = not is_ip_parse(ip)
+        # **The match is the interface, and nothing narrower.** Pinning the destination to
+        # the addresses the interface carries was tried, to stop a service protecting
+        # `docker0:443` from also taking every container's outbound HTTPS — which it does,
+        # measured, terminating it with the service's certificate. It was reverted: an
+        # interface name exists precisely for the case where **the address is not the
+        # operator's to know**, which includes firegex sitting in front of a service on
+        # another machine reached through that link, and pinning to this host's own
+        # addresses quietly removes that. Protecting an interface protects what crosses
+        # it; naming a link that carries other people's traffic is a choice, and the
+        # answer to not wanting it is a narrower address, not a narrower rule.
         redirect = (
             self._not_ours()
             + self._match(ip, port, family, l4, "daddr", "dport")
             + [self.COUNTER, {"redirect": {"port": int(proxy_port)}}]
         )
-        cmds = [
-            self._rule(self.nat_chain, redirect),
+        cmds = [self._rule(self.nat_chain, redirect)]
+        cmds.append(
             self._rule(
                 self.route_chain,
                 self._match(ip, port, family, l4, "saddr", "sport")
                 + [{"mangle": {"key": {"meta": {"key": "mark"}}, "value": PROXY_MARK}}],
-            ),
-        ]
+            )
+        )
         if not is_iface:
             cmds.append(self._rule(self.nat_output_chain, redirect))
+        else:
+            # An interface address has to be caught in the output hook too, and cannot be
+            # caught the same way. `iifname` means nothing for a packet this host is
+            # generating, and `oifname` is the wrong question twice over: `oifname eth0
+            # dport 80` would mean *we* are calling somebody else's port 80, which is the
+            # host's own outbound traffic and none of firegex's business — and a
+            # connection from this host to one of its **own** addresses is routed through
+            # `lo` anyway, so it would never match.
+            #
+            # So the destination is matched instead, against the addresses that interface
+            # carries. That is exactly "this host calling a service it protects", and it
+            # is what an operator means when they protect `lo` and then curl `127.0.0.1`.
+            # Without it the service was intercepted for the outside world and silently
+            # not for anything on the box, which is the shape of an interception canary
+            # failing and is how this was reported.
+            #
+            # The addresses are resolved now rather than stored, and that is the cost:
+            # one the interface gains later is not covered *for traffic this host
+            # generates* until the service restarts. Inbound keeps matching `iifname`, so
+            # it follows the interface as it always did. `udp_relay_host` pays the same
+            # price for the same reason.
+            #
+            # The rule carries the interface's name as a comment because nothing else in
+            # it does. `delete()` finds a rule by what it matches, and these match an
+            # address; without the comment they would be left behind on every stop — a
+            # redirect to a port nobody is listening on any more.
+            for addr in interface_addresses(ip):
+                cmds.append(self._rule(
+                    self.nat_output_chain,
+                    self._not_ours()
+                    + self._match(addr, port, ip_family(addr), l4, "daddr", "dport")
+                    + [self.COUNTER, {"redirect": {"port": int(proxy_port)}}],
+                    comment=f"{IFACE_COMMENT}{ip}",
+                ))
         self.cmd(*cmds)
 
     # --- reading back ---------------------------------------------------------
@@ -611,6 +732,14 @@ class FiregexTables(NFTableManager):
                     ip_int = str(expr[0]["match"]["right"])
                 else:
                     continue
+                # An output-hook rule installed for an interface matches one of that
+                # interface's addresses, so what it matches does not say whose it is.
+                # The comment does, and reading it back here is what lets the rest of
+                # this file go on treating the rule as the interface's — including
+                # `delete()`, which would otherwise never find it.
+                note = str(rule.get("comment") or "")
+                if note.startswith(IFACE_COMMENT):
+                    ip_int = note[len(IFACE_COMMENT):]
                 counter = next(
                     (e["counter"] for e in expr if isinstance(e, dict) and "counter" in e),
                     {},

@@ -23,11 +23,17 @@ type Layer = {
     /** Folded in when the service speaks UDP, where the trade moves. */
     udpGood?: string[],
     udpBad?: string[],
+    /** And when it speaks QUIC, where it moves again and further. */
+    quicGood?: string[],
+    quicBad?: string[],
+    /** And when it speaks HTTP, which is every version of it at once. */
+    httpGood?: string[],
+    httpBad?: string[],
 }
 
 const LAYERS: Record<string, Layer> = {
     [Transport.PROXY]: {
-        line: "Terminates and reopens the connection — the faster of the two, and the only one that can decrypt TLS.",
+        line: "Terminates and reopens the connection — the faster of the two, and the only one that can decrypt TLS or QUIC.",
         good: [
             "Carries bulk traffic 2-5× faster, and scales better with threads",
             "Python filters rewrite a payload exactly, at any length",
@@ -42,6 +48,29 @@ const LAYERS: Record<string, Layer> = {
         udpGood: [
             "One relay socket per address — no per-datagram state to recover",
             "Your service still sees the real client address (transparent IP spoofing)",
+        ],
+        quicGood: [
+            "The only layer that can see inside QUIC at all",
+            "Every stream is filtered on its own, with its own state",
+            "One endpoint per address, and the client address still reaches the service",
+            "Each stream reaches firegex0 as its own TCP stream, HTTP/3 as HTTP/1.1",
+        ],
+        quicBad: [
+            "No 0-RTT: early data is replayable, and a refusal cannot be taken back",
+            "No datagrams on HTTP/3, and no WebTransport",
+            "A refused stream closes the connection carrying it",
+        ],
+        httpGood: [
+            "HTTP/1.1, HTTP/2 and HTTP/3 through one chain, with one certificate",
+            "One filter file and one pattern cover all three: every version is shown as HTTP/1.1",
+            "Each address picks its own edge — cleartext, TLS, or HTTP/3",
+            "gRPC is filtered, request line and headers included, trailers included",
+            "TLS is decided per connection, so one port may serve both",
+        ],
+        httpBad: [
+            "A certificate is needed even for the cleartext addresses beside it",
+            "Every HTTP/2 stream is its own connection to a filter, unlike keep-alive on HTTP/1.1",
+            "Server push and CONNECT tunnels are refused rather than rendered",
         ],
     },
     [Transport.NFQUEUE]: {
@@ -108,9 +137,13 @@ export default function LayerChoice({ value, onChange, proto }: {
     const [open, setOpen] = useState(false)
     const layer = LAYERS[value] ?? LAYERS[Transport.PROXY]
     const udp = proto === L4.UDP
+    const quic = proto === L4.QUIC
+    const http = proto === L4.HTTP
     const unavailable = Object.keys(LABELS).filter(t => !carries(t, proto))
-    const good = [...layer.good, ...(udp ? layer.udpGood ?? [] : [])]
-    const bad = [...layer.bad, ...(udp ? layer.udpBad ?? [] : [])]
+    const good = [...layer.good, ...(udp ? layer.udpGood ?? [] : []),
+        ...(quic ? layer.quicGood ?? [] : []), ...(http ? layer.httpGood ?? [] : [])]
+    const bad = [...layer.bad, ...(udp ? layer.udpBad ?? [] : []),
+        ...(quic ? layer.quicBad ?? [] : []), ...(http ? layer.httpBad ?? [] : [])]
 
     return <>
         <Group justify="space-between" align="center" mb={6}>
@@ -139,7 +172,11 @@ export default function LayerChoice({ value, onChange, proto }: {
                         <Badge size="sm" radius="sm" variant="light" color="indigo">
                             {LABELS[value]}
                         </Badge>
-                        {udp ? <Badge size="sm" radius="sm" variant="outline" color="gray">UDP</Badge> : null}
+                        {udp || quic || http
+                            ? <Badge size="sm" radius="sm" variant="outline" color="gray">
+                                {proto.toUpperCase()}
+                            </Badge>
+                            : null}
                     </Group>
                     <Text size="xs" c="dimmed" mb="sm">{layer.line}</Text>
                     <Divider mb="sm" />
@@ -162,11 +199,12 @@ export default function LayerChoice({ value, onChange, proto }: {
         />
         <Space h={6} />
         <Text size="xs" c="dimmed">{layer.line}</Text>
+        {/* One line. What is worth reading here is which layers are out and why, not the
+            whole argument for it — that is what the documentation is for. */}
         {unavailable.length > 0 ? <Text size="xs" c="dimmed" mt={4}>
-            {unavailable.map(t => LABELS[t]).join(" and ")}
-            {unavailable.length > 1 ? " are" : " is"} not available for a service that speaks
-            TLS: decrypting means terminating the connection, and only this layer does that.
-            Set the protocol to TCP to use {unavailable.length > 1 ? "them" : "it"}.
+            {unavailable.map(t => LABELS[t]).join(" and ")} cannot carry encrypted
+            traffic: decrypting means terminating the connection, and only this layer
+            does that.
         </Text> : null}
     </>
 }

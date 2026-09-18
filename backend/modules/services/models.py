@@ -12,6 +12,7 @@ that can host it, and the service does not have to be recreated to change either
 """
 
 import base64
+import os
 import uuid
 
 from utils import is_ip_parse
@@ -59,13 +60,60 @@ class L4:
     UDP = "udp"
     #: TLS over TCP, terminated by the engine.
     TLS = "tls"
+    #: QUIC, terminated by the engine. UDP on the wire, TLS 1.3 inside it, and streams
+    #: inside that — which is the only reason a filter has anything to look at: once past
+    #: the Initial packet, QUIC encrypts the frames and the stream boundaries along with
+    #: the payload, so a layer that forwards has nothing to show anybody.
+    QUIC = "quic"
+    #: Every version of HTTP, on whichever transport each address carries it.
+    #:
+    #: The odd one out, and deliberately so. The other four say what is on the wire;
+    #: this one says what the *service* is, and lets each address say how it is reached
+    #: — `:80` in the clear, `:443` under TLS, `:443/udp` under QUIC. One service, one
+    #: chain, one certificate, and HTTP/1.1, HTTP/2 and HTTP/3 all rendered to the
+    #: filters as the same HTTP/1.1.
+    #:
+    #: It exists because the alternative was two or three services with hand-copied
+    #: filter chains: HTTP/1.1 and HTTP/2 live on `tls` (TCP) and HTTP/3 on `quic`
+    #: (UDP), and a chain that has to be kept in step by hand is a chain that stops
+    #: protecting one of them silently — the same argument that put several addresses
+    #: under one service in the first place.
+    #:
+    #: Nothing about the *kernel* becomes ambiguous, because nothing here is asked of
+    #: the kernel: each address still carries its own `tcp` or `udp`, which is what the
+    #: rules match and what `(ip, port, proto)` is keyed on. What the connection turns
+    #: out to be — TLS or not, HTTP/2 or not — is decided by the engine per connection,
+    #: from what the client actually sent.
+    HTTP = "http"
 
-    ALL = (TCP, UDP, TLS)
+    ALL = (TCP, UDP, TLS, QUIC, HTTP)
 
     @staticmethod
     def l4_of(proto: str) -> str:
-        """The transport a rule has to match to catch this service's traffic."""
-        return L4.UDP if str(proto) == L4.UDP else L4.TCP
+        """The transport a rule has to match to catch this service's traffic.
+
+        Two of the four are the other two wearing a hat: `tls` is TCP on the wire and
+        `quic` is UDP. That is what keeps `(ip, port, proto)` a key meaning what it says
+        — without it a TLS service and a TCP one, or a QUIC service and a UDP one, could
+        each claim one `ip:port` between them, which on the wire is the same port twice.
+
+        `http` answers `tcp` here, which is the right *default* for an address that does
+        not say otherwise and never the whole answer: an `http` service's addresses each
+        carry their own, because it is the one protocol whose addresses are not all on
+        the same transport. Ask `Service.carries` rather than the service's protocol
+        whenever the question is about the kernel.
+        """
+        return L4.UDP if str(proto) in (L4.UDP, L4.QUIC) else L4.TCP
+
+    @staticmethod
+    def edges_of(proto: str) -> tuple[str, ...]:
+        """Which transports an address of this service may be reached on.
+
+        One for every protocol but `http`, which is the point of `http`.
+        """
+        if str(proto) == L4.HTTP:
+            return (L4.TCP, L4.UDP)
+        return (L4.l4_of(proto),)
 
 
 class PROTO:
@@ -131,6 +179,44 @@ class MODE:
     ALL = (CLIENT_TO_SERVER, SERVER_TO_CLIENT, BOTH)
 
 
+class UPSTREAM:
+    """What the service *behind one address* speaks.
+
+    The engine used to have one answer and never asked: whatever the client spoke, the
+    service was assumed to speak too — a TLS connection was re-encrypted on the way out,
+    a QUIC one re-encoded as QUIC. That is right whenever firegex is carrying somebody
+    else's encryption, and wrong in the case an operator most often has, which is a
+    service that speaks neither and never will.
+
+    So it is three answers now, and they are about the *service*, not about the client:
+
+    * `same` — it speaks what the client spoke. The default, and what every service did
+      before there was a choice;
+    * `tcp` — it answers in the clear. Firegex terminates the client's TLS or QUIC and
+      forwards the plaintext, which makes firegex the thing that *adds* the encryption
+      rather than the thing that carries it;
+    * `tls` — it speaks TLS, whatever the client used to get here. On a TLS service that
+      is `same` by another name; under QUIC it is the one that matters, because it is
+      how an HTTPS-only service is reached from an HTTP/3 client.
+
+    Under QUIC the last two are not a pass-through: HTTP/3 has no cleartext form, so what
+    reaches the service is the HTTP/1.1 the filters were already being shown. That is the
+    one place in the engine where what leaves is not the version that arrived, and it is
+    only ever the operator's explicit choice.
+    """
+
+    SAME = "same"
+    TCP = "tcp"
+    TLS = "tls"
+
+    ALL = (SAME, TCP, TLS)
+
+    @staticmethod
+    def env(upstream: str) -> str:
+        """What the engine is told. One variable, because it is one question."""
+        return {UPSTREAM.TCP: "plain", UPSTREAM.TLS: "tls"}.get(str(upstream), "same")
+
+
 class Address:
     """One address a service is protected on.
 
@@ -141,10 +227,19 @@ class Address:
     filter chains in step by hand, and a chain that drifted was a chain that stopped
     protecting one of them silently.
 
-    The transport protocol is carried here as well as on the service, and is always the
-    service's own. Denormalised on purpose: it is what makes `(ip, port, proto)` a
-    usable uniqueness key, so a TCP service and a UDP one can share an address the way
-    the kernel lets them.
+    The transport protocol is carried here as well as on the service. Denormalised on
+    purpose: it is what makes `(ip, port, proto)` a usable uniqueness key, so a TCP
+    service and a UDP one can share an address the way the kernel lets them. It is
+    derived — `L4.l4_of(edge)` — because `tls` is TCP on the wire and `quic` is UDP, and
+    what the kernel matches is a smaller question than what the address carries.
+
+    Two things an address says for itself, and both are why it says anything at all:
+    **what is spoken at it** (`edge`) and **where that traffic goes** (`target_port`).
+    Firegex was transparent and only transparent — the client dialled the service's own
+    address and the engine dialled it back as the client — which meant a service could
+    only be protected where it already listened. One service answering in the clear on
+    `:80`, reached over TLS on `:443` and over HTTP/3 on a UDP port, is three rows
+    pointing at one port.
     """
 
     def __init__(
@@ -154,6 +249,9 @@ class Address:
         ip_int: str,
         port: int,
         proto: str = L4.TCP,
+        edge: str | None = None,
+        target_port: int | None = None,
+        upstream: str = UPSTREAM.SAME,
         proxy_ip: str | None = None,
         proxy_port: int | None = None,
         **other,
@@ -163,6 +261,27 @@ class Address:
         self.ip_int = ip_int
         self.port = port
         self.proto = proto
+        #: What clients speak *at this address*: one of `tcp`, `tls`, `udp`, `quic` —
+        #: the same words a service speaks, minus `http`, which is the one that means
+        #: "ask the addresses". For every protocol but that one it is the service's own
+        #: and the operator never sees it; on an `http` service it is the choice, and it
+        #: is what decides whether this address needs a certificate behind it and which
+        #: transport the kernel matches.
+        self.edge = str(edge or proto)
+        #: Where the traffic that arrives here is actually sent, when that is not the
+        #: port it arrived on. `None` is the transparent case and the default: firegex
+        #: dials the address the client dialled, as the client, and the service sees
+        #: exactly what it would have seen without any of this.
+        #:
+        #: Set, this address is a *publication*: one service answered on `:80` in the
+        #: clear and reached on `:443` under TLS, or on a QUIC port, without moving. The
+        #: address is where the world knocks; this is where the service is.
+        self.target_port = int(target_port) if target_port else None
+        #: What the service *behind this address* speaks. See [`UPSTREAM`]. It belongs to
+        #: the address rather than to the service because that is where the question has
+        #: an answer: one daemon is reached over TLS on one port and in the clear on
+        #: another, and what firegex does on the way out is a property of the way in.
+        self.upstream = str(upstream or UPSTREAM.SAME)
         #: Where the operator's own proxy is listening for *this* address. Only for
         #: `external`, and per address rather than per service: the return rule rewrites
         #: the source port back to the original one, so two addresses handed to the same
@@ -181,6 +300,9 @@ class Address:
             "ip_int": self.ip_int,
             "port": self.port,
             "proto": self.proto,
+            "edge": self.edge,
+            "target_port": self.target_port,
+            "upstream": self.upstream,
             "proxy_ip": self.proxy_ip,
             "proxy_port": self.proxy_port,
         }
@@ -195,6 +317,58 @@ class Address:
 
     def __repr__(self):
         return f"<Address {self.ip_int}:{self.port}/{self.proto}>"
+
+
+def quic_alpn() -> tuple[str, ...]:
+    """What this instance offers a QUIC service's clients, in order.
+
+    Instance-wide (`FGEX_PROXY_QUIC_ALPN`) rather than per service, because nothing has
+    yet wanted a column for it: `h3` is what a QUIC service speaks nine times in ten, and
+    an instance in front of something else sets it in its own environment the way the
+    filter deadline beside it is set. Read here as well as where the engine is launched
+    so that the one question it decides — whether an exchange can be rendered at all —
+    has a single answer.
+    """
+    raw = os.getenv("FGEX_PROXY_QUIC_ALPN", "h3")
+    listed = tuple(p.strip() for p in raw.split(",") if p.strip())
+    return listed or ("h3",)
+
+
+def upstream_refusal(proto: str, upstream: str, edge_is_udp: bool) -> str | None:
+    """Why one address cannot be forwarded the way it was told to, or `None`.
+
+    Asked of an **address** rather than of the service, because that is where it is
+    chosen: what is behind `:443` is the same daemon as what is behind `:80`, but the two
+    reach it differently — one may be re-encrypted and the other handed the plaintext, and
+    on an `http` service the two are separate ports with separate answers. Asked from the
+    three places that would otherwise drift: when an address is created, when one is
+    added, and in `ProxyTransport.check`.
+
+    One thing is impossible, and it is impossible rather than unimplemented: a QUIC edge
+    carrying something that is **not HTTP/3**. What lets an HTTP/3 client reach a service
+    that speaks HTTP/1.1 is that the exchange is already rendered as HTTP/1.1 for the
+    chain, so sending that rendering on invents nothing. Opaque bytes on a QUIC stream
+    have no such form — there is no HTTP/1.1 spelling of "some bytes" — so an address
+    whose clients speak anything else has nothing that could be forwarded.
+
+    Which is a fact about the **ALPN**, not about the protocol: a `quic` service offering
+    `h3`, which is the default and the usual case, is exactly as renderable as an `http`
+    one, and an instance that has set `FGEX_PROXY_QUIC_ALPN` to something else is the one
+    that cannot do this — on both.
+    """
+    if str(upstream) == UPSTREAM.SAME:
+        return None
+    if str(proto) not in (L4.TLS, L4.QUIC, L4.HTTP):
+        return None
+    alpn = quic_alpn()
+    if edge_is_udp and "h3" not in alpn:
+        return (
+            f"This instance offers QUIC clients {', '.join(alpn)}, and only HTTP/3 can be "
+            f"rendered to a service that speaks HTTP/1.1 — anything else on a QUIC stream "
+            f"is opaque bytes with no HTTP/1.1 form to forward. Let this address be "
+            f"forwarded as it arrives, or take its HTTP/3 edge away."
+        )
+    return None
 
 
 class Service:
@@ -240,7 +414,7 @@ class Service:
         return cls(**var)
 
     @property
-    def terminates_tls(self) -> bool:
+    def decrypts(self) -> bool:
         """Whether the engine decrypts this service's traffic before filtering it.
 
         Read off what the service speaks rather than held beside it. Only the proxy layer
@@ -248,13 +422,49 @@ class Service:
         layer does. It was once orthogonal to the layer, which took an nginx in front of
         NFQUEUE to arrange — so the connection was terminated anyway, and the one
         property that layer has over the other was already gone.
+
+        Named for what it does rather than for TLS, because two protocols do it now and
+        QUIC is the one with no alternative: TLS over TCP can at least be carried past
+        unopened, while a QUIC packet past the handshake has its frames encrypted too.
+        Both need the same thing from the operator, which is a certificate.
+
+        `http` is in the list because a certificate is the whole of what it adds: a
+        cleartext HTTP service is already `tcp`, and HTTP/2 in the clear is recognised
+        there from the connection preface whatever the service is called. What `http`
+        buys over that is the TLS and the QUIC edges, and neither exists without one.
         """
-        return str(self.proto) == L4.TLS
+        return str(self.proto) in (L4.TLS, L4.QUIC, L4.HTTP)
 
     @property
     def l4(self) -> str:
-        """The transport the kernel sees, which is what a rule has to match."""
+        """The transport the kernel sees, which is what a rule has to match.
+
+        Only meaningful where a service has one. An `http` service is reached on both,
+        and everything that used to ask this of such a service asks `carries` instead:
+        the answer here is its addresses' default, not a claim about all of them.
+        """
         return L4.l4_of(self.proto)
+
+    def carries(self, l4: str) -> bool:
+        """Whether any of this service's addresses is reached over `l4`.
+
+        The question every rule, listener and relay actually has, and the one that
+        stopped having a single answer when `http` arrived. A service with no addresses
+        yet is answered from its protocol, so a check made at creation — before there is
+        an address to look at — still means something.
+        """
+        if not self.addresses:
+            return l4 in L4.edges_of(self.proto)
+        return any(L4.l4_of(addr.proto or self.proto) == l4 for addr in self.addresses)
+
+    @property
+    def udp_addresses(self) -> list:
+        """The addresses that need a relay of their own: datagrams, and QUIC."""
+        return [
+            addr
+            for addr in self.addresses
+            if L4.l4_of(addr.proto or self.proto) == L4.UDP
+        ]
 
     @property
     def has_ipv6(self) -> bool:
@@ -264,6 +474,20 @@ class Service:
         property of the service and not of one address: one listener serves them all.
         """
         return any(addr.is_ipv6 for addr in self.addresses)
+
+    @property
+    def has_ipv6_tcp(self) -> bool:
+        """Whether the *TCP* listener needs to be able to accept IPv6.
+
+        The narrower question, and the one worth asking before rebuilding a service: the
+        only listener that can have its family wrong is the TCP one. Everything relayed
+        per address — datagrams, and QUIC — binds a socket in the family of the address
+        when it arrives. On an `http` service the two sit side by side, so an IPv6 HTTP/3
+        address must not cost every TCP connection on the service a restart it did not
+        need.
+        """
+        udp = {addr.id for addr in self.udp_addresses}
+        return any(addr.is_ipv6 for addr in self.addresses if addr.id not in udp)
 
     def to_dict(self) -> dict:
         # The certificate goes out, the key never does: it is write-only from the

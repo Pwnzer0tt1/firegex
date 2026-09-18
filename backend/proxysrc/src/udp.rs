@@ -29,7 +29,7 @@ use tokio::net::UdpSocket;
 use crate::proxy::ProxyStats;
 use crate::filter::{
     next_connection_id, ChainHandle, ChainSessions, ConnectionId, ConnectionMeta, Direction,
-    Verdict,
+    Verdict, L4,
 };
 
 /// The largest datagram this relay will carry. Comfortably past the practical MTU and
@@ -251,7 +251,7 @@ impl UdpRelay {
             &ConnectionMeta {
                 client,
                 server: self.upstream,
-                tcp: false,
+                l4: L4::Udp,
             },
         );
 

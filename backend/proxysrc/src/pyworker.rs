@@ -39,7 +39,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::filter::{ConnectionId, ConnectionMeta, Direction, Filter, FilterCtx, Verdict};
+use crate::filter::{ConnectionId, ConnectionMeta, Direction, Filter, FilterCtx, Verdict, L4};
 
 const VERDICT_ACCEPT: u8 = 0;
 const VERDICT_REJECT: u8 = 1;
@@ -292,7 +292,13 @@ impl Filter for PyWorkerRule {
             "server_ip": meta.server.ip().to_string(),
             "server_port": meta.server.port(),
             "is_ipv6": meta.server.is_ipv6(),
-            "is_tcp": meta.tcp,
+            // Both, and they are not the same question. `is_tcp` is what the NFQUEUE
+            // side has always sent and what a filter reads to know the wire; `l4` is what
+            // decides whether a stream can be built, which is true of QUIC and not of a
+            // datagram. A library that only received the first would have to guess one
+            // of them.
+            "is_tcp": meta.l4 == L4::Tcp,
+            "l4": meta.l4.name(),
         })
         .to_string();
         let mut slot = match self.child.lock() {

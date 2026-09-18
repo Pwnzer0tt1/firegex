@@ -27,8 +27,13 @@ jobs:
       # No apt-get: the tests' dependencies are pure python. `iperf3`, matplotlib and
       # numpy belong to the benchmarks, which CI does not run — a measurement has no
       # pass or fail to gate a release on.
+      #
+      # As root, because what needs root **skips** otherwise — and a case that always
+      # skips is not a case this gate is checking. Through the script rather than `sudo
+      # pytest`, because the script installs the dependencies into the environment it is
+      # running in; a root process does not read the invoking user's site-packages.
       - name: Run tests
-        run: cd tests && ./run_tests.sh
+        run: cd tests && sudo ./run_tests.sh
 
   docker_build:
     needs: run_tests

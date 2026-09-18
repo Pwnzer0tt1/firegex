@@ -31,11 +31,17 @@ class RawPacket:
         dst_ip: str = "",
         src_port: int = 0,
         dst_port: int = 0,
+        l4: str | None = None,
     ):
         self.__data = bytes(data)
         self.__is_input = bool(is_input)
         self.__is_ipv6 = bool(is_ipv6)
-        self.__is_tcp = bool(is_tcp)
+        # Derived from `is_tcp` when nothing said otherwise, because one of the engines
+        # sending this has only ever had two answers to give: the NFQUEUE binaries carry
+        # TCP and UDP and nothing else, and asking them to learn a third word to say the
+        # same thing would be a change with no question behind it.
+        self.__l4 = str(l4) if l4 else ("tcp" if is_tcp else "udp")
+        self.__is_tcp = self.__l4 == "tcp"
         self.__src_ip = str(src_ip)
         self.__dst_ip = str(dst_ip)
         self.__src_port = int(src_port)
@@ -58,8 +64,33 @@ class RawPacket:
 
     @property
     def is_tcp(self) -> bool:
-        "True if the connection is TCP, false if it is UDP"
+        "True if the connection is TCP. False for a datagram, and false for QUIC"
         return self.__is_tcp
+
+    @property
+    def l4(self) -> str:
+        """What carries this connection.
+
+        `tcp`, `udp`, `quic` for a stream inside a QUIC connection, or `quic-datagram`
+        for a DATAGRAM frame in one — which is in a connection carrying streams and is
+        not one, the distinction `is_stream` is there to answer.
+        """
+        return self.__l4
+
+    @property
+    def is_stream(self) -> bool:
+        """True if these bytes arrive in order, once each, as part of a stream.
+
+        The question every model above `RawPacket` actually asks. It used to be spelled
+        `is_tcp`, and the two came apart the day QUIC arrived: a QUIC stream is ordered
+        and reliable, so an assembled stream and a parsed HTTP message mean exactly what
+        they mean on TCP — and it is carried by UDP, so a filter asking what is on the
+        wire has to be told UDP. One flag answering both got one of them wrong whichever
+        way it was set. A datagram — plain UDP or QUIC's own — answers false here, so a
+        filter asking for a stream model is simply not called for one and a single file
+        can carry both.
+        """
+        return self.__l4 in ("tcp", "quic")
 
     @property
     def src_ip(self) -> str:
@@ -131,7 +162,7 @@ class RawPacket:
         way = "client -> service" if self.is_input else "service -> client"
         return (
             f"RawPacket({way}, {self.src_ip}:{self.src_port} -> {self.dst_ip}:{self.dst_port}, "
-            f"{'tcp' if self.is_tcp else 'udp'}/{'ip6' if self.is_ipv6 else 'ip4'}, "
+            f"{self.l4}/{'ip6' if self.is_ipv6 else 'ip4'}, "
             f"{self.data_size} bytes)"
         )
 

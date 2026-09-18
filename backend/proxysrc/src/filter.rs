@@ -72,10 +72,52 @@ pub struct ConnectionMeta {
     pub client: std::net::SocketAddr,
     /// Where it was actually headed — the protected service, not this proxy.
     pub server: std::net::SocketAddr,
-    /// Whether this is a TCP connection or a UDP flow. A filter is shown it because the
-    /// library's stream and HTTP models only apply to one of them, and a filter written
-    /// against `RawPacket` may legitimately want to know which it is looking at.
-    pub tcp: bool,
+    /// What is underneath. A filter is shown it because the library's stream and HTTP
+    /// models need a stream to be built on, and a filter written against `RawPacket` may
+    /// legitimately want to know what it is looking at.
+    pub l4: L4,
+}
+
+/// What carries a connection.
+///
+/// A boolean until QUIC arrived, which broke the question in two: a QUIC stream is
+/// ordered and reliable, so every model that needs a stream applies to it, and it is
+/// carried by UDP, so every rule that matches the wire matches UDP. Answering either of
+/// those with "is it TCP" gets the other one wrong — as a boolean this either hid the
+/// stream models from QUIC or told a filter it was looking at TCP.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum L4 {
+    Tcp,
+    Udp,
+    /// A stream inside a QUIC connection.
+    Quic,
+    /// A QUIC DATAGRAM frame: inside a QUIC connection, and outside its streams.
+    ///
+    /// Its own value rather than [`L4::Quic`] with a flag, because the two answer the
+    /// stream question differently and everything the library builds on a stream turns
+    /// on that answer. Telling a filter `udp` instead would answer both questions
+    /// correctly — unreliable, and UDP on the wire — and lose the only thing left worth
+    /// knowing, which is that this arrived inside a connection that is also carrying
+    /// streams.
+    QuicDatagram,
+}
+
+impl L4 {
+    /// Whether the bytes arrive as an ordered, reliable stream — which is what the
+    /// library's stream and HTTP models are built on.
+    pub fn is_stream(self) -> bool {
+        matches!(self, L4::Tcp | L4::Quic)
+    }
+
+    /// The name the filter library knows it by.
+    pub fn name(self) -> &'static str {
+        match self {
+            L4::Tcp => "tcp",
+            L4::Udp => "udp",
+            L4::Quic => "quic",
+            L4::QuicDatagram => "quic-datagram",
+        }
+    }
 }
 
 /// Identifies one connection for the lifetime of the process.

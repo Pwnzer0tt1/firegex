@@ -24,9 +24,11 @@ import os
 import sys
 import traceback
 
-from modules.services.models import KIND, L4, PROTO, TRANSPORT, Filter, Regex
+from modules.services.models import (KIND, L4, PROTO, TRANSPORT, UPSTREAM, Filter,
+                                     Regex, quic_alpn, upstream_refusal)
 from modules.services.nftables import (MAX_CHAIN_POSITIONS, NoRelayAddress,
-                                       resolve_target, udp_relay_host, udp_relay_key)
+                                       interface_addresses, one_address, service_at,
+                                       udp_relay_host, udp_relay_key)
 from utils import DEBUG, nicenessify
 
 MODULES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -176,7 +178,8 @@ class Transport:
     async def reload(self, chain: list[ChainLink]) -> None:
         raise NotImplementedError
 
-    async def add_udp_target(self, ip: str, port: int) -> int:
+    async def add_udp_target(self, ip: str, port: int,
+                             onward: str = "same") -> int:
         raise NotImplementedError
 
     async def stop(self) -> None:
@@ -532,7 +535,20 @@ class NfqueueTransport(Transport):
     @classmethod
     def check(cls, srv, chain: list[ChainLink]) -> None:
         super().check(srv, chain)
-        if srv.terminates_tls:
+        if str(srv.proto) == L4.HTTP:
+            # Not the TLS sentence and not the QUIC one, because the reason is neither:
+            # an `http` service is reached over TLS and over QUIC *and* in the clear, and
+            # this layer can decrypt none of it. Even the cleartext edge would be half an
+            # answer — HTTP/2 in the clear is HPACK, and rendering it means terminating
+            # the connection, which is the proxy layer's job by definition.
+            raise UnsupportedChain(
+                "An `http` service is reached over every version of HTTP at once, which "
+                "means TLS on one port and QUIC on another — and this layer inspects "
+                "packets on their way past rather than terminating them, so it can read "
+                "none of it. Move the service to the proxy layer, or set its protocol to "
+                "TCP and filter the HTTP/1.1 going by."
+            )
+        if srv.decrypts:
             # Decrypting means terminating the connection, which is what the proxy layer
             # does; this one inspects packets on their way past and hands the kernel a
             # verdict, which is the whole reason it can fail open. It was once offered
@@ -540,6 +556,18 @@ class NfqueueTransport(Transport):
             # filters attached to the plaintext leg in between — so the connection *was*
             # terminated, the layer's one distinguishing property was already gone, and
             # it cost two loopback ports chosen by hashing the address.
+            if str(srv.proto) == L4.QUIC:
+                # And for QUIC there is not even that: nginx could terminate TLS and hand
+                # over a TCP stream, but a QUIC connection past its first packet has its
+                # frames and its stream boundaries encrypted as well as its payload.
+                # Queued to userspace it is a UDP datagram of noise.
+                raise UnsupportedChain(
+                    "QUIC encrypts its frames and its stream boundaries, not just the "
+                    "payload, so a packet queued to this layer carries nothing a filter "
+                    "could read. It has to be terminated to be inspected at all: move "
+                    "the service to the proxy layer, or set its protocol to UDP and "
+                    "accept that the rules are matching the encrypted datagrams."
+                )
             raise UnsupportedChain(
                 "A service that speaks TLS has to be decrypted, and decrypting means "
                 "terminating the connection — which is what the proxy layer does and "
@@ -636,9 +664,20 @@ class ProxyTransport(Transport):
     @classmethod
     def check(cls, srv, chain: list[ChainLink]) -> None:
         super().check(srv, chain)
-        if str(srv.proto) == L4.UDP:
+        # Asked here as well as where each was set, because an address added afterwards
+        # can be one this instance cannot honour.
+        for addr in srv.addresses:
+            refusal = upstream_refusal(
+                srv.proto, addr.upstream, L4.l4_of(addr.edge) == L4.UDP
+            )
+            if refusal:
+                raise UnsupportedChain(refusal)
+        if srv.carries(L4.UDP):
             from utils import get_interface_ips, is_ip_parse
-            for addr in srv.addresses:
+            # Only the addresses that need a relay of their own. On an `http` service
+            # those are its QUIC ones, sitting beside TCP addresses that need nothing of
+            # the sort — which is why this asks the address rather than the service.
+            for addr in srv.udp_addresses:
                 if not is_ip_parse(addr.ip_int):
                     ips = get_interface_ips(addr.ip_int)
                     if not ips:
@@ -658,23 +697,79 @@ class ProxyTransport(Transport):
         #: headed from conntrack, which UDP cannot do — see `udp.rs`.
         self.udp_ports: dict[str, int] = {}
 
-    def _udp_targets(self) -> list[tuple[str, int]]:
+    #: What an address's edge is called on the wire to the engine. Only `tls` has a name
+    #: of its own, because only it is a promise: this port is the encrypted one, and a
+    #: client opening it in the clear is refused. Everything else is "whatever the client
+    #: turns out to be speaking", which is what one listener fronting both a cleartext
+    #: port and an encrypted one has always had to do — and refusing TLS at a port nobody
+    #: promised would be a rule with nothing behind it.
+    _EDGE_WORD = {L4.TLS: "tls"}
+
+    def _published(self) -> list[str]:
+        """What this engine is told about its TCP addresses, one entry each.
+
+        `10.0.0.1:443|tls|plain=10.0.0.1:80` reads as: what arrives at the first is
+        spoken under TLS, the service behind it answers in the clear, and it is at the
+        second. Every part after the address is optional and an address that needs none
+        of them is not listed at all — which is every address of every service until an
+        operator says otherwise, and is what keeps the transparent case exactly as it
+        was.
+
+        Only TCP: a UDP or QUIC address has a relay of its own, bound to the service it
+        fronts and terminating what it was built to terminate, so both questions are
+        already answered by `FGEX_PROXY_UDP`.
+
+        **An interface is resolved to the addresses it carries, one entry each**, rather
+        than skipped. The engine keys this map on what `SO_ORIGINAL_DST` hands back,
+        which is an address and never an interface — so there was nothing to key on and
+        the row was dropped. What that cost: an HTTPS edge declared on `lo:443` was never
+        announced, so the engine met the connection with no idea it was a TLS edge or
+        that the service was on `:80`, terminated it as an ordinary one and dialled
+        `:443`, where nothing listens. HTTPS on that address simply did not answer, and
+        the same address written `127.0.0.1:443` worked — which is how it was found.
+        """
+        out = []
+        for addr in self.srv.addresses:
+            if L4.l4_of(addr.edge) != L4.TCP:
+                continue
+            # Said only where the service is reached in more than one way, because that
+            # is the only place it is a choice rather than a restatement of the service.
+            word = (self._EDGE_WORD.get(str(addr.edge), "any")
+                    if str(self.srv.proto) == L4.HTTP else "any")
+            moved = addr.target_port and addr.target_port != addr.port
+            onward = UPSTREAM.env(addr.upstream)
+            # An address with nothing to say is not listed: the engine's answer for one
+            # it has never heard of is the transparent case, which is what it would be
+            # told. All three have to be silent for that, and the one that was forgotten
+            # here — what the service behind speaks — is the one with no other way in.
+            if word == "any" and not moved and onward == "same":
+                continue
+            for host in interface_addresses(addr.ip_int):
+                entry = f"{udp_relay_key(host, addr.port)}|{word}|{onward}"
+                if moved:
+                    entry += f"={udp_relay_key(host, addr.target_port)}"
+                out.append(entry)
+        return out
+
+    def _udp_targets(self) -> list[tuple[str, int, str]]:
         """The addresses that each need a relay of their own, resolved. Empty for TCP.
 
         Resolved here and nowhere else, so the relay the engine is asked to open, the
         rule that points at it and the key both are filed under are derived from one
         answer rather than from three lookups that could each land somewhere different.
+
+        The third item is what the service behind *that relay* speaks, because a relay is
+        one protected address and the question belongs to the address.
         """
-        if str(self.srv.proto) != L4.UDP:
-            return []
         out = []
-        for addr in self.srv.addresses:
-            target = resolve_target(self.srv, addr)
+        for addr in self.srv.udp_addresses:
+            target = service_at(self.srv, addr)
             if not target:
                 continue
             target_ip, target_port = target
             try:
-                out.append((udp_relay_host(target_ip), target_port))
+                out.append((udp_relay_host(target_ip), target_port,
+                            UPSTREAM.env(addr.upstream)))
             except NoRelayAddress as e:
                 raise UnsupportedChain(
                     f"{e}. Give the service an IP address, or put it on the NFQUEUE "
@@ -682,18 +777,25 @@ class ProxyTransport(Transport):
                 ) from e
         return out
 
-    def _tls_env(self) -> dict:
+    def _crypto_env(self) -> dict:
         """Hand the engine its certificate, or nothing at all.
 
         The engine reads **paths**, not the material: a certificate on a command line or
         in an environment dump is a certificate in a log somewhere. They are written
         `0600` under a directory of the service's own, and removed when it stops.
 
-        `FGEX_PROXY_TLS_UPSTREAM` is set with them, because a service behind TLS speaks
-        TLS: nginx used to re-encrypt on the way out with `proxy_ssl on`, and the engine
-        does the same thing in the same place.
+        What the service *behind* speaks does not travel here: it is the address's
+        answer, not the service's, so it rides with the address — on `FGEX_PROXY_TARGETS`
+        and `PUBLISH` for a TCP one, and on `FGEX_PROXY_UDP` and `ADD_UDP` for a relay.
+        `same` re-encrypts on the way out the way nginx's `proxy_ssl on` did; the other
+        two say the service speaks HTTP/1.1, in the clear or under its own TLS.
+
+        QUIC takes the same pair and one more word. It needs no `_UPSTREAM` flag because
+        there is no unencrypted QUIC to choose between — the handshake is part of the
+        transport — and it needs `FGEX_PROXY_QUIC` because what binds a protected
+        address is then an endpoint that terminates rather than a socket that forwards.
         """
-        if not self.srv.terminates_tls:
+        if not self.srv.decrypts:
             return {}
         os.makedirs(TLS_DIR, exist_ok=True)
         cert_path = os.path.join(TLS_DIR, f"{self.srv.id}.crt")
@@ -704,13 +806,42 @@ class ProxyTransport(Transport):
             fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(fd, "w") as handle:
                 handle.write(material or "")
-        return {
+        material = {
             "FGEX_PROXY_TLS_CERT": cert_path,
             "FGEX_PROXY_TLS_KEY": key_path,
-            "FGEX_PROXY_TLS_UPSTREAM": "1",
         }
+        if str(self.srv.proto) == L4.HTTP:
+            # Every edge at once, in one process, with one certificate and one chain.
+            # `TLS_OPTIONAL` is the whole of what makes that possible: the TCP listener
+            # terminates TLS only for the connections that start a handshake, so the
+            # cleartext port and the encrypted one are the same listener and the same
+            # filters. `QUIC` is set whether or not the service has a UDP address yet,
+            # so that adding one later opens a relay on the engine already running rather
+            # than needing it restarted.
+            return {
+                **material,
+                "FGEX_PROXY_TLS": "1",
+                "FGEX_PROXY_TLS_OPTIONAL": "1",
+                "FGEX_PROXY_QUIC": "1",
+                "FGEX_PROXY_QUIC_ALPN": ",".join(quic_alpn()),
+            }
+        if str(self.srv.proto) == L4.QUIC:
+            return {
+                **material,
+                "FGEX_PROXY_QUIC": "1",
+                # What the engine offers the service, in this order. It cannot be asked
+                # of the client the way the TLS path asks: a QUIC ClientHello arrives
+                # inside an encrypted Initial whose processing *is* the handshake, so
+                # there is nothing to hold it at and nothing to read before answering.
+                # `h3` is what a QUIC service speaks nine times in ten; an instance in
+                # front of something else sets this in its own environment, the same way
+                # the filter deadline beside it is set. Per service it would be a column,
+                # and nothing yet has wanted one.
+                "FGEX_PROXY_QUIC_ALPN": ",".join(quic_alpn()),
+            }
+        return material
 
-    def _clear_tls_material(self) -> None:
+    def _clear_crypto_material(self) -> None:
         for suffix in (".crt", ".key"):
             try:
                 os.remove(os.path.join(TLS_DIR, f"{self.srv.id}{suffix}"))
@@ -743,14 +874,22 @@ class ProxyTransport(Transport):
                     # The same knob the NFQUEUE binaries get. `run.py --threads` used to
                     # reach them and not this engine, so one flag meant two things.
                     "NTHREADS": os.getenv("NTHREADS", "1"),
-                    # UDP gets one relay per address, each with its upstream already
-                    # known: `SO_ORIGINAL_DST` is TCP-only, so there is nothing to
-                    # recover per datagram and nothing to recover it from. The client's
-                    # address is not preserved on that path, which the operator is told
-                    # before choosing it.
+                    # One relay per address, each with its upstream already known:
+                    # `SO_ORIGINAL_DST` is TCP-only, so there is nothing to recover per
+                    # datagram and nothing to recover it from. The same list serves QUIC,
+                    # which is UDP as far as the rules are concerned — what changes is
+                    # what binds the port, and `_crypto_env` is where that is said.
                     "FGEX_PROXY_UDP": ",".join(
-                        udp_relay_key(ip, port) for ip, port in self._udp_targets()
+                        f"{udp_relay_key(ip, port)}|{onward}"
+                        for ip, port, onward in self._udp_targets()
                     ),
+                    # The addresses this service is *published* on rather than
+                    # intercepted at: `dialled=service`, one pair per address that says
+                    # where the service really is. Only TCP needs telling — a UDP or
+                    # QUIC address has a relay of its own whose upstream is already the
+                    # answer, which is the same list above. Empty is the transparent
+                    # case, which is every address that did not say otherwise.
+                    "FGEX_PROXY_TARGETS": ",".join(self._published()),
                     # One number for both halves: TCP connections and UDP flows spend
                     # the same descriptors, and two limits meaning "how much of that may
                     # go" would be two things to keep in step.
@@ -759,7 +898,7 @@ class ProxyTransport(Transport):
                        if self.srv.over_limit_forwards else {}),
                     "FGEX_PROXY_FIRST_BYTE_TIMEOUT": str(self.srv.first_byte_timeout),
                     "FGEX_PROXY_FILTER_TIMEOUT_MS": os.getenv("FGEX_PROXY_FILTER_TIMEOUT_MS", "2000"),
-                    **self._tls_env(),
+                    **self._crypto_env(),
                 },
             ),
         )
@@ -868,8 +1007,11 @@ class ProxyTransport(Transport):
                 # message rather than their protection.
                 raise Exception(f"the proxy engine rejected the chain: {detail}")
 
-    async def add_udp_target(self, ip: str, port: int) -> int:
+    async def add_udp_target(self, ip: str, port: int, onward: str = "same") -> int:
         """Bind a dedicated UDP relay for a new address without restarting the engine.
+
+        `onward` is what the service behind *this* relay speaks, because a relay is one
+        protected address and that question belongs to the address.
 
         Idempotent, and deliberately the only way in: the map of relays is this
         object's, so a caller that has just added an address asks for the relay and is
@@ -885,7 +1027,7 @@ class ProxyTransport(Transport):
             if target in self.udp_ports:
                 return self.udp_ports[target]
             self._ack = asyncio.get_running_loop().create_future()
-            self.process.stdin.write(f"ADD_UDP {target}\n".encode())
+            self.process.stdin.write(f"ADD_UDP {target} {onward}\n".encode())
             await self.process.stdin.drain()
             try:
                 ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
@@ -901,6 +1043,40 @@ class ProxyTransport(Transport):
                     f"the proxy engine acknowledged ADD_UDP but did not report port for {target}"
                 )
             return relay_port
+
+    async def publish(self, public: tuple[str, int], edge: str, onward: str,
+                      target: tuple[str, int] | None) -> None:
+        """Tell the running engine about one TCP address.
+
+        The same thing `FGEX_PROXY_TARGETS` says at startup, said to an engine that is
+        already carrying traffic — because an address can be added to a running service
+        and the point of that is that nothing is dropped.
+
+        UDP and QUIC addresses are not here: theirs is a relay with its upstream fixed
+        when it is bound, so `add_udp_target` has already answered both questions.
+        """
+        where = f" {udp_relay_key(*target)}" if target else ""
+        await self._command(f"PUBLISH {udp_relay_key(*public)} {edge} {onward}{where}")
+
+    async def withdraw(self, public: tuple[str, int]) -> None:
+        await self._command(f"WITHDRAW {udp_relay_key(*public)}")
+
+    async def _command(self, line: str) -> None:
+        """One control line, and the acknowledgement it is owed."""
+        if not self.process or self.process.returncode is not None:
+            raise Exception("the proxy engine is not running")
+        async with self._cmd_lock:
+            self._ack = asyncio.get_running_loop().create_future()
+            self.process.stdin.write(f"{line}\n".encode())
+            await self.process.stdin.drain()
+            try:
+                ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
+            except asyncio.TimeoutError:
+                raise Exception(f"the proxy engine did not acknowledge {line.split()[0]}")
+            finally:
+                self._ack = None
+            if not ok:
+                raise Exception(f"the proxy engine rejected {line}: {detail}")
 
     async def _read_events(self):
         try:
@@ -948,7 +1124,7 @@ class ProxyTransport(Transport):
         await self._kill()
         # After the engine is gone, never before: a key removed while the process that
         # reads it is still running would be a key removed from under a restart.
-        self._clear_tls_material()
+        self._clear_crypto_material()
 
 
 class ExternalTransport(Transport):
@@ -993,11 +1169,14 @@ class ExternalTransport(Transport):
                 f"Deactivate them, or move the service to the proxy transport, which "
                 f"filters and can still forward."
             )
-        if srv.terminates_tls:
+        if srv.decrypts:
             raise UnsupportedChain(
-                "Decrypting exists so that filters can see the plaintext, and this "
-                "service has no filters — nothing of firegex is in its path. Let your own "
-                "proxy speak TLS, or move the service to the proxy layer."
+                f"Decrypting exists so that filters can see the plaintext, and this "
+                f"service has no filters — nothing of firegex is in its path. Let your own "
+                f"proxy speak "
+                f"{'QUIC' if str(srv.proto) == L4.QUIC else 'HTTP itself' if str(srv.proto) == L4.HTTP else 'TLS'}"
+                f", or move "
+                f"the service to the proxy layer."
             )
 
     async def start(self, chain: list[ChainLink]) -> dict:

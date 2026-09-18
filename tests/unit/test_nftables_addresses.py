@@ -14,7 +14,9 @@ import pytest
 
 from utils import is_interface_name, parse_ip_or_int
 from modules.services.models import Address, Service, TRANSPORT, L4, new_id
-from modules.services.nftables import (FiregexTables, InstalledRule, NoRelayAddress,
+from modules.services import nftables as nft
+from modules.services.nftables import (IFACE_COMMENT, FiregexTables, InstalledRule,
+                                       NoRelayAddress, interface_addresses,
                                        udp_relay_host, udp_relay_key)
 
 
@@ -199,7 +201,57 @@ def test_installed_rule_parsing():
     assert r.bytes == 1024
 
 
-def test_proxy_rule_generation_interface_vs_ip():
+def test_an_interfaces_output_rule_is_read_back_as_the_interfaces():
+    """The comment is what carries the identity back.
+
+    An output-hook rule installed for an interface matches a concrete address, so what it
+    matches cannot say whose it is — and `delete()` finds rules by what they match. Read
+    back under the address it matches, every one of them would survive the service that
+    installed it: a redirect to a port nobody is listening on any more.
+    """
+    raw_rule = {
+        "chain": "fgex_nat_out",
+        "handle": 7,
+        "comment": f"{IFACE_COMMENT}wg0",
+        "expr": [
+            {"match": {"op": "!=", "left": {"meta": {"key": "mark"}}, "right": 0x133A}},
+            {"match": {"op": "==",
+                       "left": {"payload": {"protocol": "ip", "field": "daddr"}},
+                       "right": {"prefix": {"addr": "10.10.0.3", "len": 32}}}},
+            {"match": {"op": "==",
+                       "left": {"payload": {"protocol": "tcp", "field": "dport"}},
+                       "right": 80}},
+            {"counter": {"packets": 0, "bytes": 0}},
+            {"redirect": {"port": 38472}},
+        ],
+    }
+    table = FiregexTables.__new__(FiregexTables)
+    table.list_rules = lambda tables, chains: [raw_rule]
+    rule = table.get()[0]
+    assert rule.ip_int == "wg0", "the rule was read back under the address it matches"
+
+    srv = Service(service_id="s", name="w", status="active", proto=L4.TCP,
+                  transport=TRANSPORT.PROXY)
+    on_iface = Address(address_id=new_id(), service_id="s", ip_int="wg0", port=80,
+                       proto=L4.TCP)
+    assert rule.matches(srv, on_iface), "the service could not take its own rule back"
+
+
+def test_interface_addresses_drops_link_local(monkeypatch):
+    monkeypatch.setattr(nft, "get_interface_ips",
+                        lambda name: ["10.0.0.1", "fe80::1%eth0", "169.254.3.4", "fd00::7"])
+    assert interface_addresses("eth0") == ["10.0.0.1", "fd00::7"]
+    # An address is already itself, whatever prefix it was stored with.
+    assert interface_addresses("127.0.0.1/32") == ["127.0.0.1"]
+
+
+def test_proxy_rule_generation_interface_vs_ip(monkeypatch):
+    # What the interface carries, decided here rather than by whatever this host happens
+    # to have: the rules for an interface are built from its addresses now.
+    monkeypatch.setattr(
+        nft, "get_interface_ips",
+        lambda name: ["192.168.1.5", "fe80::1%eth0", "fd00::5"] if name == "eth0" else [],
+    )
     table = FiregexTables.__new__(FiregexTables)
     commands = []
     table.cmd = lambda *cmds: commands.extend(cmds)
@@ -215,12 +267,40 @@ def test_proxy_rule_generation_interface_vs_ip():
     # 1. Interface target
     commands.clear()
     table._add_proxy(srv, "eth0", 80, "ip", "tcp", 38000)
-    # Should only write to nat_chain and route_chain (NOT nat_output_chain)
-    assert len(commands) == 2
+    # Inbound and the return leg match the interface by name; the output hook cannot —
+    # `iifname` means nothing for a packet this host generates, and a connection to one
+    # of its own addresses is routed through `lo`, so `oifname` would never match the
+    # interface either. So it matches the addresses that interface carries, one rule
+    # each, which is what makes a service protected on `lo` filter a local client.
     chains = [c["add"]["rule"]["chain"] for c in commands]
-    assert "fgex_nat" in chains
-    assert "fgex_route" in chains
-    assert "fgex_nat_out" not in chains
+    assert chains.count("fgex_nat") == 1
+    assert chains.count("fgex_route") == 1
+    assert chains.count("fgex_nat_out") == 2, "one per address the interface carries"
+    assert len(commands) == 4
+
+    # Inbound stays the interface and nothing narrower. Pinning it to the addresses the
+    # interface carries was tried and reverted: a name is what an operator reaches for
+    # when the address is not theirs to know, which includes a service on another machine
+    # reached through that link, and pinning to this host's own addresses removes it.
+    in_rule = [c["add"]["rule"] for c in commands if c["add"]["rule"]["chain"] == "fgex_nat"][0]
+    assert not [
+        e for e in in_rule["expr"]
+        if e.get("match", {}).get("left", {}).get("payload", {}).get("field") == "daddr"
+    ], "the inbound rule narrowed the interface to an address"
+
+    out_rules = [c["add"]["rule"] for c in commands if c["add"]["rule"]["chain"] == "fgex_nat_out"]
+    # Link-local is left out: an interface carries one it was never configured with, and
+    # nothing dials a service there.
+    matched = [
+        e["match"]["right"]["prefix"]["addr"]
+        for r in out_rules for e in r["expr"]
+        if "payload" in e.get("match", {}).get("left", {})
+        and e["match"]["left"]["payload"]["field"] == "daddr"
+    ]
+    assert sorted(matched) == ["192.168.1.5", "fd00::5"]
+    # And each says whose it is, because nothing else in it does — without the comment
+    # `delete()` could not find these again and would leave them behind on every stop.
+    assert all(r.get("comment") == f"{IFACE_COMMENT}eth0" for r in out_rules)
 
     # Check expressions in nat rule
     nat_rule = [c["add"]["rule"] for c in commands if c["add"]["rule"]["chain"] == "fgex_nat"][0]

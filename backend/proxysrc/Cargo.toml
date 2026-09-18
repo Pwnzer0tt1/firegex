@@ -19,10 +19,54 @@ serde_json = "1"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "tls12", "std", "logging"] }
 rustls-pemfile = "2"
+# QUIC, terminated by the engine for the same reason TLS is: after the Initial packet
+# everything — frames, stream boundaries, even the packet number — is encrypted, so a
+# layer that only forwards has nothing a filter could be shown. `ring` again, and the
+# same rustls the TCP side already links.
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
+# HTTP/3, terminated on top of QUIC. A binding rather than a second implementation: the
+# frames and QPACK are somebody else's problem, and what this engine does with them —
+# presenting each exchange to the chain as the HTTP/1.1 it would have been — is the part
+# that belongs here.
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+# HTTP/2, terminated on TCP for the reason HTTP/3 is terminated on QUIC: its method, path
+# and headers are HPACK-compressed, so a layer that only forwards shows a filter a
+# compression format. A binding again — HPACK, multiplexing and flow control are the
+# crate's problem, and a second implementation of HTTP/2 in this tree is exactly what
+# `AGENTS.md` forbids.
+h2 = "0.4"
+# HTTP/1.1 towards the service, for the one thing this engine could not do: speak an
+# older version to the service than the client used. A client edge that is terminated —
+# HTTP/3 over QUIC — is already rendered to the chain as HTTP/1.1, so putting those same
+# bytes on a socket is not a translation invented here, it is the rendering being sent
+# where the service can read it. The *response* is what needs the crate: HTTP/1.1 is the
+# one version this engine never parsed, and inventing a parser for it beside hyper's is
+# the thing `AGENTS.md` forbids. Client and http1 only — nothing here serves HTTP/1.1,
+# and the h2 client above stays h2's.
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
+http-body-util = "0.1"
+http-body = "1"
+bytes = "1"
+http = "1"
 
 [dev-dependencies]
 # Test certificates are generated, never committed.
 rcgen = "0.13"
+# The QUIC tests stand a real client and a real service either side of the relay: the
+# same crates the engine links, so what they prove is what will run.
+quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+# And a real HTTP/3 service and client either side of it, for the same reason.
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+# The same, for HTTP/2: the tests stand a real h2 client and a real h2 service either
+# side of the proxy, so what they prove is what will run.
+h2 = "0.4"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12", "logging"] }
+bytes = "1"
+http = "1"
 
 # Catching a panicking filter is what keeps the datapath alive, so the binary
 # must unwind rather than abort. This is not a tuning knob, it is load-bearing.

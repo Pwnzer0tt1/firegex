@@ -196,12 +196,18 @@ pub async fn connect_plain(upstream: SocketAddr, self_mark: Option<u32>) -> io::
     socket.connect(upstream).await
 }
 
-/// Dial the service as the client over UDP: same source address, kernel-chosen source port.
-pub async fn connect_as_udp(
+/// A UDP socket wearing the client's address, with nothing dialled yet.
+///
+/// Split out from [`connect_as_udp`] for QUIC: quinn owns its socket and sends to an
+/// address per packet, which a *connected* socket refuses (`EISCONN`). Everything that
+/// makes the address someone else's — `IP_TRANSPARENT`, the mark the intercept rules
+/// skip, and the bind to a foreign address — happens here; who it then talks to is the
+/// caller's business.
+pub fn bind_as_udp(
     client: IpAddr,
     upstream: SocketAddr,
     self_mark: Option<u32>,
-) -> io::Result<UdpSocket> {
+) -> io::Result<std::net::UdpSocket> {
     if client.is_ipv6() != upstream.is_ipv6() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -222,7 +228,16 @@ pub async fn connect_as_udp(
     socket.set_reuse_address(true)?;
     let bind_addr: socket2::SockAddr = SocketAddr::new(client, 0).into();
     socket.bind(&bind_addr)?;
-    let std_sock: std::net::UdpSocket = socket.into();
+    Ok(socket.into())
+}
+
+/// Dial the service as the client over UDP: same source address, kernel-chosen source port.
+pub async fn connect_as_udp(
+    client: IpAddr,
+    upstream: SocketAddr,
+    self_mark: Option<u32>,
+) -> io::Result<UdpSocket> {
+    let std_sock = bind_as_udp(client, upstream, self_mark)?;
     let tokio_sock = UdpSocket::from_std(std_sock)?;
     tokio_sock.connect(upstream).await?;
     Ok(tokio_sock)

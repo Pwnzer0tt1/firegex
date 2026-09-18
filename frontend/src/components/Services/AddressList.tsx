@@ -1,5 +1,5 @@
 import { CodeHighlight } from '@mantine/code-highlight';
-import { ActionIcon, Badge, Box, Button, Card, Code, Collapse, Group, Modal, Space, Stack, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Button, Card, Code, Collapse, Group, Modal, SegmentedControl, Space, Stack, Text, Tooltip } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -10,9 +10,32 @@ import { bareAddress, errorNotify, ipInterfacesQuery, isAddressOrInterface, isIn
 import { addressKind, BADGE_WIDTH } from '../InterfaceInput';
 import PortAndInterface from '../PortAndInterface';
 import YesNoModal from '../YesNoModal';
-import { Address, decrypts, Service, serviceQueryKey, services, Transport } from './utils';
+import AddressOptions, { addressCapabilities, addressTags, edgeHint, EDGE_OPTIONS } from './AddressOptions';
+import { Address, decrypts, L4, protoLabel, Service, serviceQueryKey, services, Transport, Upstream } from './utils';
 
-type Values = { ip_int: string, port: number, proxy_ip: string, proxy_port: number }
+type Values = {
+    ip_int: string, port: number, proxy_ip: string, proxy_port: number,
+    /** `http` only: what is spoken at this address. */
+    edge: string,
+    /** Where the service is, when it is not on this port. Empty means "it is". */
+    target_port: number | string,
+    /** What the service behind this address speaks. */
+    upstream: string,
+}
+
+/**
+ * What one address of a service is reached over, in the words the operator chose it in.
+ *
+ * Every protocol but `http` has one answer for the whole service, and the header already
+ * says it. `http` is the one that does not: a TCP address there carries HTTP/1.1 and
+ * HTTP/2, and the UDP one beside it carries HTTP/3, so a row that said only "HTTP" would
+ * be describing two different things with one word.
+ */
+const edgeLabel = (service: Service, address: { edge?: string, proto: string }) =>
+    service.proto === L4.HTTP
+        ? ({ [L4.TCP]: "HTTP", [L4.TLS]: "HTTPS", [L4.QUIC]: "HTTP/3" }[
+            address.edge ?? address.proto] ?? "HTTP")
+        : protoLabel(service.proto)
 
 function AddressModal({ opened, onClose, service, edit }: {
     opened: boolean, onClose: () => void, service: Service, edit?: Address,
@@ -21,9 +44,15 @@ function AddressModal({ opened, onClose, service, edit }: {
     const [busy, setBusy] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const isExternal = service.transport === Transport.EXTERNAL
+    const isHttp = service.proto === L4.HTTP
+    const caps = addressCapabilities(service.proto, service.transport)
+    const anyOption = caps.canPublish || caps.canChooseUpstream || caps.isExternal
 
     const form = useForm<Values>({
-        initialValues: { ip_int: "127.0.0.1", port: 80, proxy_ip: "127.0.0.1", proxy_port: 8080 },
+        initialValues: {
+            ip_int: "127.0.0.1", port: 80, proxy_ip: "127.0.0.1", proxy_port: 8080,
+            edge: L4.TCP, target_port: "", upstream: Upstream.SAME,
+        },
         validate: {
             ip_int: v => !isAddressOrInterface(v, { cidr: !isExternal })
                 ? "Not an IP address, and not an interface name either"
@@ -45,14 +74,25 @@ function AddressModal({ opened, onClose, service, edit }: {
             //  which is a service quietly protecting a fraction of what it did before.
             ip_int: bareAddress(edit.ip_int), port: edit.port,
             proxy_ip: edit.proxy_ip ?? "127.0.0.1", proxy_port: edit.proxy_port ?? 8080,
+            edge: edit.edge ?? edit.proto, target_port: edit.target_port ?? "",
+            upstream: edit.upstream ?? Upstream.SAME,
         })
         else form.reset()
     }, [opened, edit?.address_id])
 
     const submit = async (values: Values) => {
         setBusy(true)
+        // Sent wherever it means something, and sent even when it is empty: this is a
+        // PUT over the whole row, and `0` is how an operator says the traffic goes back
+        // to arriving where it is sent. An absent field keeps whatever the row had.
         const payload = {
             ip_int: values.ip_int, port: values.port,
+            ...(isHttp ? { edge: values.edge } : {}),
+            ...(caps.canPublish ? {
+                target_port: Number(values.target_port) !== values.port
+                    ? Number(values.target_port) || 0 : 0,
+            } : {}),
+            ...(caps.canChooseUpstream ? { upstream: values.upstream } : {}),
             ...(isExternal ? { proxy_ip: values.proxy_ip, proxy_port: values.proxy_port } : {}),
         }
         try {
@@ -73,23 +113,38 @@ function AddressModal({ opened, onClose, service, edit }: {
     }
 
     return <Modal opened={opened} onClose={onClose} centered
-        title={edit ? "Move this address" : "Protect another address"}>
+        title={edit ? "Change this address" : "Protect another address"}>
         <form onSubmit={form.onSubmit(submit)}>
             <PortAndInterface form={form} int_name="ip_int" port_name="port"
-                label="Where the service answers"
+                label="Where clients reach it"
                 description={isExternal
                     ? "One address and its port. This layer rewrites the destination and puts the original port back on the way out, which takes an address it can recognise."
-                    : "An IP address, or the name of an interface — an interface protects whatever address that link is carrying, an address protects that one alone."}
+                    : "An IP address, or the name of an interface — an interface protects whatever address that link is carrying, an address protects that one alone. Normally the service listens here too; when it does not, say so below."}
                 includeInterfaceNames={!isExternal} />
-            {isExternal ? <>
+            {isHttp ? <>
                 <Space h="md" />
-                <PortAndInterface form={form} int_name="proxy_ip" port_name="proxy_port"
-                    label="Where your proxy listens for it" includeInterfaceNames={false} />
+                <Text size="sm" fw={500} mb={6}>What clients speak here</Text>
+                <SegmentedControl fullWidth data={EDGE_OPTIONS}
+                    {...form.getInputProps('edge')} />
                 <Text size="xs" c="dimmed" mt={6}>
-                    Its own port, not one another address already uses: the return rule puts
-                    the original port back by recognising your proxy's, so two addresses
-                    behind the same endpoint could not be told apart on the way out.
+                    {edgeHint(form.values.edge)}
+                    {" "}The filters see the same HTTP/1.1 whichever it is, so the chain
+                    does not change.
                 </Text>
+            </> : null}
+            {/* The same options the ⚙ on a row of the creation form offers, in the same
+            words, and offered on an **edit** as well as on an add.
+
+            They were add-only while this endpoint rewrote the address and nothing else,
+            which left an operator who had set one of them while creating the service with
+            no way back to it short of deleting the address. The edit already takes the
+            rules back and reinstalls them, so rewriting the rest of the row costs
+            nothing more than what it already spends. */}
+            {anyOption ? <>
+                <Space h="md" />
+                <AddressOptions form={form} values={form.values}
+                    field={name => name} proto={service.proto}
+                    transport={service.transport} />
             </> : null}
             <Text size="xs" c="dimmed" mt="md">
                 {edit
@@ -118,6 +173,7 @@ export default function AddressList({ service }: { service: Service }) {
     const [removing, setRemoving] = useState<Address | null>(null)
     const addresses = service.addresses ?? []
     const only = addresses.length === 1
+    const caps = addressCapabilities(service.proto, service.transport)
     //: What each interface is carrying at the moment, so a row named `wg0` can say
     //  where that actually is. An interface with nothing on it is worth seeing too:
     //  on the proxy layer a UDP relay has to bind one of these.
@@ -187,7 +243,15 @@ export default function AddressList({ service }: { service: Service }) {
                         what is on it. No protocol badge — it is a property of the service,
                         the header already says it once, and repeating it on every row is
                         noise that grows with the list. */}
-                    <Group gap="xs" wrap="nowrap" align="flex-start" style={{ minWidth: 0 }}>
+                    {/* Grows to everything the buttons do not take, rather than to its
+                        own contents. Sized to content, each row was as wide as its own
+                        longest line — so whether the note beside the badges fitted was
+                        decided by how long that note is, and the row carrying a full
+                        IPv6 kept it inline while the one saying `now 127.0.0.1` pushed
+                        it onto a second line. Two rows of one list, wrapping opposite
+                        ways, for a reason nothing on screen explains. */}
+                    <Group gap="xs" wrap="nowrap" align="flex-start"
+                        style={{ flex: 1, minWidth: 0 }}>
                         <Tooltip position="bottom" disabled={!isInterfaceName(address.ip_int)}
                             label="An interface, not an address: the rules match on the name, so this follows whatever address the link is carrying.">
                             <Badge size="xs" variant="light" color={kind.color}
@@ -205,14 +269,38 @@ export default function AddressList({ service }: { service: Service }) {
                             label="The engine decrypts here: clients dial this address as they always did, and the filters see the plaintext inside the process.">
                             <Badge size="xs" variant="light" color="grape"
                                 leftSection={<TbShieldLock size={10} />}>
-                                TLS
+                                {edgeLabel(service, address)}
                             </Badge>
                         </Tooltip> : null}
-                        {address.proxy_port ? <Badge size="xs" variant="light" color="cyan">
-                            → {address.proxy_ip ?? "127.0.0.1"}:{address.proxy_port}
-                        </Badge> : null}
+                        {/* Said on the row, and in the same words the panel that sets
+                        them uses: this is where an operator comes back to check what
+                        they chose, and a setting named differently here reads as a
+                        different setting. Clicking one opens that panel. */}
+                        {addressTags(address, caps).map(tag =>
+                            <Tooltip key={tag.label} position="bottom" multiline w={300}
+                                label={tag.hint}>
+                                <Badge size="xs" variant="light" color="teal"
+                                    style={{ cursor: 'pointer' }}
+                                    onClick={() => setEditing(address)}>
+                                    {tag.label}
+                                </Badge>
+                            </Tooltip>)}
+                        {/* The note takes a line of its own rather than the corner of
+                        this one. Its basis is a full-length IPv6 with its prefix — when
+                        that much room is not left beside the badges, the whole note wraps
+                        down instead of being squeezed into the gap, which is what put
+                        `fd07:…:fe4` and `0:be17` on two lines with the digits broken
+                        between them. It shrank that far because the basis was 80px and
+                        `anywhere` let it: a tag or two added to the row is all it took to
+                        use the space up. The basis is the whole of the rule — a floor
+                        beside it was tried and is what overflowed the card on a phone,
+                        where the column is narrower than any floor worth setting, and it
+                        bought nothing: an item only shares a line when its basis fitted
+                        there, so on a line of its own it is already as wide as it can be.
+                        `anywhere` stays as the last resort, so a phone wraps an address
+                        rather than pushing it past the edge. */}
                         {detail ? <Text size="xs" c="dimmed" ff="monospace"
-                            style={{ flex: '1 1 80px', minWidth: 80, overflowWrap: 'anywhere' }}>
+                            style={{ flex: '1 1 320px', minWidth: 0, overflowWrap: 'anywhere' }}>
                             {detail}
                         </Text> : null}
                         </Group>
@@ -256,7 +344,7 @@ export default function AddressList({ service }: { service: Service }) {
 }
 
 /**
- * Where the decrypted traffic of every TLS service can be watched.
+ * Where the decrypted traffic of every TLS and QUIC service can be watched.
  *
  * The engine decrypts inside the process that filters, so the plaintext never becomes
  * packets on any interface — which is exactly what removed the two loopback ports a TLS
@@ -269,12 +357,19 @@ export default function AddressList({ service }: { service: Service }) {
  * as the TCP stream they were, because the stream that actually crossed the wire was
  * encrypted. Wireshark follows it normally; it is not the wire, and the interface says so.
  *
+ * A QUIC service is carried there too, one TCP stream per QUIC stream, which costs one
+ * more piece of invention: the streams of one connection share its four-tuple, so each is
+ * given a synthetic client port to be told apart by. An operator reading a port out of
+ * that capture has to know it names a stream and not a socket, which is why the panel
+ * says so rather than leaving it to be discovered.
+ *
  * Collapsed by default: it is a thing you go looking for while debugging a filter that is
  * not matching, not something that should sit in the way the rest of the time.
  */
 function PlaintextCapture({ service }: { service: Service }) {
     const [open, setOpen] = useState(false)
     if (!decrypts(service)) return null
+    const quic = service.proto === L4.QUIC
 
     return <Box mt="md">
         <Group gap="xs">
@@ -286,7 +381,7 @@ function PlaintextCapture({ service }: { service: Service }) {
         <Collapse expanded={open}>
             <Space h="xs" />
             <Text size="xs" c="dimmed">
-                Every TLS service's plaintext is written to <Code>firegex0</Code>, and
+                Every decrypted service's traffic is written to <Code>firegex0</Code>, and
                 nothing else is. Point Wireshark or tcpdump at it on the host running
                 firegex — the container shares its network namespace, so the interface is
                 there — and you get the decrypted traffic of the whole instance, both
@@ -305,6 +400,18 @@ function PlaintextCapture({ service }: { service: Service }) {
                 as sensitive as the private key that would have produced it, so treat the
                 file the same way.
             </Text>
+            {quic ? <>
+                <Space h="xs" />
+                <Text size="xs" c="dimmed">
+                    On QUIC each stream arrives as a TCP stream of its own, and over
+                    HTTP/3 that is one per request — what you see is the same HTTP/1.1
+                    the filters were shown, because what crossed the wire was a
+                    compressed header block inside an encrypted packet. The client
+                    <b> port is invented</b>: the streams of one connection share the
+                    client's real port, so each is given one of its own to be told apart
+                    by. It names a stream, not a socket — the address beside it is real.
+                </Text>
+            </> : null}
         </Collapse>
     </Box>
 }

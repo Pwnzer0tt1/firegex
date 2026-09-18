@@ -24,8 +24,10 @@ from modules.services import mirror
 from modules.services import transports
 from modules.services import stats
 from modules.services.logs import LEVEL, forget as forget_log, log_for
-from modules.services.models import KIND, STATUS, Address, Filter, Regex, Service
-from modules.services.nftables import FiregexTables, NoRelayAddress, udp_relay_host
+from modules.services.models import (KIND, L4, STATUS, UPSTREAM, Address, Filter,
+                                     Regex, Service)
+from modules.services.nftables import (FiregexTables, NoRelayAddress,
+                                       interface_addresses, udp_relay_host)
 from utils.sqlite import SQLite
 
 nft = FiregexTables()
@@ -401,14 +403,18 @@ class ServiceManager:
         reopened. Saying so and rebuilding beats installing a rule that redirects
         traffic at a socket which will refuse it.
         """
-        was_dual = self.srv.has_ipv6
+        was_dual = self.srv.has_ipv6_tcp
         self.reload_addresses()
         if not self.active:
             return
+        # Asked of the transport the kernel sees, not of what the service speaks: the
+        # one listener that has a family to get wrong is the TCP one. Anything relayed
+        # per address — datagrams, and QUIC — binds a socket for the new address when it
+        # arrives, in whatever family that address is, so there is nothing to reopen.
         if (
             self.srv.transport == transports.TRANSPORT.PROXY
-            and str(self.srv.proto) != "udp"
-            and self.srv.has_ipv6
+            and self.srv.carries(L4.TCP)
+            and self.srv.has_ipv6_tcp
             and not was_dual
             and not self.transport.is_dual_stack
         ):
@@ -422,19 +428,48 @@ class ServiceManager:
         if not added:
             return
         async with self.lock:
-            # UDP is relayed by one socket per address, so a new address is a new relay
-            # — opened on the engine that is already running, before the rule that will
-            # point traffic at it exists. The engine owns the map of them: `_steer`
+            # UDP is relayed by one socket per address — and QUIC by one endpoint per
+            # address, for the same reason — so a new address is a new relay, opened on
+            # the engine that is already running, before the rule that will point traffic
+            # at it exists. The engine owns the map of them: `_steer`
             # carries that same dict, so what is opened here is what the rule finds.
             if self.srv.transport == transports.TRANSPORT.PROXY:
                 for addr in added:
-                    if str(addr.proto or self.srv.proto) != "udp":
+                    if L4.l4_of(addr.proto or self.srv.proto) != L4.UDP:
+                        # A TCP address is fronted by the one shared listener, which
+                        # recovers where each connection was headed from conntrack — so
+                        # the only thing it can need told is that this address fronts a
+                        # service somewhere else. An address that is simply the service
+                        # needs nothing at all, which is every address until one says so.
+                        moved = addr.target_port and addr.target_port != addr.port
+                        word = ("tls" if (str(self.srv.proto) == L4.HTTP
+                                          and str(addr.edge) == L4.TLS) else "any")
+                        onward = UPSTREAM.env(addr.upstream)
+                        if moved or word != "any" or onward != "same":
+                            # One announcement per address, and an interface stands for
+                            # every address it carries: the engine keys this map on what
+                            # `SO_ORIGINAL_DST` hands back, which is never an interface
+                            # name. Skipped instead, an HTTPS edge added on `eth0:443`
+                            # was never announced and the engine dialled :443 instead of
+                            # the service.
+                            for host in interface_addresses(addr.ip_int):
+                                await self.transport.publish(
+                                    (host, addr.port),
+                                    word,
+                                    onward,
+                                    (host, addr.target_port) if moved else None,
+                                )
                         continue
                     try:
                         host = udp_relay_host(addr.ip_int)
                     except NoRelayAddress as e:
                         raise transports.UnsupportedChain(str(e)) from e
-                    await self.transport.add_udp_target(host, addr.port)
+                    # The relay's upstream *is* the answer to the same question: what is
+                    # bound here forwards to where the service is, which is the target
+                    # when there is one and the address itself when there is not.
+                    await self.transport.add_udp_target(
+                        host, addr.target_port or addr.port, UPSTREAM.env(addr.upstream)
+                    )
             nft.add(self.srv, added, **self._steer)
         self.log.add(
             LEVEL.INFO,
@@ -448,6 +483,20 @@ class ServiceManager:
             async with self.lock:
                 if self.active:
                     nft.delete(self.srv, gone)
+                    # And the engine's own note of where this address fronted, so its
+                    # map cannot come to disagree with the rules that feed it.
+                    for addr in gone:
+                        if (self.srv.transport == transports.TRANSPORT.PROXY
+                                and L4.l4_of(addr.proto or self.srv.proto) == L4.TCP):
+                            # Every address it was announced under, or the engine keeps
+                            # fronting one this service no longer protects.
+                            for host in interface_addresses(addr.ip_int):
+                                try:
+                                    await self.transport.withdraw((host, addr.port))
+                                except Exception as e:
+                                    self.log.add(
+                                        LEVEL.WARNING,
+                                        f"could not withdraw {addr.ip_int}: {e}")
             if self.active:
                 self.log.add(LEVEL.INFO, f"no longer protecting {gone[0].ip_int}:{gone[0].port}")
         # Dropped from the list here rather than re-read from the database, because the

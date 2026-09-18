@@ -126,7 +126,7 @@ class FiregexAPI:
                      proxy_ip: str | None = None, proxy_port: int | None = None,
                      addresses: list | None = None,
                      max_connections: int = 0, over_limit_forwards: bool = False,
-                     first_byte_timeout: int = 0):
+                     first_byte_timeout: int = 0, upstream: str = "same"):
         """A service takes a list of addresses; the single-address case is the common one.
 
         `tls=True` is kept as a convenience for the callers that read as "and behind
@@ -135,7 +135,10 @@ class FiregexAPI:
         """
         if addresses is None:
             addresses = [{"ip_int": ip_int, "port": port,
-                          "proxy_ip": proxy_ip, "proxy_port": proxy_port}]
+                          "proxy_ip": proxy_ip, "proxy_port": proxy_port,
+                          # What the service behind speaks belongs to the address now, so
+                          # the single-address convenience carries it there.
+                          **({"upstream": upstream} if upstream != "same" else {})}]
         req = self.s.post(f"{self.address}api/services", json={
             "name": name, "transport": transport, "addresses": addresses,
             "proto": "tls" if tls else proto, "fail_open": fail_open,
@@ -164,17 +167,43 @@ class FiregexAPI:
         return req.json()
 
     def services_add_address(self, service_id: str, ip_int: str, port: int,
-                             proxy_ip: str | None = None, proxy_port: int | None = None):
+                             proxy_ip: str | None = None, proxy_port: int | None = None,
+                             **extra):
         req = self.s.post(f"{self.address}api/services/{service_id}/addresses", json={
             "ip_int": ip_int, "port": port, "proxy_ip": proxy_ip, "proxy_port": proxy_port,
+            **extra,
         })
         return verify(req)
 
     def services_add_address_error(self, service_id: str, ip_int: str, port: int,
-                                   proxy_ip: str | None = None, proxy_port: int | None = None):
+                                   proxy_ip: str | None = None, proxy_port: int | None = None,
+                                   **extra):
         req = self.s.post(f"{self.address}api/services/{service_id}/addresses", json={
             "ip_int": ip_int, "port": port, "proxy_ip": proxy_ip, "proxy_port": proxy_port,
+            **extra,
         })
+        if req.status_code < 400:
+            return None
+        return req.json().get("detail", "")
+
+    def services_edit_address(self, service_id: str, address_id: str, ip_int: str,
+                              port: int, proxy_ip: str | None = None,
+                              proxy_port: int | None = None, **extra):
+        req = self.s.put(
+            f"{self.address}api/services/{service_id}/addresses/{address_id}", json={
+                "ip_int": ip_int, "port": port, "proxy_ip": proxy_ip,
+                "proxy_port": proxy_port, **extra,
+            })
+        return verify(req)
+
+    def services_edit_address_error(self, service_id: str, address_id: str, ip_int: str,
+                                    port: int, proxy_ip: str | None = None,
+                                    proxy_port: int | None = None, **extra):
+        req = self.s.put(
+            f"{self.address}api/services/{service_id}/addresses/{address_id}", json={
+                "ip_int": ip_int, "port": port, "proxy_ip": proxy_ip,
+                "proxy_port": proxy_port, **extra,
+            })
         if req.status_code < 400:
             return None
         return req.json().get("detail", "")

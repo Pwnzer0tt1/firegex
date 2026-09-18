@@ -34,7 +34,7 @@ from modules.services.firewall import (
 from modules.services import stats
 from modules.services.logs import log_for
 from modules.services.models import (KIND, L4, MODE, PROTO, STATUS, Service,
-                                     TRANSPORT)
+                                     TRANSPORT, UPSTREAM, upstream_refusal)
 from modules.services.nftables import FiregexTables
 from modules.services import transports
 from modules.services.transports import PROXY_ENGINE, PYWORKER, UnsupportedChain
@@ -59,8 +59,9 @@ db = SQLite(
             "name": "VARCHAR(100) NOT NULL UNIQUE",
             "status": 'VARCHAR(100) NOT NULL CHECK (status IN ("active", "stop"))',
             # What the service speaks, which is not always what the kernel matches on:
-            # `tls` is TCP on the wire. The address carries the second answer.
-            "proto": 'VARCHAR(4) NOT NULL CHECK (proto IN ("tcp", "udp", "tls"))',
+            # `tls` is TCP on the wire and `quic` is UDP. The address carries the second
+            # answer.
+            "proto": 'VARCHAR(4) NOT NULL CHECK (proto IN ("tcp", "udp", "tls", "quic", "http"))',
             "transport": 'VARCHAR(20) NOT NULL CHECK (transport IN ("nfqueue", "proxy", "external"))',
             "fail_open": "BOOLEAN NOT NULL CHECK (fail_open IN (0, 1)) DEFAULT 1",
             # How many connections (or UDP flows) this service may carry at once, and
@@ -102,6 +103,31 @@ db = SQLite(
             "service_id": "VARCHAR(100) NOT NULL",
             "ip_int": "VARCHAR(100) NOT NULL",
             "port": "INT NOT NULL CHECK(port > 0 and port < 65536)",
+            # What clients speak at this address, in the same words a service speaks
+            # them: `tls` is TCP with TLS on it, `quic` is UDP with QUIC. For every
+            # protocol but `http` it is the service's own and nobody is asked; `http` is
+            # the one that means "each address says", which is what it has always meant.
+            "edge": 'VARCHAR(4) NOT NULL CHECK (edge IN ("tcp", "udp", "tls", "quic")) '
+                    "DEFAULT 'tcp'",
+            # Where this address's traffic actually goes, when that is not the port it
+            # arrived on. NULL is transparent — the address is the service — which is
+            # what firegex did and only did until an address could be a *publication*:
+            # a service answering in the clear on :80 reached over TLS on :443 without
+            # moving. Only the port: the same host, because what is being published is a
+            # service this instance is already in front of.
+            "target_port": "INT CHECK(target_port IS NULL OR "
+                           "(target_port > 0 AND target_port < 65536))",
+            # What the service behind *this address* speaks, which used to be assumed to
+            # be whatever the client spoke. `same` is that assumption and the default;
+            # `tcp` and `tls` say the service speaks HTTP/1.1 — in the clear or under its
+            # own TLS — whatever arrived at the front, which is what puts an ordinary web
+            # service behind a TLS or HTTP/3 edge with firegex terminating on its behalf.
+            #
+            # On the address rather than on the service because that is where it has an
+            # answer: one daemon reached over TLS on one port and in the clear on another
+            # is re-encrypted for the first and handed the plaintext for the second.
+            "upstream": 'VARCHAR(8) NOT NULL CHECK (upstream IN ("same", "tcp", "tls")) '
+                        "DEFAULT 'same'",
             # The transport the *kernel* sees, derived from the service's own: `tls` is
             # TCP on the wire. Kept here so `(ip, port, proto)` is a usable uniqueness
             # key — a TCP service and a UDP one may share an address exactly as the
@@ -203,6 +229,13 @@ class AddressModel(BaseModel):
     ip_int: str
     port: PortType
     proto: str
+    #: What clients speak here, which is what the operator chose. `proto` is what the
+    #: kernel matches, and is this with the hat taken off.
+    edge: str = L4.TCP
+    #: Where the service is, when this address is a publication rather than the service.
+    target_port: int | None = None
+    #: What the service behind this address speaks: `same`, `tcp` or `tls`.
+    upstream: str = UPSTREAM.SAME
     proxy_ip: str | None = None
     proxy_port: int | None = None
 
@@ -210,6 +243,18 @@ class AddressModel(BaseModel):
 class AddressForm(BaseModel):
     ip_int: str
     port: PortType
+    #: What clients speak here — `tcp`, `tls`, `udp` or `quic`. Only ever set on an
+    #: `http` service, which is the one whose addresses are not all the same; elsewhere
+    #: the service's own protocol decides and a value here is refused rather than
+    #: allowed to disagree with it.
+    edge: str | None = None
+    #: Where the service actually is, when it is not on this port. Absent is the
+    #: transparent case: the address *is* the service.
+    target_port: int | None = None
+    #: What the service behind this address speaks. Absent is `same` — whatever arrived
+    #: at the front goes back out the same way, which is what every address did before
+    #: there was a choice.
+    upstream: str | None = None
     #: `external` only: where your own proxy listens for this address. Two addresses
     #: cannot share one — the return rule tells them apart by it.
     proxy_ip: str | None = None
@@ -725,29 +770,137 @@ async def get_service(service_id: str):
     return _with_addresses(res[0])
 
 
-def _insert_address(service_id: str, proto: str, form: AddressForm) -> str:
+def _insert_address(service_id: str, proto: str, transport: str, form: AddressForm) -> str:
     """Add one address, carrying the transport the kernel will match on.
 
     Not the service's own protocol: `tls` is TCP on the wire, and an address storing it
     verbatim would let a TCP service and a TLS one claim one `ip:port` between them.
+
+    On an `http` service the address says what is spoken at it, because that service is
+    reached in more than one way at once — `:80` in the clear, `:443` under TLS, a UDP
+    port over HTTP/3. What it says is kept beside the transport the kernel matches: the
+    two are the same answer with the hat on and off.
     """
     try:
         parsed_ip = parse_ip_or_int(form.ip_int)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    edge = _address_edge(proto, form)
+    target_port = _address_target(transport, form)
+    upstream = _address_upstream(proto, form)
     address_id = gen_id()
     db.query(
         "INSERT INTO service_addresses (address_id, service_id, ip_int, port, proto, "
-        "proxy_ip, proxy_port) VALUES (?, ?, ?, ?, ?, ?, ?);",
+        "edge, target_port, upstream, proxy_ip, proxy_port) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
         address_id,
         service_id,
         parsed_ip,
         form.port,
-        L4.l4_of(proto),
+        L4.l4_of(edge),
+        edge,
+        target_port,
+        upstream,
         form.proxy_ip or None,
         form.proxy_port,
     )
     return address_id
+
+
+def _address_edge(proto: str, form: AddressForm) -> str:
+    """What clients speak at one address of a service.
+
+    Every protocol but `http` has one answer for the whole service, so an address of one
+    is not asked and a value sent anyway is refused rather than quietly kept: a row whose
+    edge disagrees with its service is a row that would be intercepted on one transport
+    and served on another.
+
+    `http` is the protocol that means "each address says", which is what it meant when
+    the choice was TCP or UDP and what it still means now that the same address can say
+    whether it is encrypted. The default is `tcp`, which is what an HTTP address is
+    unless somebody says otherwise.
+    """
+    asked = str(form.edge) if form.edge else None
+    if str(proto) != L4.HTTP:
+        if asked and asked != str(proto):
+            raise HTTPException(
+                status_code=400,
+                detail=f"A {str(proto).upper()} service speaks {str(proto).upper()} at "
+                       f"every address, so this one cannot be {asked!r}. Only an HTTPS "
+                       f"service is reached in more than one way at once.",
+            )
+        return str(proto)
+    if asked is None:
+        return L4.TCP
+    if asked not in (L4.TCP, L4.TLS, L4.QUIC):
+        raise HTTPException(
+            status_code=400,
+            detail=f"An address of an HTTPS service is reached in the clear, under TLS "
+                   f"or over QUIC — not {asked!r}.",
+        )
+    return asked
+
+
+def _address_target(transport: str, form: AddressForm) -> int | None:
+    """Where the service reached through one address is, when it is not on that port.
+
+    Every protocol can say it, because **publishing is being reachable one more way than
+    the service is** and nothing about that is HTTP's. One daemon on `:8080` is reached
+    at `:80` in the clear, at `:443` under TLS and at a UDP port over HTTP/3 — and also,
+    with nothing HTTP about it, at whatever port the round's scoreboard was told about.
+    It was refused outside `http` while `http` was the only protocol whose addresses were
+    not all the same, which confused the shape of one protocol with the shape of the
+    feature.
+
+    What it does need is something that **dials**, and that is the layer rather than the
+    protocol. The proxy terminates the connection and opens the one to the service, so it
+    is free to open it somewhere else. NFQUEUE hands the kernel a verdict on packets
+    already on their way and opens nothing; the hand-off layer rewrites the destination to
+    your own proxy, which then decides for itself where the service is. On both, a stored
+    port would be read by nothing at all — refused rather than ignored, because an
+    operator told their service is published and finding it merely intercepted is exactly
+    the trap this file keeps arguing against.
+    """
+    if not form.target_port:
+        return None
+    if str(transport) != TRANSPORT.PROXY:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Only the proxy layer can send an address's traffic to a port other "
+                   f"than the one it arrived on: it terminates the connection and opens "
+                   f"the one to the service, so it is free to open it elsewhere. "
+                   + ("NFQUEUE passes judgement on packets already on their way and opens "
+                      "nothing."
+                      if str(transport) == TRANSPORT.NFQUEUE else
+                      "This layer hands the traffic to your own proxy, which decides for "
+                      "itself where the service is."),
+        )
+    if not 0 < form.target_port < 65536:
+        raise HTTPException(status_code=400, detail="Invalid port for the service")
+    return form.target_port
+
+
+def _address_upstream(proto: str, form: AddressForm) -> str:
+    """What the service behind one address speaks.
+
+    Only a service that is decrypted has an upstream leg of its own to decide: on
+    anything else firegex terminates nothing, so there is nothing to put back or leave
+    off, and a stored answer would be a setting that does nothing. Refused rather than
+    ignored for that reason.
+    """
+    asked = str(form.upstream) if form.upstream else UPSTREAM.SAME
+    if asked == UPSTREAM.SAME:
+        return UPSTREAM.SAME
+    if asked not in UPSTREAM.ALL:
+        raise HTTPException(status_code=400, detail=f"Unknown upstream {asked!r}")
+    if str(proto) not in (L4.TLS, L4.QUIC, L4.HTTP):
+        raise HTTPException(
+            status_code=400,
+            detail=f"A {str(proto).upper()} service is carried as it arrives: firegex "
+                   f"terminates nothing there, so there is no upstream leg to decide. "
+                   f"Only a service firegex decrypts has one.",
+        )
+    return asked
 
 
 def _address_taken(e: sqlite3.IntegrityError) -> str:
@@ -812,13 +965,33 @@ async def add_service(form: ServiceAddForm):
         raise HTTPException(
             status_code=400, detail="A service needs at least one address to protect"
         )
-    if form.proto == L4.TLS:
+    if form.proto in (L4.TLS, L4.QUIC, L4.HTTP):
         if not (form.tls_cert and form.tls_key):
             raise HTTPException(
                 status_code=400,
-                detail="A service that speaks TLS needs both a certificate and a private key",
+                detail=f"A service that speaks {form.proto.upper()} needs both a "
+                       f"certificate and a private key"
+                       + (". An HTTP service covers the TLS and HTTP/3 edges as well as "
+                          "the cleartext one, and neither exists without a certificate — "
+                          "a service that only answers in the clear is a `tcp` one, where "
+                          "HTTP/1.1 and HTTP/2 are already filtered."
+                          if form.proto == L4.HTTP else ""),
             )
         _check_tls_material(form.tls_cert, form.tls_key)
+    # Each address answers for itself what the service behind it speaks, and is refused
+    # here rather than at the first start if it cannot. Everything else an address says
+    # is checked in the same breath, and for a second reason: the rows are written after
+    # the service's own, so a refusal arriving then would leave a service behind that
+    # nobody asked for.
+    for address in form.addresses:
+        _address_target(form.transport, address)
+        refusal = upstream_refusal(
+            form.proto,
+            _address_upstream(form.proto, address),
+            L4.l4_of(_address_edge(form.proto, address)) == L4.UDP,
+        )
+        if refusal:
+            raise HTTPException(status_code=400, detail=refusal)
     # The transport gets a look before the row exists. A chain it could not host is
     # caught later, when there is one; what is caught here is what the *service* makes
     # impossible on its own — a protocol this layer cannot carry — and it is worth
@@ -852,7 +1025,8 @@ async def add_service(form: ServiceAddForm):
         db.query(
             "INSERT INTO services (service_id, name, status, proto, transport, "
             "fail_open, max_connections, over_limit_forwards, first_byte_timeout, "
-            "tls_cert, tls_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+            "tls_cert, tls_key) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
             service_id,
             refactor_name(form.name),
             STATUS.STOP,
@@ -865,11 +1039,17 @@ async def add_service(form: ServiceAddForm):
             form.tls_cert,
             form.tls_key,
         )
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError as e:
+        # The name is the only thing an operator can collide with by accident, so it is
+        # the answer worth giving — but it is not the only constraint on this row, and
+        # answering "the name exists" to a CHECK that failed sends whoever reads it
+        # looking for a service that is not there. Ask the exception which it was.
+        if "name" not in str(e):
+            return {"status": f"The service was refused by the database: {e}"}
         return {"status": "A service with this name already exists"}
     try:
         for address in form.addresses:
-            _insert_address(service_id, form.proto, address)
+            _insert_address(service_id, form.proto, form.transport, address)
     except sqlite3.IntegrityError as e:
         # All of it or none: a service that came up on half the addresses the operator
         # listed is one they would believe is protecting the other half.
@@ -921,8 +1101,8 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
     # operator has by then attributed to something else. So the stored material counts
     # towards it, and a service already holding a certificate can be switched on without
     # pasting it again.
-    lands_on_tls = (form.proto if form.proto is not None else row["proto"]) == L4.TLS
-    if lands_on_tls:
+    lands_on = form.proto if form.proto is not None else row["proto"]
+    if lands_on in (L4.TLS, L4.QUIC, L4.HTTP):
         cert = form.tls_cert if form.tls_cert is not None else row["tls_cert"]
         key = form.tls_key if form.tls_key is not None else row["tls_key"]
         if not (cert and cert.strip()) or not (key and key.strip()):
@@ -930,9 +1110,10 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
                 else "a certificate" if not (cert and cert.strip()) else "a private key"
             raise HTTPException(
                 status_code=400,
-                detail=f"This service terminates TLS, so it needs {missing}. Give it one "
-                       f"here — the engine would refuse to start without it, and the service "
-                       f"would fail on its next start rather than now.",
+                detail=f"This service terminates {str(lands_on).upper()}, so it needs "
+                       f"{missing}. Give it one here — the engine would refuse to start "
+                       f"without it, and the service would fail on its next start rather "
+                       f"than now.",
             )
     if form.tls_cert is not None:
         fields["tls_cert"] = form.tls_cert
@@ -948,14 +1129,24 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
         )
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="That name is already taken")
-    if "proto" in fields:
+    if "proto" in fields and fields["proto"] != L4.HTTP:
         # The addresses carry the transport the kernel matches on, so that
         # `(ip, port, proto)` can be unique. Kept in step here rather than being a second
         # thing the operator sets — and derived, because `tls` is TCP on the wire.
+        #
+        # Not for `http`, which is the one protocol whose addresses already hold the
+        # answer: rewriting them all to `tcp` would quietly turn its HTTP/3 address into a
+        # TCP one and leave the QUIC relay pointing at nothing. Switching *away* from
+        # `http` does flatten them, which is honest — the service now speaks one
+        # transport — and can legitimately collide, which is the 400 below.
         try:
             db.query(
-                "UPDATE service_addresses SET proto = ? WHERE service_id = ?;",
+                # Both, because they are one answer: a service that now speaks one thing
+                # everywhere has addresses that speak it too, and an `edge` left behind
+                # would be a row claiming to be reached a way the service no longer is.
+                "UPDATE service_addresses SET proto = ?, edge = ? WHERE service_id = ?;",
                 L4.l4_of(fields["proto"]),
+                fields["proto"],
                 service_id,
             )
         except sqlite3.IntegrityError:
@@ -1006,8 +1197,18 @@ async def add_address(service_id: str, form: AddressForm):
             detail="The external transport hands traffic to your own proxy and rewrites the "
                    "source address on return, which requires a concrete IP address rather than an interface.",
         )
+    # Before the row exists, because this is the address's own answer and it can be one
+    # this instance cannot honour. `ProxyTransport.check` says the same thing at start,
+    # and would leave the address behind to be undone.
+    refusal = upstream_refusal(
+        row["proto"],
+        _address_upstream(row["proto"], form),
+        L4.l4_of(_address_edge(row["proto"], form)) == L4.UDP,
+    )
+    if refusal:
+        raise HTTPException(status_code=400, detail=refusal)
     try:
-        address_id = _insert_address(service_id, row["proto"], form)
+        address_id = _insert_address(service_id, row["proto"], row["transport"], form)
     except sqlite3.IntegrityError as e:
         raise HTTPException(status_code=400, detail=_address_taken(e))
     def undo():
@@ -1031,7 +1232,18 @@ async def add_address(service_id: str, form: AddressForm):
 
 @app.put("/{service_id}/addresses/{address_id}", response_model=StatusMessageModel)
 async def edit_address(service_id: str, address_id: str, form: AddressForm):
-    """Move an address. The rules for it are taken back and reinstalled."""
+    """Change one address: where it is, and everything it says.
+
+    The rules for it are taken back and reinstalled, which is what makes the whole row
+    rewritable rather than only its address. It used to touch `ip_int`, `port` and the
+    proxy endpoint alone, so the edge, the port the service is on and what that service
+    speaks were add-only — and the operator who set one of them while creating the
+    service had no way back to it except deleting the address and adding it again. That
+    is a worse answer than reinstalling rules the edit already reinstalls.
+
+    Only this address stops being steered while that happens; the rest of the service
+    keeps its connections. A refusal puts the row back exactly as it was.
+    """
     row = _service_or_404(service_id)
     was = _address_or_404(service_id, address_id)
     if row["transport"] == TRANSPORT.EXTERNAL and not form.proxy_port:
@@ -1047,11 +1259,34 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
                    "source address on return, which requires a concrete IP address rather than an interface.",
         )
 
-    def write(ip_int, port, proxy_ip, proxy_port):
+    # A field the caller did not mention keeps what the row already had. This is the
+    # endpoint that *moves* an address as well as the one that changes what it says, and
+    # a move sending only an address and a port would otherwise quietly unpublish it.
+    # Taking one off is a value, not an absence: `0` for the port, `same` for the
+    # upstream — which is what the interface sends when it is emptied.
+    if form.edge is None:
+        form.edge = was["edge"]
+    if form.target_port is None:
+        form.target_port = was["target_port"]
+    if form.upstream is None:
+        form.upstream = was["upstream"]
+
+    # Everything the row says is worked out *before* the old rules come back, so a
+    # refusal leaves an address that is still steered exactly as it was.
+    edge = _address_edge(row["proto"], form)
+    target_port = _address_target(row["transport"], form)
+    upstream = _address_upstream(row["proto"], form)
+    refusal = upstream_refusal(row["proto"], upstream, L4.l4_of(edge) == L4.UDP)
+    if refusal:
+        raise HTTPException(status_code=400, detail=refusal)
+
+    def write(ip_int, port, proto, edge, target_port, upstream, proxy_ip, proxy_port):
         db.query(
-            "UPDATE service_addresses SET ip_int = ?, port = ?, proxy_ip = ?, "
-            "proxy_port = ? WHERE address_id = ?;",
-            ip_int, port, proxy_ip, proxy_port, address_id,
+            "UPDATE service_addresses SET ip_int = ?, port = ?, proto = ?, edge = ?, "
+            "target_port = ?, upstream = ?, proxy_ip = ?, proxy_port = ? "
+            "WHERE address_id = ?;",
+            ip_int, port, proto, edge, target_port, upstream, proxy_ip, proxy_port,
+            address_id,
         )
 
     async def restore():
@@ -1061,7 +1296,8 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
         alternative to trying is an address left unprotected because the *new* one was
         impossible. A failure here is reported by the exception that caused it.
         """
-        write(was["ip_int"], was["port"], was["proxy_ip"], was["proxy_port"])
+        write(was["ip_int"], was["port"], was["proto"], was["edge"],
+              was["target_port"], was["upstream"], was["proxy_ip"], was["proxy_port"])
         try:
             await firewall.get(service_id).address_added(address_id)
         except Exception:
@@ -1075,7 +1311,8 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
     manager = firewall.get(service_id)
     await manager.address_removed(address_id)
     try:
-        write(parsed_ip, form.port, form.proxy_ip or None, form.proxy_port)
+        write(parsed_ip, form.port, L4.l4_of(edge), edge, target_port, upstream,
+              form.proxy_ip or None, form.proxy_port)
     except sqlite3.IntegrityError as e:
         await restore()
         raise HTTPException(status_code=400, detail=_address_taken(e))

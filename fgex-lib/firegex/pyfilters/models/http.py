@@ -55,6 +55,12 @@ class InternalHTTPMessage:
     upgrading_to_h2: bool = field(default=False)
     upgrading_to_ws: bool = field(default=False)
     added_to_history: bool = field(default=False)
+    #: How much of `body` has already been handed to a model that consumes it.
+    #:
+    #: On the message rather than beside it because that is what it belongs to: a
+    #: keep-alive connection carries many messages through one parser, and a cursor kept
+    #: per connection would start the second message part-way in.
+    grpc_consumed: int = field(default=0)
 
 
 @dataclass
@@ -81,6 +87,18 @@ class InternalCallbackHandler:
     _ws_extentions = None
     _ws_raised_error = False
     release_message_headers = True
+    #: Hand the message over as its body arrives, not only when it is finished.
+    #:
+    #: Off everywhere but the gRPC models, and each model gets a parser of its own
+    #: (`_parser_class`), so `HttpRequest` keeps its contract exactly: called twice, once
+    #: with the headers and once with the whole message. It exists because a gRPC stream
+    #: that is answered message by message — a server-streaming or bidirectional RPC —
+    #: has a body that does not finish until the stream does, so a filter shown only
+    #: finished bodies would be called once, at the end, which is too late to be a
+    #: firewall.
+    release_body_chunks = False
+    #: Whether a chunk has arrived that has not been handed over yet.
+    _body_chunk_pending = False
 
     def reset_data(self):
         self.msg = InternalHTTPMessage()
@@ -91,6 +109,7 @@ class InternalCallbackHandler:
         self.buffers = InternalHttpBuffer()
         self.msg = InternalHTTPMessage()
         self.has_begun = True
+        self._body_chunk_pending = False
 
     def on_url(self, url):
         self.buffers._url_buffer += url
@@ -168,6 +187,13 @@ class InternalCallbackHandler:
         if self.save_body:
             self.msg.total_size += len(body)
             self.buffers._body_buffer += body
+            if self.release_body_chunks:
+                # Visible as it arrives rather than only at the end. **Undecoded**, and
+                # that is not an oversight: `content-encoding` is undone once, in
+                # `on_message_complete`, and half a gzip stream is not half a body. The
+                # models that read this decline while an encoding is in the way.
+                self.msg.body = self.buffers._body_buffer
+                self._body_chunk_pending = True
 
     def on_message_complete(self):
         self.msg.body = self.buffers._body_buffer
@@ -446,7 +472,7 @@ class HttpHistory:
     def _fetch_packet(cls, internal_data: DataStreamCtx):
         if (
             internal_data.current_pkt is None
-            or internal_data.current_pkt.is_tcp is False
+            or internal_data.current_pkt.is_stream is False
         ):
             raise NotReadyToRun()
 
@@ -585,6 +611,10 @@ class InternalBasicHttpMetaClass:
     def _should_release_message_headers(cls) -> bool:
         return True
 
+    @classmethod
+    def _should_release_body_chunks(cls) -> bool:
+        return False
+
     @staticmethod
     def _before_fetch_callable_checks(internal_data: DataStreamCtx) -> bool:
         raise NotImplementedError()
@@ -597,7 +627,7 @@ class InternalBasicHttpMetaClass:
     def _fetch_packet(cls, internal_data: DataStreamCtx):
         if (
             internal_data.current_pkt is None
-            or internal_data.current_pkt.is_tcp is False
+            or internal_data.current_pkt.is_stream is False
         ):
             raise NotReadyToRun()
 
@@ -614,6 +644,10 @@ class InternalBasicHttpMetaClass:
             internal_data.data_handler_context[parser_key] = parser
 
         parser.release_message_headers = cls._should_release_message_headers()
+        # Set here and not only in the constructor hook, for the same reason the line
+        # above is: parsing happens before any instance exists, and a flag applied
+        # afterwards would take effect one packet late.
+        parser.release_body_chunks = cls._should_release_body_chunks()
 
 
         if not internal_data.call_mem.get(
@@ -713,6 +747,19 @@ class InternalBasicHttpMetaClass:
             # idempotent and survived that, which is why it went unnoticed — anything
             # that counts did not.
             messages_tosend.append(parser.msg)
+
+        if (
+            parser.release_body_chunks
+            and parser._body_chunk_pending
+            and not parser.msg.message_complete
+            and not any(msg is parser.msg for msg in messages_tosend)
+        ):
+            # A body still arriving, handed over as it does. Identity rather than
+            # equality on the guard: `InternalHTTPMessage` is a dataclass, so `in` would
+            # compare every field of every message to decide something that is a question
+            # about which object this is.
+            messages_tosend.append(parser.msg)
+        parser._body_chunk_pending = False
 
         if parser._packet_to_stream():
             messages_tosend.append(
@@ -905,3 +952,214 @@ class HttpResponseHeader(HttpResponse):
     @staticmethod
     def _parser_class() -> str:
         return "http_header"
+
+
+#: The header in front of every gRPC message: one flag byte, then a big-endian length.
+GRPC_HEADER_SIZE = 5
+
+
+@dataclass
+class GrpcFrame:
+    """One length-prefixed message out of a gRPC body."""
+
+    #: Whether this message is compressed, which its own flag byte says. What it is
+    #: compressed *with* is `grpc-encoding` on the message that carried it.
+    compressed: bool
+    #: The bytes between the length prefix and the next one — a protobuf message, in
+    #: whatever schema the two ends agreed on out of band.
+    payload: bytes
+
+
+def _grpc_frames(msg: InternalHTTPMessage) -> list[GrpcFrame]:
+    """Take every complete message the body has grown since the last look.
+
+    Nothing is allocated on a claimed length: a frame is taken only once the bytes behind
+    it have actually arrived, so a header claiming four gigabytes costs nothing but the
+    wait — and the wait is already bounded by `FGEX_STREAM_MAX_SIZE`, which is what stops
+    a sender buying memory in this process.
+    """
+    body = msg.body or b""
+    taken: list[GrpcFrame] = []
+    at = msg.grpc_consumed
+    while len(body) - at >= GRPC_HEADER_SIZE:
+        length = int.from_bytes(body[at + 1 : at + GRPC_HEADER_SIZE], "big")
+        end = at + GRPC_HEADER_SIZE + length
+        if len(body) < end:
+            break
+        taken.append(
+            GrpcFrame(compressed=body[at] != 0, payload=body[at + GRPC_HEADER_SIZE : end])
+        )
+        at = end
+    msg.grpc_consumed = at
+    return taken
+
+
+def _speaks_grpc(msg: InternalHTTPMessage) -> bool:
+    return (msg.content_type or "").lower().startswith("application/grpc")
+
+
+def _body_can_be_framed(msg: InternalHTTPMessage) -> bool:
+    """Whether the body as it stands can be read as gRPC frames at all.
+
+    A `content-encoding` is undone once, when the message finishes, so while one is in
+    the way the bytes in hand are compressed and the framing is not in them. gRPC does not
+    use it — it compresses each message on its own and says so in the frame's flag byte —
+    so in practice this only ever declines for traffic that was never gRPC to begin with.
+    """
+    if msg.message_complete:
+        return True
+    encodings = {e.strip() for e in (msg.content_encoding or "").lower().split(",")}
+    return not (encodings - {"", "identity"})
+
+
+class GrpcMessage(InternalBasicHttpMetaClass):
+    """One gRPC message, in either direction.
+
+    gRPC is HTTP/2, so everything a filter could already ask about the exchange — the
+    method in the path, the headers, the trailer section carrying `grpc-status` — arrives
+    through `HttpRequest` and `HttpResponse`, because the engine renders every version of
+    HTTP as HTTP/1.1 before the chain sees it. What did not arrive was the *body*: a gRPC
+    body is a sequence of length-prefixed messages, so a filter reading `request.body` was
+    reading a five-byte header glued to a protobuf blob, and a pattern written against the
+    payload had to know to skip it.
+
+    This hands over one message at a time, as each one completes. It is called **per
+    message and not per body**, which is what makes it usable on a streaming RPC: a
+    server-streaming or bidirectional call has a body that does not finish until the
+    stream does, and a filter shown only finished bodies would be called once, at the end.
+
+    What it does **not** do is decompress a message whose own flag byte says it is
+    compressed, or decode the protobuf inside it. The first because what it is compressed
+    with is the peers' agreement (`grpc-encoding`) and guessing is how a filter comes to
+    read something that is not there; the second because without the `.proto` there is no
+    schema, and a pattern against the raw payload is what a ruleset has today.
+    """
+
+    @staticmethod
+    def _before_fetch_callable_checks(internal_data: DataStreamCtx) -> bool:
+        return True
+
+    @staticmethod
+    def _parser_class() -> str:
+        return "http_grpc"
+
+    @classmethod
+    def _should_release_message_headers(cls) -> bool:
+        # There is no message to show at the head: a gRPC exchange is its messages, and
+        # what is in the headers is what `HttpRequest` is for.
+        return False
+
+    @classmethod
+    def _should_release_body_chunks(cls) -> bool:
+        return True
+
+    def _contructor_hook(self):
+        self._parser.release_message_headers = False
+        self._parser.release_body_chunks = True
+        self._frame: GrpcFrame | None = None
+        self._is_input: bool = True
+
+    @classmethod
+    def _fetch_packet(cls, internal_data: DataStreamCtx):
+        # The base drives the parser and decides which messages are ready; this only
+        # takes the gRPC framing out of the ones that have it. Written that way round so
+        # there is still exactly one HTTP parser in this library and this is not a second.
+        carried = super()._fetch_packet(internal_data)
+        if not isinstance(carried, list):
+            carried = [carried]
+
+        pieces = []
+        for one in carried:
+            msg = one._message
+            if not _speaks_grpc(msg) or not _body_can_be_framed(msg):
+                continue
+            for frame in _grpc_frames(msg):
+                piece = cls(one._parser, msg)
+                piece._history = one._history
+                piece._frame = frame
+                piece._is_input = internal_data.current_pkt.is_input
+                pieces.append(piece)
+
+        if not pieces:
+            # Not "nothing matched" but "there is nothing to show yet" — a body half-way
+            # through a message, or an exchange that is not gRPC at all. The filter is not
+            # called, which is what `NotReadyToRun` means everywhere else.
+            raise NotReadyToRun()
+
+        result = pieces[0] if len(pieces) == 1 else pieces
+        internal_data.call_mem[f"_fetched_obj_{cls._parser_class()}"] = result
+        return result
+
+    @property
+    def payload(self) -> bytes:
+        """This message's bytes: the protobuf, without the length prefix."""
+        return self._frame.payload if self._frame else b""
+
+    @property
+    def compressed(self) -> bool:
+        """Whether this message's own flag byte says it is compressed.
+
+        What with is `grpc-encoding` on the message that carried it. Nothing here
+        decompresses it, so `payload` is the compressed bytes when this is true.
+        """
+        return bool(self._frame and self._frame.compressed)
+
+    @property
+    def is_request(self) -> bool:
+        """Whether this went from the client towards the service."""
+        return self._is_input
+
+    @property
+    def method(self) -> str | None:
+        """The gRPC method, which is the HTTP path: `/package.Service/Method`.
+
+        Present on both directions, because both halves of an exchange belong to the same
+        stream and the engine renders the request that opened it.
+        """
+        return self.url
+
+    @property
+    def grpc_status(self) -> str | None:
+        """The status, where the message carrying this frame stated one.
+
+        A gRPC status lives in the trailer section, and on a reply that refuses before
+        sending anything it lives in the headers instead — the *trailers-only* shape. Read
+        it where it is; on a reply that is still streaming it is not there yet, and this
+        is `None` rather than a guess.
+        """
+        return self.get_header("grpc-status")
+
+    def __repr__(self):
+        return (
+            f"<GrpcMessage method={self.method} "
+            f"{'request' if self.is_request else 'response'} "
+            f"payload=[{len(self.payload)} bytes] compressed={self.compressed} "
+            f"grpc_status={self.grpc_status}>"
+        )
+
+
+class GrpcRequest(GrpcMessage):
+    """A gRPC message on its way to the service, and nothing coming back."""
+
+    @staticmethod
+    def _before_fetch_callable_checks(internal_data: DataStreamCtx) -> bool:
+        return internal_data.current_pkt.is_input
+
+    @staticmethod
+    def _parser_class() -> str:
+        # Its own parser, as `HttpFullRequest` has one beside `HttpRequest`. Not tidiness:
+        # taking a frame *consumes* it, so two models sharing one parser would mean the
+        # second one is handed nothing and silently never runs.
+        return "http_grpc_req"
+
+
+class GrpcResponse(GrpcMessage):
+    """A gRPC message on its way back to the client."""
+
+    @staticmethod
+    def _before_fetch_callable_checks(internal_data: DataStreamCtx) -> bool:
+        return not internal_data.current_pkt.is_input
+
+    @staticmethod
+    def _parser_class() -> str:
+        return "http_grpc_res"

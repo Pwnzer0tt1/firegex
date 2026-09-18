@@ -15,6 +15,27 @@ from helpers.traffic import Channel
 pytestmark = pytest.mark.instance
 
 
+#: How long to keep asking for the block to show up.
+#:
+#: Asked for rather than slept through, because the path from a refusal to a line in the
+#: ring is asynchronous at both ends — the engine reports it, the backend attributes it
+#: against the database, and the flush is on a `FLUSH_INTERVAL` timer. A fixed wait that
+#: is three times the interval still loses that race on a busy machine, which is how this
+#: failed once in a full run and then passed twenty-four times on its own. Waiting *until*
+#: costs nothing when it is there already and hides nothing when it is not: the assertion
+#: below is the same one.
+APPEARS = 5.0
+
+
+def blocks_of(api, service_id, patience: float = APPEARS) -> list:
+    deadline = time.time() + patience
+    while True:
+        blocks = [e for e in api.services_logs(service_id) if e["level"] == "block"]
+        if blocks or time.time() > deadline:
+            return blocks
+        time.sleep(0.1)
+
+
 @pytest.fixture
 def noisy(api, protected, inspecting_layer):
     service_id, server, port = protected(inspecting_layer, name="log")
@@ -22,7 +43,7 @@ def noisy(api, protected, inspecting_layer):
     start_and_settle(api, service_id)
     channel = Channel(server, port, inspecting_layer.ipv6)
     channel.is_blocked(b"carrying BLOCKME")
-    time.sleep(0.8)
+    blocks_of(api, service_id)
     return service_id, channel
 
 
@@ -30,7 +51,7 @@ def test_the_log_names_what_refused_the_connection(api, noisy):
     """An operator reading an opaque id mid-round learns nothing, which is the same as
     having no log. Both layers report `<filter>/<function>` or the pattern itself."""
     service_id, _ = noisy
-    blocks = [e for e in api.services_logs(service_id) if e["level"] == "block"]
+    blocks = blocks_of(api, service_id)
     assert blocks, "nothing was logged as a block"
     assert any("BLOCKME" in e["text"] for e in blocks), str(blocks[:3])
 

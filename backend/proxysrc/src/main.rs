@@ -6,6 +6,8 @@ use std::time::Duration;
 use fgex_proxy::control::serve_stdin;
 use fgex_proxy::filter::{ChainHandle, FilterChain};
 use fgex_proxy::proxy::{Proxy, ProxyConfig, TlsSetup, Upstream};
+use fgex_proxy::quic::{QuicConfig, QuicManager, QuicSetup};
+use fgex_proxy::relays::Relays;
 use fgex_proxy::spec::parse_filters;
 use fgex_proxy::transparent::probe_capability;
 
@@ -47,26 +49,67 @@ fn env_usize(key: &str) -> Option<usize> {
     std::env::var(key).ok()?.trim().parse().ok()
 }
 
-fn build_tls() -> Result<TlsSetup, String> {
+/// The certificate and key this service terminates with, read once.
+///
+/// Read rather than passed: a certificate on a command line or in an environment dump is
+/// a certificate in a log somewhere. Both edges that need it — TLS over TCP and QUIC —
+/// ask for the same pair, so it is read here and handed to whichever wants it.
+fn read_material() -> Result<Option<(String, String)>, String> {
     let cert_path = std::env::var("FGEX_PROXY_TLS_CERT").ok();
     let key_path = std::env::var("FGEX_PROXY_TLS_KEY").ok();
-    let server = match (cert_path, key_path) {
+    match (cert_path, key_path) {
         (Some(cert), Some(key)) => {
-            let cert =
+            let certificate =
                 std::fs::read_to_string(&cert).map_err(|e| format!("cannot read {cert}: {e}"))?;
             let key =
                 std::fs::read_to_string(&key).map_err(|e| format!("cannot read the key: {e}"))?;
-            Some(fgex_proxy::tls::server_config(&cert, &key)?)
+            Ok(Some((certificate, key)))
         }
-        (None, None) => None,
-        _ => return Err("FGEX_PROXY_TLS_CERT and FGEX_PROXY_TLS_KEY go together".to_string()),
-    };
-    let upstream = if env_flag("FGEX_PROXY_TLS_UPSTREAM") {
-        Some(fgex_proxy::tls::client_config()?)
+        (None, None) => Ok(None),
+        _ => Err("FGEX_PROXY_TLS_CERT and FGEX_PROXY_TLS_KEY go together".to_string()),
+    }
+}
+
+/// The protocols offered to the service, in the operator's order.
+///
+/// Offered to the *service*, which is what makes the list needed at all: the client's own
+/// list arrives inside an encrypted Initial and cannot be read before answering, so this
+/// is what firegex has to go on. `h3` alone by default, because that is what a QUIC
+/// service is nine times in ten; anything else — a game protocol, a CTF's own — is named
+/// here or its handshake fails saying so.
+fn quic_alpn() -> Vec<Vec<u8>> {
+    let raw = std::env::var("FGEX_PROXY_QUIC_ALPN").unwrap_or_default();
+    let listed: Vec<Vec<u8>> = raw
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.as_bytes().to_vec())
+        .collect();
+    if listed.is_empty() {
+        vec![b"h3".to_vec()]
     } else {
-        None
+        listed
+    }
+}
+
+fn build_tls(material: Option<&(String, String)>, optional: bool) -> Result<TlsSetup, String> {
+    let server = match material {
+        Some((cert, key)) => Some(fgex_proxy::tls::server_config(cert, key)?),
+        None => None,
     };
-    Ok(TlsSetup { server, upstream })
+    // Built whenever this engine terminates anything, and *used* per address: whether a
+    // given connection is re-encrypted on the way out is the address's answer
+    // (`Onward`), not the process's. A plain TCP service terminates nothing, so it has
+    // no client configuration and never did — which is why none of this reaches it.
+    let upstream = match server {
+        Some(_) => Some(fgex_proxy::tls::client_config()?),
+        None => None,
+    };
+    Ok(TlsSetup {
+        server,
+        upstream,
+        optional,
+    })
 }
 
 /// Answer one regex-debug request and exit, instead of starting a datapath.
@@ -178,9 +221,38 @@ async fn run() {
         }
     };
 
-    // TLS terminated here rather than by an nginx in front. Rules see plaintext that
-    // never leaves the process.
-    let tls = match build_tls() {
+    // Read before either edge is built: TLS over TCP and QUIC terminate with the same
+    // certificate, and a service speaks one of them or the other.
+    let material = match read_material() {
+        Ok(material) => material,
+        Err(e) => {
+            eprintln!("[fatal] [main] {e}");
+            exit(2);
+        }
+    };
+
+    // QUIC is UDP on the wire, so it takes the place of the datagram relays rather than
+    // sitting beside them: the same map of one port per protected address, bound by
+    // something that terminates instead of something that forwards.
+    let quic = env_flag("FGEX_PROXY_QUIC");
+
+    // Whether the TCP listener terminates TLS, and whether it insists on it.
+    //
+    // `FGEX_PROXY_TLS_OPTIONAL` is what an `http` service sets: one certificate, one
+    // chain, and each connection carried as whatever the client opened it with — in the
+    // clear on one port and under TLS on another. It also means TLS on TCP and QUIC on
+    // UDP live in **one** engine process, which they could not before: the two used to be
+    // exclusive here, on the reasoning that a service speaks one or the other, and an
+    // HTTP service speaks both.
+    let tls_optional = env_flag("FGEX_PROXY_TLS_OPTIONAL");
+    // Absent, the old rule: a certificate means terminate, unless this is a QUIC service,
+    // where the certificate belongs to the QUIC edge and the TCP listener has nothing
+    // pointed at it. Said explicitly by anything that wants both.
+    let terminate_tls = env_flag("FGEX_PROXY_TLS") || tls_optional || !quic;
+    let tls = match build_tls(
+        if terminate_tls { material.as_ref() } else { None },
+        tls_optional,
+    ) {
         Ok(setup) => setup,
         Err(e) => {
             eprintln!("[fatal] [main] {e}");
@@ -208,15 +280,82 @@ async fn run() {
         secs => Some(Duration::from_secs(secs as u64)),
     };
 
+    // Opened once for the process and shared by every path that reconstructs something:
+    // the interface belongs to the instance, not to a service or a connection.
+    let capture = fgex_proxy::capture::Capture::open();
+
+    // Where each published address sends its traffic, for the ones this engine starts
+    // with. `10.0.0.1:443=10.0.0.1:80` reads as "what arrives at the first is the
+    // service at the second" — an address published on a port the service does not
+    // listen on. Absent, and for every address not named, the answer is the address
+    // itself, which is what transparent means and what every service had before.
+    let targets = std::sync::Arc::new(fgex_proxy::proxy::Targets::default());
+    if let Ok(spec) = std::env::var("FGEX_PROXY_TARGETS") {
+        for entry in spec.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            // `10.0.0.1:443|tls=10.0.0.1:80`, and every part after the address optional:
+            // the edge says what is spoken there and the target where the service is,
+            // and an address that says neither is one this engine is simply in front of.
+            let (address, target) = match entry.split_once('=') {
+                Some((address, target)) => (
+                    address,
+                    Some(parse_addr("FGEX_PROXY_TARGETS", target.trim())),
+                ),
+                None => (entry, None),
+            };
+            // `<address>|<edge>|<onward>`, both words optional and both defaulting to
+            // the answer every address gave before there was a question.
+            let mut words = address.split('|');
+            let address = words.next().unwrap_or(address);
+            let edge = match words.next() {
+                Some("tls") => fgex_proxy::proxy::Edge::Tls,
+                None | Some("clear") | Some("any") => fgex_proxy::proxy::Edge::Whatever,
+                Some(other) => {
+                    eprintln!("[fatal] [main] FGEX_PROXY_TARGETS: unknown edge '{other}'");
+                    exit(2);
+                }
+            };
+            let upstream = match words.next() {
+                Some("plain") => fgex_proxy::proxy::Onward::Plain,
+                Some("tls") => fgex_proxy::proxy::Onward::Tls,
+                None | Some("same") => fgex_proxy::proxy::Onward::Same,
+                Some(other) => {
+                    eprintln!("[fatal] [main] FGEX_PROXY_TARGETS: unknown upstream '{other}'");
+                    exit(2);
+                }
+            };
+            let public = parse_addr("FGEX_PROXY_TARGETS", address.trim());
+            // Said out loud, because everything else about an address is visible in the
+            // rules and this is not: it lives in this process and nowhere else, so an
+            // operator wondering why a port behaves the way it does has nothing to read.
+            eprintln!(
+                "[info] [main] {public} carries {} to {}",
+                match edge {
+                    fgex_proxy::proxy::Edge::Tls => "TLS only",
+                    _ => "whatever arrives",
+                },
+                match (target, upstream) {
+                    (Some(target), fgex_proxy::proxy::Onward::Plain) => {
+                        format!("{target} in the clear")
+                    }
+                    (Some(target), fgex_proxy::proxy::Onward::Tls) => format!("{target} on TLS"),
+                    (Some(target), _) => format!("{target} as it arrived"),
+                    (None, fgex_proxy::proxy::Onward::Plain) => "the service in the clear".into(),
+                    (None, fgex_proxy::proxy::Onward::Tls) => "the service on TLS".into(),
+                    (None, _) => "the service as it arrived".into(),
+                }
+            );
+            targets.publish(public, fgex_proxy::proxy::Published { target, edge, upstream });
+        }
+    }
+
     let cfg = ProxyConfig {
         listen,
         upstream,
         spoof_source,
         connect_timeout: Duration::from_millis(connect_timeout),
         tls,
-        // Opened once for the process and shared: the interface exists only while some
-        // TLS service is running, and `None` here simply means nothing is watching.
-        capture: fgex_proxy::capture::Capture::open(),
+        // `None` simply means nothing is watching, which is the ordinary case.
+        capture: capture.clone(),
         // Zero means no limit, which is what it was before there was one. The backend
         // always sends a value; the default here is for anyone running the engine by
         // hand, where a surprise limit would be worse than none.
@@ -224,6 +363,7 @@ async fn run() {
         over_limit_forwards,
         first_byte_timeout,
         self_mark: cfg_self_mark,
+        targets: std::sync::Arc::clone(&targets),
     };
     let chain = ChainHandle::new(FilterChain::new(filters, Duration::from_millis(deadline)));
     let chain_handle = chain.clone();
@@ -251,16 +391,62 @@ async fn run() {
          (spoof_source={spoof_source})"
     );
 
-    // UDP manager: binds and tracks UDP relays, shared between startup configuration
-    // and dynamic commands arriving on stdin.
-    let udp_manager = fgex_proxy::udp::UdpManager::new(
-        chain_handle.clone(),
-        cfg_self_mark,
-        spoof_source,
-        max_connections,
-        over_limit_forwards,
-        Arc::clone(&counters),
-    );
+    // The relays this service's addresses get, bound at startup and added to on demand.
+    // Which kind is not a per-address choice: a service speaks QUIC or it speaks
+    // datagrams, and the one it speaks is what every one of its addresses gets.
+    let relays = if quic {
+        let (cert, key) = match &material {
+            Some(pair) => pair,
+            None => {
+                eprintln!(
+                    "[fatal] [main] a QUIC service needs a certificate: QUIC carries TLS 1.3 \
+                     inside it, and terminating it is the only way a filter sees anything"
+                );
+                exit(2);
+            }
+        };
+        let alpn = quic_alpn();
+        let setup = match QuicSetup::build(cert, key, alpn.clone()) {
+            Ok(setup) => Arc::new(setup),
+            Err(e) => {
+                eprintln!("[fatal] [main] {e}");
+                exit(2);
+            }
+        };
+        eprintln!(
+            "[info] [main] QUIC terminated here; offering the service {}",
+            alpn.iter()
+                .map(|p| String::from_utf8_lossy(p).into_owned())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Relays::Quic(QuicManager::new(
+            chain_handle.clone(),
+            QuicConfig {
+                setup,
+                capture: capture.clone(),
+                self_mark: cfg_self_mark,
+                spoof_source,
+                max_connections,
+                over_limit_forwards,
+                first_byte_timeout,
+                connect_timeout: Duration::from_millis(connect_timeout),
+                // The default for a relay that was added without saying; the backend
+                // says, per address, on `FGEX_PROXY_UDP` and on `ADD_UDP`.
+                upstream: fgex_proxy::proxy::Onward::Same,
+            },
+            Arc::clone(&counters),
+        ))
+    } else {
+        Relays::Datagram(fgex_proxy::udp::UdpManager::new(
+            chain_handle.clone(),
+            cfg_self_mark,
+            spoof_source,
+            max_connections,
+            over_limit_forwards,
+            Arc::clone(&counters),
+        ))
+    };
 
     // UDP, when the backend asks for it: a comma-separated list of protected
     // addresses, one relay each. One socket per address rather than one for all of
@@ -269,8 +455,21 @@ async fn run() {
     // there is nothing to recover.
     if let Ok(spec) = std::env::var("FGEX_PROXY_UDP") {
         for target in spec.split(',').filter(|s| !s.trim().is_empty()) {
+            // `<address>` or `<address>|<onward>`: what the service behind this one
+            // relay speaks. Per relay because a relay is one protected address, and
+            // two ports of one service can be reached differently.
+            let (target, onward) = match target.trim().split_once('|') {
+                Some((target, "plain")) => (target, fgex_proxy::proxy::Onward::Plain),
+                Some((target, "tls")) => (target, fgex_proxy::proxy::Onward::Tls),
+                Some((target, "same")) => (target, fgex_proxy::proxy::Onward::Same),
+                Some((_, other)) => {
+                    eprintln!("[fatal] [main] FGEX_PROXY_UDP: unknown upstream '{other}'");
+                    exit(2);
+                }
+                None => (target.trim(), fgex_proxy::proxy::Onward::Same),
+            };
             let upstream = parse_addr("FGEX_PROXY_UDP", target.trim());
-            match udp_manager.add_relay(upstream).await {
+            match relays.add_relay(upstream, onward).await {
                 Ok(port) => {
                     println!("UDP {upstream} {port}");
                     use std::io::Write;
@@ -289,8 +488,8 @@ async fn run() {
     // before, during and after a rule change or relay addition.
     let deadline_dur = Duration::from_millis(deadline);
     let control_chain = chain_handle.clone();
-    let control_udp = udp_manager.clone();
-    tokio::spawn(async move { serve_stdin(control_chain, deadline_dur, control_udp).await });
+    let control_relays = relays.clone();
+    tokio::spawn(async move { serve_stdin(control_chain, deadline_dur, control_relays, targets).await });
 
     // Both counters live on the proxy, not on the chain: a chain is replaced wholesale
     // every time a ruleset is pushed, and counters that reset on a rule edit would make

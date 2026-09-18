@@ -32,7 +32,7 @@ class InternalTCPStream:
     
     @classmethod
     def _fetch_packet(cls, internal_data:DataStreamCtx, is_input:bool=False):
-        if internal_data.current_pkt is None or internal_data.current_pkt.is_tcp is False:
+        if internal_data.current_pkt is None or internal_data.current_pkt.is_stream is False:
             raise NotReadyToRun()
         if internal_data.current_pkt.is_input != is_input:
             raise NotReadyToRun()

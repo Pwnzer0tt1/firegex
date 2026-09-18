@@ -50,10 +50,81 @@ export enum L4 {
     UDP = "udp",
     /** TLS over TCP, decrypted by the engine. Only on the proxy layer. */
     TLS = "tls",
+    /**
+     * QUIC: UDP on the wire, TLS 1.3 inside it, streams inside that. Decrypted by the
+     * engine, and only on the proxy layer — with less choice about it than TLS has.
+     * Past the first packet QUIC encrypts its frames and its stream boundaries too, so
+     * a layer that forwards packets has nothing to show a filter at all.
+     */
+    QUIC = "quic",
+    /**
+     * Every version of HTTP at once: HTTP/1.1 and HTTP/2 on TCP — in the clear or under
+     * TLS, whichever each client opens with — and HTTP/3 on UDP beside them.
+     *
+     * The odd one out, because it says what the *service* is rather than what is on the
+     * wire, and lets each address say how it is reached. It exists because the
+     * alternative was two or three services with the same filter chain copied between
+     * them by hand, and a chain kept in step by hand is one that stops protecting one of
+     * them silently. Every version is shown to the filters as the same HTTP/1.1, so one
+     * pattern and one Python filter cover all of them.
+     */
+    HTTP = "http",
+}
+
+/**
+ * What a protocol is called in the interface.
+ *
+ * One place, because the form, the service row and its page all have to call a service
+ * the same thing: being offered `HTTPS` and then shown `HTTP` on the row is the kind of
+ * difference an operator reasonably reads as two different settings.
+ *
+ * Only `http` is not simply its own name in capitals. Stored and served as `http` — it
+ * *is* every version of HTTP — it is shown as **HTTPS** because of where it is chosen:
+ * among the protocols firegex has to decrypt, beside TLS and QUIC, where a thing labelled
+ * "HTTP" reads as the cleartext web protocol, which is the confusion this whole picker
+ * was rebuilt around. What it adds to TLS is the cleartext ports carried beside it, and
+ * that belongs in the sentence under the option rather than in its name.
+ */
+export const protoLabel = (proto: string) => proto === L4.HTTP ? "HTTPS" : proto.toUpperCase()
+
+/**
+ * What the service *behind one address* speaks.
+ *
+ * It used to be assumed rather than asked: whatever the client spoke, the service was
+ * taken to speak too — a TLS connection re-encrypted on the way out, a QUIC one
+ * re-encoded as QUIC. That is right when firegex is carrying somebody else's encryption
+ * and wrong in the case an operator most often has, which is a service that speaks
+ * neither and never will.
+ *
+ * It belongs to the address because that is where it has an answer: one daemon reached
+ * over TLS on one port and in the clear on another is re-encrypted for the first and
+ * handed the plaintext for the second.
+ */
+export enum Upstream {
+    /** It speaks what arrived. The default, and what every address used to do. */
+    SAME = "same",
+    /** It answers in the clear, and firegex is what adds the encryption in front of it. */
+    TCP = "tcp",
+    /** It speaks TLS, whatever the client used to get here. */
+    TLS = "tls",
 }
 
 /** Whether a service's traffic is decrypted before the filters see it. */
-export const decrypts = (service: { proto: string }) => service.proto === L4.TLS
+export const decrypts = (service: { proto: string }) =>
+    service.proto === L4.TLS || service.proto === L4.QUIC || service.proto === L4.HTTP
+
+/**
+ * What an address of this service may be reached over.
+ *
+ * One answer for every protocol but `http`, which is the one that means "each address
+ * says" — and says it in the same words a service speaks: in the clear, under TLS, or
+ * over QUIC.
+ */
+export const addressEdges = (proto: string): string[] =>
+    proto === L4.HTTP ? [L4.TCP, L4.TLS, L4.QUIC] : [proto]
+
+/** Whether an address of this service has to say which transport it is on. */
+export const addressPicksProto = (proto: string) => proto === L4.HTTP
 
 /**
  * Whether a network layer can carry a protocol at all.
@@ -64,11 +135,12 @@ export const decrypts = (service: { proto: string }) => service.proto === L4.TLS
  * the backend refuses — which it does refuse, in `Transport.check()`, and being told no
  * after filling in a form is a worse way to learn it.
  *
- * Only TLS constrains anything today: decrypting means terminating the connection, which
- * is what the proxy layer does and the other two deliberately do not.
+ * Only the two protocols that have to be decrypted constrain anything: decrypting means
+ * terminating the connection, which is what the proxy layer does and the other two
+ * deliberately do not.
  */
 export const carries = (transport: string, proto: string): boolean =>
-    proto !== L4.TLS || transport === Transport.PROXY
+    !decrypts({ proto }) || transport === Transport.PROXY
 
 
 
@@ -91,7 +163,17 @@ export type Address = {
     service_id: string,
     ip_int: string,
     port: number,
+    /** What the kernel matches: this is `edge` with the hat taken off. */
     proto: string,
+    /** What clients speak here — `tcp`, `tls`, `udp` or `quic`. */
+    edge: string,
+    /** What the service behind *this address* speaks. See {@link Upstream}. */
+    upstream: string,
+    /**
+     * Where the service really is, when this address is a publication rather than the
+     * service itself. Null is the transparent case: firegex dials what the client dialled.
+     */
+    target_port: number | null,
     /** `external` only: where your own proxy listens for this address. */
     proxy_ip: string | null,
     proxy_port: number | null,
@@ -100,6 +182,12 @@ export type Address = {
 export type AddressForm = {
     ip_int: string,
     port: number,
+    /** `http` only: what is spoken at this address. */
+    edge?: string | null,
+    /** Where the service is, when it is not on this port. */
+    target_port?: number | null,
+    /** What the service behind this address speaks. */
+    upstream?: string | null,
     proxy_ip?: string | null,
     proxy_port?: number | null,
 }

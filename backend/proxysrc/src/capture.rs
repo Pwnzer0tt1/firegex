@@ -19,13 +19,24 @@
 //! follow; what it costs is that this is not evidence of what was on the wire, and the
 //! documentation says so.
 //!
+//! **A QUIC stream is reconstructed the same way, one TCP stream each.** A QUIC stream
+//! is ordered, reliable and starts at zero, which is precisely what a [`Tap`] rebuilds —
+//! but every stream of one connection shares the connection's four-tuple, so writing
+//! them out as they are would interleave a hundred of them into a single conversation
+//! that no tool could take apart. So each is given a **synthetic client port** by
+//! [`Tap::open_stream`], and that is one more piece of invented framing on top of the
+//! invented framing this whole file is: the port identifies a stream and was never a
+//! port anybody bound. It has to be said wherever a capture from here is offered, next
+//! to the sentence about sequence numbers, because an operator reading a port back out
+//! of Wireshark will otherwise go looking for a socket that does not exist.
+//!
 //! Failure is always silent and always local. If the interface is not there, or the
 //! socket cannot be opened, or a send fails, the traffic goes on exactly as it would
 //! have: a capture aid must never be able to interrupt a service it is only watching.
 
 use std::ffi::CString;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use std::sync::Arc;
 
 /// The interface the decrypted traffic is written to. A fixed name on purpose: it is
@@ -112,9 +123,58 @@ pub struct Tap {
     up: AtomicU32,
     /// Next sequence number for service → client.
     down: AtomicU32,
+    /// Whether the end of the stream has been written.
+    ended: AtomicBool,
+}
+
+/// A reconstruction always gets an end, whichever way its owner left.
+///
+/// The TCP path closes its tap where the connection is torn down, and could; the paths
+/// that carry one stream of many have a dozen ways out — a refused request returns before
+/// anything is joined — and a stream left without a FIN is one Wireshark holds open
+/// waiting for bytes that are never coming. So the last holder emits it, and
+/// [`Tap::closed`] stays callable where the end is known and worth saying explicitly.
+impl Drop for Tap {
+    fn drop(&mut self) {
+        self.closed();
+    }
+}
+
+/// Hands out the ports that tell one multiplexed stream from another.
+///
+/// A counter and not a hash of the stream id: ids restart at zero on every QUIC
+/// connection, so deriving the port from one would drop two clients' first streams into
+/// the same conversation. Cycling the ephemeral range instead gives the same answer a
+/// NAT gives, and reuse only becomes possible after 16384 live streams — at which point
+/// a new SYN is what separates them, exactly as it does for a real port that came round
+/// again.
+static NEXT_STREAM_PORT: AtomicU16 = AtomicU16::new(0);
+
+const EPHEMERAL_BASE: u16 = 49152;
+const EPHEMERAL_SPAN: u16 = 65535 - EPHEMERAL_BASE + 1;
+
+fn stream_port() -> u16 {
+    EPHEMERAL_BASE + NEXT_STREAM_PORT.fetch_add(1, Ordering::Relaxed) % EPHEMERAL_SPAN
 }
 
 impl Tap {
+    /// Start a reconstruction for one stream of a multiplexed connection.
+    ///
+    /// The client's address keeps its IP and loses its port, because the port is the only
+    /// field left that can tell two streams of one connection apart: the service's end is
+    /// the service's and changing it would misattribute the traffic, and the client's IP
+    /// is what an operator filters on. What comes back is therefore a conversation
+    /// between a real host and a real service on a port that never existed.
+    pub fn open_stream(
+        capture: Option<Arc<Capture>>,
+        client: SocketAddr,
+        server: SocketAddr,
+    ) -> Option<Arc<Tap>> {
+        let mut client = client;
+        client.set_port(stream_port());
+        Tap::open(capture, client, server)
+    }
+
     /// Start a reconstruction, and emit the handshake that opens it.
     ///
     /// The handshake is not decoration: without a SYN, Wireshark has no beginning for
@@ -132,6 +192,7 @@ impl Tap {
             server,
             up: AtomicU32::new(0),
             down: AtomicU32::new(0),
+            ended: AtomicBool::new(false),
         });
         // Interleaved with the increments, not emitted and then counted: each of these
         // reads the two counters as they stand, so a SYN-ACK sent before the client's
@@ -159,7 +220,13 @@ impl Tap {
     }
 
     /// Close the reconstruction, so the stream has an end as well as a beginning.
+    ///
+    /// Idempotent: [`Drop`] calls it too, and a stream that ended twice would read as one
+    /// that was closed and then closed again.
     pub fn closed(&self) {
+        if self.ended.swap(true, Ordering::Relaxed) {
+            return;
+        }
         self.emit(true, FIN | ACK, &[]);
         self.emit(false, FIN | ACK, &[]);
     }
@@ -311,4 +378,29 @@ fn build_v6(
     out.extend_from_slice(&tcp);
     out.extend_from_slice(payload);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The one property that makes multiplexed streams separable in a capture.
+    ///
+    /// Two streams of one connection differ in nothing a capture tool looks at — same
+    /// addresses, same service port — so if this stopped handing out distinct ports they
+    /// would arrive as one interleaved conversation, which is worse than not capturing
+    /// them at all: it reads as a single stream whose bytes make no sense.
+    #[test]
+    fn every_stream_gets_a_port_of_its_own() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..EPHEMERAL_SPAN as usize {
+            let port = stream_port();
+            assert!(port >= EPHEMERAL_BASE, "{port} is not an ephemeral port");
+            assert!(seen.insert(port), "{port} came round before the range was spent");
+        }
+        // And then it does come round, rather than running out: a long-lived engine has
+        // more streams than there are ports, and a new SYN is what separates the reuse —
+        // exactly as it does for a real port the kernel hands out again.
+        assert!(!seen.insert(stream_port()));
+    }
 }

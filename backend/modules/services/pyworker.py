@@ -303,9 +303,14 @@ class Filters:
             "data": data,
             "is_input": is_input,
             "is_ipv6": bool(meta.get("is_ipv6", False)),
-            # Said by the engine rather than assumed: this worker serves TCP connections
-            # and UDP flows alike, and the library's stream and HTTP models key off it.
+            # Said by the engine rather than assumed: this worker serves TCP connections,
+            # UDP flows and QUIC streams alike. Two words rather than one, because they
+            # answer different questions — `is_tcp` is what is on the wire, `l4` is what
+            # the library's stream and HTTP models are built on, and QUIC answers those
+            # two differently. Absent, `l4` derives from the other: the NFQUEUE engines
+            # carry TCP and UDP and have nothing else to say.
             "is_tcp": bool(meta.get("is_tcp", True)),
+            "l4": meta.get("l4"),
             "src_ip": client_ip if is_input else server_ip,
             "src_port": client_port if is_input else server_port,
             "dst_ip": server_ip if is_input else client_ip,

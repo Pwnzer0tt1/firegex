@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 use crate::filter::{
     next_connection_id, ChainHandle, ChainSessions, ConnectionId, ConnectionMeta, Direction,
-    FilterChain, Verdict,
+    FilterChain, Verdict, L4,
 };
 use crate::capture::{Capture, Tap};
 use crate::tls;
@@ -36,6 +36,22 @@ pub struct TlsSetup {
     pub server: Option<std::sync::Arc<rustls::ServerConfig>>,
     /// Re-encrypt towards the service, the way nginx's `proxy_ssl on` does.
     pub upstream: Option<std::sync::Arc<rustls::ClientConfig>>,
+    /// Terminate it **only if the client actually starts a handshake**.
+    ///
+    /// What an `http` service is: one chain in front of a daemon that answers in the
+    /// clear on one port and under TLS on another, with one certificate and one set of
+    /// filters. The alternative was one service per edge with the chain copied between
+    /// them by hand, which is the failure several addresses under one service already
+    /// exist to prevent.
+    ///
+    /// It is a per-connection question because that is the only place it has an answer,
+    /// and answering it from what the client sent is the same rule the ALPN mirroring
+    /// follows: firegex carries what the two ends are doing rather than deciding it for
+    /// them. The upstream leg mirrors it too — a connection that arrived in the clear is
+    /// forwarded in the clear, one that arrived under TLS is re-encrypted — because the
+    /// service is being dialled on the port the client chose, and that port's edge is the
+    /// one the client just demonstrated.
+    pub optional: bool,
 }
 
 impl TlsSetup {
@@ -44,12 +60,123 @@ impl TlsSetup {
     }
 }
 
+/// What a connection turned out to be, from the bytes the client opened it with.
+///
+/// **Peeked, never read.** Everything stays in the socket, so a connection this tells
+/// apart is handed on exactly as it arrived — there is nothing buffered to replay, and no
+/// way for the question to lose a byte.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Opening {
+    /// A TLS record: `0x16` handshake, major version 3. Nothing else begins that way.
+    Tls,
+    /// The HTTP/2 connection preface, which is what "prior knowledge" looks like.
+    Http2,
+    /// Anything else, including a service that spoke before its client did.
+    Other,
+}
+
 const RELAY_BUF: usize = 64 * 1024;
 
 /// Backstop for a direction that will not wind down — one blocked writing to a peer
 /// that has stopped reading, say. The normal path is the stop signal below, which is
 /// prompt.
 const REJECT_GRACE: Duration = Duration::from_secs(2);
+
+/// What is spoken at one published address, and where it goes.
+///
+/// Firegex is transparent by default and was transparent only, for as long as there was
+/// one answer to "where is the service": the address the client dialled. The engine
+/// recovers that from conntrack and dials it as the client, so the service goes on
+/// seeing connections to the port it listens on from the addresses they came from. An
+/// address with no entry here behaves exactly that way, which is why the empty map is
+/// the default and why every field below is optional.
+///
+/// An entry is the operator saying something about one address in particular:
+///
+/// * **where the service is**, when it is not on this port — one daemon answering on
+///   `:80` reached over TLS on `:443`, without being moved or reconfigured;
+/// * **what is spoken here**, when the service is reached in more than one way at once.
+///   Only `http` services have that, and only there is the question asked.
+///
+/// Only the TCP path needs any of it. A UDP or QUIC address already has a relay of its
+/// own, bound to the service it fronts and terminating what it was built to terminate.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum Edge {
+    /// Whatever the client turns out to be speaking. The default and the ordinary case:
+    /// one listener fronts a whole service, a cleartext port and an encrypted one are
+    /// the same listener, and which a connection is cannot be known before it starts.
+    ///
+    /// There is deliberately no "cleartext only" beside this. Refusing a client that
+    /// brings TLS to a port nobody promised would be a rule with nothing behind it, and
+    /// the permissive answer is what an `http` service has always given.
+    #[default]
+    Whatever,
+    /// This address is the encrypted one, and was said to be. A client that opens it in
+    /// the clear is refused rather than carried, because "this port is HTTPS" is a
+    /// promise about the port rather than a guess about the connection — and a service
+    /// expecting HTTPS being handed a cleartext request is the kind of surprise an
+    /// operator would rather have at the door.
+    Tls,
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct Published {
+    pub target: Option<SocketAddr>,
+    pub edge: Edge,
+    /// What the service behind *this* address speaks. Per address rather than per
+    /// process because that is where it has an answer: one daemon reached over TLS on
+    /// one port and in the clear on another is re-encrypted for the first and handed
+    /// the plaintext for the second, and what firegex does on the way out is a property
+    /// of the way in.
+    pub upstream: Onward,
+}
+
+/// What this engine speaks onward, to the service behind one address.
+///
+/// Not to be confused with [`Upstream`] beside it, which is *where* to forward. This is
+/// what is spoken when it gets there.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum Onward {
+    /// Whatever arrived: a connection terminated here goes back out encrypted, one that
+    /// arrived in the clear is forwarded in the clear. The default, and what every
+    /// address did before there was a choice.
+    #[default]
+    Same,
+    /// The service speaks in the clear, whatever the client used to get here.
+    Plain,
+    /// The service speaks TLS, whatever the client used to get here.
+    Tls,
+}
+
+#[derive(Default)]
+pub struct Targets(std::sync::RwLock<std::collections::HashMap<SocketAddr, Published>>);
+
+impl Targets {
+    /// Say something about one address. Replaces any previous answer for it.
+    pub fn publish(&self, public: SocketAddr, what: Published) {
+        if let Ok(mut map) = self.0.write() {
+            map.insert(public, what);
+        }
+    }
+
+    /// Forget one published address. A stale entry could only ever be consulted by
+    /// traffic the rules no longer send here, but an engine whose map disagrees with the
+    /// rules is a thing somebody will one day read and believe.
+    pub fn withdraw(&self, public: &SocketAddr) {
+        if let Ok(mut map) = self.0.write() {
+            map.remove(public);
+        }
+    }
+
+    /// What was said about the address this connection was dialled at, if anything.
+    pub fn resolve(&self, original: SocketAddr) -> Published {
+        self.0
+            .read()
+            .ok()
+            .and_then(|map| map.get(&original).copied())
+            .unwrap_or_default()
+    }
+}
 
 /// Where a connection should be forwarded.
 #[derive(Clone, Copy, Debug)]
@@ -93,6 +220,9 @@ pub struct ProxyConfig {
     /// the operator's to choose; refusing is the default because a filter that quietly
     /// stops filtering is the worse surprise.
     pub over_limit_forwards: bool,
+    /// Where published addresses send their traffic, when it is not where they were
+    /// dialled. Empty is the transparent case and the default.
+    pub targets: Arc<Targets>,
     /// How long a connection may carry no bytes at all before it is closed. `None` is
     /// off, which is what it was before.
     ///
@@ -124,6 +254,7 @@ impl ProxyConfig {
             over_limit_forwards: false,
             first_byte_timeout: None,
             self_mark: None,
+            targets: Arc::new(Targets::default()),
         }
     }
 }
@@ -158,7 +289,7 @@ pub struct ProxyStats {
 /// a dozen ways out — a refused chain, a dial that fails, a handshake that times out, a
 /// panic — and a counter that leaks on any one of them is a limit that tightens until it
 /// refuses everything.
-struct Slot(Arc<ProxyStats>);
+pub(crate) struct Slot(pub(crate) Arc<ProxyStats>);
 
 impl Drop for Slot {
     fn drop(&mut self) {
@@ -338,6 +469,10 @@ async fn handle_connection(
             }
         },
     };
+    // What the operator said about the address this was dialled at: nothing, for every
+    // address that is simply the service, which is the transparent case and the default.
+    let published = cfg.targets.resolve(upstream);
+    let upstream = published.target.unwrap_or(upstream);
 
     // A rule that steers our own outbound traffic back at us would spin forever.
     if upstream == cfg.listen {
@@ -358,6 +493,345 @@ async fn handle_connection(
     let _ = client.set_nodelay(true);
     let _ = server.set_nodelay(true);
 
+    // Nothing is sniffed for a chain that has nothing to say: a bypassed service is a
+    // byte pump whatever its clients speak, so the question has no consequence and the
+    // peek would be work paid for no answer. An `http` service in that state carries the
+    // client's TLS through untouched, which is exactly what "not filtering" means.
+    let opening = if chain.current().is_bypassed() || !(cfg.tls.is_off() || cfg.tls.optional) {
+        Opening::Other
+    } else {
+        sniff(&client, &server).await
+    };
+
+    // An address declared to be the encrypted one keeps that promise: a client opening
+    // it in the clear is refused rather than carried to a service expecting HTTPS. Every
+    // other address is `Whatever`, where the sniff is the only answer there can be —
+    // one listener fronts both a cleartext port and an encrypted one, and which a
+    // connection is cannot be known before it starts.
+    if published.edge == Edge::Tls && opening != Opening::Tls && !cfg.tls.is_off() {
+        stats.closed_by_filter.fetch_add(1, Ordering::Relaxed);
+        // Said out loud, and at `warn`, because the operator on the other end of this has
+        // no way to guess it. What a cleartext client gets back is either nothing or a
+        // TLS alert — seven bytes a browser offers to save as a file — and neither says
+        // which of the two ends is wrong. It is nearly always the address: a port carrying
+        // the cleartext site declared as the encrypted one. Naming the address and what
+        // was expected turns an afternoon into a sentence.
+        eprintln!(
+            "[warn] [proxy] {peer} spoke something that is not TLS to {upstream}, which              this service declares as its encrypted address. The connection is refused              rather than carried to a service expecting HTTPS. If that address is meant              to carry the site in the clear, it is the one to change."
+        );
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{upstream} is published as TLS and this connection did not start one"),
+        ));
+    }
+    if cfg.tls.is_off() || (cfg.tls.optional && opening != Opening::Tls) {
+        // HTTP/2 in the clear, which a client announces by opening with a fixed 24-byte
+        // preface. It is worth catching for the same reason the TLS path catches `h2`:
+        // without it a gRPC service that speaks plaintext — which is most of them behind
+        // a load balancer — is carried as HPACK nobody can read.
+        if opening == Opening::Http2 {
+            return crate::h2::carry(
+                client,
+                server,
+                crate::h2::Carriage {
+                    client: peer,
+                    upstream,
+                    chain: chain.clone(),
+                    stats: Arc::clone(&stats),
+                    // Unlike every other plaintext connection, this one *is* worth
+                    // reconstructing: what is on the wire is a compression format, so the
+                    // capture interface is the only place the exchange can be read as the
+                    // filters saw it.
+                    capture: cfg.capture.clone(),
+                    first_byte_timeout: cfg.first_byte_timeout,
+                },
+            )
+            .await;
+        }
+        // Only where there is something to reconstruct: with no TLS and no HTTP/2, the
+        // bytes on the wire *are* the plaintext, and anybody wanting them can capture the
+        // interface they are already crossing rather than a copy this process invents.
+        let (client_rd, client_wr) = tokio::io::split(client);
+        let (server_rd, server_wr) = tokio::io::split(server);
+        return relay(
+            client_rd, client_wr, server_rd, server_wr, peer, upstream, &cfg, &chain, &stats, None,
+        )
+        .await;
+    }
+
+    // Handshakes before anything is relayed, and all of them on the deadline: a peer
+    // that opens a connection and then says nothing must not tie up a task.
+    //
+    // The order is the interesting part. The client's handshake is *started* and
+    // then held open at the ClientHello, because that message carries the protocols
+    // the client is willing to speak and this proxy has no business deciding them.
+    // The upstream handshake goes next, offering the service exactly that list; what
+    // the service picks is what the client is then told. Terminating in the middle
+    // of a connection means answering for a service, and answering something the
+    // service did not say is how a proxy breaks a protocol it was only supposed to
+    // carry — a client told `h2` while the service speaks HTTP/1.1 sends frames to
+    // something that cannot read them.
+    //
+    // Terminating HTTP/2 below changes nothing about that: the client is still told
+    // exactly what the service chose. What changes is what firegex then *does* with a
+    // connection that agreed on `h2` — it speaks it, on both sides, instead of
+    // forwarding frames no filter can read.
+    let (started, wanted) = match &cfg.tls.server {
+        Some(_) => {
+            let start = tokio::time::timeout(
+                cfg.connect_timeout,
+                tokio_rustls::LazyConfigAcceptor::new(rustls::server::Acceptor::default(), client),
+            )
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TLS handshake timed out"))??;
+            let wanted: Vec<Vec<u8>> = start
+                .client_hello()
+                .alpn()
+                .map(|it| it.map(|p| p.to_vec()).collect())
+                .unwrap_or_default();
+            (Some(start), wanted)
+        }
+        None => (None, Vec::new()),
+    };
+
+    // Per address: the configuration is built once, and whether this connection uses it
+    // is the address's answer. `Same` is the old rule — re-encrypt what was terminated —
+    // and is why a plain TCP service, which terminates nothing, is untouched by any of
+    // this and always was.
+    let upstream_tls = match published.upstream {
+        Onward::Plain => None,
+        // The two coincide here and that is not an oversight: this point is only
+        // reached for a connection whose TLS *was* terminated, so "what arrived" and
+        // "TLS" are the same answer. They differ on the QUIC edge, where there is no
+        // arriving TLS to mirror and the choice decides the whole upstream leg.
+        Onward::Tls | Onward::Same => cfg.tls.upstream.as_ref(),
+    };
+    let (server, agreed): (Duplex, Option<Vec<u8>>) = match upstream_tls {
+        Some(config) => {
+            let name = tls::server_name(&upstream.ip().to_string())?;
+            let connected = tokio::time::timeout(
+                cfg.connect_timeout,
+                tls::connector(tls::with_alpn(config, &wanted)).connect(name, server),
+            )
+            .await
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut, "upstream TLS handshake timed out")
+            })??;
+            let agreed = connected.get_ref().1.alpn_protocol().map(|p| p.to_vec());
+            (Box::new(connected), agreed)
+        }
+        // Nothing upstream to *ask*, which is two situations wearing one shape. Where
+        // the connection was never terminated there is nothing to decide and `wanted` is
+        // empty anyway. Where it was terminated and the address says the service speaks
+        // HTTP/1.1 whatever arrives (`Onward::Plain`), firegex is not carrying somebody
+        // else's protocol — it **is** the far end — so it answers for itself, and saying
+        // `http/1.1` is the whole of what it can honestly promise today.
+        //
+        // **`h2` is promised only while the chain will render it.** A bypassed chain is a
+        // byte pump, and a byte pump between an HTTP/2 client and an HTTP/1.1 service
+        // carries frames nothing at the far end can read — the exact breakage the
+        // mirroring rule exists to prevent, arriving from the other direction. The trade
+        // is the one the bypass already documents: a connection admitted while the chain
+        // was empty keeps the protocol it was admitted with.
+        //
+        // This is the other half of an asymmetry that stood for a while and had no reason
+        // behind it: the same cleartext HTTP/1.1 service was reachable over HTTP/3,
+        // because the QUIC edge picks from its own candidate list and speaks HTTP/1.1
+        // onwards through `h1up`, and not reachable over HTTP/2 at all, because this edge
+        // had nobody to copy and therefore said nothing. One rendering underneath,
+        // opposite answers.
+        None => {
+            let picked = if matches!(published.upstream, Onward::Plain) {
+                let renders = !chain.current().is_bypassed();
+                let offers = |name: &[u8]| wanted.iter().any(|p| p.as_slice() == name);
+                if renders && offers(b"h2") {
+                    Some(b"h2".to_vec())
+                } else if offers(b"http/1.1") {
+                    Some(b"http/1.1".to_vec())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            (Box::new(server), picked)
+        }
+    };
+
+    let client: Duplex = match (started, &cfg.tls.server) {
+        (Some(start), Some(config)) => {
+            let accepted = tokio::time::timeout(
+                cfg.connect_timeout,
+                start.into_stream(tls::answering_with(config, agreed.as_deref())),
+            )
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TLS handshake timed out"))??;
+            Box::new(accepted)
+        }
+        _ => unreachable!("a started handshake means a server config"),
+    };
+
+    // Both ends agreed to speak HTTP/2, so the engine speaks it: terminated here, each
+    // exchange rendered to the chain as the HTTP/1.1 it would have been, and re-encoded
+    // on the way to the service. Without this the connection was forwarded as frames,
+    // and a pattern written against a request line matched nothing while an
+    // `HttpRequest` filter was never called — switched on, reporting nothing, running
+    // never.
+    //
+    // Not when the chain is bypassed. Rendering for a chain that has nothing to say is
+    // work paid for no answer, and this is the path a service with no filters and the
+    // `over_limit_forwards` fallback both take. The cost is that a connection carried
+    // while the chain was empty stays a byte pump for its whole life, even if a filter
+    // is pushed a moment later — the same trade the fallback itself makes, and the
+    // reason it is written down here.
+    if agreed.as_deref() == Some(b"h2") && !chain.current().is_bypassed() {
+        let carriage = crate::h2::Carriage {
+            client: peer,
+            upstream,
+            chain: chain.clone(),
+            stats: Arc::clone(&stats),
+            capture: cfg.capture.clone(),
+            first_byte_timeout: cfg.first_byte_timeout,
+        };
+        // Which version leaves is the address's answer, not the client's. `Plain` is the
+        // operator saying the service speaks HTTP/1.1 whatever arrives, so what leaves is
+        // the HTTP/1.1 the chain was already shown — the same bargain the QUIC edge makes,
+        // and the reason `h2.rs` takes its upstream as an `Outbound` rather than a
+        // connection of its own kind.
+        return match published.upstream {
+            Onward::Plain => {
+                crate::h2::carry_to_h1(
+                    client,
+                    crate::h1up::H1Upstream {
+                        upstream,
+                        client: peer,
+                        tls: None,
+                        connect_timeout: cfg.connect_timeout,
+                        self_mark: cfg.self_mark,
+                        spoof: cfg.spoof_source,
+                    },
+                    carriage,
+                )
+                .await
+            }
+            _ => crate::h2::carry(client, server, carriage).await,
+        };
+    }
+
+    let (client_rd, client_wr) = tokio::io::split(client);
+    let (server_rd, server_wr) = tokio::io::split(server);
+    relay(
+        client_rd,
+        client_wr,
+        server_rd,
+        server_wr,
+        peer,
+        upstream,
+        &cfg,
+        &chain,
+        &stats,
+        Tap::open(cfg.capture.clone(), peer, upstream),
+    )
+    .await
+}
+
+/// What a client opening an HTTP/2 connection in the clear sends before anything else.
+///
+/// RFC 9113's connection preface: a fixed 24 bytes, written as one piece, that no other
+/// protocol begins with. It is what "prior knowledge" means — the client has been told the
+/// service speaks HTTP/2 and does not negotiate.
+const H2C_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+
+/// How long the opening is waited for when neither end has said anything yet.
+///
+/// Short, and paid only by a connection where *nobody* has spoken — which is the shape the
+/// first-byte deadline already exists to close, measured in seconds, so this adds nothing
+/// anybody will notice. It is here so that two silent peers cannot hold this function, and
+/// the two descriptors behind it, open forever.
+const SNIFF_WAIT: Duration = Duration::from_millis(250);
+
+/// What this connection opens with, without taking anything out of the socket.
+///
+/// It races the service, and that is the part that matters: a protocol where the *server*
+/// speaks first — SMTP, SSH, most game protocols — would otherwise be held here waiting for
+/// a client that is correctly waiting for a banner, and firegex would look like it was
+/// breaking them at random. Neither TLS nor HTTP/2 has a client that waits to be spoken to,
+/// so the service having spoken is proof this is neither.
+async fn sniff(client: &TcpStream, server: &TcpStream) -> Opening {
+    async fn opening(client: &TcpStream) -> Opening {
+        let mut buf = [0u8; H2C_PREFACE.len()];
+        loop {
+            let n = match client.peek(&mut buf).await {
+                Ok(0) | Err(_) => return Opening::Other,
+                Ok(n) => n,
+            };
+            // Decided from three bytes, which arrive in the first segment of every TLS
+            // connection there has ever been: a handshake record, major version 3. Not
+            // from one — an opening byte on its own says nothing, and guessing from it
+            // would send a connection down the wrong edge for good.
+            if buf[0] == 0x16 {
+                if n < 3 {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                    continue;
+                }
+                return if buf[1] == 0x03 {
+                    Opening::Tls
+                } else {
+                    Opening::Other
+                };
+            }
+            if n >= H2C_PREFACE.len() {
+                return if buf == H2C_PREFACE {
+                    Opening::Http2
+                } else {
+                    Opening::Other
+                };
+            }
+            // Fewer bytes than the preface, but so far they *are* the preface: the
+            // segment boundary fell inside it. Peeking again costs nothing and is bounded
+            // by the caller — and treating a short read as "not HTTP/2" would be a
+            // connection carried unfiltered for a reason nobody could see.
+            if H2C_PREFACE.starts_with(&buf[..n]) {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            } else {
+                return Opening::Other;
+            }
+        }
+    }
+
+    let mut first = [0u8; 1];
+    tokio::select! {
+        biased;
+        answer = opening(client) => answer,
+        _ = server.peek(&mut first) => Opening::Other,
+        _ = tokio::time::sleep(SNIFF_WAIT) => Opening::Other,
+    }
+}
+
+/// Carry one connection as two streams of bytes, which is every case HTTP/2 is not.
+///
+/// Its own function because the plaintext path and the TLS one reach it from different
+/// places now: the h2 branch returns before this, and what is left has to open the
+/// chain's connection, pump, and close it in one piece rather than in two copies.
+#[allow(clippy::too_many_arguments)]
+async fn relay<CR, CW, SR, SW>(
+    client_rd: CR,
+    client_wr: CW,
+    server_rd: SR,
+    server_wr: SW,
+    peer: SocketAddr,
+    upstream: SocketAddr,
+    cfg: &Arc<ProxyConfig>,
+    chain: &ChainHandle,
+    stats: &Arc<ProxyStats>,
+    tap: Option<Arc<Tap>>,
+) -> io::Result<()>
+where
+    CR: AsyncReadExt + Unpin + Send + 'static,
+    CW: AsyncWriteExt + Unpin + Send + 'static,
+    SR: AsyncReadExt + Unpin + Send + 'static,
+    SW: AsyncWriteExt + Unpin + Send + 'static,
+{
     // Both directions share it: to a filter this is one stream, and a filter keeping
     // per-stream state must not see the two halves as unrelated clients.
     let connection = next_connection_id();
@@ -369,127 +843,24 @@ async fn handle_connection(
         &ConnectionMeta {
             client: peer,
             server: upstream,
-            tcp: true,
+            l4: L4::Tcp,
         },
     );
 
-    // Only where there is something to reconstruct: with TLS off, the bytes on the wire
-    // *are* the plaintext, and anybody wanting them can capture the interface they are
-    // already crossing rather than a copy this process invents.
-    let tap = if cfg.tls.is_off() {
-        None
-    } else {
-        Tap::open(cfg.capture.clone(), peer, upstream)
-    };
+    let (up, down) = spawn_pumps(
+        client_rd,
+        client_wr,
+        server_rd,
+        server_wr,
+        chain,
+        stats,
+        connection,
+        tap.clone(),
+        Arc::new(AtomicBool::new(false)),
+        cfg.first_byte_timeout,
+    );
 
-    let (mut up, mut down) = if cfg.tls.is_off() {
-        let (client_rd, client_wr) = tokio::io::split(client);
-        let (server_rd, server_wr) = tokio::io::split(server);
-        spawn_pumps(
-            client_rd, client_wr, server_rd, server_wr, &chain, &stats, connection, None,
-            cfg.first_byte_timeout,
-        )
-    } else {
-        // Handshakes before anything is relayed, and all of them on the deadline: a peer
-        // that opens a connection and then says nothing must not tie up a task.
-        //
-        // The order is the interesting part. The client's handshake is *started* and
-        // then held open at the ClientHello, because that message carries the protocols
-        // the client is willing to speak and this proxy has no business deciding them.
-        // The upstream handshake goes next, offering the service exactly that list; what
-        // the service picks is what the client is then told. Terminating in the middle
-        // of a connection means answering for a service, and answering something the
-        // service did not say is how a proxy breaks a protocol it was only supposed to
-        // carry — a client told `h2` while the service speaks HTTP/1.1 sends frames to
-        // something that cannot read them.
-        let (started, wanted) = match &cfg.tls.server {
-            Some(_) => {
-                let start = tokio::time::timeout(
-                    cfg.connect_timeout,
-                    tokio_rustls::LazyConfigAcceptor::new(
-                        rustls::server::Acceptor::default(),
-                        client,
-                    ),
-                )
-                .await
-                .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TLS handshake timed out"))??;
-                let wanted: Vec<Vec<u8>> = start
-                    .client_hello()
-                    .alpn()
-                    .map(|it| it.map(|p| p.to_vec()).collect())
-                    .unwrap_or_default();
-                (Some(start), wanted)
-            }
-            None => (None, Vec::new()),
-        };
-
-        let (server, agreed): (Duplex, Option<Vec<u8>>) = match &cfg.tls.upstream {
-            Some(config) => {
-                let name = tls::server_name(&upstream.ip().to_string())?;
-                let connected = tokio::time::timeout(
-                    cfg.connect_timeout,
-                    tls::connector(tls::with_alpn(config, &wanted)).connect(name, server),
-                )
-                .await
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::TimedOut, "upstream TLS handshake timed out")
-                })??;
-                let agreed = connected.get_ref().1.alpn_protocol().map(|p| p.to_vec());
-                (Box::new(connected), agreed)
-            }
-            // Nothing upstream to ask, so nothing to relay back: the client is told no
-            // protocol rather than one this end invented.
-            None => (Box::new(server), None),
-        };
-
-        let client: Duplex = match (started, &cfg.tls.server) {
-            (Some(start), Some(config)) => {
-                let accepted = tokio::time::timeout(
-                    cfg.connect_timeout,
-                    start.into_stream(tls::answering_with(config, agreed.as_deref())),
-                )
-                .await
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::TimedOut, "TLS handshake timed out")
-                })??;
-                Box::new(accepted)
-            }
-            _ => unreachable!("a started handshake means a server config"),
-        };
-        let (client_rd, client_wr) = tokio::io::split(client);
-        let (server_rd, server_wr) = tokio::io::split(server);
-        spawn_pumps(
-            client_rd, client_wr, server_rd, server_wr, &chain, &stats, connection,
-            tap.clone(), cfg.first_byte_timeout,
-        )
-    };
-
-    // A rule blocks a connection, not a direction. Half-closing would leave the
-    // other side free to answer anyway — a service that replies without waiting for
-    // the request would then still reach a client whose request was refused.
-    fn rejected(r: &Result<io::Result<PumpOutcome>, tokio::task::JoinError>) -> bool {
-        matches!(r, Ok(Ok(PumpOutcome::Rejected)))
-    }
-    async fn wind_down(
-        other: &mut tokio::task::JoinHandle<io::Result<PumpOutcome>>,
-        rejected: bool,
-    ) {
-        if !rejected {
-            let _ = other.await;
-            return;
-        }
-        if tokio::time::timeout(REJECT_GRACE, &mut *other)
-            .await
-            .is_err()
-        {
-            other.abort();
-        }
-    }
-
-    tokio::select! {
-        r = &mut up => wind_down(&mut down, rejected(&r)).await,
-        r = &mut down => wind_down(&mut up, rejected(&r)).await,
-    }
+    join_pumps(up, down).await;
     // Both directions are finished, so anything a filter was keeping for this stream
     // can go. Filters whose state lives in a session were already freed by dropping
     // it; this is for the ones whose state lives somewhere the session cannot reach.
@@ -511,10 +882,47 @@ pub enum PumpOutcome {
     Rejected,
 }
 
+/// Wait for both directions to finish, and report whether a rule ended them.
+///
+/// A rule blocks a connection, not a direction. Half-closing would leave the other side
+/// free to answer anyway — a service that replies without waiting for the request would
+/// then still reach a client whose request was refused. The refused direction is already
+/// winding the other one down through the stop channel; the grace period is the backstop
+/// for one blocked writing to a peer that has stopped reading.
+///
+/// The answer comes back rather than being acted on here, because what a refusal ends
+/// differs by layer: on TCP the connection *is* the stream, while a QUIC stream is one of
+/// many and the connection carrying it has to be closed on purpose.
+pub(crate) async fn join_pumps(
+    mut up: tokio::task::JoinHandle<io::Result<PumpOutcome>>,
+    mut down: tokio::task::JoinHandle<io::Result<PumpOutcome>>,
+) -> bool {
+    fn rejected(r: &Result<io::Result<PumpOutcome>, tokio::task::JoinError>) -> bool {
+        matches!(r, Ok(Ok(PumpOutcome::Rejected)))
+    }
+    async fn wind_down(
+        other: &mut tokio::task::JoinHandle<io::Result<PumpOutcome>>,
+        rejected: bool,
+    ) -> bool {
+        if !rejected {
+            return matches!(other.await, Ok(Ok(PumpOutcome::Rejected)));
+        }
+        if tokio::time::timeout(REJECT_GRACE, &mut *other).await.is_err() {
+            other.abort();
+        }
+        true
+    }
+
+    tokio::select! {
+        r = &mut up => wind_down(&mut down, rejected(&r)).await,
+        r = &mut down => wind_down(&mut up, rejected(&r)).await,
+    }
+}
+
 /// Start both directions. Split out so the plain and the TLS paths share it.
 #[allow(clippy::type_complexity)]
 #[allow(clippy::too_many_arguments)]
-fn spawn_pumps<CR, CW, SR, SW>(
+pub(crate) fn spawn_pumps<CR, CW, SR, SW>(
     client_rd: CR,
     client_wr: CW,
     server_rd: SR,
@@ -523,6 +931,7 @@ fn spawn_pumps<CR, CW, SR, SW>(
     stats: &Arc<ProxyStats>,
     connection: ConnectionId,
     tap: Option<Arc<Tap>>,
+    spoken: Arc<AtomicBool>,
     cfg_first_byte: Option<Duration>,
 ) -> (
     tokio::task::JoinHandle<io::Result<PumpOutcome>>,
@@ -542,7 +951,11 @@ where
 
     // Set by whichever direction moves a byte first. Both pumps hold it, so a server
     // that speaks before its client satisfies the deadline just as a request would.
-    let spoken = Arc::new(AtomicBool::new(false));
+    //
+    // Passed in rather than made here: on QUIC one connection carries many streams, and
+    // the question the deadline asks — has this peer said anything at all — is about the
+    // connection. A flag per stream would answer it once per stream and never for the
+    // connection that opened a hundred of them and spoke on none.
     if let Some(deadline) = cfg_first_byte {
         let spoken = Arc::clone(&spoken);
         let stop = stop_tx.clone();
@@ -602,7 +1015,7 @@ where
 // used exactly once, so a struct would be a wrapper around the argument list.
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::too_many_arguments)]
-async fn pump<R, W>(
+pub(crate) async fn pump<R, W>(
     mut rd: R,
     mut wr: W,
     dir: Direction,

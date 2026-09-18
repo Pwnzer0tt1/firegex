@@ -8,14 +8,20 @@
 pub mod control;
 pub mod debug;
 pub mod filter;
+pub mod h1up;
+pub mod h2;
+pub mod h3;
+pub mod http1;
 pub mod hyperscan;
 pub mod proxy;
+pub mod quic;
 pub mod pyworker;
 pub mod rules;
 pub mod spec;
 pub mod capture;
 pub mod tls;
 pub mod transparent;
+pub mod relays;
 pub mod udp;
 
 pub use filter::{

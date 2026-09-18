@@ -1,19 +1,27 @@
-import { Accordion, ActionIcon, Alert, Box, Button, Code, Group, Modal, NumberInput, SegmentedControl, Space, Switch, Text, TextInput, Tooltip } from '@mantine/core';
+import { Accordion, ActionIcon, Alert, Box, Button, Code, Group, Modal, NumberInput, Space, Switch, Text, TextInput, Tooltip } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { BsPlusLg, BsTrashFill } from 'react-icons/bs';
 import { errorNotify, isAddressOrInterface, isInterfaceName, okNotify } from '../../js/utils';
-import PortAndInterface from '../PortAndInterface';
+import { addressCapabilities } from './AddressOptions';
+import AddressRow from './AddressRow';
 import LayerChoice from './LayerChoice';
 import PemInput from './PemInput';
-import { AddressForm, carries, L4, Service, ServiceAddForm, serviceQueryKey, services, Transport } from './utils';
+import ProtocolChoice from './ProtocolChoice';
+import { AddressForm, decrypts, L4, Upstream, Service, ServiceAddForm, serviceQueryKey, services, Transport } from './utils';
 
 type AddressValues = {
     ip_int: string,
     port: number,
     proxy_ip: string,
     proxy_port: number,
+    /** `http` only: what is spoken at this address. */
+    edge: string,
+    /** Where the service is, when it is not on this port. Empty means "it is". */
+    target_port: number | string,
+    /** What the service behind this address speaks. */
+    upstream: string,
 }
 
 type FormValues = {
@@ -32,6 +40,13 @@ type FormValues = {
 
 const emptyAddress = (): AddressValues => ({
     ip_int: "127.0.0.1", port: 80, proxy_ip: "127.0.0.1", proxy_port: 8080,
+    // Only ever read on an `http` service, where each address says what is spoken at it;
+    // everywhere else the service's own protocol decides and this is ignored.
+    edge: L4.TCP,
+    // Both behind the row's own button, and both absent unless they were set: an address
+    // is where the service listens, forwarded as it arrived, until somebody says else.
+    target_port: "",
+    upstream: Upstream.SAME,
 })
 
 /**
@@ -77,13 +92,13 @@ export default function AddEditService({ opened, onClose, edit }: {
             // checked whenever something *was* typed is the PEM envelope, the same check
             // the backend makes — so the wrong field is named instead of the whole form.
             tls_cert: (v, values) => {
-                if (values.proto !== L4.TLS) return null
+                if (!decrypts(values)) return null
                 if (v === "") return stored ? null : "A certificate is required"
                 return v.includes("-----BEGIN CERTIFICATE-----") ? null
                     : "Not a PEM certificate: no 'BEGIN CERTIFICATE' block in it"
             },
             tls_key: (v, values) => {
-                if (values.proto !== L4.TLS) return null
+                if (!decrypts(values)) return null
                 if (v === "") return stored ? null : "A private key is required"
                 if (v.includes("ENCRYPTED PRIVATE KEY-----"))
                     return "Passphrase-protected keys cannot be used: decrypt it first"
@@ -124,9 +139,18 @@ export default function AddEditService({ opened, onClose, edit }: {
     const submit = async (values: FormValues) => {
         setSubmitting(true)
         const isExternal = values.transport === Transport.EXTERNAL
+        const caps = addressCapabilities(values.proto, values.transport)
         const addresses: AddressForm[] = values.addresses.map(a => ({
             ip_int: a.ip_int,
             port: a.port,
+            // Sent only where it means something — the same rules the ⚙ on each row
+            // offers them by. Everywhere else the backend refuses them rather than
+            // letting a stored value sit there being read by nothing.
+            ...(values.proto === L4.HTTP ? { edge: a.edge } : {}),
+            ...(caps.canPublish && Number(a.target_port) && Number(a.target_port) !== a.port
+                ? { target_port: Number(a.target_port) } : {}),
+            ...(caps.canChooseUpstream && a.upstream !== Upstream.SAME
+                ? { upstream: a.upstream } : {}),
             ...(isExternal ? { proxy_ip: a.proxy_ip, proxy_port: a.proxy_port } : {}),
         }))
 
@@ -140,8 +164,8 @@ export default function AddEditService({ opened, onClose, edit }: {
                     max_connections: values.max_connections,
                     over_limit_forwards: values.over_limit_forwards,
                     first_byte_timeout: values.first_byte_timeout,
-                    ...(values.proto === L4.TLS && values.tls_cert !== "" ? { tls_cert: values.tls_cert } : {}),
-                    ...(values.proto === L4.TLS && values.tls_key !== "" ? { tls_key: values.tls_key } : {}),
+                    ...(decrypts(values) && values.tls_cert !== "" ? { tls_cert: values.tls_cert } : {}),
+                    ...(decrypts(values) && values.tls_key !== "" ? { tls_key: values.tls_key } : {}),
                 })
                 if (err) { setError(err); setSubmitting(false); return }
                 okNotify("Service updated", `${values.name} now uses the ${values.transport} transport`)
@@ -153,8 +177,8 @@ export default function AddEditService({ opened, onClose, edit }: {
                     over_limit_forwards: values.over_limit_forwards,
                     first_byte_timeout: values.first_byte_timeout,
                 }
-                if (values.proto === L4.TLS && values.tls_cert !== "") payload.tls_cert = values.tls_cert
-                if (values.proto === L4.TLS && values.tls_key !== "") payload.tls_key = values.tls_key
+                if (decrypts(values) && values.tls_cert !== "") payload.tls_cert = values.tls_cert
+                if (decrypts(values) && values.tls_key !== "") payload.tls_key = values.tls_key
                 const res = await services.add(payload)
                 if (res.status !== "ok" || !res.service_id) { setError(res.status); setSubmitting(false); return }
                 if (values.autostart) {
@@ -174,7 +198,10 @@ export default function AddEditService({ opened, onClose, edit }: {
     }
 
     const isProxy = form.values.transport === Transport.PROXY
-    const isTls = form.values.proto === L4.TLS
+    //: Whether the engine terminates and decrypts this service — TLS or QUIC. What the
+    //  certificate fields, their validation and the payload all key off, because the two
+    //  protocols need exactly the same thing from the operator.
+    const isEncrypted = decrypts(form.values)
     // What the fold would tell you if you opened it. Built from what *differs* rather
     // than listing every setting, so a service nobody has tuned says so in three words
     // and a service that has been says exactly how.
@@ -193,17 +220,24 @@ export default function AddEditService({ opened, onClose, edit }: {
     // Leaving TLS selected while the layer that can decrypt it is not would send a
     // combination the backend refuses, and the operator would be looking at a protocol
     // the form is no longer offering.
+    //: The layer is not offered for a service that is decrypted, so it has to be set
+    //  rather than assumed: a form that hides a control still submits its value.
+    useEffect(() => {
+        if (isEncrypted && form.values.transport !== Transport.PROXY)
+            form.setFieldValue('transport', Transport.PROXY)
+    }, [isEncrypted])
     useEffect(() => {
         if (form.values.transport === Transport.PROXY) return
         // Neither survives leaving the layer that honours it. A stored limit that does
-        // nothing is the same trap as a stored TLS flag that does nothing.
-        if (isTls) form.setFieldValue('proto', L4.TCP)
+        // nothing is the same trap as a stored protocol nothing can decrypt.
+        if (isEncrypted) form.setFieldValue('proto', L4.TCP)
         if (form.values.max_connections !== 0) form.setFieldValue('max_connections', 0)
         if (form.values.first_byte_timeout !== 0) form.setFieldValue('first_byte_timeout', 0)
     }, [form.values.transport])
     const isExternal = form.values.transport === Transport.EXTERNAL
-    const isUdp = form.values.proto === L4.UDP
-
+    //: `http` is the one protocol whose addresses are not all on the same transport, so
+    //  it is the one where each of them has to say which it is.
+    const isHttp = form.values.proto === L4.HTTP
     // The form is tall — addresses are a list, and the layer choice explains itself — so
     // the fields scroll and the actions do not. A submit button that falls below the
     // fold of a modal is a button that is not there.
@@ -216,36 +250,33 @@ export default function AddEditService({ opened, onClose, edit }: {
                 <TextInput label="Service name" placeholder="shop-api" {...form.getInputProps('name')} />
                 <Space h="md" />
 
-                <Text size="sm" fw={500}>Transport protocol</Text>
-                <Text size="xs" c="dimmed" mb={6}>
-                    What the service speaks on the wire. TLS is one of them rather than a
-                    switch on top of TCP: the engine decrypts it, so the filters see the
-                    plaintext and no extra port is used.
-                </Text>
-                <SegmentedControl fullWidth
-                    // Disabled, not removed — the same way the layer picker below says no,
-                    // from the same `carries` rule. An option that vanishes leaves nothing to
-                    // ask about: the operator wonders whether TLS exists at all, or whether
-                    // they misremembered seeing it. Greyed out with a reason underneath, it
-                    // says both that it exists and what it would take to reach it.
-                    data={[
-                        { label: 'TCP', value: L4.TCP },
-                        { label: 'UDP', value: L4.UDP },
-                        {
-                            label: 'TLS',
-                            value: L4.TLS,
-                            disabled: !carries(form.values.transport, L4.TLS),
-                        },
-                    ]}
-                    {...form.getInputProps('proto')}
-                />
-                {/* Beside the control it is greyed out in, not further down beside the layer
-                that decides it: the question a reader has is "why can I not click that". */}
-                {!carries(form.values.transport, L4.TLS) ? <Text size="xs" c="dimmed" mt={6}>
-                    TLS is unavailable on this layer: it inspects packets as they pass rather
-                    than terminating the connection, and decrypting means terminating. Choose
-                    the proxy layer to use it.
-                </Text> : null}
+                <ProtocolChoice value={form.values.proto} transport={form.values.transport}
+                    onChange={v => form.setFieldValue('proto', v)} />
+                {/* Directly under the choice that asks for them, not at the far end of the
+                form. They used to sit below the advanced settings, which put the reason
+                and the request a screenful apart: an operator who had just picked HTTP for
+                a service answering in the clear met the fields with nothing next to them
+                saying which choice had produced them, and read it as firegex wanting a
+                certificate for a service that has none. */}
+                {isEncrypted ? <>
+                    <Space h="md" />
+                    <PemInput label="Certificate (PEM)"
+                        placeholder={edit ? "unchanged" : "-----BEGIN CERTIFICATE-----"}
+                        expect="-----BEGIN CERTIFICATE-----"
+                        value={form.values.tls_cert}
+                        onChange={v => form.setFieldValue('tls_cert', v)}
+                        error={form.errors.tls_cert} />
+                    <Space h="sm" />
+                    <PemInput label="Private key (PEM)"
+                        placeholder={edit ? "unchanged" : "-----BEGIN PRIVATE KEY-----"}
+                        expect="PRIVATE KEY-----"
+                        value={form.values.tls_key}
+                        onChange={v => form.setFieldValue('tls_key', v)}
+                        error={form.errors.tls_key} />
+                    {stored ? <Text size="xs" c="dimmed" mt={6}>
+                        Both are already stored: leave these empty to keep them.
+                    </Text> : null}
+                </> : null}
                 <Space h="md" />
 
                 {edit ? null : <>
@@ -255,7 +286,7 @@ export default function AddEditService({ opened, onClose, edit }: {
                             <Text size="xs" c="dimmed">
                                 {isExternal
                                     ? "One service, one hand-off, as many addresses as it answers on — IPv4 and IPv6 together if that is how it is reachable."
-                                    : "One service, one filter chain, as many places as it answers on — IPv4 and IPv6 together if that is how it is reachable, and an interface name where the address is not yours to know."}
+                                    : "One service, one filter chain, as many ways in as it has — IPv4 and IPv6 together if that is how it is reachable, and an interface name where the address is not yours to know. One more way in is one more address here."}
                             </Text>
                         </Box>
                         <Tooltip label="Protect another address with the same chain" position="left">
@@ -266,28 +297,10 @@ export default function AddEditService({ opened, onClose, edit }: {
                         </Tooltip>
                     </Group>
                     <Space h="xs" />
-                    {form.values.addresses.map((_, index) => <Box key={index} mb="sm">
-                        <Group align="flex-end" wrap="nowrap" gap="xs">
-                            <Box style={{ flex: 1 }}>
-                                <PortAndInterface form={form}
-                                    int_name={`addresses.${index}.ip_int`}
-                                    port_name={`addresses.${index}.port`}
-                                    includeInterfaceNames={!isExternal} />
-                            </Box>
-                            <ActionIcon variant="subtle" color="red" mb={4}
-                                disabled={form.values.addresses.length === 1}
-                                onClick={() => form.removeListItem('addresses', index)}>
-                                <BsTrashFill size={14} />
-                            </ActionIcon>
-                        </Group>
-                        {isExternal ? <Box mt={6}>
-                            <PortAndInterface form={form}
-                                int_name={`addresses.${index}.proxy_ip`}
-                                port_name={`addresses.${index}.proxy_port`}
-                                label="…handed to your proxy at"
-                                includeInterfaceNames={false} />
-                        </Box> : null}
-                    </Box>)}
+                    {form.values.addresses.map((_, index) =>
+                        <AddressRow key={index} form={form} index={index}
+                            proto={form.values.proto} transport={form.values.transport}
+                            canRemove={form.values.addresses.length > 1} />)}
                     {/* Said once under the list rather than as a validation error per row:
                     the operator is choosing between an address and an interface while they
                     fill it in, and being told afterwards that half of what the picker
@@ -299,16 +312,29 @@ export default function AddEditService({ opened, onClose, edit }: {
                                 An interface name — <Code>eth0</Code>, <Code>wg0</Code>, <Code>tun0</Code> —
                                 protects whatever address that link currently carries, which is what you
                                 want when somebody else hands it out. An address protects that one alone.
-                                {form.values.proto === L4.UDP && form.values.transport === Transport.PROXY
-                                    ? " On UDP this layer binds a relay to the interface's own address, so it has to have one; NFQUEUE needs none."
+                                {(form.values.proto === L4.UDP || form.values.proto === L4.QUIC)
+                                    && form.values.transport === Transport.PROXY
+                                    ? " On UDP and QUIC this layer binds a relay to the interface's own address, so it has to have one; NFQUEUE needs none."
                                     : ""}
                             </>}
                     </Text>
                     <Space h="md" />
                 </>}
 
-                <LayerChoice value={form.values.transport} proto={form.values.proto}
-                    onChange={v => form.setFieldValue('transport', v)} />
+                {/* Not a choice for a service that is decrypted: decrypting means
+                terminating the connection, and one layer does that. A picker with two
+                greyed-out options and one answer is a question nobody is being asked, so
+                it is said in a line instead — said rather than dropped, because the layer
+                is a real property of the service and an operator who has read about the
+                trade should not have to wonder which side of it they are on. */}
+                {isEncrypted
+                    ? <Text size="xs" c="dimmed">
+                        Carried by the <b>proxy</b> layer, which is the only one that can
+                        decrypt: the connection is terminated here and reopened towards
+                        the service.
+                    </Text>
+                    : <LayerChoice value={form.values.transport} proto={form.values.proto}
+                        onChange={v => form.setFieldValue('transport', v)} />}
                 <Space h="md" />
 
                 {/* One fold for everything an operator sets once — after something went
@@ -377,28 +403,6 @@ export default function AddEditService({ opened, onClose, edit }: {
                     <Space h="md" />
                 </>}
 
-
-                {isTls ? <>
-                    <Space h="sm" />
-                    <PemInput label="Certificate (PEM)"
-                        placeholder={edit ? "unchanged" : "-----BEGIN CERTIFICATE-----"}
-                        expect="-----BEGIN CERTIFICATE-----"
-                        value={form.values.tls_cert}
-                        onChange={v => form.setFieldValue('tls_cert', v)}
-                        error={form.errors.tls_cert} />
-                    <Space h="sm" />
-                    <PemInput label="Private key (PEM)"
-                        placeholder={edit ? "unchanged" : "-----BEGIN PRIVATE KEY-----"}
-                        expect="PRIVATE KEY-----"
-                        value={form.values.tls_key}
-                        onChange={v => form.setFieldValue('tls_key', v)}
-                        error={form.errors.tls_key} />
-                    <Text size="xs" c="dimmed" mt={6}>
-                        {stored
-                            ? "Both are already stored. They are never sent back to the browser, so leaving these empty keeps them as they are."
-                            : "The key is stored and used to configure nginx, and never sent back to the browser."}
-                    </Text>
-                </> : null}
 
                 {edit ? null : <>
                     <Space h="md" />
