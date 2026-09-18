@@ -36,8 +36,8 @@ RUN dnf -y update && dnf install -y python3.14-devel @development-tools gcc-c++ 
     vectorscan-devel libtins-devel libpcap-devel boost-devel cargo
 
 COPY ./backend/binsrc /execute/binsrc
-RUN g++ binsrc/nfregex.cpp -o cppregex -std=c++23 -O3 -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
-RUN g++ binsrc/pyfilter.cpp -o cpproxy -std=c++23 -O3 -lnetfilter_queue -lpython3.14 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
+RUN g++ binsrc/nfregex.cpp -o cppregex -std=c++23 -O3 -Wall -lnetfilter_queue -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libhs libmnl)
+RUN g++ binsrc/pyfilter.cpp -o cpproxy -std=c++23 -O3 -Wall -lnetfilter_queue -lpython3.14 -pthread -lnfnetlink $(pkg-config --cflags --libs libtins libmnl python3)
 
 # The proxy datapath engine, built here rather than in a rust image on purpose: it
 # links the same libhs the C++ binaries do, and a binary built against one distro's

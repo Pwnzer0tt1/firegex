@@ -556,7 +556,19 @@ class FiregexTables(NFTableManager):
             )
         cmds = []
         for position, queue_num in enumerate(queue_nums):
-            queue = {"queue": {"num": str(queue_num), "flags": ["bypass"]}}
+            # **`bypass` is the service's own fail-open policy, not a constant.** It tells
+            # the kernel to accept a packet when nothing is bound to the queue, which is
+            # exactly what happens when the interceptor dies — and it was set on every
+            # rule regardless. So a service with fail_open *off*, whose whole point is
+            # that traffic stops rather than passes when filtering stops, went wide open
+            # the moment its binary crashed: the one case the setting exists for. The
+            # other half of the same policy is `FIREGEX_NFQUEUE_FAIL_OPEN`, which decides
+            # what the process does while it is alive; the two have to agree or the
+            # answer depends on how the filtering stopped.
+            queue = {"queue": {
+                "num": str(queue_num),
+                **({"flags": ["bypass"]} if srv.fail_open else {}),
+            }}
             cmds.append(self._rule(
                 self.queue_output_chain(position),
                 self._match(ip, port, family, l4, "saddr", "sport")

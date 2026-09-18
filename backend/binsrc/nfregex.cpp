@@ -44,6 +44,9 @@ void config_updater (){
 		}catch(const std::exception& e){
 			cerr << "[error] [updater] Failed to build new configuration!" << endl;
 			osyncstream(cout) << "ACK FAIL " << e.what() << endl;
+		}catch(...){
+			cerr << "[error] [updater] Failed to build new configuration!" << endl;
+			osyncstream(cout) << "ACK FAIL unknown error" << endl;
 		}
 	}
 	
@@ -76,7 +79,7 @@ int main(int argc, char *argv[]){
 		stream_mode = false;
 	}
 	
-	bool fail_open = strcmp(getenv("FIREGEX_NFQUEUE_FAIL_OPEN"), "1") == 0;
+	bool fail_open = Firegex::NfQueue::nfqueue_fail_open();
 
 	regex_config.reset(new RegexRules(stream_mode));
 
@@ -85,7 +88,18 @@ int main(int argc, char *argv[]){
 	cerr << "[info] [main] Queue: " << queue_manager.queue_num() << " threads assigned: " << n_of_threads << " stream mode: " << stream_mode << " fail open: " << fail_open << endl;
 
 	thread qthr([&](){
-		queue_manager.start();
+		/*  An exception escaping a std::thread is std::terminate(): exit
+		    explicitly instead, so the backend sees a failed process it can
+		    react to rather than an abort. */
+		try{
+			queue_manager.start();
+		}catch(const std::exception& e){
+			cerr << "[fatal] [main] Queue loop stopped: " << e.what() << endl;
+			exit(EXIT_FAILURE);
+		}catch(...){
+			cerr << "[fatal] [main] Queue loop stopped with an unknown error" << endl;
+			exit(EXIT_FAILURE);
+		}
 	});
 	config_updater();
 	qthr.join();

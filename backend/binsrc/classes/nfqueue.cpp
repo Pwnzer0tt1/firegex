@@ -8,11 +8,39 @@
 #include <libmnl/libmnl.h>
 #include <tins/tins.h>
 #include <map>
+#include <vector>
+#include <iostream>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
 
 using namespace std;
 
 namespace Firegex{
 namespace NfQueue{
+
+/*  Largest packet we are willing to hand back to the kernel in a verdict.
+    NFQUEUE payloads are carried in a netlink attribute whose length field is
+    16 bit wide, so anything above this can never be re-injected anyway; the
+    cap exists to stop a python filter from making us allocate an arbitrary
+    amount of memory through the payload it returns. */
+const size_t MAX_VERDICT_PACKET_SIZE = 0xffff;
+
+/*  Reads the fail-open policy once, tolerating a missing variable.
+    `strcmp(getenv(...), "1")` was the previous spelling, which dereferences a
+    null pointer the moment the binary is run without the variable set — by
+    hand, or by anything that is not the backend.
+    Note that this only drives NFQA_CFG_F_FAIL_OPEN (what the kernel does when
+    the queue is full) and the fallback verdict used when a packet cannot be
+    parsed; the "what happens when this process is not running at all" half of
+    the policy lives in the nftables rules (the `bypass` queue flag). */
+inline bool nfqueue_fail_open(){
+	static const bool value = [](){
+		const char* env = getenv("FIREGEX_NFQUEUE_FAIL_OPEN");
+		return env != nullptr && strcmp(env, "1") == 0;
+	}();
+	return value;
+}
 
 enum class FilterAction{ DROP, ACCEPT, MANGLE, NOACTION };
 enum class L4Proto { TCP, UDP, RAW };
@@ -115,12 +143,13 @@ class PktRequest {
 
 	public:
 
+	// Listed in declaration order (that is the order they are really built in).
 	PktRequest(const char* payload, size_t plen, T* ctx, mnl_socket* nl, nfgenmsg *nfg, nfqnl_msg_packet_hdr *ph, bool is_input):
-		ctx(ctx), nl(nl), res_id(nfg->res_id),
-		packet_id(ph->packet_id), is_input(is_input),
+		action(FilterAction::NOACTION), nl(nl), res_id(nfg->res_id),
+		packet_id(ph->packet_id),
+		is_ipv6((payload[0] & 0xf0) == 0x60), is_input(is_input),
 		packet(string(payload, plen)),
-		action(FilterAction::NOACTION),
-		is_ipv6((payload[0] & 0xf0) == 0x60)
+		ctx(ctx)
 	{
 		if (is_ipv6){
 			ipv6 = new Tins::IPv6((uint8_t*)packet.c_str(), plen);
@@ -304,6 +333,15 @@ class PktRequest {
 	void mangle_custom_data(const char* data_ptr, size_t data_len){
 		if (action == FilterAction::NOACTION){
 			try{
+				/*  The payload comes from the operator's python, and what is
+				    rebuilt from it is what goes back to the kernel in a verdict.
+				    A netlink attribute carries its length in 16 bits, so a
+				    bigger packet could never be re-injected anyway — refusing it
+				    here is what stops a filter from making this process
+				    allocate an arbitrary amount of memory for nothing. */
+				if (data_len + _header_size > MAX_VERDICT_PACKET_SIZE){
+					throw invalid_argument("Mangled packet is too big to be re-injected");
+				}
 				set_data(data_ptr, data_len);
 				reserialize();
 				action = FilterAction::MANGLE;
@@ -338,7 +376,16 @@ class PktRequest {
 
 	private:
 	void perform_action(bool do_serialize = true){
-		char buf[MNL_SOCKET_BUFFER_SIZE+packet.size()];
+		/*  This used to be a VLA sized on the (attacker influenced) packet
+		    length, which overflows the worker stack as soon as a filter mangles
+		    a packet into something large. A thread_local buffer keeps the
+		    allocation off the stack while still avoiding a malloc per packet. */
+		static thread_local vector<char> verdict_buffer;
+		const size_t needed = MNL_SOCKET_BUFFER_SIZE + packet.size();
+		if (verdict_buffer.size() < needed){
+			verdict_buffer.resize(needed);
+		}
+		char* buf = verdict_buffer.data();
 		struct nlmsghdr *nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(res_id));
 		switch (action)
 		{
@@ -455,9 +502,7 @@ class NfQueue {
 		nlh = nfq_nlmsg_put(queue_msg_buffer, NFQNL_MSG_CONFIG, queue_num);
 		nfq_nlmsg_cfg_put_params(nlh, NFQNL_COPY_PACKET, 0xffff);
 
-		char * enable_fail_open = getenv("FIREGEX_NFQUEUE_FAIL_OPEN");
-
-		if (strcmp(enable_fail_open, "1") == 0){
+		if (nfqueue_fail_open()){
 			mnl_attr_put_u32(nlh, NFQA_CFG_FLAGS, htonl(NFQA_CFG_F_GSO|NFQA_CFG_F_FAIL_OPEN));
 			mnl_attr_put_u32(nlh, NFQA_CFG_MASK, htonl(NFQA_CFG_F_GSO|NFQA_CFG_F_FAIL_OPEN));
 		}else{
@@ -504,6 +549,18 @@ class NfQueue {
     
     private:
 
+	/*  Issues a plain verdict for a packet we could not build a PktRequest for.
+	    Every early return below has to go through this: a packet that is never
+	    given a verdict stays pinned in the kernel queue until it fills up. */
+	static void _send_raw_verdict(mnl_socket* nl, uint16_t res_id, uint32_t packet_id, int verdict) {
+		char buf[MNL_SOCKET_BUFFER_SIZE];
+		struct nlmsghdr *nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(res_id));
+		nfq_nlmsg_verdict_put(nlh_verdict, ntohl(packet_id), verdict);
+		if (mnl_socket_sendto(nl, nlh_verdict, nlh_verdict->nlmsg_len) < 0) {
+			cerr << "[error] [NfQueue._send_raw_verdict] failed to send the verdict" << endl;
+		}
+	}
+
     static int _real_queue_cb(const nlmsghdr *nlh, void *data_ptr) {
 		
         internal_nfqueue_execution_data_tmp* info = (internal_nfqueue_execution_data_tmp*) data_ptr;
@@ -511,28 +568,37 @@ class NfQueue {
 		//Extract attributes from the nlmsghdr
 		nlattr *attr[NFQA_MAX+1] = {};
 		
+		/*  None of the paths below may return MNL_CB_ERROR: that aborts
+		    mnl_cb_run(), which the caller turns into an exception. A single
+		    unexpected message must never be able to take the interceptor down,
+		    because the nftables rules outlive the process. */
 		if (nfq_nlmsg_parse(nlh, attr) < 0) {
 			cerr << "[error] [NfQueue._real_queue_cb] problems parsing" << endl;
-			return MNL_CB_ERROR;
+			return MNL_CB_OK;
 		}
 		if (attr[NFQA_PACKET_HDR] == nullptr) {
+			// Without the header there is no packet id, so there is nothing to
+			// answer: just skip the message.
 			cerr << "[error] [NfQueue._real_queue_cb] packet header not set" << endl;
-			return MNL_CB_ERROR;
-		}
-		if (attr[NFQA_MARK] == nullptr) {
-			cerr << "[error] [NfQueue._real_queue_cb] mark not set" << endl;
-			return MNL_CB_ERROR;
+			return MNL_CB_OK;
 		}
 		
 		struct nfqnl_msg_packet_hdr *ph = (nfqnl_msg_packet_hdr*) mnl_attr_get_payload(attr[NFQA_PACKET_HDR]);
 		struct nfgenmsg *nfg = (nfgenmsg *)mnl_nlmsg_get_payload(nlh);
 
+		// A packet we cannot inspect follows the service's fail-open policy
+		// instead of being silently let through.
+		const int fallback_verdict = nfqueue_fail_open() ? NF_ACCEPT : NF_DROP;
+
+		if (attr[NFQA_MARK] == nullptr) {
+			cerr << "[error] [NfQueue._real_queue_cb] mark not set" << endl;
+			_send_raw_verdict(info->nl, nfg->res_id, ph->packet_id, fallback_verdict);
+			return MNL_CB_OK;
+		}
+
 		if (attr[NFQA_PAYLOAD] == nullptr) {
 			cerr << "[error] [NfQueue._real_queue_cb] payload not set" << endl;
-			char buf[MNL_SOCKET_BUFFER_SIZE];
-			struct nlmsghdr *nlh_verdict = nfq_nlmsg_put(buf, NFQNL_MSG_VERDICT, ntohs(nfg->res_id));
-			nfq_nlmsg_verdict_put(nlh_verdict, ntohl(ph->packet_id), NF_ACCEPT);
-			mnl_socket_sendto(info->nl, nlh_verdict, nlh_verdict->nlmsg_len);
+			_send_raw_verdict(info->nl, nfg->res_id, ph->packet_id, NF_ACCEPT);
 			return MNL_CB_OK;
 		}
 
@@ -540,10 +606,58 @@ class NfQueue {
 		uint16_t plen = mnl_attr_get_payload_len(attr[NFQA_PAYLOAD]);
 		char *payload = (char *)mnl_attr_get_payload(attr[NFQA_PAYLOAD]);
 
+		if (plen == 0) {
+			cerr << "[error] [NfQueue._real_queue_cb] empty payload" << endl;
+			_send_raw_verdict(info->nl, nfg->res_id, ph->packet_id, NF_ACCEPT);
+			return MNL_CB_OK;
+		}
+
+		/*  NFQA_CFG_F_GSO is enabled, so the kernel can hand us a super packet
+		    bigger than the copy range; NFQA_CAP_LEN then reports the real
+		    length. Parsing a truncated packet yields a wrong view of the stream
+		    and re-injecting one would corrupt the connection, so treat it like
+		    any other packet we cannot inspect. */
+		if (attr[NFQA_CAP_LEN] != nullptr) {
+			uint32_t cap_len = ntohl(mnl_attr_get_u32(attr[NFQA_CAP_LEN]));
+			if (cap_len > plen) {
+				cerr << "[warning] [NfQueue._real_queue_cb] truncated packet ("
+					 << plen << " of " << cap_len << " bytes), applying the fail-open policy" << endl;
+				_send_raw_verdict(info->nl, nfg->res_id, ph->packet_id, fallback_verdict);
+				return MNL_CB_OK;
+			}
+		}
+
 		bool is_input = ntohl(mnl_attr_get_u32(attr[NFQA_MARK])) & 0x1; // == 0x1337 that is odd
-		handle_func(new PktRequest<D>(
-			payload, plen, (D*)info->data, info->nl, nfg, ph, is_input
-		));
+
+		/*  libtins throws (Tins::malformed_packet & friends) on a malformed ip
+		    header, truncated tcp options or bogus ipv6 extension headers. That
+		    exception would otherwise unwind through libmnl's C frames and kill
+		    the whole process, which is a remotely triggerable way of disabling
+		    the firewall: one crafted packet is enough. */
+		PktRequest<D>* pkt = nullptr;
+		try {
+			pkt = new PktRequest<D>(
+				payload, plen, (D*)info->data, info->nl, nfg, ph, is_input
+			);
+		} catch (const std::exception& e) {
+			cerr << "[error] [NfQueue._real_queue_cb] cannot parse the packet: " << e.what() << endl;
+			_send_raw_verdict(info->nl, nfg->res_id, ph->packet_id, fallback_verdict);
+			return MNL_CB_OK;
+		} catch (...) {
+			cerr << "[error] [NfQueue._real_queue_cb] cannot parse the packet (unknown error)" << endl;
+			_send_raw_verdict(info->nl, nfg->res_id, ph->packet_id, fallback_verdict);
+			return MNL_CB_OK;
+		}
+
+		try {
+			handle_func(pkt); // Takes ownership of pkt
+		} catch (const std::exception& e) {
+			cerr << "[error] [NfQueue._real_queue_cb] cannot enqueue the packet: " << e.what() << endl;
+			if (pkt->get_action() == FilterAction::NOACTION) {
+				_send_raw_verdict(info->nl, nfg->res_id, ph->packet_id, fallback_verdict);
+			}
+			delete pkt;
+		}
 		
 		return MNL_CB_OK;
     }
@@ -554,6 +668,7 @@ class NfQueue {
 			nl = nullptr;
 		}
 		delete[] queue_msg_buffer;
+		queue_msg_buffer = nullptr;
 	}
 
     inline ssize_t _send_config_cmd(nfqnl_msg_config_cmds cmd){
@@ -562,8 +677,31 @@ class NfQueue {
 		return mnl_socket_sendto(nl, nlh, nlh->nlmsg_len);
 	}
 
+	/*  Retries the errors that simply mean "this message is gone, carry on".
+	    ENOBUFS signals kernel side packet loss, ENOSPC is what libmnl reports
+	    for a netlink message too big for our buffer (reachable with GSO super
+	    packets) and EINTR is just a signal. Treating any of them as fatal used
+	    to abort the whole interceptor. */
 	inline ssize_t _recv_packet(){
-		return mnl_socket_recvfrom(nl, queue_msg_buffer, NFQUEUE_BUFFER_SIZE);
+		for(;;){
+			ssize_t ret = mnl_socket_recvfrom(nl, queue_msg_buffer, NFQUEUE_BUFFER_SIZE);
+			if (ret >= 0){
+				return ret;
+			}
+			switch (errno) {
+				case EINTR:
+					continue;
+				case ENOBUFS:
+					cerr << "[warning] [NfQueue._recv_packet] the kernel dropped packets (ENOBUFS)" << endl;
+					continue;
+				case ENOSPC:
+				case EMSGSIZE:
+					cerr << "[warning] [NfQueue._recv_packet] netlink message too big for the buffer, skipped" << endl;
+					continue;
+				default:
+					return -1;
+			}
+		}
 	}	
 
 };

@@ -116,7 +116,7 @@ class Transport:
     """What a network layer has to be able to do."""
 
     def __init__(self, srv, on_block=None, on_output=None, on_exception=None, on_engine=None,
-                 on_over_limit=None):
+                 on_over_limit=None, on_died=None):
         self.srv = srv
         # Called with the id of whatever refused a connection — a regex rule id, or a
         # filter id for a pyfilter. Counters live in the database, which is the
@@ -136,6 +136,12 @@ class Transport:
         #: last report. The engine's own counter resets when it restarts, so somebody
         #: above has to add them up if the trace is to outlive the process.
         self.on_over_limit = on_over_limit
+        #: Called when a datapath process dies without being asked to. **The nftables
+        #: rules outlive the process**, so nobody notices on their own: the traffic keeps
+        #: being steered at a queue nobody is reading, the interface goes on reporting the
+        #: service as active, and what it is doing is decided by the `bypass` flag alone.
+        #: Whoever is above decides whether to bring it back.
+        self.on_died = on_died
         #: Whether whatever this layer listens on can accept IPv6. Declared here rather
         #: than on the one layer that has a listener, so a caller asking a transport
         #: what it can accept gets an answer instead of an AttributeError.
@@ -278,14 +284,35 @@ class _QueueStage:
         self._sock_ready = asyncio.Event()
         #: Which rule id each filter code stands for, for block attribution.
         self._codes: dict[str, str] = {}
+        #: Set by `stop()`, so the watchdog can tell a shutdown we asked for from one we
+        #: did not. Without the distinction every ordinary stop looks like a crash.
+        self._stopped = False
+        self._watchdog: asyncio.Task | None = None
 
     async def start(self) -> int:
         if self.link.kind == KIND.PYFILTER:
             self.queue_num = await self._start_cpproxy()
         else:
             self.queue_num = await self._start_cppregex()
+        self._watchdog = asyncio.create_task(self._watch())
         await self.reload(self.link)
         return self.queue_num
+
+    async def _watch(self):
+        """Notice the binary dying, which nothing else here does.
+
+        The reader task sees EOF on stdout and returns, which is indistinguishable from a
+        clean shutdown, so a crashed interceptor used to leave a service that reports
+        itself as active and filters nothing — its rules still pointing traffic at a queue
+        with no reader behind it.
+        """
+        try:
+            returncode = await self.process.wait()
+        except asyncio.CancelledError:
+            return
+        if self._stopped:
+            return  # we killed it ourselves
+        self.owner._stage_died(self.link.filter.name, returncode)
 
     # --- cppregex: config on stdin, events on stdout --------------------------
 
@@ -496,6 +523,12 @@ class _QueueStage:
             raise Exception(f"the nfqueue binary rejected the filters: {detail}")
 
     async def stop(self) -> None:
+        # Said before anything is torn down, or the watchdog wakes on the kill below and
+        # reports a crash we asked for.
+        self._stopped = True
+        if self._watchdog and self._watchdog is not asyncio.current_task():
+            self._watchdog.cancel()
+        self._watchdog = None
         for task in (self._reader_task, self._output_task):
             if task:
                 task.cancel()
@@ -588,6 +621,10 @@ class NfqueueTransport(Transport):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.stages: list[_QueueStage] = []
+        #: One report per datapath, not one per process: a chain is several binaries and
+        #: they usually die together, which would otherwise ask for four restarts of one
+        #: service.
+        self._reported_death = False
 
     async def start(self, chain: list[ChainLink]) -> dict:
         self.check(self.srv, chain)
@@ -622,6 +659,18 @@ class NfqueueTransport(Transport):
         for stage in self.stages:
             await stage.stop()
         self.stages = []
+
+    def _stage_died(self, filter_name: str, returncode: int):
+        """One of the chain's processes is gone and nobody asked it to go.
+
+        Reported once per shutdown: the stages share a service, so a chain of four that
+        dies together would otherwise ask for four restarts of the same thing.
+        """
+        if self._reported_death:
+            return
+        self._reported_death = True
+        if self.on_died:
+            self.on_died(f"the {filter_name} interceptor", returncode)
 
 
 class _EmptyFilter:

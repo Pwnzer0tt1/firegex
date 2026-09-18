@@ -1,5 +1,6 @@
 #include <vector>
 #include <thread>
+#include <iostream>
 #include <type_traits>
 #include "../utils.cpp"
 #include "nfqueue.cpp"
@@ -80,7 +81,8 @@ public:
     static constexpr int QUEUE_BASE_NUM = 1000;
 
     explicit MultiThreadQueue(size_t n_threads) 
-        : n_threads(n_threads), workers(n_threads) 
+        // Listed in declaration order (that is the order they are really built in).
+        : workers(n_threads), n_threads(n_threads) 
     {
         if(n_threads == 0) throw std::invalid_argument("At least 1 thread required");
         
@@ -105,8 +107,19 @@ public:
         for(auto& worker : workers) {
             worker.run_thread_loop();
         }
+		/*  One unexpected message must not end the interception. Whatever
+		    `handle_next_packet` throws — a netlink read that failed, a packet
+		    libtins refuses — the nftables rules stay installed either way, so
+		    leaving this loop means a service that still claims to be filtering
+		    and is not. */
 		for (;;){
-        	nfq->handle_next_packet(&workers);
+			try {
+				nfq->handle_next_packet(&workers);
+			} catch (const std::exception& e) {
+				std::cerr << "[error] [MultiThreadQueue.start] " << e.what() << std::endl;
+			} catch (...) {
+				std::cerr << "[error] [MultiThreadQueue.start] unknown error while handling a packet" << std::endl;
+			}
 		}
     }
 

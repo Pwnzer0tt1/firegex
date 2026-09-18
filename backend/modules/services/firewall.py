@@ -35,6 +35,17 @@ nft = FiregexTables()
 #: The user's Python, one file per filter.
 CODE_DIR = "db/service_filters"
 
+#: How many times a datapath may be brought back before it is declared broken, and how
+#: long without a crash puts the counter back to zero.
+#:
+#: Bounded, because the alternative to a budget is a restart loop: a binary that dies on
+#: the first packet of every attempt would be restarted forever, and each attempt tears
+#: the rules down and builds them again. Spending the budget stops the service outright,
+#: which is the honest end state — the rules come off and the interface says stopped,
+#: instead of a service that reports itself active and is filtering nothing.
+MAX_RESTART_ATTEMPTS = 5
+CRASH_COUNTER_RESET = 60
+
 #: How long between two log lines about the connection limit. Being at the limit means
 #: connections are arriving faster than they leave, so a line each would be the flood
 #: arriving twice — once at the service and once in the operator's log.
@@ -95,6 +106,10 @@ class ServiceManager:
         #: filter, or the port the proxy is listening on. Kept so an address added later
         #: can be steered at the same datapath instead of restarting it.
         self._steer: dict = {}
+        #: How many times this service's datapath has died on its own recently, and
+        #: when the last one was.
+        self._crash_count = 0
+        self._last_crash = 0.0
         #: Carried between lines so a multi-line traceback keeps its severity.
         self._in_traceback = False
         self._engine_level = LEVEL.INFO
@@ -278,6 +293,76 @@ class ServiceManager:
                 level = LEVEL.OUTPUT
             self.log.add(level, stripped)
 
+    def _on_datapath_died(self, what: str, returncode: int) -> None:
+        """A datapath process is gone and nobody asked it to go.
+
+        Scheduled rather than awaited: this is called from the task that was watching the
+        process, and the recovery below stops and starts the service — which cancels that
+        very task. Doing it inline would have the watchdog cancel itself half way through.
+        """
+        #: A bare `create_task` swallows whatever the coroutine raises, and the first
+        #: version of this recovery did exactly that: a wrong constant name meant the
+        #: restart never ran, while the line reporting the crash still appeared — a
+        #: watchdog that says the right thing and does nothing. Anything that goes wrong
+        #: in here is the operator's business too.
+        task = asyncio.create_task(self._recover_datapath(what, returncode))
+
+        def _complain(done: asyncio.Task):
+            if done.cancelled():
+                return
+            if done.exception():
+                self.log.add(
+                    LEVEL.ERROR,
+                    f"could not recover the datapath: {done.exception()!r}",
+                )
+
+        task.add_done_callback(_complain)
+
+    async def _recover_datapath(self, what: str, returncode: int) -> None:
+        """Bring the datapath back, a bounded number of times.
+
+        **The nftables rules outlive the process**, which is what makes this worth doing
+        at all: when the binary dies the rules stay, so traffic keeps being steered at a
+        queue nobody is reading and the interface goes on saying the service is active.
+        What actually happens to that traffic is then decided by the `bypass` flag alone —
+        accepted where the service is fail-open, dropped where it is not — and either way
+        nothing filters it and nothing says so.
+
+        Restarting rebuilds the processes *and* their rules. It is attempted a bounded
+        number of times so that a binary dying on the first packet of every attempt does
+        not become a restart loop; when the budget is spent the service is stopped for
+        good, which takes the rules off and makes the failure visible.
+        """
+        if not self.active or self.transport is None:
+            return  # already being stopped on purpose
+        now = time.monotonic()
+        if now - self._last_crash > CRASH_COUNTER_RESET:
+            self._crash_count = 0
+        self._last_crash = now
+        self._crash_count += 1
+        self.log.add(
+            LEVEL.ERROR,
+            f"{what} exited on its own with code {returncode} — its rules are still in "
+            f"place, so nothing was filtering this service",
+        )
+        if self._crash_count > MAX_RESTART_ATTEMPTS:
+            self.log.add(
+                LEVEL.ERROR,
+                f"it has done that {self._crash_count} times; stopping the service "
+                f"instead of restarting it again",
+            )
+            await self.disable()
+            return
+        self.log.add(
+            LEVEL.WARN,
+            f"restarting it ({self._crash_count}/{MAX_RESTART_ATTEMPTS})",
+        )
+        try:
+            await self.restart()
+        except Exception as e:
+            self.log.add(LEVEL.ERROR, f"could not restart it: {e}")
+            await self.disable()
+
     def _on_over_limit(self, refused: int) -> None:
         """The connection limit turned something away. Say so, and keep the count.
 
@@ -323,6 +408,7 @@ class ServiceManager:
                 on_exception=self._on_exception,
                 on_engine=self._on_engine,
                 on_over_limit=self._on_over_limit,
+                on_died=self._on_datapath_died,
             )
             try:
                 steer = await self.transport.start(self.chain())
@@ -495,7 +581,7 @@ class ServiceManager:
                                     await self.transport.withdraw((host, addr.port))
                                 except Exception as e:
                                     self.log.add(
-                                        LEVEL.WARNING,
+                                        LEVEL.WARN,
                                         f"could not withdraw {addr.ip_int}: {e}")
             if self.active:
                 self.log.add(LEVEL.INFO, f"no longer protecting {gone[0].ip_int}:{gone[0].port}")
