@@ -138,6 +138,27 @@ def one_address(ip: str) -> str:
     return str(ip).split("/")[0]
 
 
+def hijack_endpoint(proxy_ip: str | None, service_ip: str) -> str:
+    """Where the operator's own proxy listens for one address, as a single host.
+
+    The one spelling of the default, because it is asked in three places that must agree:
+    the rule that sends traffic to that proxy, the rule that undoes the rewrite on the way
+    back, and the uniqueness check that stops two addresses sharing one endpoint. Loopback
+    is where such a proxy normally is, in the family of the address it fronts.
+
+    It is resolved when an address is **written**, not only when its rules are built. The
+    column used to be left NULL and defaulted here — and SQLite's UNIQUE treats every NULL
+    as distinct, so the partial index meant to forbid two addresses behind one endpoint
+    happily accepted any number of them as long as nobody typed the address out. They then
+    all resolved to the same loopback port, which is exactly the collision the index exists
+    to prevent: the return rule recognises the proxy by address and port, so it could not
+    tell them apart on the way out.
+    """
+    return one_address(proxy_ip or "") or (
+        "::1" if ip_family(one_address(service_ip)) == "ip6" else "127.0.0.1"
+    )
+
+
 class NoRelayAddress(Exception):
     """An address a UDP relay cannot be bound for."""
 
@@ -220,6 +241,22 @@ class InstalledRule:
         self.packets = int(packets)
         self.bytes = int(bytes_)
 
+    def _is(self, ip: str, port: int) -> bool:
+        """Whether this rule matches one particular address and port.
+
+        Both halves together, because an installed rule is identified by the pair: the
+        two legs of a hand-off match different addresses on **different ports**, and
+        comparing the port against only one of them is what made the outbound one
+        invisible.
+        """
+        if self.port != int(port):
+            return False
+        if is_ip_parse(self.ip_int) and is_ip_parse(ip):
+            return ip_parse(self.ip_int) == ip_parse(ip)
+        if not is_ip_parse(self.ip_int) and not is_ip_parse(ip):
+            return self.ip_int == ip
+        return False
+
     def matches(self, srv: Service, addr: Address) -> bool:
         """Whether this installed rule is one of `addr`'s."""
         # The address already carries the transport the kernel matches on, derived
@@ -230,22 +267,17 @@ class InstalledRule:
         if target is None:
             return False
         target_ip, target_port = target
-        if self.port != int(target_port):
-            return False
-        if is_ip_parse(self.ip_int) and is_ip_parse(target_ip):
-            if ip_parse(self.ip_int) == ip_parse(target_ip):
-                return True
-        elif not is_ip_parse(self.ip_int) and not is_ip_parse(target_ip):
-            if self.ip_int == target_ip:
-                return True
+        if self._is(target_ip, target_port):
+            return True
         # The return leg of an external hand-off matches the operator's proxy, not the
-        # service. Recognising only the inbound rule would leave the outbound one behind
-        # every time a service was stopped, and it would keep rewriting.
+        # service — **and their port, not the service's**. The port was compared against
+        # the service's before either identity was considered, so this branch was only
+        # ever reached when the two happened to be the same number: every other hand-off
+        # left its outbound rule behind on stop, still rewriting the source of anything
+        # from that proxy endpoint, and installed a second copy on the next start.
         if srv.transport == TRANSPORT.EXTERNAL and addr.proxy_port and is_ip_parse(target_ip):
-            proxy_ip = one_address(addr.proxy_ip or "") or (
-                "::1" if ip_family(target_ip) == "ip6" else "127.0.0.1"
-            )
-            return is_ip_parse(self.ip_int) and ip_parse(self.ip_int) == ip_parse(proxy_ip)
+            proxy_ip = hijack_endpoint(addr.proxy_ip, target_ip)
+            return self._is(proxy_ip, addr.proxy_port)
         return False
 
     def matches_any(self, srv: Service, addresses: list[Address]) -> bool:
@@ -639,7 +671,7 @@ class FiregexTables(NFTableManager):
             raise Exception("the external transport needs the port your proxy listens on")
         # One host, not a network: a hand-off points at the single address the
         # operator's proxy is listening on, so any prefix a normaliser added is dropped.
-        proxy_ip = one_address(addr.proxy_ip or "") or ("::1" if family == "ip6" else "127.0.0.1")
+        proxy_ip = hijack_endpoint(addr.proxy_ip, ip)
         inbound = self._match(ip, port, family, l4, "daddr", "dport") + [
             self.COUNTER,
             {"mangle": {"key": {"payload": {"protocol": l4, "field": "dport"}},

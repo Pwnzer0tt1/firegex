@@ -90,8 +90,26 @@ def test_address_model_interface():
     assert addr_iface.is_ipv6 is False
 
 
+
+def detached_table() -> FiregexTables:
+    """A `FiregexTables` that is **not** the one the rest of the process shares.
+
+    `FiregexTables` is a `Singleton`, so `FiregexTables()` — and `FiregexTables.__new__`
+    with it — hands back the very instance `modules/services/firewall.py` holds. These
+    tests replace `cmd` and `list_rules` on what they are given, and assigning to the
+    shared object left those stand-ins in place for the rest of the run: every later test
+    that installed a rule wrote it into a list belonging to a test that had finished, and
+    saw nothing happen. Nothing did until `test_rule_round_trip.py` started installing
+    rules, which is a long time for a fixture to be quietly disabling the module.
+
+    `object.__new__` skips the singleton entirely, which is what these want: an instance
+    whose methods can be called and whose attributes belong to one test.
+    """
+    return object.__new__(FiregexTables)
+
+
 def test_nftables_match_generation():
-    table = FiregexTables.__new__(FiregexTables)
+    table = detached_table()
 
     # IP match (inbound daddr)
     m_ip_in = table._match("127.0.0.1/32", 80, "ip", "tcp", "daddr", "dport")
@@ -187,7 +205,7 @@ def test_installed_rule_parsing():
     }
 
     # Simulate get() parsing logic
-    table = FiregexTables.__new__(FiregexTables)
+    table = detached_table()
     table.list_rules = lambda tables, chains: [raw_rule]
     rules = table.get()
     assert len(rules) == 1
@@ -225,7 +243,7 @@ def test_an_interfaces_output_rule_is_read_back_as_the_interfaces():
             {"redirect": {"port": 38472}},
         ],
     }
-    table = FiregexTables.__new__(FiregexTables)
+    table = detached_table()
     table.list_rules = lambda tables, chains: [raw_rule]
     rule = table.get()[0]
     assert rule.ip_int == "wg0", "the rule was read back under the address it matches"
@@ -252,7 +270,7 @@ def test_proxy_rule_generation_interface_vs_ip(monkeypatch):
         nft, "get_interface_ips",
         lambda name: ["192.168.1.5", "fe80::1%eth0", "fd00::5"] if name == "eth0" else [],
     )
-    table = FiregexTables.__new__(FiregexTables)
+    table = detached_table()
     commands = []
     table.cmd = lambda *cmds: commands.extend(cmds)
 
@@ -330,7 +348,7 @@ def test_proxy_rule_generation_interface_vs_ip(monkeypatch):
 
 
 def test_queue_rule_generation_interface():
-    table = FiregexTables.__new__(FiregexTables)
+    table = detached_table()
     commands = []
     table.cmd = lambda *cmds: commands.extend(cmds)
 
@@ -410,3 +428,110 @@ def test_udp_relay_host_prefers_a_real_ipv4_address():
     if not loopbacks:
         pytest.skip("no loopback interface to resolve")
     assert udp_relay_host(loopbacks[0]) == "127.0.0.1"
+
+
+# --- taking the rules back again ---------------------------------------------
+# Rules are found by what they match rather than by a handle anybody remembered, so a
+# restart that lost its bookkeeping still cleans up after itself. What that costs is
+# that `matches` has to recognise every shape the module installs — and the hand-off's
+# two legs are not the same shape: the inbound rule matches the service, the outbound
+# one matches the operator's proxy, on the proxy's own port.
+
+
+def _external_service(port=80, proxy_port=8080, ip="10.0.0.1/32", proxy_ip="127.0.0.1"):
+    srv = Service(service_id="s", name="handoff", status="active", proto="tcp",
+                  transport=TRANSPORT.EXTERNAL)
+    addr = Address(address_id="a", service_id="s", ip_int=ip, port=port, proto="tcp",
+                   edge="tcp", proxy_ip=proxy_ip, proxy_port=proxy_port)
+    srv.addresses = [addr]
+    return srv, addr
+
+
+def test_the_inbound_handoff_rule_is_recognised():
+    srv, addr = _external_service()
+    rule = InstalledRule(chain=FiregexTables.hijack_in_chain, handle=1, proto="tcp",
+                         port=80, ip_int="10.0.0.1/32")
+    assert rule.matches(srv, addr) is True
+
+
+def test_the_outbound_handoff_rule_is_recognised_too():
+    """The one that was invisible, and what it cost.
+
+    The return rule matches the proxy's address **and the proxy's port**, and the port
+    was compared against the *service's* before either identity was considered — so this
+    only ever matched when the two happened to be the same number. Every other hand-off
+    left its outbound rule installed when the service stopped: still rewriting the source
+    of anything leaving that proxy endpoint, for a service that was no longer protected,
+    and joined by a second copy on the next start.
+    """
+    srv, addr = _external_service(port=80, proxy_port=8080)
+    rule = InstalledRule(chain=FiregexTables.hijack_out_chain, handle=2, proto="tcp",
+                         port=8080, ip_int="127.0.0.1/32")
+    assert rule.matches(srv, addr) is True
+
+
+def test_the_outbound_rule_of_one_address_is_not_another_addresss():
+    """Two hand-offs cannot share an endpoint, so one must never claim the other's rule."""
+    srv, addr = _external_service(proxy_port=8080)
+    other = Address(address_id="b", service_id="s", ip_int="10.0.0.2/32", port=80,
+                    proto="tcp", edge="tcp", proxy_ip="127.0.0.1", proxy_port=9090)
+    rule = InstalledRule(chain=FiregexTables.hijack_out_chain, handle=2, proto="tcp",
+                         port=8080, ip_int="127.0.0.1/32")
+    assert rule.matches(srv, other) is False
+
+
+def test_only_the_handoff_layer_recognises_a_proxy_endpoint():
+    """A proxy-layer service has no endpoint, so the branch must not be reachable for it."""
+    srv, addr = _external_service()
+    srv.transport = TRANSPORT.PROXY
+    rule = InstalledRule(chain=FiregexTables.hijack_out_chain, handle=2, proto="tcp",
+                         port=8080, ip_int="127.0.0.1/32")
+    assert rule.matches(srv, addr) is False
+
+
+def test_a_rule_on_the_wrong_transport_is_not_ours():
+    srv, addr = _external_service()
+    rule = InstalledRule(chain=FiregexTables.hijack_in_chain, handle=1, proto="udp",
+                         port=80, ip_int="10.0.0.1/32")
+    assert rule.matches(srv, addr) is False
+
+
+# --- where a hand-off actually points ----------------------------------------
+
+
+def test_the_handoff_endpoint_defaults_to_loopback_in_the_right_family():
+    assert nft.hijack_endpoint(None, "10.0.0.1/32") == "127.0.0.1"
+    assert nft.hijack_endpoint(None, "fd00::1/128") == "::1"
+
+
+def test_the_handoff_endpoint_is_one_host_not_a_network():
+    """A `mangle` writes a single address into the packet and refuses anything else."""
+    assert nft.hijack_endpoint("192.168.1.5/32", "10.0.0.1/32") == "192.168.1.5"
+
+
+# --- what an operator typed, normalised once ---------------------------------
+
+
+def test_whitespace_cannot_turn_an_address_into_an_interface():
+    """The two tests disagreed about stripping, and that decided which of the two it was.
+
+    `is_interface_name` strips and `is_ip_parse` does not, so ` 10.0.0.1 ` failed the
+    address test, passed the interface test — every character in it is in that charset —
+    and was stored verbatim. Nothing broke loudly: the rules still matched, because both
+    sides re-parse the value. What broke quietly is the uniqueness key, which is a string
+    comparison: `10.0.0.1` and `10.0.0.1/32` are two different addresses to it, so two
+    services could each believe they were protecting that one.
+    """
+    assert parse_ip_or_int("  10.0.0.1  ") == parse_ip_or_int("10.0.0.1") == "10.0.0.1/32"
+    assert parse_ip_or_int(" fd00::1 ") == parse_ip_or_int("fd00::1")
+
+
+def test_an_interface_name_survives_the_same_normalising():
+    assert parse_ip_or_int("  eth0  ") == "eth0"
+
+
+def test_something_that_is_neither_is_refused_by_name():
+    with pytest.raises(ValueError, match="neither a valid IP address nor"):
+        parse_ip_or_int("")
+    with pytest.raises(ValueError, match="neither a valid IP address nor"):
+        parse_ip_or_int("not a name, and not an address")

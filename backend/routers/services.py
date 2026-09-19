@@ -35,7 +35,7 @@ from modules.services import stats
 from modules.services.logs import log_for
 from modules.services.models import (KIND, L4, MODE, PROTO, STATUS, Service,
                                      TRANSPORT, UPSTREAM, upstream_refusal)
-from modules.services.nftables import FiregexTables
+from modules.services.nftables import FiregexTables, hijack_endpoint
 from modules.services import transports
 from modules.services.transports import PROXY_ENGINE, PYWORKER, UnsupportedChain
 from utils import (
@@ -788,6 +788,7 @@ def _insert_address(service_id: str, proto: str, transport: str, form: AddressFo
     edge = _address_edge(proto, form)
     target_port = _address_target(transport, form)
     upstream = _address_upstream(proto, form)
+    proxy_ip = _hijack_ip(transport, parsed_ip, form)
     address_id = gen_id()
     db.query(
         "INSERT INTO service_addresses (address_id, service_id, ip_int, port, proto, "
@@ -801,10 +802,29 @@ def _insert_address(service_id: str, proto: str, transport: str, form: AddressFo
         edge,
         target_port,
         upstream,
-        form.proxy_ip or None,
+        proxy_ip,
         form.proxy_port,
     )
     return address_id
+
+
+def _hijack_ip(transport: str, service_ip: str, form: AddressForm) -> str | None:
+    """Where this address's traffic is handed off, stored rather than defaulted later.
+
+    Only the hand-off layer has one; everywhere else it stays NULL, because there is no
+    endpoint and a value would be a setting that does nothing.
+
+    Resolved **here**, at the point the row is written, so that the partial unique index
+    on `(proxy_ip, proxy_port)` can do its job. It could not before: the column was left
+    NULL whenever the operator did not type an address, SQLite counts every NULL as
+    distinct in a UNIQUE index, and the rules then defaulted all of them to the same
+    loopback address — so any number of addresses could sit behind one endpoint, which is
+    the single thing that index was added to forbid. The return rule tells them apart by
+    address and port, so it could not.
+    """
+    if str(transport) != TRANSPORT.EXTERNAL or not form.proxy_port:
+        return form.proxy_ip or None
+    return hijack_endpoint(form.proxy_ip, service_ip)
 
 
 def _address_edge(proto: str, form: AddressForm) -> str:
@@ -904,8 +924,21 @@ def _address_upstream(proto: str, form: AddressForm) -> str:
 
 
 def _address_taken(e: sqlite3.IntegrityError) -> str:
-    """Say which uniqueness rule was broken, because they mean different things."""
-    if "unique_hijack_target" in str(e):
+    """Say which uniqueness rule was broken, because they mean different things.
+
+    **Told apart by the columns, not by the index name.** SQLite reports a violated
+    unique index as `UNIQUE constraint failed: <table>.<column>, ...` — it names the
+    index only for one on an expression — so keying on `unique_hijack_target` matched
+    nothing, and the sentence below has never once been shown. What an operator saw
+    instead was "one of these addresses is already protected", which points at the
+    service address while the thing actually colliding is their proxy's port: they go
+    looking for a service that does not exist.
+
+    The index name is still accepted, because it costs nothing and is what a future
+    SQLite, or an index written as an expression, might report instead.
+    """
+    said = str(e)
+    if "proxy_port" in said or "unique_hijack_target" in said:
         return (
             "another address already hands its traffic to that proxy endpoint. Give "
             "this one its own port: the return rule recognises your proxy by address "
@@ -1308,11 +1341,12 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    proxy_ip = _hijack_ip(row["transport"], parsed_ip, form)
     manager = firewall.get(service_id)
     await manager.address_removed(address_id)
     try:
         write(parsed_ip, form.port, L4.l4_of(edge), edge, target_port, upstream,
-              form.proxy_ip or None, form.proxy_port)
+              proxy_ip, form.proxy_port)
     except sqlite3.IntegrityError as e:
         await restore()
         raise HTTPException(status_code=400, detail=_address_taken(e))
@@ -1820,6 +1854,39 @@ async def get_regexes(service_id: str, filter_id: str):
     return db.query("SELECT * FROM regexes WHERE filter_id = ?;", filter_id)
 
 
+def _decoded_pattern(encoded: str) -> str:
+    """The pattern a request carries, or a 400 saying why it is not one.
+
+    Two things the obvious `b64decode(...)` does not do, and both of them matter because
+    what gets through here is compiled into a live service's chain.
+
+    **Strict decoding.** Python's decoder ignores characters outside the alphabet unless
+    it is asked not to, so `"!!!"` is not an error — it is `b""`. A malformed field
+    therefore arrived as an empty pattern rather than as a refusal.
+
+    **And an empty pattern is refused.** hyperscan compiles it happily (the flags allow a
+    pattern that matches an empty buffer, which real patterns like `a*` need) and then it
+    matches every buffer it is shown — so a service whose chain holds one refuses every
+    connection it carries. There is no legitimate way to ask for that, an empty field in
+    the form is the only way to arrive at it, and the symptom is a CTF service that has
+    silently stopped answering. It is worth one sentence at the door.
+    """
+    try:
+        # Whitespace out first, then strict: a base64 field that arrived wrapped across
+        # lines is still a perfectly good one, and `validate=True` would refuse it for a
+        # newline. What is being caught here is a field that is not base64 at all.
+        raw = base64.b64decode("".join(str(encoded).split()), validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="The pattern must be base64-encoded")
+    if not raw:
+        raise HTTPException(
+            status_code=400,
+            detail="A pattern cannot be empty: an empty one matches every byte of every "
+                   "connection, so the service would refuse all of its traffic.",
+        )
+    return raw.decode(errors="replace")
+
+
 @app.post("/{service_id}/filters/{filter_id}/regexes", response_model=StatusMessageModel)
 async def add_regex(service_id: str, filter_id: str, form: RegexAddForm):
     row = _filter_or_404(service_id, filter_id)
@@ -1827,10 +1894,7 @@ async def add_regex(service_id: str, filter_id: str, form: RegexAddForm):
         raise HTTPException(status_code=400, detail="This filter does not hold patterns")
     if form.mode not in MODE.ALL:
         raise HTTPException(status_code=400, detail=f"Unknown mode {form.mode!r}")
-    try:
-        pattern = base64.b64decode(form.regex).decode(errors="replace")
-    except (binascii.Error, ValueError):
-        raise HTTPException(status_code=400, detail="The pattern must be base64-encoded")
+    pattern = _decoded_pattern(form.regex)
     # Checked by the engine that will run it, not by a stand-in. A pattern accepted
     # here and refused at start time would leave the operator with a service that
     # will not come up and no idea which rule is at fault.
@@ -1888,10 +1952,7 @@ async def edit_regex(service_id: str, filter_id: str, regex_id: str, form: Regex
 
     # Whatever the row will hold once this is applied, checked as a whole rather than
     # field by field: what the engine has to accept is the resulting pattern.
-    try:
-        pattern = base64.b64decode(fields.get("regex", was["regex"])).decode(errors="replace")
-    except (binascii.Error, ValueError):
-        raise HTTPException(status_code=400, detail="The pattern must be base64-encoded")
+    pattern = _decoded_pattern(fields.get("regex", was["regex"]))
     ok, why = check_pattern(pattern, fields.get("case_sensitive", was["case_sensitive"]))
     if not ok:
         raise HTTPException(status_code=400, detail=f"Invalid pattern: {why}")

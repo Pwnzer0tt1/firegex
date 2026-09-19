@@ -74,3 +74,35 @@ def test_two_addresses_cannot_share_one_proxy_endpoint(api, protected, external_
         service_id, external_layer.ip, free_port(external_layer.ipv6),
         proxy_ip=external_layer.ip, proxy_port=server.external.port)
     assert why is not None, "two addresses were allowed to share one proxy endpoint"
+    # The *reason*, not just a refusal. Asserting only that something was refused is what
+    # let this pass for as long as the sentence naming the endpoint was unreachable: the
+    # operator was told one of their addresses was taken, which points at the service
+    # address while the thing colliding is their proxy's port.
+    assert "proxy endpoint" in why, why
+
+
+def test_an_endpoint_nobody_typed_is_still_an_endpoint(api, protected, external_layer):
+    """Two addresses cannot share a proxy endpoint, including when neither named one.
+
+    `proxy_ip` may be left out — such a proxy is normally on loopback, and that is what
+    the rules used when nothing said otherwise. But the uniqueness rule is a partial
+    index on `(proxy_ip, proxy_port)` and SQLite counts every NULL as **distinct**, so
+    leaving it out used to mean any number of addresses could sit behind one endpoint:
+    stored apart, resolved to the same loopback port, and indistinguishable to the return
+    rule that has to put the original port back.
+    """
+    from helpers.net import free_port
+
+    service_id, _, _ = protected(external_layer, name="extnull")
+    shared = free_port(external_layer.ipv6)
+
+    assert api.services_add_address(
+        service_id, external_layer.ip, free_port(external_layer.ipv6),
+        proxy_port=shared), "an address with an unstated proxy address was refused"
+
+    why = api.services_add_address_error(
+        service_id, external_layer.ip, free_port(external_layer.ipv6),
+        proxy_port=shared)
+    assert why is not None, \
+        "two addresses were allowed to share one endpoint by not naming it"
+    assert "proxy endpoint" in why, why

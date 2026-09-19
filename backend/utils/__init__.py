@@ -105,6 +105,24 @@ API_VERSION = _get_version()
 
 PortType = Annotated[int, Field(gt=0, lt=65536)]   
 
+#: What a backup entry may be called: a plain basename of one of the two shapes
+#: `export_db()` produces — `<name>.db` for a database and `<id>.py` for a filter's code.
+#: The charset forbids path separators and `..`, so a crafted key cannot escape the
+#: directory it is joined onto.
+#:
+#: Here rather than in `app.py`, beside `safe_join`, because the two are one defence in
+#: two halves: this decides what a name may contain and that one decides where it may
+#: land. Keeping them apart meant the charset could only be exercised by importing the
+#: whole application — a server, a JWT library and everything else `app.py` pulls in —
+#: to check two regular expressions.
+#:
+#: Matched with `fullmatch`, never `match`: in Python `$` also matches *before a trailing
+#: newline*, so `"services.db\n"` satisfied a pattern written to mean "this and nothing
+#: else".
+SAFE_DB_NAME = re.compile(r'[A-Za-z0-9_-]+\.db')
+SAFE_PY_NAME = re.compile(r'[A-Za-z0-9_-]+\.py')
+
+
 def safe_join(base_dir: Union[str, Path], *paths: str) -> Path:
     """
     Safely join a base directory with one or more path components.
@@ -196,9 +214,20 @@ def is_interface_name(name: str) -> bool:
     return bool(re.match(r'^[a-zA-Z0-9_.:-]+$', name)) and 0 < len(name) <= 15
 
 def parse_ip_or_int(ip: str) -> str:
-    if is_ip_parse(ip):
-        return ip_parse(ip)
+    """Normalise what an operator typed into what the rules and the key will use.
+
+    **Stripped once, before either question is asked.** `is_interface_name` strips and
+    `is_ip_parse` does not, so surrounding whitespace used to decide *which of the two an
+    address was*: `" 10.0.0.1 "` failed the IP test, passed the interface-name test —
+    every character in it is in that charset — and was stored verbatim. Nothing then
+    broke loudly, which is the problem: the rules still matched (both sides re-parse the
+    value), but `"10.0.0.1"` and `"10.0.0.1/32"` are different strings, so the
+    `(ip_int, port, proto)` uniqueness key no longer saw them as the same address and two
+    services could each believe they were protecting it.
+    """
     ip_str = str(ip).strip()
+    if is_ip_parse(ip_str):
+        return ip_parse(ip_str)
     if is_interface_name(ip_str):
         return ip_str
     raise ValueError(f"'{ip}' is neither a valid IP address nor a valid interface name")

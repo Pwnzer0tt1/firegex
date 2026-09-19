@@ -92,3 +92,79 @@ def test_a_ruleset_asking_to_rewrite_is_refused_rather_than_quietly_blocking():
 def test_an_explicit_block_action_is_still_accepted():
     """Old ruleset files carry it, and it says exactly what happens."""
     assert regex.load_rules([{"id": "r", "pattern": "x", "action": "block"}])[0].id == "r"
+
+
+# --- the two answers a pattern can get, and why they are two ------------------
+
+
+def test_an_empty_pattern_is_refused():
+    """It compiles, and then it blocks everything.
+
+    The flags have to allow a pattern that *can* match an empty buffer, because real
+    ones like `a*` need it — so hyperscan accepts the empty pattern itself and then
+    matches every buffer it is shown. A service whose chain holds one refuses all of its
+    traffic, which on a CTF service reads as "firegex broke it". There is no legitimate
+    way to ask for that and exactly one way to arrive at it by accident, which is an
+    empty field in the form.
+    """
+    why = regex.validate(regex.Rule(id="e", pattern="", direction=regex.Direction.BOTH,
+                                    case_sensitive=True))
+    assert why is not None
+    assert "empty" in why
+
+
+def test_a_real_pattern_is_still_accepted():
+    assert regex.validate(regex.Rule(id="r", pattern="FLAG\\{[a-z]+\\}",
+                                     direction=regex.Direction.BOTH,
+                                     case_sensitive=True)) is None
+
+
+#: Valid, will run on a real service, and cannot be block-scanned. The asymmetry is
+#: hyperscan's: reporting *where* a match started is a different mode from following a
+#: stream, and it accepts slightly less.
+STREAM_ONLY = "a{1,1000}b"
+
+
+def test_a_pattern_can_be_valid_and_still_not_testable_here():
+    rule = regex.Rule(id="big", pattern=STREAM_ONLY, direction=regex.Direction.BOTH,
+                      case_sensitive=True)
+    assert regex.validate(rule) is None, "it follows a stream perfectly well"
+    assert regex.scannable(rule) is not None, "and cannot be matched against a sample"
+
+
+def test_one_untestable_pattern_does_not_take_the_whole_ruleset_down():
+    """`check` said the ruleset was valid and `test` raised a ValueError out of ctypes.
+
+    Both answers were right and they were about different modes, which is precisely the
+    kind of disagreement this module exists to prevent — so the ruleset now matches with
+    the rules it can and says which ones it had to leave out.
+    """
+    rules = [
+        regex.Rule(id="big", pattern=STREAM_ONLY, direction=regex.Direction.BOTH,
+                   case_sensitive=True),
+        regex.Rule(id="easy", pattern="FLAG", direction=regex.Direction.BOTH,
+                   case_sensitive=True),
+    ]
+    ruleset = regex.Ruleset(rules)
+    assert ruleset.apply(b"xx FLAG xx", True) == "easy"
+    assert ruleset.apply(b"nothing here", True) is None
+    assert list(ruleset.unscannable) == ["big"]
+
+
+def test_a_ruleset_of_nothing_but_untestable_patterns_still_answers():
+    ruleset = regex.Ruleset([
+        regex.Rule(id="big", pattern=STREAM_ONLY, direction=regex.Direction.BOTH,
+                   case_sensitive=True),
+    ])
+    assert ruleset.apply(b"aaab", True) is None
+    assert list(ruleset.unscannable) == ["big"]
+
+
+def test_an_ordinary_ruleset_leaves_nothing_out():
+    """The reporting must stay empty for the normal case, or it means nothing."""
+    ruleset = regex.Ruleset([
+        regex.Rule(id="r", pattern="FLAG", direction=regex.Direction.BOTH,
+                   case_sensitive=True),
+    ])
+    assert ruleset.apply(b"FLAG", True) == "r"
+    assert ruleset.unscannable == {}

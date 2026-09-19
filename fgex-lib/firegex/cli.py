@@ -153,10 +153,18 @@ def regex_test(
     is_input = not from_service
     blocked_by = ruleset.apply(sample, is_input)
 
+    # Said before the verdict, because it changes what the verdict means: "passed
+    # through" from a run that could not try every rule is not the same answer.
+    for rule_id, why in ruleset.unscannable.items():
+        print(f"[bold yellow]not tried here[/] [bold]{escape(rule_id)}[/]: {escape(why)}. "
+              f"It is valid and will run on a real service — only matching it against a "
+              f"sample needs a mode hyperscan does not offer for it.")
+
     if blocked_by is not None:
         print(f"[bold red]blocked[/] by [bold]{escape(blocked_by)}[/]")
         close_cli(0)
-    print("[bold green]passed through[/]")
+    print("[bold green]passed through[/]"
+          + (" by the rules that could be tried" if ruleset.unscannable else ""))
 
 
 @regex_app.command("proxy", help="Run a local proxy applying a ruleset, like `fgex pyfilters`")
@@ -179,7 +187,15 @@ def regex_proxy(
         close_cli()
     print("[dim]Blocking matches per chunk here, but across the whole stream on a real "
           "service: a pattern split over two reads is caught there and not here.[/]")
-    run_regex_simulation(Ruleset(rules), address, port, from_address, from_port, ipv6)
+    ruleset = Ruleset(rules)
+    # Built before the first connection rather than on it, so the warning is on screen
+    # while the operator is still reading the banner instead of appearing mid-traffic.
+    for is_input in (True, False):
+        ruleset._db(is_input)
+    for rule_id, why in ruleset.unscannable.items():
+        print(f"[bold yellow]not applied here[/] [bold]{escape(rule_id)}[/]: {escape(why)}. "
+              f"It is valid and will run on a real service.")
+    run_regex_simulation(ruleset, address, port, from_address, from_port, ipv6)
 
 
 def version_callback(verison: bool):

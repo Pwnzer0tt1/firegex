@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from utils.sqlite import SQLite
-from utils import API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD, safe_join
+from utils import SAFE_DB_NAME, SAFE_PY_NAME, API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD, safe_join
 from utils.loader import frontend_deploy, load_routers
 from utils.models import AuthModeForm, ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 from contextlib import asynccontextmanager
@@ -18,7 +18,6 @@ import socketio
 from socketio.exceptions import ConnectionRefusedError
 import hashlib
 import hmac
-import re
 from ipaddress import ip_network, ip_address
 # DB init
 db = SQLite('db/firegex.db')
@@ -403,11 +402,8 @@ async def export_db():
                     dbs['service_filters'][f] = base64.b64encode(script_file.read()).decode('utf-8')
     return dbs
 
-# Backup entries are limited to plain basenames of the two shapes export_db()
-# produces: "<name>.db" databases and "<id>.py" filter code files. The charset
-# forbids path separators and "..", so a crafted key can't escape the target dir.
-_SAFE_DB_NAME = re.compile(r'^[A-Za-z0-9_-]+\.db$')
-_SAFE_PY_NAME = re.compile(r'^[A-Za-z0-9_-]+\.py$')
+# The charset a backup entry's name has to satisfy lives in `utils`, beside `safe_join`:
+# the two are one defence in two halves — what a name may contain, and where it may land.
 
 @api.post('/import', response_model=StatusMessageModel)
 async def import_db(data: dict):
@@ -420,7 +416,7 @@ async def import_db(data: dict):
     for key, value in data.items():
         if not isinstance(key, str):
             raise HTTPException(status_code=400, detail="Invalid backup: keys must be strings")
-        if _SAFE_DB_NAME.match(key):
+        if SAFE_DB_NAME.fullmatch(key):
             if not isinstance(value, dict):
                 raise HTTPException(status_code=400, detail=f"Invalid backup: '{key}' must be an object")
             # safe_join is defense-in-depth on top of the regex: it rejects any
@@ -430,7 +426,7 @@ async def import_db(data: dict):
             if not isinstance(value, dict):
                 raise HTTPException(status_code=400, detail="Invalid backup: 'service_filters' must be an object")
             for fname, script_content in value.items():
-                if not isinstance(fname, str) or not _SAFE_PY_NAME.match(fname):
+                if not isinstance(fname, str) or not SAFE_PY_NAME.fullmatch(fname):
                     raise HTTPException(status_code=400, detail=f"Invalid backup: illegal filter filename '{fname}'")
                 if not isinstance(script_content, str):
                     raise HTTPException(status_code=400, detail=f"Invalid backup: filter '{fname}' must be a base64 string")

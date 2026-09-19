@@ -234,16 +234,44 @@ class Database:
 
 
 def validate(rule: Rule) -> str | None:
-    """Would firegex accept this rule? Returns hyperscan's own message if not.
+    """Would firegex accept this rule? Returns the reason if not.
 
     Checked against the mode it will actually run in — stream matching, which is how a
     pattern follows a connection across chunk boundaries — because hyperscan does not
     accept quite the same patterns in every mode, and judging by the wrong one would
     refuse a rule that works.
+
+    The empty pattern is the one refusal that is ours rather than hyperscan's. It
+    compiles, because the flags have to allow a pattern that *can* match an empty buffer
+    for real ones like `a*` to work — and then it matches every buffer it is shown, so a
+    service carrying it refuses all of its traffic. firegex refuses it when a rule is
+    saved; refusing it here too is what keeps this tool's answer the same as the
+    product's, which is the whole reason this module binds libhs instead of using `re`.
     """
-    mode = HS_MODE_STREAM
+    if not rule.pattern:
+        return ("a pattern cannot be empty: an empty one matches every byte of every "
+                "connection, so the service would refuse all of its traffic")
     try:
-        Database([rule], mode)
+        Database([rule], HS_MODE_STREAM)
+    except ValueError as e:
+        return str(e)
+    return None
+
+
+def scannable(rule: Rule) -> str | None:
+    """Can this rule be tried against a sample here, or only run on a real service?
+
+    A separate question from [`validate`], and the difference is hyperscan's: matching a
+    stream and reporting *where* a match started are different modes, and block mode —
+    the only one that reports offsets — accepts slightly less. A pattern like
+    `a{1,1000}b` follows a stream perfectly well and cannot be block-scanned.
+
+    So such a rule is valid, will run, and simply cannot be exercised locally. Saying so
+    is the honest answer; the datapath's own tester reports exactly the same thing, under
+    the name `unscannable`.
+    """
+    try:
+        Database([rule], HS_MODE_BLOCK)
     except ValueError as e:
         return str(e)
     return None
@@ -261,11 +289,32 @@ class Ruleset:
     def __init__(self, rules: list[Rule]):
         self.rules = list(rules)
         self._cache: dict[bool, Database | None] = {}
+        #: The rules this simulator had to leave out, and why — valid patterns that
+        #: cannot be block-scanned. Read it and say so: silently matching with fewer
+        #: rules than the operator wrote is the failure this whole module avoids.
+        self.unscannable: dict[str, str] = {}
 
     def _db(self, is_input: bool) -> Database | None:
-        if is_input not in self._cache:
-            selected = [r for r in self.rules if r.direction.covers(is_input)]
+        if is_input in self._cache:
+            return self._cache[is_input]
+        selected = [r for r in self.rules if r.direction.covers(is_input)]
+        try:
             self._cache[is_input] = Database(selected, HS_MODE_BLOCK) if selected else None
+        except ValueError:
+            # One rule that cannot be block-scanned refused the whole set, and the caller
+            # got a `ValueError` out of what looked like a clean ruleset — `fgex regex
+            # check` had already said it was valid, because validity is judged in stream
+            # mode and that is the mode it will run in. Compiled one at a time, the ones
+            # that can be tried here still are, and the rest are named rather than
+            # silently dropped or allowed to take the run down.
+            usable = []
+            for rule in selected:
+                why = scannable(rule)
+                if why:
+                    self.unscannable[rule.id] = why
+                else:
+                    usable.append(rule)
+            self._cache[is_input] = Database(usable, HS_MODE_BLOCK) if usable else None
         return self._cache[is_input]
 
     def apply(self, data: bytes, is_input: bool) -> str | None:

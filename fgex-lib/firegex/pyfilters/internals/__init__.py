@@ -277,9 +277,16 @@ def compile(glob: dict) -> None:
             continue
         value = glob[name]
         if kind is int:
-            # A size is taken from anything that reads as one, and a nonsense size is
-            # ignored rather than refused: the file has already loaded.
-            value = int(value)
+            # A size is taken from anything that reads as one, and anything else is
+            # ignored — which is what the other two settings already did, and what this
+            # one only claimed to do: `int(value)` raises for a typo, so a file setting
+            # `FGEX_STREAM_MAX_SIZE = "1MB"` did not get the default, it failed to load
+            # altogether. The operator lost every filter in that file over an optional
+            # knob, and the message named neither the setting nor the file.
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                continue
             if value <= 0:
                 continue
         elif not isinstance(value, kind):
