@@ -23,8 +23,8 @@ Frames are length-prefixed and binary:
     in    [u32 len][u8 kind][u64 connection][payload]
           kind: 0 client->server, 1 server->client,
                 2 connection closed, 3 connection opened
-    out   [u32 len][u8 verdict][u8 name len][name][payload]
-          verdict: 0 accept, 1 reject, 2 replace
+    out   [u32 len][u8 verdict][u8 name len][name]
+          verdict: 0 accept, 1 reject
 
 The name is the `@pyfilter` function that decided, so a block is attributed to one
 function of a file rather than to the file as a whole — a file routinely holds several,
@@ -39,8 +39,10 @@ Nothing below the application layer crosses in the other direction. There used t
 `FAKE:IP:TCP:HEADERS:` prefix here, handed to the library as `raw_packet` so that a
 filter written against real headers would find something there. It found a lie: the
 proxy terminates the connection and writes its own headers, so editing them changed
-nothing, while the same filter on NFQUEUE edited a real packet. Metadata in, payload
-out — that is the one contract both network layers can honestly keep.
+nothing, while the same filter on NFQUEUE edited a real packet. Metadata in, a verdict
+out — that is the one contract both network layers can honestly keep. There is no
+payload coming back either: rewriting went with `UNSTABLE_MANGLE`, for the reason the
+library's `Action` gives.
 """
 
 import json
@@ -52,7 +54,6 @@ import traceback
 
 VERDICT_ACCEPT = 0
 VERDICT_REJECT = 1
-VERDICT_REPLACE = 2
 # Sent once, after the user's file has been compiled. It is what lets the engine refuse
 # a ruleset whose code does not load, instead of discovering it later as traffic that
 # quietly stopped being filtered.
@@ -285,8 +286,8 @@ class Filters:
         self.contexts.pop(connection, None)
         self.endpoints.pop(connection, None)
 
-    def run(self, connection: int, data: bytes, is_input: bool) -> tuple[int, str, bytes]:
-        """One chunk through the chain. Returns the verdict, who decided, and the payload."""
+    def run(self, connection: int, data: bytes, is_input: bool) -> tuple[int, str]:
+        """One chunk through the chain. Returns the verdict, and which function decided."""
         from firegex.pyfilters import ACCEPT, DROP, REJECT
 
         ctx = self.context(connection)
@@ -328,23 +329,23 @@ class Filters:
             # The library did not answer. Saying nothing about a chunk is not a reason
             # to stop carrying it.
             print("[warn] [pyworker] no verdict from the filter chain", file=sys.stderr)
-            return VERDICT_ACCEPT, "", b""
+            return VERDICT_ACCEPT, ""
 
         action = result.get("action")
         # Which function decided, so the block lands on it rather than on the whole file.
         matched = result.get("matched_by")
         matched = matched if isinstance(matched, str) else ""
         if action == ACCEPT.value:
-            return VERDICT_ACCEPT, "", b""
+            return VERDICT_ACCEPT, ""
         if action == REJECT.value:
-            return VERDICT_REJECT, matched, b""
+            return VERDICT_REJECT, matched
         if action == DROP.value:
             # A proxy has no way to swallow one chunk and keep the stream coherent —
             # the application on the other side would be reading a hole. Closing is the
             # honest equivalent, and it is what the operator meant by dropping.
-            return VERDICT_REJECT, matched, b""
+            return VERDICT_REJECT, matched
         print(f"[warn] [pyworker] unknown action {action!r}", file=sys.stderr)
-        return VERDICT_ACCEPT, "", b""
+        return VERDICT_ACCEPT, ""
 
 
 def _read_exactly(stream, count: int) -> bytes | None:
@@ -357,16 +358,11 @@ def _read_exactly(stream, count: int) -> bytes | None:
     return buf
 
 
-def _write(stream, verdict: int, matched: str, payload: bytes) -> None:
+def _write(stream, verdict: int, matched: str) -> None:
     # The name is length-prefixed with a single byte: a Python identifier fits, and a
     # separator would have to be one that cannot appear in one.
     name = matched.encode()[:255]
-    stream.write(
-        struct.pack(">I", len(payload) + len(name) + 2)
-        + bytes([verdict, len(name)])
-        + name
-        + payload
-    )
+    stream.write(struct.pack(">I", len(name) + 2) + bytes([verdict, len(name)]) + name)
     stream.flush()
 
 
@@ -453,7 +449,7 @@ def main() -> int:
             continue  # deliberately unanswered
 
         try:
-            verdict, matched, out = filters.run(connection, payload, kind == KIND_C2S)
+            verdict, matched = filters.run(connection, payload, kind == KIND_C2S)
         except Exception:
             # One connection's filter blowing up must not take the process down: the
             # other connections it is serving would lose their filtering with it. The
@@ -464,8 +460,8 @@ def main() -> int:
                 last_traceback = now
                 traceback.print_exc()
             print(EXCEPTION_MARK, file=sys.stderr, flush=True)
-            verdict, matched, out = VERDICT_ACCEPT, "", b""
-        _write(stdout, verdict, matched, out)
+            verdict, matched = VERDICT_ACCEPT, ""
+        _write(stdout, verdict, matched)
 
 
 if __name__ == "__main__":

@@ -240,8 +240,11 @@ jobs:
         include:
           - os: ubuntu-latest        # manylinux + musllinux, x86_64
           - os: ubuntu-24.04-arm     # and the same for aarch64
-          - os: macos-latest         # arm64
-          - os: macos-13             # x86_64, while GitHub still offers it
+          # arm64 and x86_64 both, from one runner: the Intel macOS image this used to ask
+          # for (`macos-13`) has been retired, and a matrix entry naming a runner that no
+          # longer exists fails — which, with the publish job needing this one, blocked
+          # every PyPI release. The x86_64 wheel is cross-compiled; see CIBW_TEST_SKIP.
+          - os: macos-latest
           - os: windows-latest
 
     steps:
@@ -256,15 +259,25 @@ jobs:
           sed -i.bak "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/setup.py;
           sed -i.bak "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/firegex/__init__.py;
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.21.3
+        # 3.x, because 2.x predates CPython 3.14 and quietly built nothing for it: the
+        # selector below matched no identifier it knew, which is not an error.
+        uses: pypa/cibuildwheel@v3.2.0
         with:
           package-dir: fgex-lib
           output-dir: wheelhouse
         env:
           # The library declares `python_requires>=3.10`, so build what it claims to
           # support and nothing else. PyPy is excluded: the datapath embeds CPython.
+          # 3.10 and 3.11 build because the binding declares its 3.12-only module slot
+          # only where it exists (`llhttp_module.c`) — unguarded, it failed to compile
+          # there, and the whole job with it.
           CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           CIBW_SKIP: "*-musllinux_i686 *_i686 pp*"
+          CIBW_ARCHS_MACOS: "arm64 x86_64"
+          # An x86_64 wheel built on an arm64 runner cannot be imported there without
+          # Rosetta, which the runner is not promised to have; the arm64 wheels, built
+          # from the same sources in the same job, are what the smoke test checks.
+          CIBW_TEST_SKIP: "*-macosx_x86_64"
           # A wheel that imports is the only kind worth publishing, and the extension is
           # the whole reason this job exists. The checks live in a file rather than in a
           # `-c` string because the one that matters needs a `try`: the parser has to

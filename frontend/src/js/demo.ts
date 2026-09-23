@@ -21,7 +21,7 @@ const DEMO_CERT = "-----BEGIN CERTIFICATE-----\n(demo placeholder, no real key m
 // per-function switches on the filter card are for. Nothing here declares a protocol:
 // asking for an HttpRequest is what makes this an HTTP filter, and the RawPacket one
 // sits beside it because HTTP provides both.
-const SAMPLE_FILTER = `from firegex.pyfilters import pyfilter, ACCEPT, REJECT, UNSTABLE_MANGLE
+const SAMPLE_FILTER = `from firegex.pyfilters import pyfilter, ACCEPT, REJECT
 from firegex.pyfilters.models import HttpRequest, RawPacket
 
 
@@ -34,12 +34,11 @@ def block_path_traversal(http_request: HttpRequest):
 
 
 @pyfilter
-def redact_flag(packet: RawPacket):
+def refuse_flag_leaks(packet: RawPacket):
     """Never let a flag leave, whatever the request looked like."""
-    if packet.is_input or b"FLAG{" not in packet.data:
-        return ACCEPT
-    packet.data = packet.data.replace(b"FLAG{", b"REDACTED{")
-    return UNSTABLE_MANGLE
+    if not packet.is_input and b"FLAG{" in packet.data:
+        return REJECT
+    return ACCEPT
 
 
 @pyfilter
@@ -62,7 +61,7 @@ const DEMO_PYFILTER_API = {
             members: [
                 { name: "client_ip", doc: "The client's address, whichever way this chunk is going", writable: false },
                 { name: "client_port", doc: "The client's port, whichever way this chunk is going", writable: false },
-                { name: "data", doc: "The application payload: the only part a filter can change", writable: true },
+                { name: "data", doc: "The application payload, as it arrived. Read-only: a filter answers with a verdict", writable: false },
                 { name: "data_size", doc: "How many bytes of application payload this chunk carries", writable: false },
                 { name: "dst_ip", doc: "Where this chunk is going", writable: false },
                 { name: "dst_port", doc: "The port this chunk is going to", writable: false },
@@ -99,8 +98,7 @@ const DEMO_PYFILTER_API = {
     verdicts: [
         { name: "ACCEPT", value: 0, doc: "Forward this chunk. Returning None means the same thing.", values: [] },
         { name: "REJECT", value: 2, doc: "Refuse the connection. Everything still in the stream goes with it.", values: [] },
-        { name: "DROP", value: 1, doc: "Silently drop this chunk and every one after it, without closing.", values: [] },
-        { name: "UNSTABLE_MANGLE", value: 3, doc: "Forward the payload you assigned to `data`.", values: [] },
+        { name: "DROP", value: 1, doc: "Stop the connection's traffic. On NFQUEUE this chunk and every one after it are dropped without closing anything; on the proxy layer, where a stream cannot skip bytes, the connection is closed as REJECT does.", values: [] },
     ],
     settings: [
         { name: "FGEX_STREAM_MAX_SIZE", doc: "Bytes of one stream a model may accumulate.", values: [] },
@@ -199,7 +197,7 @@ const state = {
     functions: [
         { filter_id: fltShopPy, name: "block_path_traversal", active: true, blocked: 641 },
         { filter_id: fltWebPy, name: "block_path_traversal", active: true, blocked: 1190 },
-        { filter_id: fltShopPy, name: "redact_flag", active: true, blocked: 0 },
+        { filter_id: fltShopPy, name: "refuse_flag_leaks", active: true, blocked: 0 },
         // Switched off rather than deleted: the code is still there to turn back on.
         { filter_id: fltShopPy, name: "log_client", active: false, blocked: 0 },
     ] as Json[],
@@ -215,6 +213,7 @@ const state = {
         settings: {
             keep_rules: false, allow_loopback: true, allow_established: true, allow_icmp: true,
             multicast_dns: false, allow_upnp: false, drop_invalid: true, allow_dhcp: true,
+            allow_dnat: true,
         } as Json,
     },
 }

@@ -8,33 +8,14 @@ and whose `reset()` re-added `filter INPUT` with `policy accept`, silently remov
 administrator's default-deny.
 """
 
-import subprocess
 import time
 
 import pytest
 
 from integration.conftest import start_and_settle
+from helpers.host import ruleset as _ruleset
 
 pytestmark = [pytest.mark.instance, pytest.mark.root]
-
-
-def _ruleset() -> str | None:
-    """The services module's table, or `None` where it cannot be read from here.
-
-    Tried directly and then through `sudo -n`, because reading the ruleset needs root and
-    the suite does not: a developer with passwordless sudo gets these checks, and one
-    without gets a skip rather than a failure about a permission the tests never asked
-    anyone for.
-    """
-    for command in (["nft"], ["sudo", "-n", "nft"]):
-        try:
-            shown = subprocess.run(command + ["list", "table", "inet", "fgex"],
-                                   capture_output=True, text=True)
-        except FileNotFoundError:
-            return None
-        if shown.returncode == 0:
-            return shown.stdout
-    return None
 
 
 @pytest.fixture(autouse=True)

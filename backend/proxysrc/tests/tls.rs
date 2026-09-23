@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use fgex_proxy::filter::{ChainHandle, FilterChain};
-use fgex_proxy::proxy::{Proxy, ProxyConfig, TlsSetup};
+use fgex_proxy::proxy::{Edge, Onward, Proxy, ProxyConfig, Published, TlsSetup};
 use fgex_proxy::spec::parse_filters;
 use fgex_proxy::tls;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -211,4 +211,132 @@ async fn tls_off_leaves_the_plain_path_alone() {
     let n = sock.read(&mut buf).await.unwrap();
     assert_eq!(&buf[..n], b"plain as ever");
     let _ = Arc::new(());
+}
+
+/// A TLS service that answers with the server name its client asked for, and nothing else.
+async fn spawn_sni_reporter(cert: &str, key: &str) -> std::net::SocketAddr {
+    let config = tls::server_config(cert, key).unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let acceptor = tls::acceptor(config);
+        loop {
+            let Ok((sock, _)) = listener.accept().await else {
+                continue;
+            };
+            let acceptor = acceptor.clone();
+            tokio::spawn(async move {
+                let Ok(mut stream) = acceptor.accept(sock).await else {
+                    return;
+                };
+                let mut buf = vec![0u8; 1024];
+                let _ = stream.read(&mut buf).await;
+                let name = stream.get_ref().1.server_name().unwrap_or("<none>").to_string();
+                let _ = stream.write_all(name.as_bytes()).await;
+                let _ = stream.shutdown().await;
+            });
+        }
+    });
+    addr
+}
+
+/// The engine as an `http` service runs it: TLS terminated only for the connections that
+/// start a handshake, with the service's address declared as the encrypted one and the
+/// service behind it speaking `upstream_speaks`.
+async fn spawn_http_edge(
+    upstream: std::net::SocketAddr,
+    filters: &str,
+    cert: &str,
+    key: &str,
+    upstream_speaks: Onward,
+) -> std::net::SocketAddr {
+    let chain = ChainHandle::new(FilterChain::new(
+        parse_filters(filters).unwrap(),
+        Duration::from_millis(500),
+    ));
+    let mut cfg = ProxyConfig::fixed("127.0.0.1:0".parse().unwrap(), upstream);
+    cfg.tls = TlsSetup {
+        server: Some(tls::server_config(cert, key).unwrap()),
+        upstream: Some(tls::client_config().unwrap()),
+        optional: true,
+    };
+    cfg.targets.publish(
+        upstream,
+        Published { target: None, edge: Edge::Tls, upstream: upstream_speaks },
+    );
+    let proxy = Proxy::bind(cfg, chain).await.unwrap();
+    let addr = proxy.local_addr().unwrap();
+    tokio::spawn(proxy.serve());
+    addr
+}
+
+/// An HTTPS address answers whether or not a filter is attached yet.
+///
+/// A chain with nothing to say used to skip the look at what the client opened with, so
+/// every connection to an address declared as the encrypted one was refused as "not TLS":
+/// a brand new `http` service answered nobody until its first filter, and one whose
+/// filters were all switched off — or had all lost their say by panicking — went dark
+/// the same way. The opposite of failing open.
+#[tokio::test]
+async fn a_tls_address_answers_with_no_filter_attached() {
+    let (cert, key) = self_signed();
+    let upstream = spawn_plain_echo().await;
+    for filters in ["", "block:ZZ-NO-SUCH-BYTES-ZZ"] {
+        let addr = spawn_http_edge(upstream, filters, &cert, &key, Onward::Plain).await;
+        let got = tls_roundtrip(addr, b"hello").await;
+        assert_eq!(
+            got.as_deref().ok(),
+            Some(&b"hello"[..]),
+            "the TLS address did not answer with the chain {filters:?}: {got:?}"
+        );
+    }
+}
+
+/// The same for a service that speaks TLS itself: re-encrypted, chain or no chain.
+#[tokio::test]
+async fn a_tls_address_re_encrypts_with_no_filter_attached() {
+    let (cert, key) = self_signed();
+    let upstream = spawn_tls_echo(&cert, &key).await;
+    let addr = spawn_http_edge(upstream, "", &cert, &key, Onward::Same).await;
+    let got = tls_roundtrip(addr, b"end to end").await.unwrap();
+    assert_eq!(got, b"end to end");
+}
+
+/// And the promise the declaration makes still holds without a filter: a client that
+/// opens the encrypted address in the clear is refused rather than carried.
+#[tokio::test]
+async fn a_tls_address_refuses_the_clear_with_no_filter_attached() {
+    let (cert, key) = self_signed();
+    let upstream = spawn_plain_echo().await;
+    let addr = spawn_http_edge(upstream, "", &cert, &key, Onward::Plain).await;
+    let mut sock = TcpStream::connect(addr).await.unwrap();
+    sock.write_all(b"GET / HTTP/1.1\r\n\r\n").await.unwrap();
+    let mut buf = vec![0u8; 1024];
+    let n = tokio::time::timeout(Duration::from_secs(5), sock.read(&mut buf))
+        .await
+        .expect("the refused connection was left hanging")
+        .unwrap_or(0);
+    assert_eq!(n, 0, "a cleartext client was carried: {:?}", &buf[..n]);
+}
+
+/// The name the client asked for is the name the service is asked for.
+///
+/// A service choosing its certificate or its virtual host by SNI was handed the bare
+/// address instead — which TLS does not even send — and answered as its default host.
+#[tokio::test]
+async fn the_client_s_server_name_reaches_the_service() {
+    let (cert, key) = self_signed();
+    let upstream = spawn_sni_reporter(&cert, &key).await;
+    let addr = spawn_proxy(
+        upstream,
+        "",
+        TlsSetup {
+            server: Some(tls::server_config(&cert, &key).unwrap()),
+            upstream: Some(tls::client_config().unwrap()),
+            optional: false,
+        },
+    )
+    .await;
+    let got = tls_roundtrip(addr, b"who am I talking to").await.unwrap();
+    assert_eq!(String::from_utf8_lossy(&got), "localhost");
 }

@@ -134,12 +134,9 @@ class RawPacket:
 
     @property
     def data(self) -> bytes:
-        """The application payload: the only part a filter can change."""
+        """The application payload, as it arrived. Read-only: a filter answers with a
+        verdict, and nothing it writes here would reach the other end."""
         return self.__data
-
-    @data.setter
-    def data(self, value: bytes):
-        self.__data = bytes(value)
 
     @property
     def data_size(self) -> int:

@@ -26,7 +26,7 @@ NAT entry to key off and so could never reach a local service at all.
 
 import subprocess
 
-from modules.services.models import TRANSPORT, Address, Service
+from modules.services.models import TRANSPORT, UPSTREAM, Address, Service
 from utils import (
     NFTableManager,
     addr_parse,
@@ -221,6 +221,20 @@ def udp_relay_key(ip: str, port: int) -> str:
     """
     host = one_address(ip)
     return f"[{host}]:{port}" if ip_family(host) == "ip6" else f"{host}:{port}"
+
+
+def udp_relay_slot(ip: str, port: int, onward: str) -> str:
+    """Which relay carries one address: where it sends, and what is spoken there.
+
+    The engine names each relay this way on its `UDP <slot> <port>` line, and it is what
+    the transport's map, the rule that points at a relay and the manager adding an address
+    are keyed on. Where it sends alone was not enough: two addresses reaching one service
+    port can want different answers — HTTP/3 relayed as QUIC to `udp/443` beside HTTP/3
+    turned into HTTPS on `tcp/443` — and an address whose answer was edited on a running
+    service was handed the relay it already had, so the new choice reached nothing until a
+    restart. `onward` is `UPSTREAM.env(...)`'s word.
+    """
+    return f"{udp_relay_key(ip, port)}|{onward}"
 
 
 class InstalledRule:
@@ -587,11 +601,12 @@ class FiregexTables(NFTableManager):
                 # at that address's port rather than at the one shared TCP listener.
                 port = proxy_port
                 if l4 == "udp":
-                    # Keyed by where the relay *sends*, which is how the engine reported
-                    # it: a published address and the service behind it are two ports,
-                    # and the relay is filed under the second.
+                    # Keyed by where the relay *sends* and what it speaks there, which is
+                    # how the engine reported it: a published address and the service
+                    # behind it are two ports, and the relay is filed under the second.
                     service_ip, service_port = service_at(srv, addr)
-                    key = udp_relay_key(udp_relay_host(service_ip), service_port)
+                    key = udp_relay_slot(udp_relay_host(service_ip), service_port,
+                                         UPSTREAM.env(addr.upstream))
                     port = (udp_ports or {}).get(key)
                     if port is None:
                         raise Exception(

@@ -94,3 +94,42 @@ def test_a_valid_exchange_is_unaffected(without_pyllhttp):
     response = _llhttp.Response()
     response.execute(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
     assert response.status_code == 404
+
+
+# --- naming the method --------------------------------------------------------
+# The name used to be read out of an array built from `HTTP_METHOD_MAP` and indexed with
+# the method's number. That map is not the numbers in order — it runs 0 to 33 and jumps to
+# QUERY at 46, with PRI and the RTSP methods not in it at all — so a request parser handed
+# any of those read past the end of the array: QUERY and PLAY came back named after
+# whatever lay beyond it, and FLUSH crashed the process. A client decides which method it
+# sends, so each case runs in a process of its own: a crash has to fail one test, not end
+# the run.
+
+_METHOD_OF = """
+import sys
+from firegex import _llhttp
+
+class Parser(_llhttp.Request):
+    def on_headers_complete(self):
+        print(self.method, flush=True)
+
+Parser().execute(sys.argv[1].encode())
+"""
+
+
+@pytest.mark.parametrize("method, line", [
+    ("GET", "GET / HTTP/1.1"),
+    ("QUERY", "QUERY / HTTP/1.1"),
+    ("PLAY", "PLAY rtsp://example/ RTSP/1.0"),
+    ("FLUSH", "FLUSH rtsp://example/ RTSP/1.0"),
+    ("DESCRIBE", "DESCRIBE rtsp://example/ RTSP/1.0"),
+])
+def test_every_method_the_parser_accepts_is_named(method, line):
+    import subprocess
+
+    ran = subprocess.run(
+        [sys.executable, "-c", _METHOD_OF, f"{line}\r\nHost: a\r\nCSeq: 1\r\n\r\n"],
+        capture_output=True, text=True, timeout=30,
+    )
+    assert ran.returncode == 0, f"parsing {line!r} ended the process: {ran.stderr[-300:]}"
+    assert ran.stdout.strip() == method

@@ -265,11 +265,24 @@ def compile(glob: dict) -> None:
 
     glob["print"] = functools.partial(print, flush=True)
 
+    # Which functions run: `None` for every one the file defines, a list for exactly
+    # those of them. A name the file no longer defines is passed over rather than
+    # refusing the whole file — a switched-off function deleted from the code afterwards
+    # would otherwise stop every other filter in it from loading. Worked out here, in the
+    # process that has just run the module, so the caller never has to run it to ask.
+    from firegex.pyfilters import collect_pyfilters
+    defined = collect_pyfilters(glob)
+    enabled = glob.get("__firegex_pyfilter_enabled")
+    if enabled is None:
+        names = defined
+    else:
+        wanted = set(enabled)
+        names = [name for name in defined if name in wanted]
     # Absent means "read it off the code", which is the normal case: the file shows
     # which protocol it speaks by what its filters ask for, so nothing has to be kept
     # in step with it by hand.
     internal_data.filter_call_info = generate_filter_structure(
-        glob["__firegex_pyfilter_enabled"], glob.get("__firegex_proto"), glob
+        names, glob.get("__firegex_proto"), glob
     )
 
     for name, (attribute, kind) in _SETTINGS.items():

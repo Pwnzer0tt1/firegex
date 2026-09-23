@@ -12,7 +12,7 @@ per-stream history, and decides in code.
 2. Attach a **Python filter** to it and write or upload the code below. One file can define
    as many `@pyfilter` functions as you like.
 3. From then on every matching packet reaches your filters, which return an action
-   (accept / drop / reject / mangle).
+   (accept / drop / reject).
 
 Code can be edited while the service is running: it takes effect on the next packet, and no
 connection is dropped. On the proxy layer the filter runs in a process of its own, so code
@@ -53,9 +53,7 @@ Filter names (the function name) must be unique within a filter file.
 
 **They run in the order the file defines them**, top to bottom, and the first one to
 return anything but `ACCEPT` ends the packet — so a filter placed above another decides
-before it, and the interface lists them in that same order. (`UNSTABLE_MANGLE` is the
-exception: the rewrite is remembered and the walk carries on, because a filter below may
-still want to refuse the rewritten bytes.)
+before it, and the interface lists them in that same order.
 
 Each TCP stream (i.e. each connection) gets its own isolated set of global variables: code at module level runs once per stream, and the same globals are reused across every packet of that stream. Don't store state in another module's globals — that memory is shared across every stream handled by the same thread and will cause data to leak/interfere between unrelated connections. Global variable names starting with `__firegex` are reserved for internal use.
 
@@ -79,7 +77,12 @@ A filter must return one of these values (importable from `firegex.pyfilters`):
 |---|---|
 | `ACCEPT` | The packet is accepted and forwarded to the destination. This is also the default behavior if `None` is returned. |
 | `REJECT` | The connection is closed and every packet in the stream is dropped. |
-| `DROP` | This packet, and every subsequent packet in the stream, is silently dropped (unlike `REJECT`, this doesn't simulate a connection closure). |
+| `DROP` | On NFQUEUE, this packet and every subsequent packet in the stream are silently dropped (unlike `REJECT`, this doesn't simulate a connection closure). On the proxy layer a stream cannot skip bytes, so `DROP` closes the connection exactly as `REJECT` does. |
+
+There is no statement that rewrites the traffic. There used to be one, `UNSTABLE_MANGLE`,
+and it was removed for the reason regex rewriting was: a filter only ever sees one chunk,
+so a pattern split across two of them was never rewritten, and nothing said so. A filter
+that should keep something from leaving refuses the connection carrying it.
 
 ### Data structures
 
@@ -90,8 +93,8 @@ These are the types you can use as filter parameter annotations. Some need a con
 Firegex's code editor is not a plain text box:
 
 - **Completion** offers the models, the verdicts and the module-level settings, and — once
-  a parameter is annotated — the members of whatever it was annotated with. Each one says
-  whether it is **read-only or writable**, which is the boundary the whole API rests on.
+  a parameter is annotated — the members of whatever it was annotated with. Everything a
+  filter is shown is read-only: it answers with a verdict and changes nothing.
 - **Hover** any model, member or verdict for what it is and what it does.
 - **The file is checked as you type**, by the process that will actually run it. A file
   that will not load is marked **on the line it fails on**, with the reason and the
@@ -118,9 +121,9 @@ defines, keeping your choices for the functions that are still there.
 
 #### What a filter can see, and what it can change
 
-Everything below the application layer is **metadata, and read-only**: the addresses, the ports, the address family, which way the chunk is going. There is no way to read an IP or TCP header as bytes and no way to write one. The payload is the only thing a filter can change.
+Everything below the application layer is **metadata, and read-only**: the addresses, the ports, the address family, which way the chunk is going. There is no way to read an IP or TCP header as bytes and no way to write one. The payload is read-only too: a filter answers with a verdict, and nothing it assigns reaches either end.
 
-That is deliberate. The two network layers cannot honestly offer the same thing down there: on NFQUEUE a real header exists and rewriting it desynchronises the connection in ways that surface minutes later somewhere else, while the proxy terminated the connection and reopened it, so the headers on the wire are firegex's own and a filter editing them would be editing nothing. An earlier version papered over that by handing the proxy a literal `FAKE:IP:TCP:HEADERS:` prefix — so the same filter did different things depending on which layer it happened to be attached to. Metadata in, payload out is the one contract both layers keep.
+That is deliberate. The two network layers cannot honestly offer the same thing down there: on NFQUEUE a real header exists and rewriting it desynchronises the connection in ways that surface minutes later somewhere else, while the proxy terminated the connection and reopened it, so the headers on the wire are firegex's own and a filter editing them would be editing nothing. An earlier version papered over that by handing the proxy a literal `FAKE:IP:TCP:HEADERS:` prefix — so the same filter did different things depending on which layer it happened to be attached to. Metadata in, a verdict out is the one contract both layers keep.
 
 #### Which models work on UDP
 
@@ -159,9 +162,6 @@ before the chain sees it, so `HttpRequest` and the rest mean what they always me
 that rendering does and does not promise. The question a model asks is therefore "is
 there a stream", not "is this TCP", and `RawPacket` answers both separately.
 
-Rewriting a datagram is **exact**, on both layers: there are no sequence numbers for a
-different length to desynchronise.
-
 `REJECT` means something narrower here. There is no connection to close, so the datagram
 is simply not delivered and the next one from the same flow is judged afresh.
 
@@ -171,7 +171,7 @@ is simply not delivered and the next one from the same flow is judged afresh.
 from firegex.pyfilters.models import RawPacket
 ```
 
-One chunk of the connection, and what is known about it. The **only** data structure that can be mutated.
+One chunk of the connection, and what is known about it.
 
 - `data: bytes` — the application payload. Read-only.
 - `data_size: int` — how many bytes of payload this chunk carries.
@@ -188,7 +188,6 @@ One chunk of the connection, and what is known about it. The **only** data struc
   so one file can carry both.
 - `src_ip: str`, `dst_ip: str`, `src_port: int`, `dst_port: int` — where this chunk came from and where it is going (read-only).
 - `client_ip`, `client_port`, `server_ip`, `server_port` — the same two endpoints named by role instead of by direction, so a filter does not have to branch on `is_input` to find out who the client is (read-only).
-- `was_mangled: bool` — whether an earlier filter in the chain already rewrote this chunk.
 
 
 
@@ -443,12 +442,11 @@ There is no protocol to pass: the file says which one it speaks by what its filt
 from firegex.pyfilters.models import RawPacket, HttpRequest, HttpHistory
 from firegex.pyfilters import pyfilter, ACCEPT, REJECT, DROP, FullStreamAction
 
-# Lowest level of abstraction: only RawPacket can be mangled.
+# Lowest level of abstraction: the raw payload of each chunk.
 @pyfilter
-def mangle_example(packet: RawPacket):
-    if b"TEST_MANGLING" in packet.data:
-        packet.data = packet.data.replace(b"TEST", b"UNSTABLE")
-        return UNSTABLE_MANGLE
+def raw_example(packet: RawPacket):
+    if not packet.is_input and b"FLAG{" in packet.data:
+        return REJECT
     if b"BAD DATA" in packet.data:
         return DROP
     return ACCEPT

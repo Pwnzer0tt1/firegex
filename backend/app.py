@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Depends, APIRouter
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import jwt
 from utils.sqlite import SQLite
-from utils import SAFE_DB_NAME, SAFE_PY_NAME, API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD, safe_join
+from utils import boot_auth_mode, SAFE_DB_NAME, SAFE_PY_NAME, API_VERSION, FIREGEX_PORT, FIREGEX_HOST, FIREGEX_SOCKET, JWT_ALGORITHM, get_interfaces, socketio_emit, DEBUG, SysctlManager, NORELOAD, safe_join
 from utils.loader import frontend_deploy, load_routers
 from utils.models import AuthModeForm, ChangePasswordModel, IpInterface, PasswordChangeForm, PasswordForm, ResetRequest, StatusModel, StatusMessageModel
 from contextlib import asynccontextmanager
@@ -45,6 +45,18 @@ PROXY_IP_HEADER = os.getenv("PROXY_IP_HEADER", "")
 #: "it will take effect immediately" while the process it was talking to had already
 #: decided that every caller was an administrator.
 UNSAFE_DISABLE_AUTH_ENV = os.getenv("UNSAFE_DISABLE_AUTH", "").strip().lower() in {"1", "true", "yes", "on"}
+
+#: Whether this boot's environment was written just now, from the host's configuration:
+#: set by `docker-entrypoint.sh` on the first boot of a container, and by `run.py` for
+#: every standalone start. Absent means the container is being started **again** by
+#: Docker — after a reboot, a restart of the daemon, a crash under `restart:
+#: unless-stopped` — with the environment it was created with, which is older than
+#: anything `run.py config` has said since.
+FRESH_BOOT = os.getenv("FIREGEX_FRESH_BOOT", "") == "1"
+
+#: What the host last decided about authentication with `run.py config`, kept where a
+#: restart can read it. See `seed_auth_mode`.
+AUTH_HOST_KEY = "auth_disabled_host"
 
 
 def auth_disabled() -> bool:
@@ -343,14 +355,38 @@ async def get_ip_interfaces():
 #Routers Loader
 reset, startup, shutdown = load_routers(api)
 
-async def startup_main():
+def seed_auth_mode():
+    """Decide at boot whether authentication is on.
+
+    Three writers, and a boot has to take the right one. `run.py start/restart` says it
+    in the environment of a container it has just created. `run.py config` says it on the
+    running instance and in `.firegex-conf.json` — but a container's environment is fixed
+    when it is created, so a container Docker started again by itself (a reboot, a daemon
+    restart, a crash under `restart: unless-stopped`) came back up with the value it was
+    created with. Authentication re-enabled with `run.py config --password` was off again
+    after the next reboot, while `config --show` went on saying it was on.
+
+    So `run.py config` also writes what it decided under `AUTH_HOST_KEY`, and a boot that
+    is not fresh takes that over its stale environment. A fresh one — a container `run.py`
+    has just created from the current configuration — takes the environment, which already
+    says the same thing, and clears the key. What the interface sets (`/api/auth-mode`)
+    writes neither, so it lasts as long as the process, as it says it does.
+    """
+    disabled, keep_held = boot_auth_mode(db.get(AUTH_HOST_KEY), FRESH_BOOT,
+                                         UNSAFE_DISABLE_AUTH_ENV)
+    db.put("auth_disabled", "1" if disabled else "0")
+    if not keep_held:
+        db.query("DELETE FROM keys_values WHERE key = ?;", AUTH_HOST_KEY)
+
+
+async def startup_main(seed_auth: bool = True):
     db.init()
-    # The environment is the boot-time answer: `run.py start/restart --[no-]unsafe-disable-auth`
-    # says what this instance should come up as, and writing it here is what makes the flag
-    # readable at runtime without making it unreadable at boot. Changes made afterwards —
-    # from the interface, or with `run.py config` — outlive nothing but the process, which
-    # is why `run.py config` also persists them to .firegex-conf.json.
-    db.put("auth_disabled", "1" if UNSAFE_DISABLE_AUTH_ENV else "0")
+    # Only when a process is starting. An import restarts the application state without
+    # anything about the deployment having changed, and re-deciding here opened a window —
+    # the length of every service's start — in which a container booted without
+    # authentication answered everybody as an administrator, whatever it had been set to.
+    if seed_auth:
+        seed_auth_mode()
     if os.getenv("PSW_HASH_SET"):
         db.put("password", os.getenv("PSW_HASH_SET"))
     try:
@@ -442,15 +478,8 @@ async def import_db(data: dict):
         os.makedirs('db')
 
     # Backups never contain the password, the secret or the auth mode (export_db strips
-    # all three), so preserve this instance's own values instead of losing them on import.
-    current_password = db.get("password")
-    current_secret = db.get("secret")
-    # This one has to go back *after* the restart below: `startup_main` seeds it from the
-    # environment, which is the right answer when the process is starting and the wrong
-    # one here — nothing restarted, the environment did not change, and an import that
-    # quietly reverted authentication to whatever the container was booted with would
-    # undo a `run.py config` nobody remembers making.
-    current_auth_disabled = db.get("auth_disabled")
+    # them), so preserve this instance's own values instead of losing them on import.
+    kept = {key: db.get(key) for key in ("password", "secret", "auth_disabled", AUTH_HOST_KEY)}
 
     for db_path, db_data in db_imports:
         temp_db = SQLite(str(db_path))
@@ -464,16 +493,19 @@ async def import_db(data: dict):
             with open(filter_path, 'wb') as script_file:
                 script_file.write(decoded)
 
-    if current_password is not None:
-        db.put("password", current_password)
-    if current_secret is not None:
-        db.put("secret", current_secret)
+    for key, value in kept.items():
+        if value is not None:
+            db.put(key, value)
 
-    # Restart the application state
+    # Restart the application state, without re-deciding authentication: nothing about the
+    # deployment changed, and deciding again from the environment is what a boot does.
     await shutdown_main()
-    await startup_main()
-    if current_auth_disabled is not None:
-        db.put("auth_disabled", current_auth_disabled)
+    await startup_main(seed_auth=False)
+    # And once more after it, in case the restart recreated the database under an older
+    # schema and took the values with it.
+    for key, value in kept.items():
+        if value is not None and db.get(key) != value:
+            db.put(key, value)
 
     return {'status': 'ok'}
 

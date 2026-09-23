@@ -24,9 +24,10 @@ def _clean(doc: str | None) -> str:
 def _members(cls) -> list[dict]:
     """The public properties of a model, with what they are for and whether they change.
 
-    Writability is worth reporting on its own: the whole boundary the filter API rests
-    on is that metadata is read and only the payload is written, and an editor that says
-    so while you type teaches it better than a paragraph in the documentation.
+    Writability is reported rather than assumed: the boundary the filter API rests on is
+    that a filter reads and answers with a verdict, and an editor that says so while you
+    type teaches it better than a paragraph in the documentation. Nothing is writable
+    today — the payload was, for `UNSTABLE_MANGLE`, and stopped being with it.
     """
     out = []
     for name, member in inspect.getmembers(cls, lambda m: isinstance(m, property)):
@@ -75,8 +76,9 @@ def describe() -> dict:
         {"name": "REJECT", "value": REJECT.value,
          "doc": "Refuse the connection. Everything still in the stream goes with it."},
         {"name": "DROP", "value": DROP.value,
-         "doc": "Silently drop this chunk and every one after it, without closing."},
-        
+         "doc": "Stop the connection's traffic. On NFQUEUE this chunk and every one after "
+                "it are dropped without closing anything; on the proxy layer, where a "
+                "stream cannot skip bytes, the connection is closed as REJECT does."},
     ]
 
     settings = [

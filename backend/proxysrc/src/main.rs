@@ -459,19 +459,22 @@ async fn run() {
             // relay speaks. Per relay because a relay is one protected address, and
             // two ports of one service can be reached differently.
             let (target, onward) = match target.trim().split_once('|') {
-                Some((target, "plain")) => (target, fgex_proxy::proxy::Onward::Plain),
-                Some((target, "tls")) => (target, fgex_proxy::proxy::Onward::Tls),
-                Some((target, "same")) => (target, fgex_proxy::proxy::Onward::Same),
-                Some((_, other)) => {
-                    eprintln!("[fatal] [main] FGEX_PROXY_UDP: unknown upstream '{other}'");
-                    exit(2);
-                }
+                Some((target, word)) => match fgex_proxy::proxy::Onward::from_word(word) {
+                    Some(onward) => (target, onward),
+                    None => {
+                        eprintln!("[fatal] [main] FGEX_PROXY_UDP: unknown upstream '{word}'");
+                        exit(2);
+                    }
+                },
                 None => (target.trim(), fgex_proxy::proxy::Onward::Same),
             };
             let upstream = parse_addr("FGEX_PROXY_UDP", target.trim());
             match relays.add_relay(upstream, onward).await {
                 Ok(port) => {
-                    println!("UDP {upstream} {port}");
+                    // With what it speaks onward, because that is half of what names a
+                    // relay: two addresses sending to one service port can want different
+                    // answers, and each gets a relay of its own.
+                    println!("UDP {upstream}|{} {port}", onward.word());
                     use std::io::Write;
                     let _ = std::io::stdout().flush();
                 }

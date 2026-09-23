@@ -45,8 +45,6 @@ function AddressModal({ opened, onClose, service, edit }: {
     const [error, setError] = useState<string | null>(null)
     const isExternal = service.transport === Transport.EXTERNAL
     const isHttp = service.proto === L4.HTTP
-    const caps = addressCapabilities(service.proto, service.transport)
-    const anyOption = caps.canPublish || caps.canChooseUpstream || caps.isExternal
 
     const form = useForm<Values>({
         initialValues: {
@@ -80,6 +78,11 @@ function AddressModal({ opened, onClose, service, edit }: {
         else form.reset()
     }, [opened, edit?.address_id])
 
+    // What this address can say depends on what it is reached over, which on an HTTPS
+    // service is being chosen in this very form.
+    const caps = addressCapabilities(service.proto, service.transport, form.values.edge)
+    const anyOption = caps.canPublish || caps.canChooseUpstream || caps.isExternal
+
     const submit = async (values: Values) => {
         setBusy(true)
         // Sent wherever it means something, and sent even when it is empty: this is a
@@ -92,7 +95,11 @@ function AddressModal({ opened, onClose, service, edit }: {
                 target_port: Number(values.target_port) !== values.port
                     ? Number(values.target_port) || 0 : 0,
             } : {}),
-            ...(caps.canChooseUpstream ? { upstream: values.upstream } : {}),
+            // Where the address has no decrypted leg the choice is taken back rather than
+            // left out: left out, the row keeps what it had, and an address moved to the
+            // clear would keep an answer that no longer applies to anything.
+            ...(isHttp || caps.canChooseUpstream
+                ? { upstream: caps.canChooseUpstream ? values.upstream : Upstream.SAME } : {}),
             ...(isExternal ? { proxy_ip: values.proxy_ip, proxy_port: values.proxy_port } : {}),
         }
         try {
@@ -173,7 +180,6 @@ export default function AddressList({ service }: { service: Service }) {
     const [removing, setRemoving] = useState<Address | null>(null)
     const addresses = service.addresses ?? []
     const only = addresses.length === 1
-    const caps = addressCapabilities(service.proto, service.transport)
     //: What each interface is carrying at the moment, so a row named `wg0` can say
     //  where that actually is. An interface with nothing on it is worth seeing too:
     //  on the proxy layer a UDP relay has to bind one of these.
@@ -276,7 +282,8 @@ export default function AddressList({ service }: { service: Service }) {
                         them uses: this is where an operator comes back to check what
                         they chose, and a setting named differently here reads as a
                         different setting. Clicking one opens that panel. */}
-                        {addressTags(address, caps).map(tag =>
+                        {addressTags(address,
+                            addressCapabilities(service.proto, service.transport, address.edge)).map(tag =>
                             <Tooltip key={tag.label} position="bottom" multiline w={300}
                                 label={tag.hint}>
                                 <Badge size="xs" variant="light" color="teal"
@@ -369,7 +376,10 @@ export default function AddressList({ service }: { service: Service }) {
 function PlaintextCapture({ service }: { service: Service }) {
     const [open, setOpen] = useState(false)
     if (!decrypts(service)) return null
+    // An HTTPS service carries QUIC too, on whichever of its addresses say HTTP/3, and the
+    // invented port needs saying there exactly as much.
     const quic = service.proto === L4.QUIC
+        || (service.proto === L4.HTTP && (service.addresses ?? []).some(a => a.edge === L4.QUIC))
 
     return <Box mt="md">
         <Group gap="xs">

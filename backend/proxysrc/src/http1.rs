@@ -318,7 +318,39 @@ pub(crate) async fn judge(
     }
 }
 
+/// Why a request names its authority twice and disagrees with itself, or `None`.
+///
+/// HTTP/2 and HTTP/3 carry the authority in `:authority`, and a client may send a `host`
+/// header beside it. The rendering shows the chain one `Host` line, while the request goes
+/// on to the service with both — and a service reading HTTP/2 or HTTP/3 routes on
+/// `:authority`, which RFC 9113 §8.3.1 says wins. So a request whose two disagree would
+/// show a filter one host and deliver itself to another: `:authority: admin.internal` with
+/// `host: public.example` walks past every rule written against the admin host. The RFC
+/// calls such a request malformed, and so does this. A second `host` header is the same
+/// question asked twice, and is answered the same way.
+pub(crate) fn conflicting_authority(request: &http::Request<()>) -> Option<String> {
+    let mut hosts = request.headers().get_all(http::header::HOST).iter();
+    let host = hosts.next();
+    if hosts.next().is_some() {
+        return Some("the request carries more than one host header".to_string());
+    }
+    match (request.uri().authority(), host) {
+        (Some(authority), Some(host))
+            if !host.as_bytes().eq_ignore_ascii_case(authority.as_str().as_bytes()) =>
+        {
+            Some(format!(
+                ":authority says {authority} and the host header says {}",
+                String::from_utf8_lossy(host.as_bytes())
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// The request, as the HTTP/1.1 it would have been.
+///
+/// Called only for a request that has passed [`conflicting_authority`], so a `host` header
+/// and `:authority`, where both are present, say the same thing.
 pub(crate) fn render_request(request: &http::Request<()>, framing: &Framing) -> Vec<u8> {
     let target = request
         .uri()
@@ -327,7 +359,7 @@ pub(crate) fn render_request(request: &http::Request<()>, framing: &Framing) -> 
         .unwrap_or_else(|| "/".to_string());
     let mut view = format!("{} {} HTTP/1.1\r\n", request.method(), target).into_bytes();
     // Both versions carry it as `:authority`, and an HTTP/1.1 parser wants a `Host` line.
-    // A request that also sent `host` outright keeps its own.
+    // A request that also sent `host` outright keeps its own, which is the same value.
     if !request.headers().contains_key(http::header::HOST) {
         if let Some(authority) = request.uri().authority() {
             view.extend_from_slice(format!("host: {authority}\r\n").as_bytes());
@@ -390,4 +422,35 @@ pub(crate) fn close_body(view: &mut Vec<u8>, framing: &Framing, trailers: Option
         }
     }
     view.extend_from_slice(b"\r\n");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::conflicting_authority;
+
+    fn request(authority: Option<&str>, hosts: &[&str]) -> http::Request<()> {
+        let uri = match authority {
+            Some(authority) => format!("https://{authority}/path"),
+            None => "/path".to_string(),
+        };
+        let mut builder = http::Request::builder().uri(uri);
+        for host in hosts {
+            builder = builder.header(http::header::HOST, *host);
+        }
+        builder.body(()).unwrap()
+    }
+
+    #[test]
+    fn one_authority_said_once_or_twice_alike_is_fine() {
+        assert_eq!(conflicting_authority(&request(Some("example.com"), &[])), None);
+        assert_eq!(conflicting_authority(&request(None, &["example.com"])), None);
+        assert_eq!(conflicting_authority(&request(Some("example.com"), &["example.com"])), None);
+        assert_eq!(conflicting_authority(&request(Some("Example.com"), &["example.COM"])), None);
+    }
+
+    #[test]
+    fn two_authorities_that_disagree_are_malformed() {
+        assert!(conflicting_authority(&request(Some("admin.internal"), &["public.example"])).is_some());
+        assert!(conflicting_authority(&request(None, &["a.example", "b.example"])).is_some());
+    }
 }

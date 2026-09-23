@@ -66,14 +66,21 @@ pub async fn serve_stdin(
             let mut parts = rest.split_whitespace();
             let target_str = parts.next().unwrap_or("").trim();
             let onward = match parts.next() {
-                Some("plain") => Onward::Plain,
-                Some("tls") => Onward::Tls,
-                _ => Onward::Same,
+                None => Onward::Same,
+                Some(word) => match Onward::from_word(word) {
+                    Some(onward) => onward,
+                    None => {
+                        let err = format!("unknown upstream {word:?}");
+                        eprintln!("[warn] [control] {err}");
+                        ack(false, &err);
+                        continue;
+                    }
+                },
             };
             match target_str.parse::<SocketAddr>() {
                 Ok(upstream) => match relays.add_relay(upstream, onward).await {
                     Ok(port) => {
-                        println!("UDP {upstream} {port}");
+                        println!("UDP {upstream}|{} {port}", onward.word());
                         ack(true, "");
                     }
                     Err(e) => {

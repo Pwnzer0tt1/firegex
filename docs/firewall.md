@@ -27,8 +27,11 @@ Beyond the rule list and policy, a few toggles affect the whole module:
 - **allow_dhcp**: always accept DHCP traffic.
 - **multicast_dns**: always accept mDNS (multicast DNS) traffic.
 - **allow_upnp**: always accept UPnP traffic.
+- **allow_dnat** (on by default): forwarded traffic whose destination another NAT rewrote — a port **Docker or podman published** for a container, a router's port forward — is left to the rules that published it when none of *your* rules matched it, instead of meeting the forward policy. Your `forward` rules still apply to it first, so a rule that drops it drops it.
 
-Each of these, when enabled, inserts a small accept rule ahead of your own rules — they're conveniences for common cases you'd otherwise have to write by hand.
+Each of the others, when enabled, inserts a small accept rule ahead of your own rules — they're conveniences for common cases you'd otherwise have to write by hand. **allow_dnat** is the exception: it sits after your rules, because it only decides what the *policy* does with what they did not match.
+
+Why it exists: a published container port is reached by *forwarding* — Docker rewrites the destination to the container's address, and the traffic is routed to it rather than delivered to this host — so an `in` rule for that port never matches it, and with the policy at `drop` it would be dropped at the forward hook. When Firegex's rules lived in the tables `iptables` uses, Docker's own accept in that same chain let such traffic through; in tables of Firegex's own it has to be said. Turn it off to have the forward policy apply to published ports too, and allow them with `forward` rules.
 
 ## How it works
 

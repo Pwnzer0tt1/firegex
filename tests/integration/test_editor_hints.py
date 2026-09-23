@@ -26,22 +26,22 @@ def test_a_raw_packet_offers_the_metadata_a_filter_may_read(described):
     assert {"client_ip", "server_port", "is_tcp", "is_input"} <= members, str(sorted(members))
 
 
-def test_only_the_payload_is_writable(described):
-    """Nothing below the application layer crosses into a filter.
+def test_nothing_a_filter_is_shown_is_writable(described):
+    """A filter reads, and answers with a verdict.
 
-    The two layers cannot honestly offer the same thing underneath it — NFQUEUE has a
-    real header whose rewriting desynchronises the stream, while the proxy terminated the
-    connection and writes its own — so metadata in, payload out is the one contract both
-    keep. The old model papered over that by handing the proxy a literal
-    `FAKE:IP:TCP:HEADERS:` prefix, so the same filter did different things depending on
-    where it was attached.
+    Nothing below the application layer ever crossed into one: the two layers cannot
+    honestly offer the same thing underneath it — NFQUEUE has a real header whose
+    rewriting desynchronises the stream, while the proxy terminated the connection and
+    writes its own. The payload was the one exception, for `UNSTABLE_MANGLE`, and stopped
+    being one with it: assignable and read by nothing afterwards, it was an editor
+    promising a rewrite that never reached the other end.
     """
     raw = [m for m in described["models"] if m["name"] == "RawPacket"][0]
     members = {m["name"]: m for m in raw["members"]}
-    assert members["data"]["writable"] is True
-    assert members["client_ip"]["writable"] is False
-    writable = [name for name, member in members.items() if member["writable"]]
-    assert writable == ["data"], str(writable)
+    assert members["data"]["writable"] is False
+    writable = [f"{model['name']}.{member['name']}" for model in described["models"]
+                for member in model["members"] if member["writable"]]
+    assert writable == [], str(writable)
 
 
 def test_each_model_says_which_protocols_it_belongs_to(described):

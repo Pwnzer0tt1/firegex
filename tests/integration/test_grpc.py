@@ -18,7 +18,7 @@ import pytest
 from integration import filter_code
 from integration.conftest import (add_python_filter, add_regex_filter,
                                   start_and_settle)
-from helpers.grpcserver import (BIDI, FORBIDDEN, SECRET, TRAILERS_ONLY, UNARY,
+from helpers.grpcserver import (FORBIDDEN, SECRET, TRAILERS_ONLY, UNARY,
                                 GrpcService, bidi, call, channel, needs_grpc,
                                 server_stream)
 from helpers.net import free_port

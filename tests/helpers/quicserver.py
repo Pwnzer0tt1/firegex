@@ -78,7 +78,8 @@ class QuicEcho:
         self._loop.run_forever()
 
     async def _serve(self):
-        import tempfile, os
+        import tempfile
+        import os
         # aioquic reads them from disk, and a key written world-readable is a key
         # somebody else on the machine can have.
         paths = []

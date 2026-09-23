@@ -123,6 +123,22 @@ SAFE_DB_NAME = re.compile(r'[A-Za-z0-9_-]+\.db')
 SAFE_PY_NAME = re.compile(r'[A-Za-z0-9_-]+\.py')
 
 
+def boot_auth_mode(held: str | None, fresh_boot: bool, env_disabled: bool) -> tuple[bool, bool]:
+    """Whether authentication starts off disabled, and whether the host's stored decision
+    is kept — `(disabled, keep_held)`.
+
+    `held` is what `run.py config` last stored for the host (`"1"`, `"0"` or `None`). A
+    fresh boot — a container or a standalone start `run.py` has just written the
+    environment for — takes the environment, which already says what the configuration
+    says, and the stored decision is dropped. Any other boot is Docker starting an existing
+    container again with the environment it was created with, which may be older than the
+    stored decision, and the stored decision wins.
+    """
+    if fresh_boot or held is None:
+        return env_disabled, False
+    return held == "1", True
+
+
 def safe_join(base_dir: Union[str, Path], *paths: str) -> Path:
     """
     Safely join a base directory with one or more path components.

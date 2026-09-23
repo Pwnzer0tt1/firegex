@@ -29,7 +29,8 @@ use h3::error::StreamError;
 use crate::capture::Tap;
 use crate::filter::{ChainSessions, ConnectionId, Direction};
 use crate::http1::{
-    carried, close_body, head_framing, judge, push_body, render_request, render_response, Answer,
+    carried, close_body, conflicting_authority, head_framing, judge, push_body, render_request,
+    render_response, Answer,
     Framing, Incoming, Outbound, OutboundBody, Rendered,
 };
 use crate::quic::{Behind, Carrier};
@@ -278,6 +279,19 @@ async fn exchange<O: Outbound>(
 ) -> io::Result<()> {
     let (request, mut from_client) = resolver.resolve_request().await.map_err(io::Error::other)?;
     carrier.spoken.store(true, Ordering::Relaxed);
+
+    // One authority, or none: the chain is shown one `Host` and the service is handed the
+    // request as it came, so two that disagree would be a filter reading one host while
+    // the service answers for another. Malformed, and the stream is stopped as such.
+    if let Some(why) = conflicting_authority(&request) {
+        eprintln!(
+            "[warn] [h3] {}: {why}, so the filters would be shown one host while the \
+             service routes on the other. The stream is stopped as malformed.",
+            carrier.client
+        );
+        from_client.stop_stream(h3::error::Code::H3_MESSAGE_ERROR);
+        return Ok(());
+    }
 
     // A request that carries no body must not be shown `transfer-encoding: chunked`,
     // which it never had — a filter looking for that header is usually looking for

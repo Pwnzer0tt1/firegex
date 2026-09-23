@@ -135,7 +135,7 @@ pub struct Published {
 ///
 /// Not to be confused with [`Upstream`] beside it, which is *where* to forward. This is
 /// what is spoken when it gets there.
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, Debug)]
 pub enum Onward {
     /// Whatever arrived: a connection terminated here goes back out encrypted, one that
     /// arrived in the clear is forwarded in the clear. The default, and what every
@@ -146,6 +146,29 @@ pub enum Onward {
     Plain,
     /// The service speaks TLS, whatever the client used to get here.
     Tls,
+}
+
+impl Onward {
+    /// The word the backend uses for it, on `FGEX_PROXY_UDP`, `ADD_UDP` and `PUBLISH`, and
+    /// the one this engine answers with on a `UDP` line.
+    pub fn word(self) -> &'static str {
+        match self {
+            Onward::Same => "same",
+            Onward::Plain => "plain",
+            Onward::Tls => "tls",
+        }
+    }
+
+    /// The other way round. `None` for a word nobody defined, so each caller can decide
+    /// whether that is fatal (at startup) or a refused command (on the control channel).
+    pub fn from_word(word: &str) -> Option<Onward> {
+        match word {
+            "same" => Some(Onward::Same),
+            "plain" => Some(Onward::Plain),
+            "tls" => Some(Onward::Tls),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -427,6 +450,11 @@ async fn dial(
     .await
     {
         Ok(Ok(stream)) => Ok(stream),
+        // The service answered, and the answer was no: nothing is listening there. That
+        // says nothing about impersonating the client, so it is not a reason to try again
+        // as ourselves — the second attempt would be refused the same way, and the warning
+        // below would blame source preservation for a service that is simply down.
+        Ok(Err(e)) if e.kind() == io::ErrorKind::ConnectionRefused => Err(e),
         // Losing the client's address is bad; losing the connection is worse. Fall
         // back, but make the degradation loud — a service silently seeing one source
         // address for everyone is exactly the kind of thing nobody notices in time.
@@ -452,6 +480,24 @@ async fn dial(
     }
 }
 
+/// Whether a connection was dialled straight at this engine instead of being steered here.
+///
+/// Every connection the engine should carry arrives through a `redirect`, so conntrack
+/// remembers a destination that is somebody else's: the service's own address and port.
+/// A client that dials the listener itself — its port is an ephemeral one on every
+/// address of the host, and a port scan finds it — leaves conntrack nothing to translate,
+/// and `SO_ORIGINAL_DST` then answers with the very address the connection was accepted
+/// on. Forwarding there is dialling ourselves, and the new connection asks the same
+/// question and gets the same answer: measured, one such client grew into as many
+/// connections as the limit allowed within two seconds, and with no limit (the default) it
+/// grows until the process runs out of descriptors and the service stops answering anyone.
+///
+/// The configured listen address could not catch it, because that is the wildcard the
+/// listener was bound to (`[::]:0`) and never the address a connection is accepted on.
+fn dialled_at_ourselves(destination: SocketAddr, accepted_on: SocketAddr, listen: SocketAddr) -> bool {
+    destination == accepted_on || destination == listen
+}
+
 async fn handle_connection(
     client: TcpStream,
     peer: SocketAddr,
@@ -459,7 +505,7 @@ async fn handle_connection(
     chain: ChainHandle,
     stats: Arc<ProxyStats>,
 ) -> io::Result<()> {
-    let upstream = match cfg.upstream {
+    let original = match cfg.upstream {
         Upstream::Fixed(addr) => addr,
         Upstream::Original => match original_destination(&client) {
             Ok(addr) => addr,
@@ -471,15 +517,23 @@ async fn handle_connection(
     };
     // What the operator said about the address this was dialled at: nothing, for every
     // address that is simply the service, which is the transparent case and the default.
-    let published = cfg.targets.resolve(upstream);
-    let upstream = published.target.unwrap_or(upstream);
+    let published = cfg.targets.resolve(original);
+    let upstream = published.target.unwrap_or(original);
 
-    // A rule that steers our own outbound traffic back at us would spin forever.
-    if upstream == cfg.listen {
+    // Something that would have this engine dial itself: a client connecting straight to
+    // the listener, or a rule or a publication that points back at it. Either would spin
+    // for as long as there are descriptors to spend — see `dialled_at_ourselves`.
+    let accepted_on = unmap(client.local_addr()?);
+    if dialled_at_ourselves(original, accepted_on, cfg.listen)
+        || dialled_at_ourselves(upstream, accepted_on, cfg.listen)
+    {
         stats.origin_lookup_failures.fetch_add(1, Ordering::Relaxed);
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("refusing to forward {upstream} to ourselves: check the intercept rules"),
+            format!(
+                "refusing to forward {upstream} to ourselves: this connection was dialled \
+                 at the engine's own port rather than steered here by a rule"
+            ),
         ));
     }
 
@@ -493,14 +547,27 @@ async fn handle_connection(
     let _ = client.set_nodelay(true);
     let _ = server.set_nodelay(true);
 
-    // Nothing is sniffed for a chain that has nothing to say: a bypassed service is a
-    // byte pump whatever its clients speak, so the question has no consequence and the
-    // peek would be work paid for no answer. An `http` service in that state carries the
-    // client's TLS through untouched, which is exactly what "not filtering" means.
-    let opening = if chain.current().is_bypassed() || !(cfg.tls.is_off() || cfg.tls.optional) {
-        Opening::Other
-    } else {
+    // What the client opened with, asked only where the answer decides something.
+    //
+    // On a listener that terminates TLS **optionally** — an `http` service — it always
+    // does, whatever the chain: whether this connection is decrypted is what makes an
+    // address declared as the encrypted one keep its promise, and what lets a service
+    // that answers in the clear be reached over TLS at all (`Onward::Plain`). This was
+    // skipped for a chain with nothing to say, on the reasoning that a bypassed service
+    // is a byte pump either way — and every connection to a TLS address of such a service
+    // was then refused as "not TLS", which is what a brand new HTTPS service with no
+    // filter yet did, and what one did the moment its filters were switched off or lost
+    // their say. The opposite of failing open.
+    //
+    // On a plain listener the only question is HTTP/2 in the clear, which matters only to
+    // a chain that renders it — so there, and only there, a bypassed chain skips the peek.
+    // A listener that always terminates TLS has no question to ask.
+    let opening = if cfg.tls.optional
+        || (cfg.tls.is_off() && !chain.current().is_bypassed())
+    {
         sniff(&client, &server).await
+    } else {
+        Opening::Other
     };
 
     // An address declared to be the encrypted one keeps that promise: a client opening
@@ -517,19 +584,24 @@ async fn handle_connection(
         // the cleartext site declared as the encrypted one. Naming the address and what
         // was expected turns an afternoon into a sentence.
         eprintln!(
-            "[warn] [proxy] {peer} spoke something that is not TLS to {upstream}, which              this service declares as its encrypted address. The connection is refused              rather than carried to a service expecting HTTPS. If that address is meant              to carry the site in the clear, it is the one to change."
+            "[warn] [proxy] {peer} spoke something that is not TLS to {original}, which \
+             this service declares as its encrypted address. The connection is refused \
+             rather than carried to a service expecting HTTPS. If that address is meant \
+             to carry the site in the clear, it is the one to change."
         );
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("{upstream} is published as TLS and this connection did not start one"),
+            format!("{original} is published as TLS and this connection did not start one"),
         ));
     }
     if cfg.tls.is_off() || (cfg.tls.optional && opening != Opening::Tls) {
         // HTTP/2 in the clear, which a client announces by opening with a fixed 24-byte
         // preface. It is worth catching for the same reason the TLS path catches `h2`:
         // without it a gRPC service that speaks plaintext — which is most of them behind
-        // a load balancer — is carried as HPACK nobody can read.
-        if opening == Opening::Http2 {
+        // a load balancer — is carried as HPACK nobody can read. Not for a chain with
+        // nothing to say, which is a byte pump whatever the client speaks: the peek is
+        // only taken on its behalf here because an optional TLS listener needed it anyway.
+        if opening == Opening::Http2 && !chain.current().is_bypassed() {
             return crate::h2::carry(
                 client,
                 server,
@@ -576,7 +648,7 @@ async fn handle_connection(
     // exactly what the service chose. What changes is what firegex then *does* with a
     // connection that agreed on `h2` — it speaks it, on both sides, instead of
     // forwarding frames no filter can read.
-    let (started, wanted) = match &cfg.tls.server {
+    let (started, wanted, sni) = match &cfg.tls.server {
         Some(_) => {
             let start = tokio::time::timeout(
                 cfg.connect_timeout,
@@ -584,14 +656,19 @@ async fn handle_connection(
             )
             .await
             .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "TLS handshake timed out"))??;
-            let wanted: Vec<Vec<u8>> = start
-                .client_hello()
+            let hello = start.client_hello();
+            let wanted: Vec<Vec<u8>> = hello
                 .alpn()
                 .map(|it| it.map(|p| p.to_vec()).collect())
                 .unwrap_or_default();
-            (Some(start), wanted)
+            // The name the client asked for, carried on for the same reason the protocol
+            // list is: a service choosing its certificate or its virtual host by SNI would
+            // otherwise be handed this engine's idea of a name — the bare address, which
+            // TLS does not even send — and answer as its default host.
+            let sni = hello.server_name().map(str::to_owned);
+            (Some(start), wanted, sni)
         }
-        None => (None, Vec::new()),
+        None => (None, Vec::new(), None),
     };
 
     // Per address: the configuration is built once, and whether this connection uses it
@@ -608,7 +685,10 @@ async fn handle_connection(
     };
     let (server, agreed): (Duplex, Option<Vec<u8>>) = match upstream_tls {
         Some(config) => {
-            let name = tls::server_name(&upstream.ip().to_string())?;
+            let name = match sni.as_deref().map(tls::server_name) {
+                Some(Ok(name)) => name,
+                _ => tls::server_name(&upstream.ip().to_string())?,
+            };
             let connected = tokio::time::timeout(
                 cfg.connect_timeout,
                 tls::connector(tls::with_alpn(config, &wanted)).connect(name, server),
@@ -706,6 +786,7 @@ async fn handle_connection(
                         upstream,
                         client: peer,
                         tls: None,
+                        server_name: None,
                         connect_timeout: cfg.connect_timeout,
                         self_mark: cfg.self_mark,
                         spoof: cfg.spoof_source,
@@ -1092,4 +1173,23 @@ where
     }
     let _ = wr.shutdown().await;
     Ok(PumpOutcome::Finished)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dialled_at_ourselves;
+
+    /// What `SO_ORIGINAL_DST` hands back for a connection dialled straight at the listener
+    /// is the address it was accepted on, and forwarding there is dialling ourselves.
+    #[test]
+    fn a_connection_nothing_redirected_is_recognised() {
+        let listen = "[::]:0".parse().unwrap();
+        let accepted_on = "10.0.0.5:41234".parse().unwrap();
+        assert!(dialled_at_ourselves(accepted_on, accepted_on, listen));
+        // The configured address is the wildcard, which is why comparing with it alone
+        // never caught this.
+        assert!(!dialled_at_ourselves(accepted_on, "10.0.0.6:41234".parse().unwrap(), listen));
+        // A redirected connection remembers the service it was headed for.
+        assert!(!dialled_at_ourselves("10.0.0.5:80".parse().unwrap(), accepted_on, listen));
+    }
 }

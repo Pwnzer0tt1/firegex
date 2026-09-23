@@ -40,7 +40,7 @@ the service being configured is offered:
 |---|---|---|
 | **What clients speak here** — clear · TLS · HTTP/3 | HTTPS services, on the row itself | Not an extra: it is what the address *is* |
 | **The service is on another port** | the Proxy layer | Clients arrive at this address; firegex dials the service on that port instead |
-| **Send to the service** — what arrived · plaintext · TLS | any service firegex decrypts | What firegex speaks to the service, which need not be what the client spoke. *Plaintext* is what puts an ordinary cleartext site behind HTTPS, HTTP/2 and HTTP/3 with only firegex holding a certificate |
+| **Send to the service** — what arrived · plaintext · TLS | an address whose traffic firegex decrypts: any address of a TLS or QUIC service, and the TLS and HTTP/3 addresses of an HTTPS one | What firegex speaks to the service, which need not be what the client spoke. *Plaintext* is what puts an ordinary cleartext site behind HTTPS, HTTP/2 and HTTP/3 with only firegex holding a certificate. Not on a cleartext address: firegex carries what arrives there as it arrived, so there is no decrypted leg to hand over differently, and the choice is refused rather than stored |
 | **Hand it to your proxy at** | the hand-off layer | Where your own proxy is listening for this address |
 
 What is set is repeated back under the address as a **tag**, and clicking a tag opens the
@@ -239,10 +239,10 @@ Nothing is terminated.
   which caps bulk throughput.
 - **Reassembly in userspace.** Done via libtins, with memory caps and timeout heuristics.
 - **One process per filter.** Chaining requires multiple processes and netfilter queues.
-- **A Python filter's rewriting is unstable on TCP here.** Changing a payload's length
-  desynchronises the stream, which is what `UNSTABLE_MANGLE` is named after. On **UDP**
-  it is exact, because a datagram carries no sequence numbers to desynchronise.
-  Patterns do not rewrite on either layer.
+- **Nothing rewrites traffic, on either layer.** A Python filter answers with a verdict,
+  and patterns block; `UNSTABLE_MANGLE` is gone, because a chunk at a time could never
+  rewrite a pattern split across two of them — see the [Python filter
+  documentation](pyfilter.md#packet-statements).
 
 ### UDP on the proxy layer
 
@@ -288,6 +288,12 @@ hundred of them from a single host were enough to exhaust firegex entirely. No d
 to be sent, and every other service on the instance went down with the one being
 attacked.
 
+The limit is **one number for everything the service carries**: its TCP connections, its
+QUIC connections and its UDP flows are counted together, because they spend the same
+descriptors. A UDP flow — one client address talking to one address of the service —
+holds its place until it has been quiet for a minute, since a datagram has no close to
+wait for.
+
 A limit does **not** save the service under attack. A cap cannot tell a connection that
 is silent because it is an attack from one that is silent because the client is slow, so
 an attacker who fills the limit still fills it. What it does is contain the damage to that
@@ -299,7 +305,8 @@ What happens past the limit is yours to choose:
 - **Refuse** (the default). Nothing reaches the service that was not inspected, and
   clients are turned away while the limit holds.
 - **Forward unfiltered.** The service stays reachable past the limit, and that traffic
-  gets there with nothing having looked at it. This is the same trade as fail-open, made
+  gets there with nothing having looked at it. On UDP that is a flow of its own, answers
+  included, carried with no filter in front of it for as long as it lasts. This is the same trade as fail-open, made
   at a different moment, and it is off by default for the same reason: a filter that
   quietly stops filtering is the worse surprise.
 
@@ -379,7 +386,9 @@ refused there and then.
 **It is asked of each address**, under its ⚙ button, and not of the service: what leaves
 towards the service is a property of the way in. One daemon reached over TLS on one port
 and in the clear on another is re-encrypted for the first and handed the plaintext for the
-second.
+second. It is only asked where firegex decrypts: the cleartext address of an HTTPS service
+is carried as it arrived, so moving an address to the clear takes its answer back to *as
+it arrives*.
 
 | | What firegex does |
 |---|---|

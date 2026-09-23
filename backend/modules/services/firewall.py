@@ -138,7 +138,7 @@ class ServiceManager:
                     code_path=code_path(flt.id),
                     functions=self.db.query(
                         "SELECT name, active FROM pyfilters WHERE filter_id = ? "
-                        "ORDER BY name ASC;",
+                        "ORDER BY position ASC, name ASC;",
                         flt.id,
                     ),
                 ))
@@ -398,9 +398,13 @@ class ServiceManager:
     # --- lifecycle ------------------------------------------------------------
 
     async def enable(self):
-        if self.active:
-            return
+        # Asked under the lock, not before it. Asked first, two starts arriving together —
+        # a double click, or an operator's start racing the watchdog's restart — both saw
+        # a stopped service, and the second built a datapath of its own over the first:
+        # the first engine was left running with nobody holding it.
         async with self.lock:
+            if self.active:
+                return
             self.transport = transports.build(
                 self.srv,
                 on_block=self._on_block,
@@ -430,9 +434,12 @@ class ServiceManager:
             )
 
     async def disable(self, persist: bool = True):
-        if not self.active:
-            return
+        # Under the lock for the same reason: a stop arriving while a start was still in
+        # progress saw a service that was not active yet, returned at once, and the start
+        # then finished — so the stop the operator asked for was simply lost.
         async with self.lock:
+            if not self.active:
+                return
             nft.delete(self.srv)
             self._steer = {}
             if self.transport:
@@ -502,6 +509,7 @@ class ServiceManager:
             and self.srv.carries(L4.TCP)
             and self.srv.has_ipv6_tcp
             and not was_dual
+            and self.transport is not None
             and not self.transport.is_dual_stack
         ):
             self.log.add(
@@ -514,6 +522,10 @@ class ServiceManager:
         if not added:
             return
         async with self.lock:
+            # Asked again under the lock: the service may have been stopped while this
+            # was waiting for it, and there is then no datapath to point anything at.
+            if not self.active or self.transport is None:
+                return
             # UDP is relayed by one socket per address — and QUIC by one endpoint per
             # address, for the same reason — so a new address is a new relay, opened on
             # the engine that is already running, before the rule that will point traffic

@@ -59,7 +59,8 @@ use crate::filter::{
     next_connection_id, ChainHandle, ChainSessions, ConnectionId, ConnectionMeta, Direction, L4,
 };
 use crate::http1::{
-    carried, close_body, head_framing, judge, push_body, render_request, render_response, Answer,
+    carried, close_body, conflicting_authority, head_framing, judge, push_body, render_request,
+    render_response, Answer,
     Framing, Incoming, Outbound, OutboundBody, Rendered,
 };
 use crate::proxy::ProxyStats;
@@ -521,6 +522,20 @@ async fn exchange<O: Outbound>(
         );
         let mut respond = respond;
         respond.send_reset(h2::Reason::REFUSED_STREAM);
+        return Ok(());
+    }
+
+    // One authority, or none: the chain is shown one `Host` and the service is handed the
+    // request as it came, so two that disagree would be a filter reading one host while
+    // the service answers for another. Malformed by RFC 9113 §8.3.1, and treated so.
+    if let Some(why) = conflicting_authority(&head) {
+        eprintln!(
+            "[warn] [h2] {}: {why}, so the filters would be shown one host while the \
+             service routes on the other. The stream is reset as malformed.",
+            ctx.client
+        );
+        let mut respond = respond;
+        respond.send_reset(h2::Reason::PROTOCOL_ERROR);
         return Ok(());
     }
 

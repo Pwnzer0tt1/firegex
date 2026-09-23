@@ -46,19 +46,6 @@ const SNIPPETS = [
         doc: "Asking for an HttpRequest is what makes this file an HTTP filter.",
     },
     {
-        label: "pyfilter-rewrite",
-        detail: "a filter that rewrites the payload",
-        insert: [
-            "@pyfilter",
-            "def ${1:redact}(packet: RawPacket):",
-            "\tif b\"${2:secret}\" not in packet.data:",
-            "\t\treturn ACCEPT",
-            "\tpacket.data = packet.data.replace(b\"${2:secret}\", b\"${3:[redacted]}\")",
-            "\treturn UNSTABLE_MANGLE",
-        ].join("\n"),
-        doc: "`data` is the only thing a filter can change. Exact on the proxy layer.",
-    },
-    {
         label: "imports",
         detail: "the usual imports",
         insert: "from firegex.pyfilters import pyfilter, ACCEPT, REJECT\nfrom firegex.pyfilters.models import ${1:RawPacket}\n",
@@ -81,14 +68,14 @@ function annotationsInScope(lines: string[], upTo: number): Map<string, string> 
     return found
 }
 
+// Whether a member can be assigned to is reported by the library rather than assumed. A
+// filter answers with a verdict and changes nothing — the payload used to be writable,
+// for `UNSTABLE_MANGLE`, and stopped being with it — so no member claims to be today.
 const memberDoc = (model: string, m: { name: string, doc: string, writable: boolean }) => ({
     value: [
         `\`${model}.${m.name}\`${m.writable ? " — **writable**" : ""}`,
         "",
         m.doc || "_No description._",
-        ...(m.writable
-            ? ["", "Assign to it and return `UNSTABLE_MANGLE` to forward the new bytes."]
-            : []),
     ].join("\n"),
 })
 

@@ -11,7 +11,6 @@ and covers the cases nobody would stage against a running firewall.
 """
 
 import re
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -92,7 +91,8 @@ def test_a_backup_carries_neither_credentials_nor_the_auth_mode(tmp_path):
     db.connect()
     db.create_schema({})
     for key, value in (("password", "$pbkdf2$secret"), ("secret", "jwt-signing-key"),
-                       ("auth_disabled", "1"), ("something_else", "kept")):
+                       ("auth_disabled", "1"), ("auth_disabled_host", "1"),
+                       ("something_else", "kept")):
         db.query("INSERT INTO keys_values (key, value) VALUES (?, ?);", key, value)
 
     carried = {row["key"] for row in db.dump()["keys_values"]}
@@ -101,7 +101,7 @@ def test_a_backup_carries_neither_credentials_nor_the_auth_mode(tmp_path):
 
 
 def test_everything_else_in_a_table_is_carried(tmp_path):
-    """The exclusion is three named keys, not a table nobody exports."""
+    """The exclusion is four named keys, not a table nobody exports."""
     db = SQLite(str(tmp_path / "other.db"), {})
     db.connect()
     db.create_schema({"things": {"id": "VARCHAR(10) PRIMARY KEY", "v": "TEXT"}})
@@ -110,3 +110,35 @@ def test_everything_else_in_a_table_is_carried(tmp_path):
     dumped = db.dump()
     assert dumped["things"] == [{"id": "a", "v": "kept"}]
     db.disconnect()
+
+
+# --- whether authentication starts off ----------------------------------------
+# A container's environment is fixed when it is created. Docker starting it again by
+# itself — a reboot, a daemon restart, a crash under `restart: unless-stopped` — brings that
+# environment back, older than what `run.py config` has said since: authentication turned
+# back on with `run.py config --password` was off again after the next reboot.
+
+
+def test_a_fresh_boot_takes_the_environment():
+    """`run.py` has just written it from the current configuration."""
+    from utils import boot_auth_mode
+
+    assert boot_auth_mode(None, True, True) == (True, False)
+    assert boot_auth_mode("0", True, True) == (True, False), \
+        "a container run.py has just created is told the current answer by its environment"
+    assert boot_auth_mode("1", True, False) == (False, False)
+
+
+def test_a_restarted_container_keeps_what_the_host_decided_since():
+    from utils import boot_auth_mode
+
+    assert boot_auth_mode("0", False, True) == (False, True), \
+        "authentication re-enabled with run.py config came back off after a reboot"
+    assert boot_auth_mode("1", False, False) == (True, True)
+
+
+def test_with_nothing_decided_since_the_environment_stands():
+    from utils import boot_auth_mode
+
+    assert boot_auth_mode(None, False, False) == (False, False)
+    assert boot_auth_mode(None, False, True) == (True, False)

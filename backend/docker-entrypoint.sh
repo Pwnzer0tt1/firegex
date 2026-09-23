@@ -2,6 +2,17 @@
 
 chown nobody -R /execute/
 
+# Whether this is the first boot of this container, told to the backend. A container's
+# environment is fixed when it is created, and Docker starting it again by itself — after
+# a reboot, a restart of the daemon, a crash under `restart: unless-stopped` — brings back
+# that environment, which may be older than what `run.py config` has said since. The
+# marker lives in the container's own layer: it survives a restart and is gone from a
+# container `run.py` creates anew.
+if [ ! -e /execute/.firegex-booted ]; then
+    touch /execute/.firegex-booted
+    export FIREGEX_FRESH_BOOT=1
+fi
+
 # Create socket directory if SOCKET_DIR is set
 if [ -n "$SOCKET_DIR" ]; then
     mkdir -p "$SOCKET_DIR"

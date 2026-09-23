@@ -110,6 +110,42 @@ def test_every_function_switched_off_is_an_empty_list_not_an_absence():
     assert link.enabled_functions is not None
 
 
+# --- what cpproxy is told ------------------------------------------------------
+
+
+def _python_stage(tmp_path, code: str, functions=None):
+    path = tmp_path / "filter.py"
+    path.write_text(code, encoding="utf-8")
+    srv = Service(service_id="s", name="n", status="stop", proto="tcp",
+                  transport=TRANSPORT.NFQUEUE)
+    link = ChainLink(a_filter(KIND.PYFILTER), code_path=str(path), functions=functions)
+    return _QueueStage(srv, link, owner=None), link
+
+
+def _body(payload: bytes) -> bytes:
+    size = int.from_bytes(payload[:4], "big")
+    assert size == len(payload) - 4, "the length prefix disagrees with what follows"
+    return payload[4:]
+
+
+def test_the_length_prefix_counts_bytes_not_characters(tmp_path):
+    """Counted in characters, one accented letter in a comment announced fewer bytes than
+    followed; the binary read the rest as the next length prefix and exited."""
+    stage, link = _python_stage(tmp_path, "# perché\nX = 'é'\n")
+    _body(stage._python_payload(link))
+
+
+def test_the_binary_is_told_names_and_never_runs_the_file_here(tmp_path):
+    """Which functions exist is the library's to work out, in the process that compiles
+    the module: nothing of the operator's code runs in the backend to ask."""
+    stage, link = _python_stage(tmp_path, "raise SystemExit('ran in the backend')\n")
+    assert b"__firegex_pyfilter_enabled = None" in _body(stage._python_payload(link))
+
+    stage, link = _python_stage(tmp_path, "X = 1\n", functions=[{"name": "a", "active": 1},
+                                                              {"name": "b", "active": 0}])
+    assert b"__firegex_pyfilter_enabled = ['a']" in _body(stage._python_payload(link))
+
+
 # --- what the proxy engine is told about an address ---------------------------
 
 

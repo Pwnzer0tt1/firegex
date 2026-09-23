@@ -16,14 +16,13 @@ RUN bun run build
 # Base fedora container
 FROM --platform=$TARGETARCH quay.io/fedora/fedora:44 AS base
 # iproute: the proxy engine needs `ip rule`/`ip route` to bring the return traffic
-# home when a service preserves the client's source address.
-# iproute-tc: `tc` is a separate package from `ip` on Fedora, and it is what mirrors the
-# decrypted traffic of every TLS service onto one capture interface. The kernel's own
-# `dup to` in the netdev family would do the same without it, and is not used: it needs
-# `nft_dup_netdev`, which plenty of kernels are built without, and the failure is a rule
-# that will not load rather than a feature that degrades.
+# home when a service preserves the client's source address, and `ip link` is what puts
+# the `firegex0` capture interface there. Nothing else is needed for the capture: the
+# engine writes the decrypted traffic onto it itself, through a packet socket
+# (`proxysrc/src/capture.rs`). `tc` used to be installed for mirroring it there, and
+# nothing has used it since.
 RUN dnf -y update && dnf install -y python3.14 libnetfilter_queue \
-    libnfnetlink libmnl libcap-ng-utils nftables iproute iproute-tc \
+    libnfnetlink libmnl libcap-ng-utils nftables iproute \
     vectorscan libtins python3-nftables libpcap && dnf clean all
 
 RUN mkdir -p /execute/modules

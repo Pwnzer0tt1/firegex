@@ -269,3 +269,24 @@ def test_the_per_packet_layer_reports_no_connection_share_rather_than_a_made_up_
     service_id, _, _, _ = with_blocks
     traffic = api.services_stats(service_id)["traffic"]
     assert traffic["connections"] is None and traffic["refused_share"] is None, str(traffic)
+
+
+def test_the_service_total_is_the_sum_of_its_filters(api, protected, proxy_layer):
+    """What the service list shows beside each service.
+
+    It added up the *distinct* counts, so two filters that had refused one connection
+    each made a service that had refused one. The proxy layer, because a connection is
+    refused exactly once there, and equal counts are what the old sum lost.
+    """
+    service_id, server, port = protected(proxy_layer, name="sum")
+    add_regex_filter(api, service_id, "FIRST_BLOCK", name="first")
+    add_regex_filter(api, service_id, "SECOND_BLOCK", name="second")
+    start_and_settle(api, service_id)
+    channel = Channel(server, port, proxy_layer.ipv6)
+    assert channel.is_blocked(b"carrying FIRST_BLOCK")
+    assert channel.is_blocked(b"carrying SECOND_BLOCK")
+    time.sleep(1.0)
+
+    per_filter = [f["blocked"] for f in api.services_filters(service_id)]
+    assert per_filter == [1, 1], f"each filter was meant to refuse once: {per_filter}"
+    assert api.services_get(service_id)["n_blocked"] == 2

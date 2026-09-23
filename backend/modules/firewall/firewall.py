@@ -40,7 +40,8 @@ class FirewallManager:
                 multicast_dns=self.multicast_dns,
                 allow_upnp=self.allow_upnp,
                 drop_invalid=self.drop_invalid,
-                allow_dhcp=self.allow_dhcp
+                allow_dhcp=self.allow_dhcp,
+                allow_dnat=self.allow_dnat,
             )
     
     @settings.setter
@@ -53,6 +54,7 @@ class FirewallManager:
         self.allow_upnp=value.allow_upnp
         self.drop_invalid=value.drop_invalid
         self.allow_dhcp=value.allow_dhcp
+        self.allow_dnat=value.allow_dnat
 
     @property
     def policy(self):
@@ -133,4 +135,12 @@ class FirewallManager:
     @allow_dhcp.setter
     def allow_dhcp(self, value):
         self.db.set("allow_dhcp", "1" if value else "0")
+
+    @property
+    def allow_dnat(self):
+        return self.db.get("allow_dnat", "1") == "1"
+
+    @allow_dnat.setter
+    def allow_dnat(self, value):
+        self.db.set("allow_dnat", "1" if value else "0")
 

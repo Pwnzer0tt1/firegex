@@ -10,15 +10,16 @@ to it, in an order the operator chooses, and can be added, reordered, switched o
 switched on without the service being recreated or a single connection being dropped.
 """
 
+import asyncio
 import base64
 import binascii
 import json
 import os
 import secrets
 import sqlite3
-import subprocess
 import sys
 import time
+import traceback
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
@@ -687,8 +688,8 @@ SERVICE_QUERY = """
         s.over_limit_last over_limit_last,
         (s.tls_cert IS NOT NULL AND TRIM(s.tls_cert) != ''
          AND s.tls_key IS NOT NULL AND TRIM(s.tls_key) != '') has_tls_material,
-        COUNT(DISTINCT f.filter_id) n_filters,
-        COALESCE(SUM(DISTINCT f.blocked), 0) n_blocked
+        COUNT(f.filter_id) n_filters,
+        COALESCE(SUM(f.blocked), 0) n_blocked
     FROM services s LEFT JOIN filters f ON s.service_id = f.service_id
 """
 
@@ -787,7 +788,7 @@ def _insert_address(service_id: str, proto: str, transport: str, form: AddressFo
         raise HTTPException(status_code=400, detail=str(e))
     edge = _address_edge(proto, form)
     target_port = _address_target(transport, form)
-    upstream = _address_upstream(proto, form)
+    upstream = _address_upstream(proto, edge, form)
     proxy_ip = _hijack_ip(transport, parsed_ip, form)
     address_id = gen_id()
     db.query(
@@ -803,7 +804,7 @@ def _insert_address(service_id: str, proto: str, transport: str, form: AddressFo
         target_port,
         upstream,
         proxy_ip,
-        form.proxy_port,
+        _hijack_port(transport, form),
     )
     return address_id
 
@@ -822,9 +823,21 @@ def _hijack_ip(transport: str, service_ip: str, form: AddressForm) -> str | None
     the single thing that index was added to forbid. The return rule tells them apart by
     address and port, so it could not.
     """
-    if str(transport) != TRANSPORT.EXTERNAL or not form.proxy_port:
+    if str(transport) != TRANSPORT.EXTERNAL:
+        return None
+    if not form.proxy_port:
         return form.proxy_ip or None
     return hijack_endpoint(form.proxy_ip, service_ip)
+
+
+def _hijack_port(transport: str, form: AddressForm) -> int | None:
+    """The port half of the same endpoint: the hand-off layer's alone.
+
+    Stored for any layer, it was a value read by nothing that still sat in the partial
+    unique index — so a proxy address that happened to carry one could refuse a real
+    hand-off its endpoint.
+    """
+    return form.proxy_port if str(transport) == TRANSPORT.EXTERNAL else None
 
 
 def _address_edge(proto: str, form: AddressForm) -> str:
@@ -886,9 +899,9 @@ def _address_target(transport: str, form: AddressForm) -> int | None:
     if str(transport) != TRANSPORT.PROXY:
         raise HTTPException(
             status_code=400,
-            detail=f"Only the proxy layer can send an address's traffic to a port other "
-                   f"than the one it arrived on: it terminates the connection and opens "
-                   f"the one to the service, so it is free to open it elsewhere. "
+            detail="Only the proxy layer can send an address's traffic to a port other "
+                   "than the one it arrived on: it terminates the connection and opens "
+                   "the one to the service, so it is free to open it elsewhere. "
                    + ("NFQUEUE passes judgement on packets already on their way and opens "
                       "nothing."
                       if str(transport) == TRANSPORT.NFQUEUE else
@@ -900,13 +913,27 @@ def _address_target(transport: str, form: AddressForm) -> int | None:
     return form.target_port
 
 
-def _address_upstream(proto: str, form: AddressForm) -> str:
+def upstream_applies(proto: str, edge: str) -> bool:
+    """Whether one address has an upstream leg of its own to decide.
+
+    Only where firegex decrypts what arrives: on a cleartext service it terminates
+    nothing, and on the cleartext address of an HTTPS service the engine carries what
+    arrived as it arrived — so an answer stored there is read by nothing. It was accepted
+    there, and the form offered it: "send it to the service over TLS" on a port clients
+    reach in the clear was saved, shown back as a tag, and ignored by the engine, whose
+    cleartext path never asks.
+    """
+    if str(proto) not in (L4.TLS, L4.QUIC, L4.HTTP):
+        return False
+    return str(edge) != L4.TCP
+
+
+def _address_upstream(proto: str, edge: str, form: AddressForm) -> str:
     """What the service behind one address speaks.
 
-    Only a service that is decrypted has an upstream leg of its own to decide: on
-    anything else firegex terminates nothing, so there is nothing to put back or leave
-    off, and a stored answer would be a setting that does nothing. Refused rather than
-    ignored for that reason.
+    Only an address whose traffic is decrypted has an upstream leg of its own to decide
+    (`upstream_applies`). Anywhere else a stored answer would be a setting that does
+    nothing, and it is refused rather than ignored for that reason.
     """
     asked = str(form.upstream) if form.upstream else UPSTREAM.SAME
     if asked == UPSTREAM.SAME:
@@ -919,6 +946,13 @@ def _address_upstream(proto: str, form: AddressForm) -> str:
             detail=f"A {str(proto).upper()} service is carried as it arrives: firegex "
                    f"terminates nothing there, so there is no upstream leg to decide. "
                    f"Only a service firegex decrypts has one.",
+        )
+    if not upstream_applies(proto, edge):
+        raise HTTPException(
+            status_code=400,
+            detail="This address is reached in the clear, and firegex carries what arrives "
+                   "there as it arrived — there is no decrypted leg for it to hand the "
+                   "service differently. Only an address reached over TLS or HTTP/3 has one.",
         )
     return asked
 
@@ -1018,10 +1052,11 @@ async def add_service(form: ServiceAddForm):
     # nobody asked for.
     for address in form.addresses:
         _address_target(form.transport, address)
+        edge = _address_edge(form.proto, address)
         refusal = upstream_refusal(
             form.proto,
-            _address_upstream(form.proto, address),
-            L4.l4_of(_address_edge(form.proto, address)) == L4.UDP,
+            _address_upstream(form.proto, edge, address),
+            L4.l4_of(edge) == L4.UDP,
         )
         if refusal:
             raise HTTPException(status_code=400, detail=refusal)
@@ -1094,6 +1129,63 @@ async def add_service(form: ServiceAddForm):
     return {"status": "ok", "service_id": service_id}
 
 
+def _shown(ip_int: str) -> str:
+    """An address as an operator typed it: the host-length prefix it is stored with is
+    dropped, a real range keeps its own."""
+    addr, _, prefix = str(ip_int).partition("/")
+    if prefix in ("32", "128"):
+        return addr
+    return str(ip_int)
+
+
+def _address_under(address: dict, proto: str) -> dict:
+    """What one address becomes when its service changes protocol.
+
+    The addresses carry the transport the kernel matches on, so that `(ip, port, proto)`
+    can be unique, and what is spoken at them; both follow the service rather than being
+    a second thing the operator sets. `http` is the one protocol whose addresses keep
+    their own answer — rewriting them all to `tcp` would quietly turn an HTTP/3 address
+    into a TCP one — except that an address reached over plain UDP is, on an HTTPS
+    service, its HTTP/3 edge. Switching *away* from `http` flattens them, which is honest:
+    the service now speaks one thing, and a collision that follows from it is refused.
+
+    An upstream choice survives only where the address still has a decrypted leg for it
+    to apply to (`upstream_applies`); anywhere else it would be a stored answer read by
+    nothing.
+    """
+    if str(proto) == L4.HTTP:
+        edge = str(address["edge"])
+        if edge not in (L4.TCP, L4.TLS, L4.QUIC):
+            edge = L4.QUIC if L4.l4_of(edge) == L4.UDP else L4.TCP
+    else:
+        edge = str(proto)
+    upstream = str(address["upstream"] or UPSTREAM.SAME)
+    if not upstream_applies(proto, edge):
+        upstream = UPSTREAM.SAME
+    return {**address, "edge": edge, "proto": L4.l4_of(edge), "upstream": upstream}
+
+
+async def _filters_needing_a_stream(service_id: str) -> list[str]:
+    """The Python filters of a service that could not run on datagrams, by name.
+
+    Asked of the checker, which reports the models a file asks for: the protocol stored
+    on the row says only whether a file parses HTTP, and a file asking for a TCP stream is
+    stored as `tcp` and would sit on a UDP service never being called.
+    """
+    names = []
+    for row in db.query(
+        "SELECT filter_id, name FROM filters WHERE service_id = ? AND kind = ?;",
+        service_id, KIND.PYFILTER,
+    ):
+        code = read_code(row["filter_id"])
+        if not code.strip():
+            continue
+        checked = await validate_code(code)
+        if checked.get("ok") and needs_a_stream(checked.get("models", [])):
+            names.append(row["name"])
+    return names
+
+
 @app.put("/{service_id}", response_model=StatusMessageModel)
 async def edit_service(service_id: str, form: ServiceSettingsForm):
     """Change a service's definition.
@@ -1102,6 +1194,16 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
     service is stopped and started around it. That is a visible interruption, which is
     why filters and addresses are edited through their own endpoints instead — those
     cost at most the connections on the address that changed.
+
+    **A refused edit changes nothing**, and three things make that true. The service it
+    would become is checked before anything is written — the layer against the protocol
+    and the chain, the way a start would check it, whether or not the service is running;
+    this used to happen only by starting it, so a stopped service took any combination
+    and failed on its next start instead. It is written in one transaction, the service
+    and its addresses together: a protocol change that collided with another service's
+    address used to leave the service rewritten and its addresses not. And a running
+    service whose new definition will not start is put back, and started again as it was,
+    instead of being left stopped on the definition that failed.
     """
     row = _service_or_404(service_id)
     fields = {}
@@ -1154,46 +1256,97 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
         fields["tls_key"] = form.tls_key
     if not fields:
         return {"status": "ok"}
-    try:
-        db.query(
-            f"UPDATE services SET {', '.join(f'{k} = ?' for k in fields)} WHERE service_id = ?;",
-            *fields.values(),
-            service_id,
-        )
-    except sqlite3.IntegrityError:
-        raise HTTPException(status_code=400, detail="That name is already taken")
-    if "proto" in fields and fields["proto"] != L4.HTTP:
-        # The addresses carry the transport the kernel matches on, so that
-        # `(ip, port, proto)` can be unique. Kept in step here rather than being a second
-        # thing the operator sets — and derived, because `tls` is TCP on the wire.
-        #
-        # Not for `http`, which is the one protocol whose addresses already hold the
-        # answer: rewriting them all to `tcp` would quietly turn its HTTP/3 address into a
-        # TCP one and leave the QUIC relay pointing at nothing. Switching *away* from
-        # `http` does flatten them, which is honest — the service now speaks one
-        # transport — and can legitimately collide, which is the 400 below.
-        try:
-            db.query(
-                # Both, because they are one answer: a service that now speaks one thing
-                # everywhere has addresses that speak it too, and an `edge` left behind
-                # would be a row claiming to be reached a way the service no longer is.
-                "UPDATE service_addresses SET proto = ?, edge = ? WHERE service_id = ?;",
-                L4.l4_of(fields["proto"]),
-                fields["proto"],
-                service_id,
-            )
-        except sqlite3.IntegrityError:
+
+    proto = str(fields.get("proto", row["proto"]))
+    transport = str(fields.get("transport", row["transport"]))
+    old_addresses = _addresses(service_id)
+    new_addresses = [_address_under(address, proto) for address in old_addresses]
+
+    # What the addresses say has to mean something on the layer they land on. A port the
+    # service is published on takes a layer that dials; on the others it would be read by
+    # nothing, and the address would look published while being merely intercepted.
+    if transport != TRANSPORT.PROXY:
+        published = [a for a in new_addresses if a["target_port"]]
+        if published:
             raise HTTPException(
                 status_code=400,
-                detail="Another service already protects one of these addresses on "
-                       f"{fields['proto']}",
+                detail="Only the proxy layer can send an address's traffic to a port other "
+                       "than the one it arrived on, and "
+                       + ", ".join(f"{_shown(a['ip_int'])}:{a['port']}" for a in published)
+                       + " is published on another port. Take that off the address first.",
             )
+    for address in new_addresses:
+        refusal = upstream_refusal(proto, address["upstream"],
+                                   L4.l4_of(address["edge"]) == L4.UDP)
+        if refusal:
+            raise HTTPException(status_code=400, detail=refusal)
 
-    srv = load_service(service_id)
+    # The service it would become, asked what a start would ask of the layer and the
+    # chain. Without its addresses, the way a service is checked when it is created: what
+    # an address still lacks on the new layer — the port of the operator's own proxy, say
+    # — is filled in on the address afterwards, and a start says so if it is not.
+    manager = firewall.get(service_id)
+    candidate = Service.from_dict({**row, **fields})
     try:
-        await firewall.get(service_id).refresh(srv)
+        transports.build_class(transport).check(candidate, manager.chain())
     except UnsupportedChain as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if proto == L4.UDP:
+        needing = await _filters_needing_a_stream(service_id)
+        if needing:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{', '.join(needing)} {'ask' if len(needing) > 1 else 'asks'} for a "
+                       f"stream — an assembled TCP stream or a parsed HTTP message — and a "
+                       f"UDP service carries datagrams, so on it the library would never "
+                       f"call {'them' if len(needing) > 1 else 'it'}. Rewrite them against "
+                       f"RawPacket, or keep the service on a stream.",
+            )
+
+    def rewrite(values: dict, addresses: list[dict]) -> list[tuple]:
+        queries = [(
+            f"UPDATE services SET {', '.join(f'{k} = ?' for k in values)} WHERE service_id = ?;",
+            *values.values(),
+            service_id,
+        )]
+        for address in addresses:
+            queries.append((
+                "UPDATE service_addresses SET proto = ?, edge = ?, upstream = ? "
+                "WHERE address_id = ?;",
+                address["proto"], address["edge"], address["upstream"], address["address_id"],
+            ))
+        return queries
+
+    # All of it or none: a protocol change that collided with another service's address
+    # used to leave the service rewritten and its addresses as they were.
+    try:
+        db.queries(rewrite(fields, new_addresses))
+    except sqlite3.IntegrityError as e:
+        if "services.name" in str(e):
+            raise HTTPException(status_code=400, detail="That name is already taken")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Another service already protects one of these addresses on {proto}",
+        )
+
+    was_active = manager.active
+    try:
+        await manager.refresh(load_service(service_id))
+    except Exception as e:
+        # The new definition would not start. Put the old one back, and the service with
+        # it, rather than leaving it stopped on the definition that failed — which is what
+        # happened, with a 500, to a service handed a key its engine would not sign with.
+        db.queries(rewrite({k: row[k] for k in fields}, old_addresses))
+        manager.srv = load_service(service_id)
+        if was_active:
+            try:
+                await manager.enable()
+            except Exception:
+                traceback.print_exc()
+        raise HTTPException(
+            status_code=400 if isinstance(e, UnsupportedChain) else 500,
+            detail=f"The service would not start with that, so nothing was changed: {e}",
+        )
     await refresh_frontend()
     return {"status": "ok"}
 
@@ -1233,10 +1386,11 @@ async def add_address(service_id: str, form: AddressForm):
     # Before the row exists, because this is the address's own answer and it can be one
     # this instance cannot honour. `ProxyTransport.check` says the same thing at start,
     # and would leave the address behind to be undone.
+    edge = _address_edge(row["proto"], form)
     refusal = upstream_refusal(
         row["proto"],
-        _address_upstream(row["proto"], form),
-        L4.l4_of(_address_edge(row["proto"], form)) == L4.UDP,
+        _address_upstream(row["proto"], edge, form),
+        L4.l4_of(edge) == L4.UDP,
     )
     if refusal:
         raise HTTPException(status_code=400, detail=refusal)
@@ -1297,6 +1451,7 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
     # a move sending only an address and a port would otherwise quietly unpublish it.
     # Taking one off is a value, not an absence: `0` for the port, `same` for the
     # upstream — which is what the interface sends when it is emptied.
+    upstream_mentioned = form.upstream is not None
     if form.edge is None:
         form.edge = was["edge"]
     if form.target_port is None:
@@ -1307,8 +1462,13 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
     # Everything the row says is worked out *before* the old rules come back, so a
     # refusal leaves an address that is still steered exactly as it was.
     edge = _address_edge(row["proto"], form)
+    if not upstream_mentioned and not upstream_applies(row["proto"], edge):
+        # Moved to the clear without a word about the upstream: what the row had was an
+        # answer for the decrypted leg this address no longer has, and keeping it would
+        # refuse the very edit that made it meaningless.
+        form.upstream = UPSTREAM.SAME
     target_port = _address_target(row["transport"], form)
-    upstream = _address_upstream(row["proto"], form)
+    upstream = _address_upstream(row["proto"], edge, form)
     refusal = upstream_refusal(row["proto"], upstream, L4.l4_of(edge) == L4.UDP)
     if refusal:
         raise HTTPException(status_code=400, detail=refusal)
@@ -1346,7 +1506,7 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
     await manager.address_removed(address_id)
     try:
         write(parsed_ip, form.port, L4.l4_of(edge), edge, target_port, upstream,
-              proxy_ip, form.proxy_port)
+              proxy_ip, _hijack_port(row["transport"], form))
     except sqlite3.IntegrityError as e:
         await restore()
         raise HTTPException(status_code=400, detail=_address_taken(e))
@@ -1612,7 +1772,7 @@ async def check_filter_code(service_id: str, filter_id: str, form: CodeForm):
     row = _filter_or_404(service_id, filter_id)
     if row["kind"] != KIND.PYFILTER:
         raise HTTPException(status_code=400, detail="This filter is not a pyfilter")
-    return validate_code(form.code)
+    return await validate_code(form.code)
 
 
 @app.get("/{service_id}/filters/{filter_id}/code", response_class=PlainTextResponse)
@@ -1643,7 +1803,7 @@ async def set_filter_code(service_id: str, filter_id: str, form: CodeForm):
     # Refused here, with the reason and the line, rather than by the datapath a moment
     # later with "the filter code did not load: worker exited" — which is true, useless,
     # and leaves the operator reading a traceback out of the service log.
-    checked = validate_code(form.code)
+    checked = await validate_code(form.code)
     if not checked.get("ok"):
         raise HTTPException(status_code=400, detail=describe_error(checked["error"]))
     service = _service_or_404(service_id)
@@ -1664,20 +1824,23 @@ async def set_filter_code(service_id: str, filter_id: str, form: CodeForm):
     proto = checked.get("proto", PROTO.TCP)
     was = read_code(filter_id)
     was_functions = db.query(
-        "SELECT name, active, blocked FROM pyfilters WHERE filter_id = ?;", filter_id
+        "SELECT name, active, blocked, position FROM pyfilters WHERE filter_id = ?;", filter_id
     )
     write_code(filter_id, form.code)
     db.query("UPDATE filters SET proto = ? WHERE filter_id = ?;", proto, filter_id)
-    _reconcile_functions(filter_id, form.code)
+    _reconcile_functions(filter_id, checked.get("filters") or [])
 
     def undo():
         write_code(filter_id, was)
         db.query("UPDATE filters SET proto = ? WHERE filter_id = ?;", row["proto"], filter_id)
         db.query("DELETE FROM pyfilters WHERE filter_id = ?;", filter_id)
         for fn in was_functions:
+            # With its place in the file, or a refused edit would hand back the list in
+            # an order the file does not have.
             db.query(
-                "INSERT INTO pyfilters (filter_id, name, active, blocked) VALUES (?, ?, ?, ?);",
-                filter_id, fn["name"], fn["active"], fn["blocked"],
+                "INSERT INTO pyfilters (filter_id, name, active, blocked, position) "
+                "VALUES (?, ?, ?, ?, ?);",
+                filter_id, fn["name"], fn["active"], fn["blocked"], fn["position"],
             )
 
     await _apply_chain(service_id, undo)
@@ -1685,7 +1848,7 @@ async def set_filter_code(service_id: str, filter_id: str, form: CodeForm):
     return {"status": "ok"}
 
 
-def _reconcile_functions(filter_id: str, code: str) -> None:
+def _reconcile_functions(filter_id: str, defined: list[str]) -> None:
     """Line the stored function list up with what the code now defines.
 
     The code decides which functions exist; the operator decides which of them run. So a
@@ -1693,16 +1856,12 @@ def _reconcile_functions(filter_id: str, code: str) -> None:
     switched on, and one that is still there keeps whatever the operator had set — an
     edit elsewhere in the file must not silently switch a function back on.
 
-    A file that will not load leaves the list alone rather than emptying it: the
-    datapath refuses the ruleset with the real error a moment later, and wiping the
-    operator's choices on the way to that would be a second failure.
+    `defined` is what `pyworker.py --check` found, in definition order: the file is not
+    run again here to ask. It used to be — `exec`ed a second time inside the backend's
+    own event loop, after the checker had already answered the same question in a process
+    of its own, which is exactly the place the checker exists to keep the operator's
+    module body out of.
     """
-    from firegex.pyfilters.internals import get_filter_names
-
-    try:
-        defined = get_filter_names(code) if code.strip() else []
-    except Exception:
-        return
     existing = {
         row["name"] for row in db.query(
             "SELECT name FROM pyfilters WHERE filter_id = ?;", filter_id
@@ -1730,7 +1889,36 @@ def _reconcile_functions(filter_id: str, code: str) -> None:
 CHECK_TIMEOUT = 8
 
 
-def validate_code(code: str) -> dict:
+async def _run_helper(argv: list[str], stdin: bytes | None,
+                      timeout: float) -> tuple[int, bytes, bytes] | None:
+    """Run one of the helper processes without holding up everything else.
+
+    The checker and the regex tester are separate processes on purpose, and they were
+    waited for with `subprocess.run` from inside `async` endpoints — which blocks the one
+    event loop the whole backend runs on. The editor asks for a check 700 ms after every
+    pause in typing, and a check is a Python start and an import at the very least, up to
+    `CHECK_TIMEOUT` for slow module code: for that long no acknowledgement from a datapath
+    was read (so a ruleset push or a service start could time out), and no `BLOCKED` line
+    either, until the engine's pipe filled and its writes stalled the traffic itself.
+
+    `None` when it ran out of time, and it is killed rather than left behind.
+    """
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.PIPE if stdin is not None else asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(stdin), timeout)
+    except (asyncio.TimeoutError, TimeoutError):
+        proc.kill()
+        await proc.wait()
+        return None
+    return proc.returncode, stdout, stderr
+
+
+async def validate_code(code: str) -> dict:
     """Would this filter load, and if not, exactly where does it go wrong?
 
     Asked of `pyworker.py --check`, which is the process that will run the filter — the
@@ -1741,7 +1929,7 @@ def validate_code(code: str) -> dict:
     In a subprocess, and not only for the answer: the module body of a filter is
     arbitrary code, and this used to be `exec`ed inside the backend's own event loop. A
     `while True:` at module level would have taken the whole interface down with it.
-    Here it costs a timeout.
+    Here it costs a timeout — the check's own, not the backend's (see `_run_helper`).
     """
     import tempfile
 
@@ -1749,12 +1937,14 @@ def validate_code(code: str) -> dict:
         f.write(code)
         probe = f.name
     try:
-        proc = subprocess.run(
-            [sys.executable or "python3", PYWORKER, "--check", probe],
-            capture_output=True,
-            timeout=CHECK_TIMEOUT,
-        )
-    except subprocess.TimeoutExpired:
+        ran = await _run_helper([sys.executable or "python3", PYWORKER, "--check", probe],
+                                None, CHECK_TIMEOUT)
+    finally:
+        try:
+            os.remove(probe)
+        except OSError:
+            pass
+    if ran is None:
         return {
             "ok": False,
             "error": {
@@ -1765,16 +1955,12 @@ def validate_code(code: str) -> dict:
                 "traceback": "",
             },
         }
-    finally:
-        try:
-            os.remove(probe)
-        except OSError:
-            pass
+    _, stdout, stderr = ran
     try:
-        return json.loads(proc.stdout.decode())
+        return json.loads(stdout.decode())
     except (ValueError, UnicodeDecodeError):
         # The checker itself failed, which is ours to explain rather than theirs.
-        detail = proc.stderr.decode(errors="replace").strip() or "the check produced no answer"
+        detail = stderr.decode(errors="replace").strip() or "the check produced no answer"
         return {"ok": False, "error": {"type": "CheckFailed", "message": detail,
                                        "line": 0, "column": 0, "text": "",
                                        "traceback": ""}}
@@ -1898,7 +2084,7 @@ async def add_regex(service_id: str, filter_id: str, form: RegexAddForm):
     # Checked by the engine that will run it, not by a stand-in. A pattern accepted
     # here and refused at start time would leave the operator with a service that
     # will not come up and no idea which rule is at fault.
-    ok, why = check_pattern(pattern, form.case_sensitive)
+    ok, why = await check_pattern(pattern, form.case_sensitive)
     if not ok:
         raise HTTPException(status_code=400, detail=f"Invalid pattern: {why}")
     try:
@@ -1953,7 +2139,7 @@ async def edit_regex(service_id: str, filter_id: str, regex_id: str, form: Regex
     # Whatever the row will hold once this is applied, checked as a whole rather than
     # field by field: what the engine has to accept is the resulting pattern.
     pattern = _decoded_pattern(fields.get("regex", was["regex"]))
-    ok, why = check_pattern(pattern, fields.get("case_sensitive", was["case_sensitive"]))
+    ok, why = await check_pattern(pattern, fields.get("case_sensitive", was["case_sensitive"]))
     if not ok:
         raise HTTPException(status_code=400, detail=f"Invalid pattern: {why}")
 
@@ -2176,26 +2362,23 @@ async def clear_logs(service_id: str):
 # --- the debugger ------------------------------------------------------------
 
 
-def _ask_engine(request: dict) -> dict:
+async def _ask_engine(request: dict) -> dict:
     """Put the question to the binary that would enforce the answer."""
     try:
-        proc = subprocess.run(
-            [PROXY_ENGINE, "--debug-regex"],
-            input=json.dumps(request).encode(),
-            capture_output=True,
-            timeout=10,
-        )
+        ran = await _run_helper([PROXY_ENGINE, "--debug-regex"],
+                                json.dumps(request).encode(), 10)
     except FileNotFoundError:
         raise HTTPException(status_code=500, detail="The matching engine is not installed")
-    except subprocess.TimeoutExpired:
+    if ran is None:
         raise HTTPException(status_code=400, detail="The pattern took too long to evaluate")
-    if proc.returncode != 0:
-        detail = proc.stderr.decode(errors="replace").strip() or "the engine refused the request"
+    returncode, stdout, stderr = ran
+    if returncode != 0:
+        detail = stderr.decode(errors="replace").strip() or "the engine refused the request"
         raise HTTPException(status_code=400, detail=detail)
-    return json.loads(proc.stdout.decode())
+    return json.loads(stdout.decode())
 
 
-def check_pattern(pattern: str, case_sensitive: bool = True) -> tuple[bool, str]:
+async def check_pattern(pattern: str, case_sensitive: bool = True) -> tuple[bool, str]:
     """Would the engine accept this pattern?
 
     Asked of the engine that will run it rather than of a stand-in, and compiled for
@@ -2210,7 +2393,7 @@ def check_pattern(pattern: str, case_sensitive: bool = True) -> tuple[bool, str]
     a pattern that was perfectly fine.
     """
     try:
-        res = _ask_engine(
+        res = await _ask_engine(
             {
                 "patterns": [
                     {
@@ -2240,7 +2423,7 @@ async def debug_regexes(form: DebugForm):
     be saved and disagree about what matches — a tester the operator would learn not
     to trust, which is worse than none.
     """
-    res = _ask_engine(
+    res = await _ask_engine(
         {
             "patterns": [
                 {

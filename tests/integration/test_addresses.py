@@ -384,3 +384,31 @@ def test_a_container_runtimes_rewrite_does_not_take_the_traffic(
         "the service stopped answering once a rewrite was staged beside it"
     assert _echo(real.port, b"carrying BLOCKME") != b"carrying BLOCKME", \
         "the rewrite took the traffic and the chain never ran"
+
+
+def test_an_upstream_is_refused_where_nothing_is_decrypted(api, service, stand_in,
+                                                          certificate):
+    """The cleartext address of an HTTPS service is carried as it arrived.
+
+    So "send it to the service over TLS" has nothing to act on there. It was accepted,
+    shown back as a tag, and read by nothing — the engine's cleartext path never asks.
+    """
+    cert, key = certificate()
+    server = stand_in()
+    name = f"clear-up-{server.port}"
+    why = api.services_add_error(
+        name=name, transport="proxy", proto="http", tls_cert=cert, tls_key=key,
+        addresses=[{"ip_int": "127.0.0.1", "port": server.port, "edge": "tcp",
+                    "upstream": "tls"}],
+    )
+    assert why is not None, "an upstream was accepted on a cleartext address"
+    assert "in the clear" in why, why
+
+    service_id = service(name, "127.0.0.1", server.port, "proxy", proto="http",
+                         tls_cert=cert, tls_key=key,
+                         addresses=[{"ip_int": "127.0.0.1", "port": server.port,
+                                     "edge": "tcp"}])
+    address = api.services_addresses(service_id)[0]
+    why = api.services_edit_address_error(service_id, address["address_id"], "127.0.0.1",
+                                          server.port, edge="tcp", upstream="tls")
+    assert why is not None and "in the clear" in why, why

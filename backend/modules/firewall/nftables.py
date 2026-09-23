@@ -18,13 +18,19 @@ policy. Two things went wrong with that, and both were reported from real hosts:
   default-deny policy had it quietly removed the moment the firegex firewall was
   disabled.
 
-Owning the tables fixes both by construction, and costs nothing: a base chain carries
-its own policy wherever it lives, so default-deny is expressed exactly as before, and a
-`drop` is terminal no matter which table's chain reached it. What changes is that
-firegex now *adds* a layer instead of taking over somebody else's — an `accept` here
-means "firegex does not block this", never "nothing else will", which is what it already
-meant in practice. Everything installed is visible under one prefix and removed by
-deleting two tables per family.
+Owning the tables fixes both by construction: a base chain carries its own policy
+wherever it lives, so default-deny is expressed exactly as before, and a `drop` is
+terminal no matter which table's chain reached it. What changes is that firegex now
+*adds* a layer instead of taking over somebody else's — an `accept` here means "firegex
+does not block this", never "nothing else will", which is what it already meant in
+practice. Everything installed is visible under one prefix and removed by deleting two
+tables per family.
+
+One thing did change, and `dnat_rules` is what puts it back: sharing iptables' own
+`FORWARD` chain, traffic Docker or podman accepted for a published port never met
+firegex's policy, while a chain of our own is evaluated on its own — so a drop policy
+dropped every connection to a published container port. `allow_dnat` (on by default)
+leaves destination-NATed traffic no rule of ours matched to the rules that published it.
 """
 
 from modules.firewall.models import FirewallSettings, Action, Rule, Protocol, Mode, Table
@@ -271,8 +277,37 @@ class FiregexTables(NFTableManager):
         
         # No hooking step any more: the base chains are firegex's own and `_skeleton`
         # already pointed each of them at its rules chain.
-        rules = self.init_comands(policy, opt) + self.get_rules(*srvs)
+        rules = self.init_comands(policy, opt) + self.get_rules(*srvs) + self.dnat_rules(opt)
         self.cmd(*rules)
+
+    def dnat_rules(self, opt: FirewallSettings | None) -> list[dict]:
+        """Leave port-forwarded traffic to the rules that forwarded it, when no rule of
+        ours has matched it.
+
+        A consequence of owning the base chains that the move to them did not keep. In
+        iptables' own `FORWARD` chain, which is where firegex's rules used to be, Docker's
+        and podman's accept for a published port came first or came after firegex's jump
+        in the same chain — either way, traffic to a container's published port was
+        accepted without ever meeting firegex's policy. A base chain of our own is
+        evaluated on its own, so with the policy at drop every connection to a published
+        container port was dropped, on the CTF box where that is how every service is
+        reached. The rules chain still runs first, so a forward rule the operator wrote
+        applies to that traffic exactly as before; this only decides what the *policy*
+        does with what no rule matched, and the runtime's own chain still decides on its
+        own whether it accepts it.
+        """
+        if opt is None or not opt.allow_dnat:
+            return []
+        return [
+            {"add": {"rule": {
+                "family": family, "table": self.filter_table, "chain": "fgex_forward",
+                "expr": [
+                    {"match": {"op": "in", "left": {"ct": {"key": "status"}}, "right": "dnat"}},
+                    {"accept": None},
+                ],
+            }}}
+            for family in ("ip", "ip6")
+        ]
 
     def get_rules(self,*srvs:Rule):
         rules = []

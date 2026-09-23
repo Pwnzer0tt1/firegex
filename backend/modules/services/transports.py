@@ -28,8 +28,8 @@ from typing import NamedTuple
 from modules.services.models import (KIND, L4, PROTO, TRANSPORT, UPSTREAM, Filter,
                                      Regex, quic_alpn, upstream_refusal)
 from modules.services.nftables import (MAX_CHAIN_POSITIONS, NoRelayAddress,
-                                       interface_addresses, one_address, service_at,
-                                       udp_relay_host, udp_relay_key)
+                                       interface_addresses, service_at, udp_relay_host,
+                                       udp_relay_key, udp_relay_slot)
 from utils import DEBUG, nicenessify
 
 MODULES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -345,7 +345,8 @@ class _QueueStage:
         self._sock_reader: asyncio.StreamReader | None = None
         self._sock_writer: asyncio.StreamWriter | None = None
         self._sock_ready = asyncio.Event()
-        #: Which rule id each filter code stands for, for block attribution.
+        #: Which rule id each pattern code stands for, for block attribution. A Python
+        #: stage reports the function's own name instead, which needs no table.
         self._codes: dict[str, str] = {}
         #: Set by `stop()`, so the watchdog can tell a shutdown we asked for from one we
         #: did not. Without the distinction every ordinary stop looks like a crash.
@@ -453,8 +454,16 @@ class _QueueStage:
                 data = await self.process.stdout.read(10 * 1024)
                 if not data:
                     return
+                text = data.decode(errors="replace")
+                # The binary's own diagnostics share this pipe with the user's output, so
+                # the reason it gives for dying is read here or not at all — and without
+                # it a stage that would not start was reported as merely "would not
+                # start", with the sentence that said why sitting in the log.
+                for line in text.splitlines():
+                    if "[fatal]" in line:
+                        self.owner._last_fatal = line.split("[fatal]", 1)[1].strip()
                 if self.owner.on_output:
-                    self.owner.on_output(self.srv.id, data.decode(errors="replace"))
+                    self.owner.on_output(self.srv.id, text)
         except (asyncio.CancelledError, asyncio.IncompleteReadError):
             pass
         except Exception:
@@ -480,9 +489,14 @@ class _QueueStage:
                 line = (await reader.readuntil()).decode().strip()
                 if DEBUG:
                     print(f"[{self.srv.name}/{self.link.filter.name}] {line}")
-                if line.startswith("BLOCKED ") or line.startswith("MANGLED "):
+                if line.startswith("BLOCKED "):
                     code = line.split()[1]
-                    self.owner._emit_block(self._codes.get(code, self.link.id))
+                    if self.link.kind == KIND.PYFILTER:
+                        # The function that decided, as `<filter>/<function>`: the one
+                        # token both network layers report.
+                        self.owner._emit_block(f"{self.link.id}/{code}")
+                    else:
+                        self.owner._emit_block(self._codes.get(code, self.link.id))
                 elif line.startswith("EXCEPTION") and self.owner.on_exception:
                     self.owner.on_exception(self.srv.id)
                 elif line.startswith("ACK "):
@@ -522,38 +536,27 @@ class _QueueStage:
         return (" ".join(codes) + "\n").encode()
 
     def _python_payload(self, link: ChainLink) -> bytes:
-        """cpproxy takes the user's module and compiles it in its own interpreter."""
-        from firegex.pyfilters.internals import get_filter_names
+        """cpproxy takes the user's module and compiles it in its own interpreter.
 
+        **Nothing of the user's code runs here.** Which functions the file defines used to
+        be asked of the library in this process, which meant `exec`ing the module body
+        inside the backend's own event loop on every start and every reload — the thing
+        `pyworker.py --check` exists to keep out of it. The binary is told which functions
+        the operator left switched on, by name, and the library in there works out the rest
+        against the module it has just compiled: `None` means every one the file defines,
+        and a name the file no longer defines is passed over rather than refusing the file.
+        """
         code = ""
         if link.code_path and os.path.exists(link.code_path):
             with open(link.code_path) as f:
                 code = f.read()
-        # Which filters the file defines, asked of the library rather than assumed: it
-        # decides what counts as one, and it refuses to compile a module that does not
-        # tell it. Every block the binary reports names one of these, so they are also
-        # what attributes a refusal to a rule.
-        try:
-            names = get_filter_names(code) if code.strip() else []
-        except Exception:
-            # A file that will not even parse is the binary's refusal to make, with the
-            # error the operator needs; guessing an empty list here would hide it.
-            names = []
-        # Only what the operator left switched on, intersected with what the file
-        # actually defines: a stale selection naming a function that has since been
-        # deleted must not stop the module from loading.
+        self._codes = {}
         enabled = link.enabled_functions
-        if enabled is not None:
-            names = [name for name in names if name in set(enabled)]
-        # The binary reports a block by the function name; `<filter>/<function>` is the
-        # one token both network layers send, so the backend attributes a block the same
-        # way whichever one produced it.
-        self._codes = {name: f"{link.id}/{name}" for name in names}
         body = (
             code
-            + "\n\n__firegex_pyfilter_enabled = ["
-            + ", ".join(repr(name) for name in names)
-            + "]\n"
+            + "\n\n__firegex_pyfilter_enabled = "
+            + ("None" if enabled is None else repr(list(enabled)))
+            + "\n"
             # No protocol is written in. The file shows which one it speaks by what its
             # filters ask for, so a file cannot disagree with its own declaration — it
             # used to be passed in from here, and a filter asking for an HttpRequest
@@ -561,8 +564,12 @@ class _QueueStage:
             # annotation.
             + "import firegex.pyfilters.internals\n"
             + "firegex.pyfilters.internals.compile(globals())\n"
-        )
-        return len(body).to_bytes(4, byteorder="big") + body.encode()
+        ).encode()
+        # The length of what is sent, in bytes: counted in characters, a file with one
+        # accented letter in a comment announced fewer bytes than followed, and the rest of
+        # it was read as the next length prefix — the binary refused the code, then took the
+        # leftover as an absurd size and exited.
+        return len(body).to_bytes(4, byteorder="big") + body
 
     async def _push(self, payload: bytes):
         self._ack = asyncio.get_running_loop().create_future()
@@ -710,10 +717,17 @@ class NfqueueTransport(Transport):
     async def reload(self, chain: list[ChainLink]) -> None:
         self.check(self.srv, chain)
         active = [link for link in chain if link.filter.active]
+        running = [stage.link.id for stage in self.stages]
+        # Nothing active, and nothing but the stand-in running: the shape has not changed.
+        # Compared as it was, the stand-in's id never matched an empty list, so every edit
+        # to a service whose filters were all switched off — renaming one, adding a
+        # pattern to one — tore the whole datapath down and built it again.
+        if not active and running == [_EmptyFilter(self.srv.id).id]:
+            return
         # A filter appearing, disappearing or changing places changes which process sits
         # at which priority, and that is the chain itself. Pushing new rules into the
         # processes that happen to be running would enforce the old order.
-        if [link.id for link in active] != [stage.link.id for stage in self.stages]:
+        if [link.id for link in active] != running:
             raise ChainShapeChanged()
         for stage, link in zip(self.stages, active):
             await stage.reload(link)
@@ -804,10 +818,15 @@ class ProxyTransport(Transport):
         self._ack: asyncio.Future | None = None
         self._cmd_lock = asyncio.Lock()
         self.port: int | None = None
-        #: One relay port per protected address, for UDP. TCP needs none of this: a
-        #: single listener fronts every address and recovers where each connection was
-        #: headed from conntrack, which UDP cannot do — see `udp.rs`.
+        #: One relay port per protected address, for UDP, keyed by `udp_relay_slot`: where
+        #: the relay sends and what it speaks there. TCP needs none of this: a single
+        #: listener fronts every address and recovers where each connection was headed
+        #: from conntrack, which UDP cannot do — see `udp.rs`.
         self.udp_ports: dict[str, int] = {}
+        #: Set by `stop()`, so the watchdog can tell a shutdown we asked for from one we
+        #: did not — the same distinction the NFQUEUE stages make.
+        self._stopped = False
+        self._watchdog: asyncio.Task | None = None
 
     def _published(self) -> list[str]:
         """What this engine is told about its TCP addresses, one entry each.
@@ -954,6 +973,9 @@ class ProxyTransport(Transport):
         # This allows adding new IPv6 addresses to a running service without any restart.
         self.is_dual_stack = self.srv.has_ipv6 or supports_ipv6()
         listen = "[::]:0" if self.is_dual_stack else "0.0.0.0:0"
+        # Resolved once: the list the engine is launched with and the number of `UDP`
+        # lines read back afterwards have to be the same answer.
+        relays = self._udp_targets()
         self.process = await asyncio.create_subprocess_exec(
             PROXY_ENGINE,
             stdout=asyncio.subprocess.PIPE,
@@ -978,8 +1000,7 @@ class ProxyTransport(Transport):
                     # which is UDP as far as the rules are concerned — what changes is
                     # what binds the port, and `_crypto_env` is where that is said.
                     "FGEX_PROXY_UDP": ",".join(
-                        f"{udp_relay_key(ip, port)}|{onward}"
-                        for ip, port, onward in self._udp_targets()
+                        udp_relay_slot(ip, port, onward) for ip, port, onward in relays
                     ),
                     # The addresses this service is *published* on rather than
                     # intercepted at: `dialled=service`, one pair per address that says
@@ -1018,7 +1039,7 @@ class ProxyTransport(Transport):
         # One `UDP <upstream> <port>` line per relay, before anything else. Read here
         # rather than in the event loop because the rules cannot be installed until
         # every one of them is known.
-        for _ in self._udp_targets():
+        for _ in relays:
             try:
                 line = (
                     await asyncio.wait_for(self.process.stdout.readuntil(), timeout=ACK_TIMEOUT)
@@ -1031,11 +1052,17 @@ class ProxyTransport(Transport):
             if not line.startswith("UDP "):
                 await self.stop()
                 raise Exception(f"unexpected output from the proxy engine: {line.strip()!r}")
-            _, upstream, port = line.split()
-            self.udp_ports[upstream] = int(port)
+            _, slot, port = line.split()
+            self.udp_ports[slot] = int(port)
         # Only now: the handshake line was read directly above, and everything after
         # it belongs to the event reader.
         self._reader_task = asyncio.create_task(self._read_events())
+        # And someone to notice if it goes. The nft rules outlive the process: without
+        # this an engine that died — killed by the OOM killer under a flood, say — left
+        # every connection redirected at a port nobody listened on, so each client got a
+        # reset while the interface went on reporting the service as active, and nothing
+        # ever brought it back. The NFQUEUE stages always had one.
+        self._watchdog = asyncio.create_task(self._watch())
         # Rules before traffic. The engine must already be enforcing when the nft rule
         # starts sending it connections, or the first ones through a freshly started
         # service would go unfiltered.
@@ -1086,9 +1113,24 @@ class ProxyTransport(Transport):
                 )
         return json.dumps(out)
 
+    async def _watch(self):
+        """Notice the engine dying, which nothing else here does. See `start`."""
+        process = self.process
+        try:
+            returncode = await process.wait()
+        except asyncio.CancelledError:
+            return
+        if self._stopped or process is not self.process:
+            return  # we stopped it ourselves
+        if self.on_died:
+            self.on_died("the proxy engine", returncode)
+
     async def reload(self, chain: list[ChainLink]) -> None:
         if not self.process or self.process.returncode is not None:
-            return
+            # Said, rather than passed over: returning quietly made an edit look applied
+            # to an engine that was not there to apply it. The watchdog restarts a dead
+            # engine from what the database holds.
+            raise Exception("the proxy engine is not running")
         async with self._cmd_lock:
             self._ack = asyncio.get_running_loop().create_future()
             self.process.stdin.write((self._payload(chain) + "\n").encode())
@@ -1115,15 +1157,20 @@ class ProxyTransport(Transport):
         object's, so a caller that has just added an address asks for the relay and is
         handed the port, rather than keeping a second map of its own beside this one.
         """
-        target = udp_relay_key(udp_relay_host(ip), port)
-        if target in self.udp_ports:
-            return self.udp_ports[target]
+        host = udp_relay_host(ip)
+        target = udp_relay_key(host, port)
+        # What names a relay is where it sends *and* what it speaks there: keyed on the
+        # first alone, an address whose answer was edited on a running service was handed
+        # the relay it already had, and the new choice reached nothing until a restart.
+        slot = udp_relay_slot(host, port, onward)
+        if slot in self.udp_ports:
+            return self.udp_ports[slot]
         if not self.process or self.process.returncode is not None:
             raise Exception("the proxy engine is not running")
 
         async with self._cmd_lock:
-            if target in self.udp_ports:
-                return self.udp_ports[target]
+            if slot in self.udp_ports:
+                return self.udp_ports[slot]
             self._ack = asyncio.get_running_loop().create_future()
             self.process.stdin.write(f"ADD_UDP {target} {onward}\n".encode())
             await self.process.stdin.drain()
@@ -1135,10 +1182,10 @@ class ProxyTransport(Transport):
                 self._ack = None
             if not ok:
                 raise Exception(f"the proxy engine rejected ADD_UDP {target}: {detail}")
-            relay_port = self.udp_ports.get(target)
+            relay_port = self.udp_ports.get(slot)
             if relay_port is None:
                 raise Exception(
-                    f"the proxy engine acknowledged ADD_UDP but did not report port for {target}"
+                    f"the proxy engine acknowledged ADD_UDP but did not report port for {slot}"
                 )
             return relay_port
 
@@ -1189,8 +1236,8 @@ class ProxyTransport(Transport):
                 elif line.startswith("UDP "):
                     parts = line.split()
                     if len(parts) == 3:
-                        _, upstream, port_str = parts
-                        self.udp_ports[upstream] = int(port_str)
+                        _, slot, port_str = parts
+                        self.udp_ports[slot] = int(port_str)
                 elif line.startswith("BLOCKED "):
                     self._emit_block(line.split()[1])
                 elif line.startswith("STATS "):
@@ -1214,6 +1261,12 @@ class ProxyTransport(Transport):
             traceback.print_exc()
 
     async def stop(self) -> None:
+        # Said before anything is torn down, or the watchdog wakes on the kill below and
+        # reports a crash we asked for.
+        self._stopped = True
+        if self._watchdog and self._watchdog is not asyncio.current_task():
+            self._watchdog.cancel()
+        self._watchdog = None
         for task in (self._reader_task, self._stderr_pump):
             if task:
                 task.cancel()

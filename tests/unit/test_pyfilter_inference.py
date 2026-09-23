@@ -16,7 +16,7 @@ import pytest
 
 from firegex.pyfilters import collect_pyfilters, pyfilter
 from firegex.pyfilters.internals import (compile as fgex_compile, get_code_proto,
-                                         get_filter_names, infer_proto, simplest_proto)
+                                         get_filter_names, simplest_proto)
 from firegex.pyfilters.internals.data import DataStreamCtx
 from firegex.pyfilters.internals.models import ExceptionAction, FullStreamAction
 from firegex.pyfilters.models import (HttpRequest, RawPacket, TCPClientStream,

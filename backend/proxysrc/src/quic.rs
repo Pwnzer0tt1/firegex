@@ -356,6 +356,8 @@ impl QuicRelay {
                         ),
                         _ => None,
                     },
+                    // Known only once the client's handshake is done, below.
+                    server_name: None,
                     connect_timeout: self.cfg.connect_timeout,
                     self_mark: self.cfg.self_mark,
                     spoof: self.cfg.spoof_source,
@@ -402,6 +404,17 @@ impl QuicRelay {
             }
         };
 
+        // The name the client asked for, now that its handshake has said it, for an
+        // upstream that re-encrypts: a service choosing its certificate or virtual host by
+        // SNI must not be handed the bare address instead. A QUIC upstream is dialled
+        // before the client's handshake (see `dial_upstream`) and cannot be told.
+        let mut behind = behind;
+        if let Behind::Http1(upstream) = &mut behind {
+            upstream.server_name = peer
+                .handshake_data()
+                .and_then(|data| data.downcast::<quinn::crypto::rustls::HandshakeData>().ok())
+                .and_then(|data| data.server_name);
+        }
         self.relay(peer, behind, client, chain, agreed.as_deref()).await;
         drop(endpoint);
         Ok(())
@@ -952,7 +965,13 @@ pub struct QuicManager {
     chain: ChainHandle,
     cfg: QuicConfig,
     stats: Arc<ProxyStats>,
-    relays: Arc<tokio::sync::Mutex<HashMap<SocketAddr, u16>>>,
+    /// One relay per service **and** per what that service speaks. Keyed on the service
+    /// alone, a second address sending to the same port with a different answer — HTTP/3
+    /// relayed as QUIC to `udp/443` beside HTTP/3 turned into HTTPS on `tcp/443`, both
+    /// perfectly real — was handed the first one's relay, and so was an address whose
+    /// answer was edited on a running service: the new choice reached nothing until a
+    /// restart, while the interface said it was in force.
+    relays: Arc<tokio::sync::Mutex<HashMap<(SocketAddr, Onward), u16>>>,
 }
 
 impl QuicManager {
@@ -967,7 +986,7 @@ impl QuicManager {
 
     pub async fn add_relay(&self, upstream: SocketAddr, onward: Onward) -> io::Result<u16> {
         let mut map = self.relays.lock().await;
-        if let Some(&port) = map.get(&upstream) {
+        if let Some(&port) = map.get(&(upstream, onward)) {
             return Ok(port);
         }
         let bind: SocketAddr = if upstream.is_ipv6() {
@@ -987,7 +1006,7 @@ impl QuicManager {
             Arc::clone(&self.stats),
         )?;
         let port = relay.local_addr()?.port();
-        map.insert(upstream, port);
+        map.insert((upstream, onward), port);
         tokio::spawn(Arc::new(relay).serve());
         Ok(port)
     }

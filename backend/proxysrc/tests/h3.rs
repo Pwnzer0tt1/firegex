@@ -701,3 +701,62 @@ async fn a_pattern_matches_with_an_http1_service_behind() {
     let answer = request(addr, "GET", "/public", None, false).await.unwrap();
     assert_eq!(answer, "you asked for /public and sent 0 bytes: ");
 }
+
+/// A `host` header that disagrees with `:authority` is malformed, and never reaches the
+/// service — the HTTP/3 half of the same case in `h2.rs`.
+#[tokio::test]
+async fn a_host_that_disagrees_with_the_authority_is_refused() {
+    let (cert, key) = self_signed();
+    let upstream = spawn_h3_echo(&cert, &key).await;
+    let addr = spawn_relay(upstream, "").await;
+
+    let ask = |host: &'static str| async move {
+        let mut config = tls::quic_client_config().unwrap();
+        config.alpn_protocols = vec![b"h3".to_vec()];
+        let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+        endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+            QuicClientConfig::try_from(config).unwrap(),
+        )));
+        let connection = endpoint
+            .connect(addr, "localhost")
+            .map_err(|e| e.to_string())?
+            .await
+            .map_err(|e| e.to_string())?;
+        let (mut driver, mut sender) = h3::client::new(h3_quinn::Connection::new(connection))
+            .await
+            .map_err(|e| e.to_string())?;
+        let driving = tokio::spawn(async move {
+            let _ = driver.wait_idle().await;
+        });
+        let answer = async {
+            let outgoing = http::Request::builder()
+                .method("GET")
+                .uri("https://localhost/who")
+                .header("host", host)
+                .body(())
+                .map_err(|e| e.to_string())?;
+            let mut stream = sender.send_request(outgoing).await.map_err(|e| e.to_string())?;
+            stream.finish().await.map_err(|e| e.to_string())?;
+            stream.recv_response().await.map_err(|e| e.to_string())?;
+            let mut got = Vec::new();
+            while let Some(mut chunk) = stream.recv_data().await.map_err(|e| e.to_string())? {
+                let len = chunk.remaining();
+                got.extend_from_slice(&chunk.copy_to_bytes(len));
+            }
+            Ok::<String, String>(String::from_utf8_lossy(&got).into_owned())
+        }
+        .await;
+        driving.abort();
+        answer
+    };
+
+    let agreeing = ask("localhost").await;
+    assert!(
+        agreeing.as_deref().is_ok_and(|a| a.contains("/who")),
+        "a host agreeing with :authority was not carried: {agreeing:?}"
+    );
+    let disagreeing = tokio::time::timeout(Duration::from_secs(5), ask("admin.internal"))
+        .await
+        .expect("a malformed request was left hanging");
+    assert!(disagreeing.is_err(), "a disagreeing host was carried: {disagreeing:?}");
+}

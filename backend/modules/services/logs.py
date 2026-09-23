@@ -105,6 +105,10 @@ class ServiceLog:
         if not entries:
             return
         if dropped:
+            # A number of its own. It used to reuse the last line's, which the browser
+            # dedupes on: whichever of the two arrived second was thrown away, and it was
+            # usually this one — the only line saying how much had not been shown.
+            self.seq += 1
             entries.append({
                 "at": int(time.time() * 1000),
                 "level": LEVEL.WARN,

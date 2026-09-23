@@ -245,3 +245,34 @@ def test_it_works_over_ipv6_too(api, service, quic_stand_in):
     assert "/public" in h3_request(server.host, server.port, "/public")
     assert h3_is_blocked(server.host, server.port, "/admin"), \
         "the filters are not seeing the decrypted request over IPv6"
+
+
+@needs_quic
+def test_what_the_service_speaks_can_be_changed_while_it_runs(api, service, quic_stand_in,
+                                                              http_stand_in):
+    """The relay is keyed by where it sends *and* what it speaks there.
+
+    It used to be keyed by where alone, so the address came back to the relay it already
+    had — still speaking HTTP/3 to a service now answering HTTP/1.1 — and the edit was
+    saved, shown, and did nothing until the service was restarted.
+
+    Two stand-ins on one port number, one on UDP and one on TCP, tell the two legs apart
+    by their answers: the QUIC one echoes what it was sent after a colon, the HTTP/1.1
+    one does not.
+    """
+    quic = quic_stand_in()
+    http_stand_in(port=quic.port)
+    cert, key = quic.material
+    service_id = service(f"quic-onward-{quic.port}", "127.0.0.1", quic.port, "proxy",
+                         proto="quic", tls_cert=cert, tls_key=key)
+    start_and_settle(api, service_id)
+    assert h3_request(quic.host, quic.port, "/which").endswith("bytes: "), \
+        "the exchange did not reach the QUIC service to begin with"
+
+    address = api.services_addresses(service_id)[0]
+    assert api.services_edit_address(service_id, address["address_id"], "127.0.0.1",
+                                     quic.port, upstream="tcp")
+    time.sleep(SETTLE)
+    answer = h3_request(quic.host, quic.port, "/which")
+    assert answer.endswith("bytes"), \
+        f"the edit was saved and the relay went on speaking HTTP/3: {answer!r}"

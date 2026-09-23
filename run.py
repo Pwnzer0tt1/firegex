@@ -105,7 +105,7 @@ def check_already_running():
 #: option that owns the setting is the one to use.
 MANAGED_ENV = {
     "PORT", "HOST", "NTHREADS", "PSW_HASH_SET", "SOCKET_DIR", "FIREGEX_VERSION",
-    "ALLOWED_IPS", "PROXY_IP_HEADER", "UNSAFE_DISABLE_AUTH",
+    "ALLOWED_IPS", "PROXY_IP_HEADER", "UNSAFE_DISABLE_AUTH", "FIREGEX_FRESH_BOOT",
 }
 
 
@@ -1010,6 +1010,11 @@ def run_standalone():
     if psw_set:
         env_vars.append(f"PSW_HASH_SET={hash_psw(psw_set)}")
     
+    # Every standalone start is a boot whose environment was just written from the
+    # configuration, which is what the backend needs to know to let it decide
+    # authentication over what `run.py config` last stored (see `seed_auth_mode`).
+    env_vars.append("FIREGEX_FRESH_BOOT=1")
+
     # Add socket dir if set (use path inside chroot)
     if args.socket_dir:
         env_vars.append("SOCKET_DIR=/run/firegex")
@@ -1228,9 +1233,12 @@ def handle_config_command(args):
             puts("Authentication disabled: every request reaching firegex becomes a full administrator", color=colors.red, is_bold=True)
         else:
             puts("Authentication enabled", color=colors.green)
-        # Both halves, or the two disagree until the next restart: the database is what
-        # the running process reads, the config file is what the next one comes up with.
-        applied = put_runtime_settings({"auth_disabled": "1" if args.unsafe_disable_auth else "0"})
+        # Every half, or they disagree: the database is what the running process reads,
+        # the config file is what the next `run.py start` comes up with, and the host key
+        # is what a container Docker starts again by itself comes up with — its own
+        # environment being the one it was created with, older than this.
+        value = "1" if args.unsafe_disable_auth else "0"
+        applied = put_runtime_settings({"auth_disabled": value, "auth_disabled_host": value})
         if applied:
             puts("Applied to the running instance immediately, and kept for the next start.", color=colors.green)
         else:
@@ -1293,7 +1301,7 @@ def handle_config_command(args):
                 puts("Put it in force with 'python3 run.py config --no-unsafe-disable-auth'.", color=colors.yellow)
             else:
                 config["unsafe_disable_auth"] = False
-                put_runtime_settings({"auth_disabled": "0"})
+                put_runtime_settings({"auth_disabled": "0", "auth_disabled_host": "0"})
                 puts("Authentication was disabled on this instance: turned back on, so the new "
                      "password is asked for.", color=colors.green, is_bold=True)
                 puts("Pass --keep-auth-disabled to store a password without putting it in force.",

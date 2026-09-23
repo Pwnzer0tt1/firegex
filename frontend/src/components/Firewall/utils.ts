@@ -60,7 +60,8 @@ export type FirewallSettings = {
     multicast_dns: boolean,
     allow_upnp: boolean,
     drop_invalid: boolean,
-    allow_dhcp: boolean
+    allow_dhcp: boolean,
+    allow_dnat: boolean,
 }
 
 

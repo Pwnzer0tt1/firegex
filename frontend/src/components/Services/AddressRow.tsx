@@ -33,7 +33,7 @@ export default function AddressRow({ form, index, proto, transport, canRemove }:
 }) {
     const [open, setOpen] = useState(false)
     const address = form.values.addresses[index]
-    const caps = addressCapabilities(proto, transport)
+    const caps = addressCapabilities(proto, transport, address.edge)
     const tags = addressTags(address, caps)
     const anything = caps.canPublish || caps.canChooseUpstream || caps.isExternal
 

@@ -134,7 +134,7 @@ async def _forward_and_filter(filter_ctx: dict,
                     continue
 
                 if action == DROP.value:
-                    log_print("drop-action", "Dropping connection caused by {escape(filter_name)} pyfilter")
+                    log_print("drop-action", f"Dropping connection caused by {escape(filter_name)} pyfilter")
                     has_to_drop = True
                     continue
 

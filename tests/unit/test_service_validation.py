@@ -17,8 +17,9 @@ import pytest
 from fastapi import HTTPException
 
 from routers.services import (AddressForm, _address_edge, _address_target,
-                              _address_upstream, _check_tls_material, _decoded_pattern,
-                              _hijack_ip, describe_error, needs_a_stream)
+                              _address_under, _address_upstream, _check_tls_material,
+                              _decoded_pattern, _hijack_ip, _hijack_port, describe_error,
+                              needs_a_stream, upstream_applies)
 from modules.services.models import L4, TRANSPORT, UPSTREAM
 
 
@@ -92,21 +93,64 @@ def test_a_published_port_has_to_be_a_port():
 
 def test_only_a_decrypted_service_has_an_upstream_leg():
     """Firegex terminates nothing elsewhere, so there is nothing to put back or leave off."""
-    assert _address_upstream(L4.TLS, form(upstream=UPSTREAM.TCP)) == UPSTREAM.TCP
-    assert _address_upstream(L4.HTTP, form(upstream=UPSTREAM.TLS)) == UPSTREAM.TLS
-    assert "carried as it arrives" in refusal(_address_upstream, L4.TCP,
+    assert _address_upstream(L4.TLS, L4.TLS, form(upstream=UPSTREAM.TCP)) == UPSTREAM.TCP
+    assert _address_upstream(L4.HTTP, L4.TLS, form(upstream=UPSTREAM.TLS)) == UPSTREAM.TLS
+    assert _address_upstream(L4.HTTP, L4.QUIC, form(upstream=UPSTREAM.TCP)) == UPSTREAM.TCP
+    assert "carried as it arrives" in refusal(_address_upstream, L4.TCP, L4.TCP,
                                               form(upstream=UPSTREAM.TCP))
+
+
+def test_a_cleartext_address_has_no_upstream_leg_either():
+    """Firegex carries what arrives at the cleartext address of an HTTPS service as it
+    arrived: the engine's plaintext path never asks. The choice used to be accepted there,
+    shown back as a tag, and read by nothing."""
+    assert not upstream_applies(L4.HTTP, L4.TCP)
+    assert upstream_applies(L4.HTTP, L4.TLS) and upstream_applies(L4.HTTP, L4.QUIC)
+    assert "reached in the clear" in refusal(_address_upstream, L4.HTTP, L4.TCP,
+                                             form(upstream=UPSTREAM.TLS))
 
 
 def test_the_default_upstream_is_allowed_everywhere():
     """`same` is what every address did before there was a choice."""
     for proto in L4.ALL:
-        assert _address_upstream(proto, form()) == UPSTREAM.SAME
-        assert _address_upstream(proto, form(upstream=UPSTREAM.SAME)) == UPSTREAM.SAME
+        for edge in L4.edges_of(proto) + (proto,):
+            assert _address_upstream(proto, edge, form()) == UPSTREAM.SAME
+            assert _address_upstream(proto, edge, form(upstream=UPSTREAM.SAME)) == UPSTREAM.SAME
 
 
 def test_an_unknown_upstream_is_named():
-    assert "Unknown upstream" in refusal(_address_upstream, L4.TLS, form(upstream="carrier-pigeon"))
+    assert "Unknown upstream" in refusal(_address_upstream, L4.TLS, L4.TLS,
+                                         form(upstream="carrier-pigeon"))
+
+
+# --- an address, when its service changes protocol ------------------------------
+
+
+def _row(**kw) -> dict:
+    return {"address_id": "a", "ip_int": "10.0.0.1/32", "port": 443, "proto": "tcp",
+            "edge": "tls", "upstream": "tcp", "target_port": 80, **kw}
+
+
+def test_an_address_follows_its_service_to_one_protocol():
+    moved = _address_under(_row(), L4.QUIC)
+    assert (moved["edge"], moved["proto"]) == (L4.QUIC, L4.UDP)
+    assert moved["upstream"] == UPSTREAM.TCP, "still decrypted, so the answer still applies"
+    assert moved["target_port"] == 80, "where the service is is not the protocol's to change"
+
+
+def test_an_answer_with_nothing_left_to_apply_to_goes():
+    """A service that stops being decrypted has no leg to hand over differently."""
+    assert _address_under(_row(), L4.TCP)["upstream"] == UPSTREAM.SAME
+
+
+def test_an_https_service_keeps_what_each_address_said():
+    assert _address_under(_row(edge="tls"), L4.HTTP)["edge"] == L4.TLS
+    assert _address_under(_row(edge="quic", proto="udp"), L4.HTTP)["edge"] == L4.QUIC
+    # A plain UDP address of a service becoming HTTPS is that service's HTTP/3 edge.
+    became = _address_under(_row(edge="udp", proto="udp", upstream="same"), L4.HTTP)
+    assert (became["edge"], became["proto"]) == (L4.QUIC, L4.UDP)
+    cleartext = _address_under(_row(edge="tcp", upstream="tls"), L4.HTTP)
+    assert cleartext["upstream"] == UPSTREAM.SAME
 
 
 # --- where the operator's own proxy is ---------------------------------------
@@ -130,9 +174,14 @@ def test_a_stated_endpoint_is_kept():
 
 
 def test_nothing_else_has_an_endpoint():
-    """A value on a layer that hands nothing off would be a setting that does nothing."""
+    """A value on a layer that hands nothing off would be a setting that does nothing —
+    and one that still sat in the unique index, able to refuse a real hand-off its port."""
     assert _hijack_ip(TRANSPORT.PROXY, "10.0.0.1/32", form()) is None
     assert _hijack_ip(TRANSPORT.NFQUEUE, "10.0.0.1/32", form()) is None
+    assert _hijack_ip(TRANSPORT.PROXY, "10.0.0.1/32",
+                      form(proxy_ip="127.0.0.1", proxy_port=8080)) is None
+    assert _hijack_port(TRANSPORT.PROXY, form(proxy_port=8080)) is None
+    assert _hijack_port(TRANSPORT.EXTERNAL, form(proxy_port=8080)) == 8080
 
 
 # --- the TLS material ---------------------------------------------------------

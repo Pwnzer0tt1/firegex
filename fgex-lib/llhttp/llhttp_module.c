@@ -57,11 +57,29 @@ static void error_class_name(const char *snake, char *out, size_t out_len) {
     out[written] = '\0';
 }
 
-static const char* methods[] = {
-    #define HTTP_METHOD_GEN(NUMBER, NAME, STRING) #STRING,
-    HTTP_METHOD_MAP(HTTP_METHOD_GEN)
+/*
+ * The name of a method, by the number llhttp gives it, or NULL for a number it never
+ * produces.
+ *
+ * A switch over `HTTP_ALL_METHOD_MAP` with the numbers as the case labels. This used to
+ * be an array built from `HTTP_METHOD_MAP` and indexed with the method's number — but
+ * that map is not the numbers in order: it runs 0 to 33 and then jumps to QUERY (46),
+ * and PRI (34) and the RTSP methods (35 to 45) are not in it at all, although a request
+ * parser accepts every one of them. So `QUERY / HTTP/1.1` read a name from past the end
+ * of the array, PRI was reported as QUERY, and `FLUSH rtsp://x/ RTSP/1.0` — one line from
+ * any client, sent to a service with an HTTP filter — crashed the process parsing it.
+ * `llhttp_method_name` would give the same answers and `abort()` on anything else; this
+ * answers NULL instead, because nothing a client sends may take the process down.
+ */
+static const char *method_name(uint8_t method) {
+    switch (method) {
+    #define HTTP_METHOD_GEN(NUMBER, NAME, STRING) case NUMBER: return #STRING;
+    HTTP_ALL_METHOD_MAP(HTTP_METHOD_GEN)
     #undef HTTP_METHOD_GEN
-};
+    default:
+        return NULL;
+    }
+}
 
 /* New public callback helper that uses method names as C strings */
 static int parser_callback(const char *name, llhttp_t *llhttp) {
@@ -322,7 +340,10 @@ static PyObject *parser_method(PyObject *self, void *closure) {
     if (!llhttp->http_major && !llhttp->http_minor)
         Py_RETURN_NONE;
 
-    return PyUnicode_FromString(methods[llhttp->method]);
+    const char *name = method_name(llhttp->method);
+    if (!name)
+        Py_RETURN_NONE;
+    return PyUnicode_FromString(name);
 }
 
 static PyObject *parser_major(PyObject *self, void *closure) {
@@ -610,7 +631,12 @@ fail:
 
 static PyModuleDef_Slot llhttp_slots[] = {
     {Py_mod_exec, init_llhttp_module},
+    /* Declared where it exists — the slot arrived with per-interpreter GILs in 3.12, and
+     * the package supports interpreters older than that. Before 3.12 there is nothing to
+     * declare: every subinterpreter shares the one GIL. */
+#if PY_VERSION_HEX >= 0x030C0000
     {Py_mod_multiple_interpreters, Py_MOD_PER_INTERPRETER_GIL_SUPPORTED},
+#endif
     {0, NULL}
 };
 

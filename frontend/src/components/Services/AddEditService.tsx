@@ -139,20 +139,24 @@ export default function AddEditService({ opened, onClose, edit }: {
     const submit = async (values: FormValues) => {
         setSubmitting(true)
         const isExternal = values.transport === Transport.EXTERNAL
-        const caps = addressCapabilities(values.proto, values.transport)
-        const addresses: AddressForm[] = values.addresses.map(a => ({
-            ip_int: a.ip_int,
-            port: a.port,
-            // Sent only where it means something — the same rules the ⚙ on each row
-            // offers them by. Everywhere else the backend refuses them rather than
-            // letting a stored value sit there being read by nothing.
-            ...(values.proto === L4.HTTP ? { edge: a.edge } : {}),
-            ...(caps.canPublish && Number(a.target_port) && Number(a.target_port) !== a.port
-                ? { target_port: Number(a.target_port) } : {}),
-            ...(caps.canChooseUpstream && a.upstream !== Upstream.SAME
-                ? { upstream: a.upstream } : {}),
-            ...(isExternal ? { proxy_ip: a.proxy_ip, proxy_port: a.proxy_port } : {}),
-        }))
+        const addresses: AddressForm[] = values.addresses.map(a => {
+            // Per address, because on an HTTPS service what an address can say depends on
+            // what it is reached over.
+            const caps = addressCapabilities(values.proto, values.transport, a.edge)
+            return {
+                ip_int: a.ip_int,
+                port: a.port,
+                // Sent only where it means something — the same rules the ⚙ on each row
+                // offers them by. Everywhere else the backend refuses them rather than
+                // letting a stored value sit there being read by nothing.
+                ...(values.proto === L4.HTTP ? { edge: a.edge } : {}),
+                ...(caps.canPublish && Number(a.target_port) && Number(a.target_port) !== a.port
+                    ? { target_port: Number(a.target_port) } : {}),
+                ...(caps.canChooseUpstream && a.upstream !== Upstream.SAME
+                    ? { upstream: a.upstream } : {}),
+                ...(isExternal ? { proxy_ip: a.proxy_ip, proxy_port: a.proxy_port } : {}),
+            }
+        })
 
         try {
             if (edit) {

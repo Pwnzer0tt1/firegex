@@ -204,9 +204,18 @@ export function getMainPath(){
     return ""
 }
 
+/**
+ * The top-level pages that exist. The last one visited is remembered for the tab and sent
+ * back to on "/" — so it has to be one of these: a tab open across the upgrade that folded
+ * `nfregex`, `nfproxy`, `porthijack` and `tls-decrypt` into `services` remembered one of
+ * those, and redirecting to a route that no longer exists landed back here and redirected
+ * again, for ever.
+ */
+export const HOME_SECTIONS = ["services", "firewall"]
+
 export function HomeRedirector(){
     const section = useSessionStore.getState().getHomeSection();
-    const path = section?`/${section}`:`/services`
+    const path = section && HOME_SECTIONS.includes(section) ? `/${section}` : `/services`
     return <Navigate to={path} replace/>
 }
 

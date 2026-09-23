@@ -16,8 +16,12 @@ import { decrypts, L4, Transport, Upstream } from './utils';
  * the operator to work out the effect for themselves.
  */
 
-/** Which of these options exist at all for the service being configured. */
-export function addressCapabilities(proto: string, transport: string) {
+/**
+ * Which of these options exist at all for one address of the service being configured.
+ *
+ * `edge` is what that address is reached over, which only an HTTPS service lets vary.
+ */
+export function addressCapabilities(proto: string, transport: string, edge?: string | null) {
     const isExternal = transport === Transport.EXTERNAL
     return {
         isExternal,
@@ -28,9 +32,13 @@ export function addressCapabilities(proto: string, transport: string) {
         //  connection to the service, NFQUEUE opens nothing, and the hand-off layer
         //  leaves the question to the proxy you run yourself.
         canPublish: transport === Transport.PROXY,
-        //: Only a service firegex decrypts has a leg of its own towards the service. On
-        //  a cleartext one it terminates nothing, so there is nothing to put back.
-        canChooseUpstream: decrypts({ proto }) && transport === Transport.PROXY,
+        //: Only an address whose traffic firegex decrypts has a leg of its own towards the
+        //  service. On a cleartext service it terminates nothing, and on the cleartext
+        //  address of an HTTPS service it carries what arrived as it arrived — so there is
+        //  nothing to put back or leave off. It used to be offered there anyway, and the
+        //  choice was saved, shown back as a tag and read by nothing.
+        canChooseUpstream: decrypts({ proto }) && transport === Transport.PROXY
+            && !(proto === L4.HTTP && (edge ?? L4.TCP) === L4.TCP),
     }
 }
 
@@ -58,6 +66,8 @@ export const upstreamHint = (upstream: string) =>
 
 type Extras = {
     port: number,
+    /** `http` only: what this address is reached over. */
+    edge?: string | null,
     target_port?: number | string | null,
     upstream?: string | null,
     proxy_ip?: string | null,
@@ -107,7 +117,7 @@ export default function AddressOptions({ form, field, values, proto, transport }
     proto: string,
     transport: string,
 }) {
-    const caps = addressCapabilities(proto, transport)
+    const caps = addressCapabilities(proto, transport, values.edge)
     const port = Number(values.port)
     const target = Number(values.target_port)
     const upstream = String(values.upstream ?? Upstream.SAME)

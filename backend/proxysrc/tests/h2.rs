@@ -957,3 +957,54 @@ async fn a_pattern_blocks_over_http2_in_front_of_http1() {
         "the refused request reached the service anyway"
     );
 }
+
+/// One request with an explicit `host` header beside its `:authority`, and what came back.
+async fn request_with_host(addr: SocketAddr, host: &str) -> Result<String, String> {
+    let (mut sender, driving) = connect(addr).await?;
+    let answer = async {
+        let outgoing = http::Request::builder()
+            .method("GET")
+            .uri("https://localhost/who")
+            .header("host", host)
+            .body(())
+            .map_err(|e| e.to_string())?;
+        let (response, _) = sender.send_request(outgoing, true).map_err(|e| e.to_string())?;
+        let response = response.await.map_err(|e| e.to_string())?;
+        let mut got = Vec::new();
+        let mut incoming = response.into_body();
+        while let Some(chunk) = incoming.data().await {
+            let chunk = chunk.map_err(|e| e.to_string())?;
+            let len = chunk.len();
+            got.extend_from_slice(&chunk);
+            let _ = incoming.flow_control().release_capacity(len);
+        }
+        Ok(String::from_utf8_lossy(&got).into_owned())
+    }
+    .await;
+    driving.abort();
+    answer
+}
+
+/// A `host` header that disagrees with `:authority` is malformed, and never reaches the
+/// service.
+///
+/// The chain is shown one `Host` line and the service is handed the request as it came,
+/// and an HTTP/2 service routes on `:authority`. So `:authority: admin.internal` beside
+/// `host: public.example` showed every filter the public host while the request went to
+/// the admin one — a rule written against the admin host walked straight past.
+#[tokio::test]
+async fn a_host_that_disagrees_with_the_authority_is_refused() {
+    let (addr, seen) = relay(Service::Echo, LIVE).await;
+
+    let agreeing = request_with_host(addr, "localhost").await;
+    assert!(agreeing.is_ok(), "a host agreeing with :authority was refused: {agreeing:?}");
+    let answered = seen.requests.load(Ordering::Relaxed);
+
+    let disagreeing = request_with_host(addr, "admin.internal").await;
+    assert!(disagreeing.is_err(), "a disagreeing host was carried: {disagreeing:?}");
+    assert_eq!(
+        seen.requests.load(Ordering::Relaxed),
+        answered,
+        "the service answered a request the filters were shown under another host"
+    );
+}

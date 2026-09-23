@@ -72,6 +72,10 @@ pub(crate) struct H1Upstream {
     pub(crate) client: SocketAddr,
     /// Present when the service speaks TLS: the client half of the handshake.
     pub(crate) tls: Option<Arc<rustls::ClientConfig>>,
+    /// The name the client asked for, presented to the service in turn. A service that
+    /// picks its certificate or its virtual host by SNI would otherwise be handed the bare
+    /// address — which TLS does not even send — and answer as its default host.
+    pub(crate) server_name: Option<String>,
     pub(crate) connect_timeout: Duration,
     pub(crate) self_mark: Option<u32>,
     /// Dial as the client. Off is the fallback the TCP path also has, and it is here for
@@ -167,7 +171,10 @@ impl Outbound for H1Upstream {
 
         let answer = match &self.tls {
             Some(config) => {
-                let name = crate::tls::server_name(&self.upstream.ip().to_string())?;
+                let name = match self.server_name.as_deref().map(crate::tls::server_name) {
+                    Some(Ok(name)) => name,
+                    _ => crate::tls::server_name(&self.upstream.ip().to_string())?,
+                };
                 let stream = tokio::time::timeout(
                     self.connect_timeout,
                     crate::tls::connector(config.clone()).connect(name, socket),
