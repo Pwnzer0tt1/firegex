@@ -202,6 +202,12 @@ export default function AddEditService({ opened, onClose, edit }: {
     }
 
     const isProxy = form.values.transport === Transport.PROXY
+    //: On NFQUEUE the same number means something narrower: how many UDP flows keep what
+    //  their Python filters hold. A datagram has no close to observe, so that is the one
+    //  thing there with nothing but a count and an idle timeout to bound it; a TCP stream
+    //  lets go of its state when it closes, and a limit on it would do nothing.
+    const limitsQueuedFlows = form.values.transport === Transport.NFQUEUE
+        && form.values.proto === L4.UDP
     //: Whether the engine terminates and decrypts this service — TLS or QUIC. What the
     //  certificate fields, their validation and the payload all key off, because the two
     //  protocols need exactly the same thing from the operator.
@@ -215,6 +221,9 @@ export default function AddEditService({ opened, onClose, edit }: {
             : null,
         isProxy && form.values.max_connections > 0 && form.values.over_limit_forwards
             ? "the excess forwarded unfiltered"
+            : null,
+        limitsQueuedFlows && form.values.max_connections > 0
+            ? `at most ${form.values.max_connections} UDP flows held`
             : null,
         isProxy && form.values.first_byte_timeout > 0
             ? `silent for ${form.values.first_byte_timeout}s is closed`
@@ -235,9 +244,12 @@ export default function AddEditService({ opened, onClose, edit }: {
         // Neither survives leaving the layer that honours it. A stored limit that does
         // nothing is the same trap as a stored protocol nothing can decrypt.
         if (isEncrypted) form.setFieldValue('proto', L4.TCP)
-        if (form.values.max_connections !== 0) form.setFieldValue('max_connections', 0)
         if (form.values.first_byte_timeout !== 0) form.setFieldValue('first_byte_timeout', 0)
     }, [form.values.transport])
+    useEffect(() => {
+        if (!isProxy && !limitsQueuedFlows && form.values.max_connections !== 0)
+            form.setFieldValue('max_connections', 0)
+    }, [form.values.transport, form.values.proto])
     const isExternal = form.values.transport === Transport.EXTERNAL
     //: `http` is the one protocol whose addresses are not all on the same transport, so
     //  it is the one where each of them has to say which it is.
@@ -396,11 +408,24 @@ export default function AddEditService({ opened, onClose, edit }: {
                                             {...form.getInputProps('over_limit_forwards', { type: 'checkbox' })}
                                         />
                                     </> : null}
-                                </> : <Switch
-                                    label="Keep forwarding if the filter stops answering"
-                                    description="The kernel's fail-open backstop. Turning it off means traffic stops when the filter does."
-                                    {...form.getInputProps('fail_open', { type: 'checkbox' })}
-                                />}
+                                </> : <>
+                                    <Switch
+                                        label="Keep forwarding if the filter stops answering"
+                                        description="The kernel's fail-open backstop. Turning it off means traffic stops when the filter does."
+                                        {...form.getInputProps('fail_open', { type: 'checkbox' })}
+                                    />
+                                    {limitsQueuedFlows ? <>
+                                        <Space h="sm" />
+                                        <NumberInput
+                                            label="Most UDP flows at once"
+                                            description={form.values.max_connections > 0
+                                                ? "Past it, the flow quiet the longest loses what its Python filters were keeping, and starts over."
+                                                : "0 means no limit: a flow keeps its Python filters' state until it has been quiet for a minute."}
+                                            min={0} step={64} allowDecimal={false}
+                                            {...form.getInputProps('max_connections')}
+                                        />
+                                    </> : null}
+                                </>}
                             </Accordion.Panel>
                         </Accordion.Item>
                     </Accordion>

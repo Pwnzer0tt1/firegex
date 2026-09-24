@@ -17,9 +17,9 @@ class RawPacket:
     depending on the transport it happened to be attached to — the exact failure the
     unified model exists to prevent.
 
-    So: read the metadata, edit `data`. `data` is the application payload and the only
-    thing a filter can change, which is also the only change that means the same thing
-    on both layers.
+    So: read the metadata and the payload, and answer with a verdict. Nothing a filter is
+    shown can be written — the payload was, for `UNSTABLE_MANGLE`, and stopped being
+    with it.
     """
 
     def __init__(self,

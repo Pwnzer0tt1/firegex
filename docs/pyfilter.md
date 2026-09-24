@@ -315,7 +315,7 @@ def check_previous_requests(resp: HttpResponse):
         return REJECT
 ```
 
-The number of entries kept per stream is capped by the `FGEX_MAX_HISTORY_SIZE` global (default `100`) — see [Other global options](#other-global-options) below; once the cap is reached, the oldest entry is dropped as a new one is added.
+The number of entries kept per stream is capped by the `FGEX_MAX_HISTORY_SIZE` global (default `100`) — see [Other global options](#other-global-options) below; once the cap is reached, the oldest entry is dropped as a new one is added. What each direction's history holds is also kept under `FGEX_STREAM_MAX_SIZE` bytes, the same budget as the stream itself, so on a connection carrying large bodies the oldest entries go sooner; the newest one is always kept.
 
 ### gRPC messages
 
@@ -391,6 +391,13 @@ Then set these in the filter file's globals:
 | `REJECT` | Reject the stream and close the connection, like a `REJECT` filter statement. |
 | `ACCEPT` | Stop calling pyfilters and accept the rest of the traffic as-is. |
 
+A compressed body is held to the same limit **decoded**: a megabyte of gzip can be a
+gigabyte of anything that compresses well, so decoding stops at `FGEX_STREAM_MAX_SIZE` and
+a body that would go past it meets the action above — refused with `REJECT` or `DROP`,
+passed without calling the filter with `ACCEPT`, and with `FLUSH` handed over as it
+arrived, still encoded, as a body in an encoding the library cannot undo would be. A
+compressed WebSocket message is bounded the same way.
+
 ## Other global options
 
 ```python
@@ -398,7 +405,7 @@ from firegex.pyfilters import ExceptionAction
 ```
 
 - `FGEX_INVALID_ENCODING_ACTION: ExceptionAction` — action taken when parsing hits an invalid/unsupported encoding (a parser-level failure). Default: `ExceptionAction.REJECT`. Values: `ACCEPT` (accept the packet that caused the error), `DROP` (drop the connection), `REJECT` (reject the connection), `NOACTION` (do nothing — the error is signaled and the stream is accepted without calling any more pyfilters on it).
-- `FGEX_MAX_HISTORY_SIZE: int` — max number of requests/responses kept per stream by [`HttpHistory`](#httphistory-alias-httpstreamhistory--http-only). Default: `100`.
+- `FGEX_MAX_HISTORY_SIZE: int` — max number of requests/responses kept per stream by [`HttpHistory`](#httphistory-alias-httpstreamhistory--http-only). Default: `100`. The entries of one direction together are also held under `FGEX_STREAM_MAX_SIZE` bytes.
 
 ## Testing a filter locally
 

@@ -78,6 +78,13 @@ const STARTUP_GRACE: Duration = Duration::from_secs(10);
 /// Cap on one frame, so a confused worker cannot ask us to allocate the machine away.
 const MAX_FRAME: u32 = 64 * 1024 * 1024;
 
+/// Cap on the open and close frames waiting for the next exchange. Reached only when
+/// nothing has asked the worker anything for thousands of connections — a filter that
+/// has lost its say is still told about every connection — and past it they are
+/// dropped: a connection then reaches the worker without its addresses, or leaves state
+/// behind in a worker that was not going to be asked anything anyway.
+const MAX_PENDING: usize = 1024 * 1024;
+
 #[derive(Debug, Default)]
 pub struct WorkerStats {
     /// Times the worker was killed for missing its deadline or dying on its own.
@@ -98,6 +105,14 @@ pub struct PyWorkerRule {
     /// thing: a frame is a request and a response, and interleaving them would need
     /// request ids and a worker able to answer out of order. A pool comes later.
     child: Mutex<Option<Child>>,
+    /// Open and close frames not yet written, in order. They need no answer, and they
+    /// are told from the relay itself — on the async runtime — where taking `child`
+    /// meant waiting out whatever exchange held it, up to its whole deadline, and where
+    /// a worker that had to be started first was started right there. A filter hanging
+    /// on one connection held every new connection of the service in that queue, on the
+    /// threads that carry all the others. The next exchange writes them ahead of its own
+    /// chunk, which runs where blocking is allowed and keeps an open ahead of the data.
+    pending: Mutex<Vec<u8>>,
     pub stats: std::sync::Arc<WorkerStats>,
 }
 
@@ -116,6 +131,7 @@ impl PyWorkerRule {
             enabled,
             deadline,
             child: Mutex::new(None),
+            pending: Mutex::new(Vec::new()),
             stats: std::sync::Arc::new(WorkerStats::default()),
         }
     }
@@ -180,6 +196,15 @@ impl PyWorkerRule {
     /// Deciding here rather than in the file is the point: a function is turned off
     /// without editing the code that defines it, and turned back on without the
     /// operator having to remember what they deleted.
+    /// Hold a frame that needs no answer for the next exchange. See `pending`.
+    fn queue(&self, frame: Vec<u8>) {
+        let Ok(mut pending) = self.pending.lock() else { return };
+        if pending.len() + frame.len() > MAX_PENDING {
+            pending.clear();
+        }
+        pending.extend_from_slice(&frame);
+    }
+
     pub fn enabled(&self) -> Option<&[String]> {
         self.enabled.as_deref()
     }
@@ -234,6 +259,12 @@ impl PyWorkerRule {
                 chunk,
             );
 
+            let queued = std::mem::take(
+                &mut *self.pending.lock().map_err(|_| "worker queue poisoned".to_string())?,
+            );
+            if !queued.is_empty() {
+                write_before(stdin, &queued, deadline_at)?;
+            }
             write_before(stdin, &frame, deadline_at)?;
             let stdout = child.stdout.as_mut().ok_or("worker has no stdout")?;
             let mut header = [0u8; 4];
@@ -301,41 +332,13 @@ impl Filter for PyWorkerRule {
             "l4": meta.l4.name(),
         })
         .to_string();
-        let mut slot = match self.child.lock() {
-            Ok(slot) => slot,
-            Err(_) => return,
-        };
-        if slot.is_none() {
-            match self.spawn() {
-                Ok(child) => *slot = Some(child),
-                Err(_) => return,
-            }
-        }
-        let Some(child) = slot.as_mut() else { return };
-        let Some(stdin) = child.stdin.as_mut() else {
-            return;
-        };
-        let frame = build_frame(connection, KIND_OPEN, payload.as_bytes());
-        let deadline_at = Instant::now() + self.deadline;
-        if write_before(stdin, &frame, deadline_at).is_err() {
-            self.discard(&mut slot, "could not report a new connection");
-        }
+        self.queue(build_frame(connection, KIND_OPEN, payload.as_bytes()));
     }
     fn connection_closed(&self, connection: ConnectionId) {
         // Best effort, and deliberately not on the datapath's critical path: the
         // connection is already over, so nothing is waiting on this. A worker that
         // has died in the meantime simply has no state left to free.
-        let mut slot = match self.child.lock() {
-            Ok(slot) => slot,
-            Err(_) => return,
-        };
-        let Some(child) = slot.as_mut() else { return };
-        let Some(stdin) = child.stdin.as_mut() else { return };
-        let frame = build_frame(connection, KIND_CLOSE, &[]);
-        let deadline_at = Instant::now() + self.deadline;
-        if write_before(stdin, &frame, deadline_at).is_err() {
-            self.discard(&mut slot, "could not report a closed connection");
-        }
+        self.queue(build_frame(connection, KIND_CLOSE, &[]));
     }
     fn prepare(&self) -> Result<(), String> {
         self.warm_up()

@@ -65,6 +65,16 @@ use crate::http1::{
 };
 use crate::proxy::ProxyStats;
 
+/// How many streams one client connection may have open at once.
+///
+/// The h2 crate's default is none at all, and on this edge every stream is an exchange of
+/// its own — towards an HTTP/1.1 service, a connection of its own to the service. So one
+/// client connection, which `max_connections` counts once, could open as many connections
+/// to the protected service as it liked, and a Python filter's state with each. A hundred
+/// is what the QUIC edge already allows (quinn's default), so the two versions of one
+/// service answer the same, and it is what RFC 9113 recommends as a floor.
+const MAX_CONCURRENT_STREAMS: u32 = 100;
+
 /// How long a refused connection is given to put its GOAWAY on the wire.
 ///
 /// A refusal that simply dropped the socket would reach the client as a truncated TLS
@@ -344,6 +354,8 @@ where
     // advertising it would invite streams whose rendering would be a fabrication. Push is
     // turned off towards the service above, in the same spirit.
     let mut server = h2::server::Builder::new()
+        .max_concurrent_streams(MAX_CONCURRENT_STREAMS)
+        .max_header_list_size(crate::http1::MAX_HEAD_BYTES)
         .handshake::<_, Bytes>(client_io)
         .await
         .map_err(io::Error::other)?;

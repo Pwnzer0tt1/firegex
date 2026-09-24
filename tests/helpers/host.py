@@ -26,15 +26,16 @@ def ruleset() -> str | None:
     return as_root("nft", "list", "table", "inet", "fgex")
 
 
-def engine_port(service_port: int) -> int | None:
-    """The proxy engine's listener, read off the rule that redirects a service's port.
+def engine_port(service_port: int, l4: str = "tcp") -> int | None:
+    """Where the proxy layer's redirect sends a service's port: the engine's listener,
+    or with `l4="udp"` the relay bound for that address.
 
-    The engine picks an ephemeral port when it starts and tells only the backend, so the
-    redirect is the one place outside those two that says which it is.
+    The engine picks ephemeral ports when it starts and tells only the backend, so the
+    redirect is the one place outside those two that says which they are.
     """
     for line in (ruleset() or "").splitlines():
-        # TCP only: a UDP address on the same port is redirected to its own relay.
-        if re.search(rf"\btcp dport {service_port}\b", line):
+        # By protocol: a UDP address on the same port is redirected to its own relay.
+        if re.search(rf"\b{l4} dport {service_port}\b", line):
             found = re.search(r"redirect to :(\d+)", line)
             if found:
                 return int(found.group(1))

@@ -760,3 +760,126 @@ async fn a_host_that_disagrees_with_the_authority_is_refused() {
         .expect("a malformed request was left hanging");
     assert!(disagreeing.is_err(), "a disagreeing host was carried: {disagreeing:?}");
 }
+
+/// One GET through the relay carrying `headers`, and the answer's status, head and body.
+async fn ask_with(
+    addr: SocketAddr,
+    headers: &[(&'static str, &'static str)],
+) -> Result<(u16, http::HeaderMap, String), String> {
+    let mut config = tls::quic_client_config().unwrap();
+    config.alpn_protocols = vec![b"h3".to_vec()];
+    let mut endpoint = quinn::Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
+    endpoint.set_default_client_config(quinn::ClientConfig::new(Arc::new(
+        QuicClientConfig::try_from(config).unwrap(),
+    )));
+    let connection = endpoint
+        .connect(addr, "localhost")
+        .map_err(|e| e.to_string())?
+        .await
+        .map_err(|e| e.to_string())?;
+    let (mut driver, mut sender) = h3::client::new(h3_quinn::Connection::new(connection))
+        .await
+        .map_err(|e| e.to_string())?;
+    let driving = tokio::spawn(async move {
+        let _ = driver.wait_idle().await;
+    });
+    let answer = async {
+        let mut builder = http::Request::builder().method("GET").uri("https://localhost/who");
+        for (name, value) in headers {
+            builder = builder.header(*name, *value);
+        }
+        let outgoing = builder.body(()).map_err(|e| e.to_string())?;
+        let mut stream = sender.send_request(outgoing).await.map_err(|e| e.to_string())?;
+        stream.finish().await.map_err(|e| e.to_string())?;
+        let response = stream.recv_response().await.map_err(|e| e.to_string())?;
+        let mut got = Vec::new();
+        while let Some(mut chunk) = stream.recv_data().await.map_err(|e| e.to_string())? {
+            let len = chunk.remaining();
+            got.extend_from_slice(&chunk.copy_to_bytes(len));
+        }
+        Ok::<_, String>((
+            response.status().as_u16(),
+            response.headers().clone(),
+            String::from_utf8_lossy(&got).into_owned(),
+        ))
+    }
+    .await;
+    driving.abort();
+    answer
+}
+
+/// A header about a connection is malformed in HTTP/3, and the h3 crate does not refuse
+/// it. Carried to a service reached over HTTP/1.1 it would be read there as a statement
+/// about *that* connection — which headers to drop, which transfer coding to undo — and a
+/// filter shown the rendering would not recognise the request the service got.
+#[tokio::test]
+async fn a_connection_header_is_refused_over_http3() {
+    let upstream = spawn_h1_echo().await;
+    let addr = spawn_relay_to(upstream, "", Onward::Plain).await;
+
+    let trailers = ask_with(addr, &[("te", "trailers")]).await;
+    assert!(trailers.is_ok(), "`te: trailers`, the one allowed, was refused: {trailers:?}");
+    for header in [("transfer-encoding", "chunked"), ("connection", "x-forwarded-for"),
+                   ("keep-alive", "timeout=5"), ("upgrade", "websocket"), ("te", "gzip")] {
+        let refused = tokio::time::timeout(Duration::from_secs(5), ask_with(addr, &[header]))
+            .await
+            .expect("a malformed request was left hanging");
+        assert!(refused.is_err(), "a request carrying {header:?} was carried: {refused:?}");
+    }
+}
+
+/// What an HTTP/1.1 service answers with says things about its own connection — a body
+/// sent chunked, a connection offered for reuse — that an HTTP/3 client is required to
+/// reject a response for. They are the service's, and they stay behind.
+#[tokio::test]
+async fn an_http1_answer_reaches_an_http3_client_without_its_connection_headers() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let upstream = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut buf = [0u8; 4096];
+                let _ = socket.read(&mut buf).await;
+                let _ = socket
+                    .write_all(
+                        b"HTTP/1.1 200 OK\r\nconnection: keep-alive, x-internal\r\n\
+                          keep-alive: timeout=5\r\nx-internal: secret\r\n\
+                          content-type: text/plain\r\ntransfer-encoding: chunked\r\n\r\n\
+                          5\r\nhello\r\n0\r\n\r\n",
+                    )
+                    .await;
+            });
+        }
+    });
+    let addr = spawn_relay_to(upstream, "", Onward::Plain).await;
+
+    let (_, headers, body) = ask_with(addr, &[]).await.unwrap();
+    assert_eq!(body, "hello");
+    for name in ["connection", "keep-alive", "transfer-encoding", "x-internal"] {
+        assert!(!headers.contains_key(name), "`{name}` reached the HTTP/3 client: {headers:?}");
+    }
+    assert_eq!(headers.get("content-type").map(|v| v.as_bytes()), Some(&b"text/plain"[..]));
+}
+
+/// A head is bounded, which the h3 crate does not do by default at all.
+#[tokio::test]
+async fn a_head_past_the_limit_is_refused_over_http3() {
+    let upstream = spawn_h1_echo().await;
+    let addr = spawn_relay_to(upstream, "", Onward::Plain).await;
+    let big: &'static str = Box::leak("a".repeat(2 * 1024 * 1024).into_boxed_str());
+    let refused = tokio::time::timeout(Duration::from_secs(10), ask_with(addr, &[("x-big", big)]))
+        .await
+        .expect("an oversized head was left hanging");
+    // The crate answers `431 Request Header Fields Too Large` itself, and nothing is sent on.
+    assert!(
+        !matches!(refused, Ok((200, _, _))),
+        "a 2 MiB head was carried: {:?}",
+        refused.map(|r| r.2)
+    );
+    let large: &'static str = Box::leak("a".repeat(256 * 1024).into_boxed_str());
+    assert!(
+        matches!(ask_with(addr, &[("x-large", large)]).await, Ok((200, _, _))),
+        "a 256 KiB head was refused"
+    );
+}

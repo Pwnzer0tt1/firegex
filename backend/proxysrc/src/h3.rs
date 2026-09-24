@@ -29,7 +29,8 @@ use h3::error::StreamError;
 use crate::capture::Tap;
 use crate::filter::{ChainSessions, ConnectionId, Direction};
 use crate::http1::{
-    carried, close_body, conflicting_authority, head_framing, judge, push_body, render_request,
+    carried, close_body, conflicting_authority, connection_specific, head_framing, judge,
+    push_body, render_request,
     render_response, Answer,
     Framing, Incoming, Outbound, OutboundBody, Rendered,
 };
@@ -157,6 +158,7 @@ pub(crate) async fn carry(carrier: &Carrier) {
     // handling has its priorities backwards.
     let mut server = match h3::server::builder()
         .send_grease(false)
+        .max_field_section_size(u64::from(crate::http1::MAX_HEAD_BYTES))
         .build(h3_quinn::Connection::new(carrier.peer.clone()))
         .await
     {
@@ -287,6 +289,16 @@ async fn exchange<O: Outbound>(
         eprintln!(
             "[warn] [h3] {}: {why}, so the filters would be shown one host while the \
              service routes on the other. The stream is stopped as malformed.",
+            carrier.client
+        );
+        from_client.stop_stream(h3::error::Code::H3_MESSAGE_ERROR);
+        return Ok(());
+    }
+    // Malformed as well (RFC 9114 §4.2), and not refused by the h3 crate: see
+    // `connection_specific`. HTTP/2 needs no such line, because h2 refuses them itself.
+    if let Some(why) = connection_specific(request.headers()) {
+        eprintln!(
+            "[warn] [h3] {}: {why}. The stream is stopped as malformed.",
             carrier.client
         );
         from_client.stop_stream(h3::error::Code::H3_MESSAGE_ERROR);

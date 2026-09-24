@@ -160,6 +160,56 @@ def sometimes_hangs(packet: RawPacket):
     assert!(c.disabled_filters().is_empty());
 }
 
+/// Telling the worker about a connection is not allowed to wait on it.
+///
+/// The open and close frames are sent from the relay itself, on the async runtime. They
+/// used to take the worker's lock there — held by whatever exchange was in progress, up
+/// to its whole deadline — so one connection feeding a hanging filter held every new
+/// connection of the service on the threads that carry all the others.
+#[tokio::test]
+async fn a_connection_opening_does_not_wait_on_a_hanging_filter() {
+    let path = filter_file(
+        "hang-open",
+        r#"
+import time
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import RawPacket
+
+@pyfilter
+def hangs_on_request(packet: RawPacket):
+    if b"HANG" in packet.data:
+        time.sleep(3600)
+    return ACCEPT
+"#,
+    );
+    let c = std::sync::Arc::new(chain_for(&path, 1500));
+    // Started first, so the worker is up and the only thing held is the exchange.
+    assert_eq!(feed(&c, &[b"warm"]).await, vec![Verdict::Accept]);
+
+    let stuck = {
+        let c = std::sync::Arc::clone(&c);
+        tokio::spawn(async move { feed(&c, &[b"HANG"]).await })
+    };
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let meta = ConnectionMeta {
+        client: "10.0.0.9:51000".parse().unwrap(),
+        server: "10.0.0.1:8080".parse().unwrap(),
+        l4: L4::Tcp,
+    };
+    let started = Instant::now();
+    let other = next_connection_id();
+    c.connection_opened(other, &meta);
+    c.connection_closed(other);
+    assert!(
+        started.elapsed() < Duration::from_millis(200),
+        "a new connection waited {:?} on another connection's hanging filter",
+        started.elapsed()
+    );
+
+    assert_eq!(stuck.await.unwrap(), vec![Verdict::Accept]);
+}
+
 /// A filter that crashes on one chunk must not cost the ones after it.
 #[tokio::test]
 async fn a_crashing_python_filter_recovers() {

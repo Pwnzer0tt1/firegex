@@ -39,7 +39,7 @@ public:
 	NfQueue::PktRequest<RegexNfQueue>* pkt;
 
 	bool filter_action(NfQueue::PktRequest<RegexNfQueue>* pkt, const string& data){
-		shared_ptr<RegexRules> conf = regex_config;
+		shared_ptr<RegexRules> conf = regex_config.load();
 
 		auto current_version = conf->ver();
 		if (current_version != latest_config_ver){

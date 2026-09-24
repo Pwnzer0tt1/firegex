@@ -80,10 +80,6 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		control_socket << "BLOCKED " << func_name << endl;
 	}
 
-	inline void print_mangle_reason(const string& func_name){
-		control_socket << "MANGLED " << func_name << endl;
-	}
-
 	inline void print_exception_reason(){
 		control_socket << "EXCEPTION" << endl;
 	}
@@ -97,20 +93,18 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		pyq->pkt->drop();// This is needed because the callback has to take the updated pkt pointer!
 	}
 
-	//: How many UDP flows may hold a filter context at once. See `enforce_limit`.
-	static const size_t MAX_UDP_FLOWS = 4096;
-
 	// One datagram, judged on its own.
 	//
 	// No stream to follow and no sequence numbers to fix: a datagram is complete in
-	// itself, which is also why a rewrite here is *exact* rather than the unstable
-	// thing it is over TCP — there is nothing for a different length to desynchronise.
-	// Each flow still gets its own module globals, keyed the same way a connection is.
+	// itself. Each flow still gets its own module globals, keyed the same way a
+	// connection is.
 	void filter_action_udp(NfQueue::PktRequest<PyProxyQueue>* pkt, const string& data){
+		// Idle flows first, so a limit is never met by flows that have already gone.
+		sctx.udp_expire(UDP_IDLE_SECONDS);
 		auto stream_search = sctx.streams_ctx.find(pkt->sid);
 		pyfilter_ctx* stream_match;
 		if (stream_search == sctx.streams_ctx.end()){
-			shared_ptr<PyCodeConfig> conf = config;
+			shared_ptr<PyCodeConfig> conf = config.load();
 			PyObject* compiled_code = conf->compiled_code();
 			if (compiled_code == nullptr){
 				return pkt->accept(); // no filter configured; nothing to ask
@@ -122,11 +116,12 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 				print_exception_reason();
 				return pkt->accept();
 			}
-			sctx.enforce_limit(MAX_UDP_FLOWS);
+			sctx.udp_make_room(max_udp_flows());
 			sctx.streams_ctx.insert_or_assign(pkt->sid, stream_match);
 		}else{
 			stream_match = stream_search->second;
 		}
+		sctx.udp_touch(pkt->sid);
 
 		auto result = stream_match->handle_packet(pkt, data, pkt->is_input);
 		switch(result.action){
@@ -139,16 +134,6 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 			case PyFilterResponse::REJECT:
 				print_blocked_reason(*result.filter_match_by);
 				return pkt->drop();
-			case PyFilterResponse::MANGLE:
-				pkt->mangle_custom_data(result.mangled_data->c_str(), result.mangled_data->size());
-				if (pkt->get_action() == NfQueue::FilterAction::DROP){
-					cerr << "[ERROR] [filter_action_udp] Failed to mangle: Malformed Packet... the packet was dropped" << endl;
-					print_blocked_reason(*result.filter_match_by);
-					print_exception_reason();
-				}else{
-					print_mangle_reason(*result.filter_match_by);
-				}
-				return;
 			case PyFilterResponse::EXCEPTION:
 			case PyFilterResponse::INVALID:
 				print_exception_reason();
@@ -161,7 +146,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		auto stream_search = sctx.streams_ctx.find(pkt->sid);
 		pyfilter_ctx* stream_match;
 		if (stream_search == sctx.streams_ctx.end()){
-			shared_ptr<PyCodeConfig> conf = config;
+			shared_ptr<PyCodeConfig> conf = config.load();
 			//If config is not set, ignore the stream
 			PyObject* compiled_code = conf->compiled_code();
 			if (compiled_code == nullptr){
@@ -205,16 +190,6 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 				stream.client_data_callback(bind(keep_fin_packet, this));
 				stream.server_data_callback(bind(keep_fin_packet, this));
 				return pkt->reject();
-			case PyFilterResponse::MANGLE:
-				pkt->mangle_custom_data(result.mangled_data->c_str(), result.mangled_data->size());
-				if (pkt->get_action() == NfQueue::FilterAction::DROP){
-					cerr << "[ERROR] [filter_action] Failed to mangle: Malformed Packet... the packet was dropped" << endl;
-					print_blocked_reason(*result.filter_match_by);
-					print_exception_reason();
-				}else{
-					print_mangle_reason(*result.filter_match_by);
-				}
-				return;
 			case PyFilterResponse::EXCEPTION:
 			case PyFilterResponse::INVALID:
 				print_exception_reason();

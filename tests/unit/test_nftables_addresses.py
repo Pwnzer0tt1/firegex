@@ -535,3 +535,44 @@ def test_something_that_is_neither_is_refused_by_name():
         parse_ip_or_int("")
     with pytest.raises(ValueError, match="neither a valid IP address nor"):
         parse_ip_or_int("not a name, and not an address")
+
+
+# --- the engine's own ports ---------------------------------------------------------
+# Every listener and relay the proxy engine binds is on the wildcard, so each is guarded:
+# what reaches one without having been redirected there is dropped. A relay stays bound
+# for as long as the engine runs, even after its address is taken off the service.
+
+
+def _guard_elements(commands: list, verb: str) -> list:
+    return [c[verb]["element"]["elem"][0]["concat"] for c in commands
+            if verb in c and "element" in c[verb]]
+
+
+def test_an_engine_port_is_guarded_until_its_service_stops(monkeypatch):
+    table = detached_table()
+    sent: list = []
+    table.cmd = lambda *cmds: sent.extend(cmds)
+    table.raw_cmd = lambda *cmds: sent.extend(cmds)
+    table.get = lambda: []
+    monkeypatch.setattr(FiregexTables, "_guarded", {})
+    first = Address(address_id=new_id(), service_id="dns", ip_int="10.0.0.1/32", port=53,
+                    proto=L4.UDP)
+    second = Address(address_id=new_id(), service_id="dns", ip_int="10.0.0.2/32", port=53,
+                     proto=L4.UDP)
+    srv = Service(service_id="dns", name="dns", status="active", proto=L4.UDP,
+                  transport=TRANSPORT.PROXY, addresses=[first, second])
+    relays = {nft.udp_relay_slot(nft.udp_relay_host(a.ip_int), 53, "same"): port
+              for a, port in ((first, 41000), (second, 41001))}
+
+    table.add(srv, udp_ports=relays)
+    assert sorted(_guard_elements(sent, "add")) == [["udp", 41000], ["udp", 41001]]
+
+    sent.clear()
+    table.delete(srv, [first])
+    assert _guard_elements(sent, "delete") == [], \
+        "a relay still bound in the engine was left reachable directly"
+
+    sent.clear()
+    table.delete(srv)
+    assert sorted(_guard_elements(sent, "delete")) == [["udp", 41000], ["udp", 41001]], \
+        "a port the service no longer holds was left guarded for whoever binds it next"

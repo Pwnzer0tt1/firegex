@@ -5,6 +5,8 @@
 #include <iostream>
 #include <tins/tcp_ip/stream_identifier.h>
 #include <map>
+#include <list>
+#include <cstdlib>
 #include <atomic>
 #include <chrono>
 #include <Python.h>
@@ -22,34 +24,32 @@ namespace PyProxy {
 class PyCodeConfig;
 class PyProxyQueue;
 
+// The library's `Action` values, which are the wire format between it and this binary.
+// 3 was `MANGLE`, a rewrite of the payload; it is gone from the library, and the number
+// stays unused so that nothing old can ever mean something new. Anything outside the
+// valid set is `INVALID`, which fails open and is reported like an exception.
 enum PyFilterResponse {
 	ACCEPT = 0,
 	DROP = 1,
 	REJECT = 2,
-	MANGLE = 3,
 	EXCEPTION = 4,
 	INVALID = 5
 };
 
-const PyFilterResponse VALID_PYTHON_RESPONSE[4] = {
+const PyFilterResponse VALID_PYTHON_RESPONSE[3] = {
 	PyFilterResponse::ACCEPT,
 	PyFilterResponse::DROP,
 	PyFilterResponse::REJECT,
-	PyFilterResponse::MANGLE
 };
 
 struct py_filter_response {
 	PyFilterResponse action;
 	string* filter_match_by = nullptr;
-	// The rewritten application payload, never a packet: nothing below the
-	// application layer crosses into the filter, so nothing below it comes back.
-	string* mangled_data = nullptr;
 
-	py_filter_response(PyFilterResponse action, string* filter_match_by = nullptr, string* mangled_data = nullptr):
-		action(action), filter_match_by(filter_match_by), mangled_data(mangled_data){}
+	py_filter_response(PyFilterResponse action, string* filter_match_by = nullptr):
+		action(action), filter_match_by(filter_match_by){}
 
 	~py_filter_response(){
-		delete mangled_data;
 		delete filter_match_by;
 	}
 };
@@ -256,28 +256,8 @@ struct pyfilter_ctx {
 			del_item_from_glob("__firegex_pyfilter_result");
 			return py_filter_response(action_enum, func_name);
 		}
-		if (action_enum == PyFilterResponse::MANGLE){
-			PyObject* mangled_data = PyDict_GetItemString(result, "mangled_data");
-			if (mangled_data == nullptr){
-				del_item_from_glob("__firegex_pyfilter_result");
-				#ifdef DEBUG
-				cerr << "[DEBUG] [handle_packet] No result mangled_data found" << endl;
-				#endif
-				return py_filter_response(PyFilterResponse::INVALID);
-			}
-			if (!PyBytes_Check(mangled_data)){
-				#ifdef DEBUG
-				cerr << "[DEBUG] [handle_packet] mangled_data is not a bytes" << endl;
-				#endif
-				del_item_from_glob("__firegex_pyfilter_result");
-				return py_filter_response(PyFilterResponse::INVALID);
-			}
-			string* pkt_str = new string(PyBytes_AsString(mangled_data), PyBytes_Size(mangled_data));
-			del_item_from_glob("__firegex_pyfilter_result");
-			return py_filter_response(PyFilterResponse::MANGLE, func_name, pkt_str);
-		}
-		
 		//Should never reach this point, but just in case of new action not managed...
+		delete func_name;
 		del_item_from_glob("__firegex_pyfilter_result");
 		return py_filter_response(PyFilterResponse::INVALID);
 	}
@@ -287,11 +267,53 @@ struct pyfilter_ctx {
 typedef map<stream_id, pyfilter_ctx*> matching_map;
 
 
+// How long a UDP flow keeps its filter's state with nothing arriving. A datagram has no
+// close to observe, so this is the only thing that ends a flow — the same minute the
+// proxy layer's relay gives one.
+constexpr int64_t UDP_IDLE_SECONDS = 60;
+
+inline long long env_number(const char* name){
+	const char* env = getenv(name);
+	if (env == nullptr) return 0;
+	char* end = nullptr;
+	long long parsed = strtoll(env, &end, 10);
+	return end != env ? parsed : 0;
+}
+
+// How many UDP flows one queue thread may hold a filter's state for at once: the
+// service's own "most connections at once", shared out between the threads — each holds
+// the contexts of the flows hashed to it, so a limit applied per thread would be the
+// operator's number times the thread count. 0, missing or unreadable means no limit, and
+// idle flows still go after `UDP_IDLE_SECONDS`, which is what keeps that from growing
+// without end.
+inline size_t max_udp_flows(){
+	static const size_t value = [](){
+		const long long limit = env_number("FIREGEX_MAX_FLOWS");
+		if (limit <= 0) return (size_t)0;
+		const long long threads = env_number("NTHREADS") > 0 ? env_number("NTHREADS") : 1;
+		return (size_t)((limit + threads - 1) / threads);
+	}();
+	return value;
+}
+
+inline int64_t steady_seconds(){
+	return std::chrono::duration_cast<std::chrono::seconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 struct stream_ctx {
 
 	matching_map streams_ctx;
 
 	NfQueue::tcp_ack_map tcp_ack_ctx;
+
+	// The UDP flows holding a context, most recently used first, with when each was
+	// last seen — so the one to let go of, whether for being idle or to make room, is
+	// always at the back. TCP contexts are not in here and are never evicted: a TCP
+	// stream is released when libtins sees it close, and dropping its state while it
+	// is still open would have its next packet parsed from a clean slate mid-message.
+	list<pair<stream_id, int64_t>> udp_recent;
+	map<stream_id, list<pair<stream_id, int64_t>>::iterator> udp_where;
 
 	void clean_stream_by_id(stream_id sid){
 		auto stream_search = streams_ctx.find(sid);
@@ -299,6 +321,41 @@ struct stream_ctx {
 			auto stream_match = stream_search->second;
 			delete stream_match;
 			streams_ctx.erase(stream_search->first);
+		}
+		auto flow = udp_where.find(sid);
+		if (flow != udp_where.end()){
+			udp_recent.erase(flow->second);
+			udp_where.erase(flow);
+		}
+	}
+
+	// This UDP flow was just used.
+	void udp_touch(const stream_id& sid){
+		auto flow = udp_where.find(sid);
+		if (flow != udp_where.end()){
+			udp_recent.erase(flow->second);
+		}
+		udp_recent.emplace_front(sid, steady_seconds());
+		udp_where[sid] = udp_recent.begin();
+	}
+
+	// Let go of the UDP flows nothing has arrived on for `idle` seconds.
+	void udp_expire(int64_t idle){
+		const int64_t now = steady_seconds();
+		while (!udp_recent.empty() && now - udp_recent.back().second >= idle){
+			stream_id sid = udp_recent.back().first;
+			clean_stream_by_id(sid);
+		}
+	}
+
+	// Make room for one more UDP flow under `limit`, letting the least recently used go;
+	// a limit of zero is none. Only UDP flows are counted and only UDP flows go: the
+	// ceiling used to be applied to every context, so a burst of datagrams could take the
+	// state of a TCP connection still in the middle of a request.
+	void udp_make_room(size_t limit){
+		while (limit > 0 && udp_where.size() >= limit && !udp_recent.empty()){
+			stream_id sid = udp_recent.back().first;
+			clean_stream_by_id(sid);
 		}
 	}
 
@@ -311,23 +368,6 @@ struct stream_ctx {
 		}
 	}
 
-	// Keep the number of live filter contexts under a ceiling.
-	//
-	// A TCP flow is released when libtins sees the connection close. A datagram has no
-	// close to observe, so a UDP service under a spoofed-source flood would otherwise
-	// accumulate one set of Python module globals per forged address until the process
-	// died. Which context is dropped is arbitrary — the map is ordered by flow id, not
-	// by age — and that is the honest trade: the bound is the point, and a flow that
-	// loses its globals starts again from a clean state rather than taking the service
-	// with it.
-	void enforce_limit(size_t limit){
-		while (streams_ctx.size() >= limit && !streams_ctx.empty()){
-			auto victim = streams_ctx.begin();
-			delete victim->second;
-			streams_ctx.erase(victim);
-		}
-	}
-
 	void clean(){
 		for (auto ele: streams_ctx){
 			delete ele.second;
@@ -337,6 +377,8 @@ struct stream_ctx {
 		}
 		tcp_ack_ctx.clear();
 		streams_ctx.clear();
+		udp_recent.clear();
+		udp_where.clear();
 	}
 };
 

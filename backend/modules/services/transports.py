@@ -422,6 +422,10 @@ class _QueueStage:
                     "NTHREADS": os.getenv("NTHREADS", "1"),
                     "FIREGEX_NFQUEUE_FAIL_OPEN": "1" if self.srv.fail_open else "0",
                     "FIREGEX_NFPROXY_SOCK": self._sock_path,
+                    # How many UDP flows keep a filter's state at once: the service's own
+                    # limit, 0 for none. Only datagrams need it — a TCP stream's state
+                    # goes when the stream closes.
+                    "FIREGEX_MAX_FLOWS": str(self.srv.max_connections),
                 },
             ),
         )

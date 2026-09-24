@@ -314,13 +314,6 @@ def _chain(name: str, ctype: str, hook: str, prio: int) -> dict:
     }
 
 
-def _drop_chain(name: str) -> list[dict]:
-    return [
-        {"flush": {"chain": {"table": FiregexTables.table_name, "family": "inet", "name": name}}},
-        {"delete": {"chain": {"table": FiregexTables.table_name, "family": "inet", "name": name}}},
-    ]
-
-
 class FiregexTables(NFTableManager):
     # NFQUEUE transport: one pair of chains per position in the filter chain.
     @staticmethod
@@ -340,6 +333,9 @@ class FiregexTables(NFTableManager):
     nat_chain = "fgex_nat"
     nat_output_chain = "fgex_nat_out"
     route_chain = "fgex_route"
+    guard_chain = "fgex_guard"
+    #: `l4proto . port` of every listener and relay a proxy-layer redirect points at.
+    datapath_set = "fgex_datapath"
 
     def __init__(self):
         super().__init__(
@@ -400,6 +396,64 @@ class FiregexTables(NFTableManager):
                 _chain(self.nat_output_chain, "nat", "output", NAT_PRIORITY),
                 # `route`, so changing the mark forces the packet to be re-routed.
                 _chain(self.route_chain, "route", "output", -150),
+                # **The engine's own ports are reached through a redirect or not at all.**
+                # Its TCP listener and every UDP and QUIC relay are bound to the wildcard,
+                # because a redirect delivers to whichever address the packet arrived on,
+                # so each of them could be dialled straight from anywhere that reaches the
+                # host. A relay forwards to its service whoever sent the datagram: a
+                # service protected on `127.0.0.1:53` was on the network through the
+                # relay's port. What arrived by the redirect carries conntrack's DNAT
+                # status; anything else aimed at one of these ports is dropped. Replies
+                # to the engine's transparent sockets are marked by `fgex_divert` and
+                # left alone, since a client's source port can be any number at all.
+                {
+                    "add": {
+                        "set": {
+                            "family": "inet",
+                            "table": self.table_name,
+                            "name": self.datapath_set,
+                            "type": ["inet_proto", "inet_service"],
+                        }
+                    }
+                },
+                _chain(self.guard_chain, "filter", "input", 0),
+                {
+                    "add": {
+                        "rule": {
+                            "family": "inet",
+                            "table": self.table_name,
+                            "chain": self.guard_chain,
+                            "expr": [
+                                {
+                                    "match": {
+                                        "op": "!=",
+                                        "left": {"meta": {"key": "mark"}},
+                                        "right": PROXY_MARK,
+                                    }
+                                },
+                                {
+                                    "match": {
+                                        "op": "==",
+                                        "left": {"&": [{"ct": {"key": "status"}}, "dnat"]},
+                                        "right": 0,
+                                    }
+                                },
+                                {
+                                    "match": {
+                                        "op": "==",
+                                        "left": {"concat": [
+                                            {"meta": {"key": "l4proto"}},
+                                            {"payload": {"protocol": "th", "field": "dport"}},
+                                        ]},
+                                        "right": f"@{self.datapath_set}",
+                                    }
+                                },
+                                self.COUNTER,
+                                {"drop": None},
+                            ],
+                        }
+                    }
+                },
                 # Installed once. A packet on the intercepted (redirected) connection
                 # is the engine answering a client and has to leave normally; anything
                 # else from a protected service is a reply to the engine's own dial,
@@ -424,23 +478,12 @@ class FiregexTables(NFTableManager):
                     }
                 },
             ],
-            [
-                *[
-                    cmd
-                    for position in range(MAX_CHAIN_POSITIONS)
-                    for cmd in (
-                        *_drop_chain(self.queue_input_chain(position)),
-                        *_drop_chain(self.queue_output_chain(position)),
-                    )
-                ],
-                *_drop_chain(self.hijack_in_chain),
-                *_drop_chain(self.hijack_local_chain),
-                *_drop_chain(self.hijack_out_chain),
-                *_drop_chain(self.divert_chain),
-                *_drop_chain(self.nat_chain),
-                *_drop_chain(self.nat_output_chain),
-                *_drop_chain(self.route_chain),
-            ],
+            # The whole table, which is firegex's alone. It used to be flushed chain by
+            # chain in one batch, and nft refuses a batch outright if any object in it is
+            # missing — so a table left by a version with a different set of chains (an
+            # upgrade after a crash, say) was never cleared at all: its rules went on
+            # steering traffic at queues and ports nobody listened on any more.
+            [{"delete": {"table": {"family": "inet", "name": self.table_name}}}],
         )
 
     #: How the mark and the routing table are spelled to `ip`, derived from the constants
@@ -476,6 +519,8 @@ class FiregexTables(NFTableManager):
 
     def reset(self):
         super().reset()
+        # The set went with the table.
+        self._guarded.clear()
         try:
             self._policy_route("del")
         except Exception:
@@ -613,6 +658,7 @@ class FiregexTables(NFTableManager):
                             f"the proxy transport has no UDP relay listening for {key}"
                         )
                 self._add_proxy(srv, target_ip, target_port, family, l4, port)
+                self._guard(srv, l4, port)
 
     def _add_queue(self, srv: Service, ip: str, port: int, family: str, l4: str,
                    queue_nums: list[int]):
@@ -900,3 +946,39 @@ class FiregexTables(NFTableManager):
         ]
         if cmds:
             self.cmd(*cmds)
+        # Only when the whole service comes down. An address taken off a running service
+        # leaves its relay bound in the engine — relays live as long as the engine does —
+        # so its port stays guarded until the engine goes; released earlier, the relay
+        # would be reachable directly again with nothing steering traffic at it.
+        if addresses is None:
+            for l4, port in self._guarded.pop(str(srv.id), set()):
+                self._unguard(l4, port)
+
+    def _element(self, verb: str, l4: str, port: int) -> dict:
+        return {
+            verb: {
+                "element": {
+                    "family": "inet",
+                    "table": self.table_name,
+                    "name": self.datapath_set,
+                    "elem": [{"concat": [l4, int(port)]}],
+                }
+            }
+        }
+
+    #: Which engine ports each running service has had guarded, so that all of them are
+    #: released when it stops — including a relay whose address was removed while it ran.
+    #: Kept here rather than read back from the rules for exactly that relay: nothing
+    #: points at it any more, and an element left in the set would drop traffic for
+    #: whatever process is given that port next.
+    _guarded: dict[str, set[tuple[str, int]]] = {}
+
+    def _guard(self, srv: Service, l4: str, port: int) -> None:
+        """Refuse whatever reaches `port` without having been redirected there."""
+        self.cmd(self._element("add", l4, port))
+        self._guarded.setdefault(str(srv.id), set()).add((l4, int(port)))
+
+    def _unguard(self, l4: str, port: int) -> None:
+        # Separately, and tolerated: an element that is not there makes nft refuse the
+        # command, and the rules it belonged to are already gone either way.
+        self.raw_cmd(self._element("delete", l4, port))

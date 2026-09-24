@@ -130,8 +130,8 @@ const state = {
     ],
     // One shape for every service: a network layer, and a chain of filters on it.
     services: [
-        { service_id: svcShop, name: "shop-api", status: "active", proto: "tcp", transport: "proxy", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
-        { service_id: svcScore, name: "scoreboard", status: "active", proto: "tcp", transport: "nfqueue", fail_open: true, max_connections: 512, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 1847, over_limit_first: demoStart, over_limit_last: demoStart + 900, filtering_since: demoStart },
+        { service_id: svcShop, name: "shop-api", status: "active", proto: "tcp", transport: "proxy", fail_open: true, max_connections: 512, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 1847, over_limit_first: demoStart, over_limit_last: demoStart + 900, filtering_since: demoStart },
+        { service_id: svcScore, name: "scoreboard", status: "active", proto: "tcp", transport: "nfqueue", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: demoStart },
         { service_id: svcVault, name: "vault", status: "stop", proto: "tls", transport: "proxy", fail_open: true, max_connections: 0, over_limit_forwards: false, first_byte_timeout: 0, over_limit_hits: 0, over_limit_first: null, over_limit_last: null, filtering_since: null },
         // QUIC: UDP on the wire, terminated here because nothing else can see inside it.
         // Its filters are written against HTTP because its traffic is HTTP/3, which the

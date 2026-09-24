@@ -30,7 +30,10 @@
 //!   than forwarded past a filter that never saw them;
 //! * `host` is rendered from the `:authority` pseudo-header, which is where both HTTP/2
 //!   and HTTP/3 put it;
-//! * hop-by-hop headers do not appear, because both forbid sending them.
+//! * hop-by-hop headers do not appear: both versions forbid them, a request carrying one
+//!   is refused as malformed ([`connection_specific`]), and an answer from a service
+//!   reached over HTTP/1.1 has its own taken out before it goes on
+//!   ([`drop_connection_headers`]).
 //!
 //! A message whose declared `content-length` disagrees with the body it then sends is
 //! malformed in HTTP/2 and HTTP/3 as well, and nothing here tries to repair it: the frames
@@ -344,6 +347,70 @@ pub(crate) fn conflicting_authority(request: &http::Request<()>) -> Option<Strin
             ))
         }
         _ => None,
+    }
+}
+
+/// The most a client's head may take — the header section of one request, decoded.
+///
+/// Neither crate bounds it usefully by default: h2 allows 16 MiB, and h3 sets no limit at
+/// all, so an HTTP/3 request could keep one header block growing for as long as flow
+/// control kept crediting it, a hundred streams to a connection. A mebibyte is the budget
+/// the filter library holds a stream to by default (`FGEX_STREAM_MAX_SIZE`), well past
+/// what any HTTP/1.1 server accepts in a head, and far enough from the usual range that
+/// a large cookie or a heavy set of gRPC metadata is never what it refuses.
+pub(crate) const MAX_HEAD_BYTES: u32 = 1024 * 1024;
+
+/// Headers about one connection rather than about the message it carries.
+///
+/// HTTP/2 and HTTP/3 have no such thing (RFC 9113 §8.2.2, RFC 9114 §4.2): the framing and
+/// the connection's lifetime are the protocol's own business, so a message carrying one
+/// is malformed. `te` is the exception, and only as `trailers`.
+const CONNECTION_SPECIFIC: [&str; 6] =
+    ["connection", "keep-alive", "proxy-connection", "transfer-encoding", "upgrade", "te"];
+
+/// Why a request that arrived over HTTP/2 or HTTP/3 carries a header only a connection
+/// can, or `None`.
+///
+/// The h2 crate refuses these itself; h3 does not, so an HTTP/3 client could hand a
+/// service reached over HTTP/1.1 a `connection` naming headers for it to drop, or a `te`
+/// the upstream then extends into a transfer coding the service is told to undo — none of
+/// which a filter shown the rendering would recognise as the request the service got.
+pub(crate) fn connection_specific(headers: &http::HeaderMap) -> Option<String> {
+    for name in CONNECTION_SPECIFIC {
+        for value in headers.get_all(name) {
+            if name == "te" && value.as_bytes().eq_ignore_ascii_case(b"trailers") {
+                continue;
+            }
+            return Some(format!(
+                "the request carries `{name}`, which belongs to a connection rather than to \
+                 a message"
+            ));
+        }
+    }
+    None
+}
+
+/// Take out of an HTTP/1.1 answer what belongs to that connection, before it goes on in
+/// a version that forbids it.
+///
+/// Every HTTP/1.1 service says something about its connection — a body of unknown length
+/// comes `transfer-encoding: chunked`, a connection it will keep open says `keep-alive` —
+/// and those were passed on as they came: HTTP/2 refused to send the response at all, and
+/// an HTTP/3 client is required to reject one. What `connection` itself names goes too,
+/// since that is what the header is for (RFC 9110 §7.6.1).
+pub(crate) fn drop_connection_headers(headers: &mut http::HeaderMap) {
+    let named: Vec<http::HeaderName> = headers
+        .get_all(http::header::CONNECTION)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split(','))
+        .filter_map(|name| http::HeaderName::from_bytes(name.trim().as_bytes()).ok())
+        .collect();
+    for name in named {
+        headers.remove(name);
+    }
+    for name in CONNECTION_SPECIFIC {
+        headers.remove(name);
     }
 }
 

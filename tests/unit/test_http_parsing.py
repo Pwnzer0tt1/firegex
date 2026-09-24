@@ -268,6 +268,76 @@ def test_a_zstd_body_is_decompressed_before_the_filter_sees_it():
     assert final(run((raw, False)), "response")["body"] == b"FLAG{secret}"
 
 
+# --- a body larger decoded than the cap it arrived under -----------------------------
+# `FGEX_STREAM_MAX_SIZE` bounds what a filter holds, but a body arrives under it
+# compressed: a megabyte of gzip is a gigabyte of zeroes. It was decoded whole, so one
+# response could take the worker's memory with it.
+
+
+def _capped(cap: int, action: str, *chunks: tuple[bytes, bool]) -> tuple[list[dict], int]:
+    code = FILTER_CODE.replace(
+        "seen = []",
+        "from firegex.pyfilters import FullStreamAction\n"
+        f"FGEX_STREAM_MAX_SIZE = {cap}\n"
+        f"FGEX_FULL_STREAM_ACTION = FullStreamAction.{action}\n"
+        "seen = []",
+    )
+    glob = {"__firegex_pyfilter_enabled": ["watch_request", "watch_response"]}
+    exec(code, glob, glob)
+    compile(glob)
+    for payload, is_input in chunks:
+        glob["__firegex_packet_info"] = packet(payload, is_input)
+        handle_packet(glob)
+    return glob["seen"], glob.get("__firegex_pyfilter_result", {}).get("action")
+
+
+def _response(encoding: str, payload: bytes) -> bytes:
+    return (b"HTTP/1.1 200 OK\r\nContent-Encoding: " + encoding.encode()
+            + b"\r\nContent-Length: " + str(len(payload)).encode() + b"\r\n\r\n" + payload)
+
+
+def _bombs():
+    import brotli
+    zeroes = b"\0" * (4 * 1024 * 1024)
+    deflate = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+    yield "gzip", gzip.compress(zeroes)
+    yield "deflate", deflate.compress(zeroes) + deflate.flush()
+    yield "br", brotli.compress(zeroes)
+    # Two layers, each under the cap on its own: the limit holds for every step.
+    yield "gzip, gzip", gzip.compress(gzip.compress(zeroes))
+
+
+@pytest.mark.parametrize("encoding,payload", list(_bombs()), ids=lambda v: str(v)[:12])
+def test_a_body_that_decodes_past_the_cap_meets_the_full_stream_action(encoding, payload):
+    seen, action = _capped(1024 * 1024, "REJECT", (_response(encoding, payload), False))
+    assert action == 2, "a body decoding to four megabytes under a one-megabyte cap passed"
+    assert seen == [], "the filter was handed a body past the cap"
+
+
+def test_flushing_hands_the_body_over_as_it_arrived():
+    """Nothing is buffered to throw away, so the message goes on still encoded — what
+    an encoding this cannot undo already does."""
+    payload = gzip.compress(b"\0" * (4 * 1024 * 1024))
+    seen, action = _capped(1024 * 1024, "FLUSH", (_response("gzip", payload), False))
+    assert action == 0
+    assert final(seen, "response")["body"] == payload
+
+
+def test_a_body_under_the_cap_is_still_decoded():
+    seen, _ = _capped(1024 * 1024, "REJECT", (_response("gzip", gzip.compress(b"FLAG")), False))
+    assert final(seen, "response")["body"] == b"FLAG"
+
+
+def test_headers_past_the_cap_are_flushed_not_raised():
+    """The flush subtracted `len(body)` from a message still in its headers, whose body is
+    `None`: headers past the cap raised instead of flushing, and the packet failed open."""
+    head = b"POST / HTTP/1.1\r\nHost: a\r\nX-Pad: " + b"A" * 150
+    seen, action = _capped(100, "FLUSH", (head[:60], True), (head[60:], True),
+                           (b"\r\nContent-Length: 4\r\n\r\nbody", True))
+    assert action == 0
+    assert final(seen, "request")["body"] == b"body"
+
+
 def test_an_identity_encoding_is_left_alone():
     raw = b"HTTP/1.1 200 OK\r\nContent-Encoding: identity\r\nContent-Length: 5\r\n\r\nplain"
     assert final(run((raw, False)), "response")["body"] == b"plain"
@@ -307,3 +377,29 @@ def test_tabs_around_a_content_length_are_tolerated():
     message = final(run((raw, False)), "response")
     assert message["body"] == b"plain"
     assert message["content_length"] == 5
+
+
+def test_the_history_is_held_to_the_same_bytes_as_the_stream():
+    """`FGEX_MAX_HISTORY_SIZE` counts messages, and each can be as large as the stream
+    cap: a keep-alive connection could hold a hundred bodies of a megabyte, per
+    direction, for as long as it stayed open."""
+    code = """
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpFullRequest
+FGEX_STREAM_MAX_SIZE = 1000
+held = []
+@pyfilter
+def watch(req: HttpFullRequest):
+    held.append(sum(len(r.body or b"") for r in req.history.requests))
+    return ACCEPT
+"""
+    glob = {"__firegex_pyfilter_enabled": ["watch"]}
+    exec(code, glob, glob)
+    compile(glob)
+    request = b"POST / HTTP/1.1\r\nHost: a\r\nContent-Length: 400\r\n\r\n" + b"b" * 400
+    for _ in range(8):
+        glob["__firegex_packet_info"] = packet(request, True)
+        handle_packet(glob)
+    assert len(glob["held"]) == 8
+    assert max(glob["held"]) <= 1000, glob["held"]
+    assert glob["held"][-1] > 0, "the history was emptied rather than trimmed"

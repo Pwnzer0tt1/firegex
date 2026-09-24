@@ -3,9 +3,10 @@ pydantic>=2
 typing-extensions>=4.7.1
 pycryptodome
 watchfiles
-fgex
 websockets
-brotli
+# 1.2 is the first with `output_buffer_limit`, which is what lets a body be decoded only
+# as far as a filter may hold it. See `_unbrotli` in pyfilters/models/http.py.
+brotli>=1.2.0
 # Python 3.14 has `compression.zstd` in the standard library; this fills the gap
 # below it. See firegex/pyfilters/internals/zstd_compat.py.
 zstandard; python_version < '3.14'

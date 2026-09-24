@@ -858,6 +858,18 @@ fn edge(tls: bool) -> &'static str {
 
 /// A cleartext **HTTP/1.1** service, which is what most of the web is.
 async fn spawn_http1_service(seen: Arc<Mutex<Vec<String>>>) -> SocketAddr {
+    spawn_http1_service_answering(
+        seen,
+        b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\ncontent-length: 5\r\n\r\nhello",
+    )
+    .await
+}
+
+/// The same, answering with whatever head and body it is given.
+async fn spawn_http1_service_answering(
+    seen: Arc<Mutex<Vec<String>>>,
+    answer: &'static [u8],
+) -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
@@ -873,12 +885,7 @@ async fn spawn_http1_service(seen: Arc<Mutex<Vec<String>>>) -> SocketAddr {
                 seen.lock()
                     .unwrap()
                     .push(String::from_utf8_lossy(&buf[..read]).to_string());
-                let _ = socket
-                    .write_all(
-                        b"HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n\
-                          content-length: 5\r\n\r\nhello",
-                    )
-                    .await;
+                let _ = socket.write_all(answer).await;
             });
         }
     });
@@ -939,6 +946,124 @@ async fn http2_is_carried_to_a_service_that_speaks_http1() {
         "the service was not spoken to in HTTP/1.1: {:?}",
         arrived[0]
     );
+}
+
+/// What an HTTP/1.1 service actually answers with: a body of unknown length sent chunked,
+/// and a connection it offers to keep open. Both are headers about *that* connection,
+/// which HTTP/2 forbids outright — the h2 crate refuses to send a response carrying one —
+/// so they were passed through and every such answer failed on its way to the client.
+#[tokio::test]
+async fn an_http1_answer_is_relayed_without_its_connection_headers() {
+    let (cert, key) = self_signed();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let service = spawn_http1_service_answering(
+        Arc::clone(&seen),
+        b"HTTP/1.1 200 OK\r\nconnection: keep-alive\r\nkeep-alive: timeout=5\r\n\
+          content-type: text/plain\r\ntransfer-encoding: chunked\r\n\r\n\
+          5\r\nhello\r\n0\r\n\r\n",
+    )
+    .await;
+    let proxy = spawn_proxy_to_http1(service, &cert, &key, LIVE).await;
+
+    let answer = request(proxy, "GET", "/files/ok", Body::None).await;
+    assert!(
+        answer.as_deref().is_ok_and(|a| a.contains("hello")),
+        "a chunked keep-alive answer did not reach an HTTP/2 client: {answer:?}"
+    );
+}
+
+/// One client connection is one connection to the limit, and each of its streams is an
+/// exchange of its own — towards an HTTP/1.1 service, a connection of its own. With no cap
+/// on concurrent streams, one client could open as many connections to the service as it
+/// liked past `max_connections`.
+#[tokio::test]
+async fn one_client_connection_cannot_open_the_service_a_thousand_times() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let service = listener.local_addr().unwrap();
+    let open = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let most = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    {
+        let (open, most) = (Arc::clone(&open), Arc::clone(&most));
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                let (open, most) = (Arc::clone(&open), Arc::clone(&most));
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    // Counted from the request, not from the accept: a connection that
+                    // closes without asking anything is not one the service is serving.
+                    let mut buf = [0u8; 4096];
+                    if !matches!(socket.read(&mut buf).await, Ok(n) if n > 0) {
+                        return;
+                    }
+                    let now = open.fetch_add(1, Ordering::SeqCst) + 1;
+                    most.fetch_max(now, Ordering::SeqCst);
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    // Counted down before answering: once the answer is out the stream
+                    // can end and the client open the next, before this task resumes.
+                    open.fetch_sub(1, Ordering::SeqCst);
+                    let _ = socket
+                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok")
+                        .await;
+                });
+            }
+        });
+    }
+    let (cert, key) = self_signed();
+    let proxy = spawn_proxy_to_http1(service, &cert, &key, LIVE).await;
+
+    let (sender, driving) = connect(proxy).await.unwrap();
+    let mut asked = Vec::new();
+    for _ in 0..250 {
+        let sender = sender.clone();
+        asked.push(tokio::spawn(async move {
+            let mut sender = sender.ready().await.map_err(|e| e.to_string())?;
+            let outgoing = http::Request::builder()
+                .method("GET")
+                .uri("https://localhost/")
+                .body(())
+                .map_err(|e| e.to_string())?;
+            let (response, _) = sender.send_request(outgoing, true).map_err(|e| e.to_string())?;
+            response.await.map_err(|e| e.to_string()).map(|_| ())
+        }));
+    }
+    for one in asked {
+        let _ = tokio::time::timeout(Duration::from_secs(20), one).await;
+    }
+    driving.abort();
+    let most = most.load(Ordering::SeqCst);
+    assert!(most > 0, "nothing reached the service at all");
+    assert!(most <= 100, "one client connection held {most} connections to the service open");
+}
+
+/// A head is bounded: the h2 crate's own limit is 16 MiB, a hundred streams to a
+/// connection. Well past what services accept, though — a large head is still carried.
+#[tokio::test]
+async fn a_head_past_the_limit_is_refused_over_http2() {
+    let (addr, seen) = relay(Service::Echo, LIVE).await;
+    let ask = |size: usize| async move {
+        let (mut sender, driving) = connect(addr).await?;
+        let answer = async {
+            let outgoing = http::Request::builder()
+                .method("GET")
+                .uri("https://localhost/who")
+                .header("x-big", "a".repeat(size))
+                .body(())
+                .map_err(|e| e.to_string())?;
+            let (response, _) = sender.send_request(outgoing, true).map_err(|e| e.to_string())?;
+            response.await.map_err(|e| e.to_string()).map(|r| r.status().as_u16())
+        }
+        .await;
+        driving.abort();
+        answer
+    };
+    assert_eq!(ask(256 * 1024).await, Ok(200), "a 256 KiB head was refused");
+    let answered = seen.requests.load(Ordering::Relaxed);
+    let refused = tokio::time::timeout(Duration::from_secs(10), ask(2 * 1024 * 1024))
+        .await
+        .expect("an oversized head was left hanging");
+    // The crate answers `431 Request Header Fields Too Large` itself, as RFC 9113 suggests.
+    assert!(!matches!(refused, Ok(200)), "a 2 MiB head was carried: {refused:?}");
+    assert_eq!(seen.requests.load(Ordering::Relaxed), answered, "it reached the service");
 }
 
 #[tokio::test]

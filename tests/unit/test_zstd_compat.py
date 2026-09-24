@@ -92,3 +92,19 @@ def test_the_fallback_is_reachable_at_all():
     # shim itself. That is what tells the two apart.
     assert fallback._decompress.__module__ == "zstd_compat_probe", \
         "hiding `compression` did not select the zstandard fallback"
+
+
+@pytest.mark.parametrize("hide_stdlib", BACKENDS)
+@pytest.mark.parametrize("label,blob,expected",
+                         [pytest.param(n, b, e, id=n) for n, b, e in _corpus()])
+def test_both_backends_stop_where_they_are_told_to(hide_stdlib, label, blob, expected):
+    """A bounded read, so a body can be decoded only as far as a filter may hold it."""
+    shim = _load(hide_stdlib)
+    assert shim.decompress(blob, max_length=7) == expected[:7]
+    assert shim.decompress(blob, max_length=len(expected) + 1) == expected
+
+
+@pytest.mark.parametrize("hide_stdlib", BACKENDS)
+def test_a_frame_declaring_far_more_is_not_decoded_whole(hide_stdlib):
+    blob = zstandard.ZstdCompressor().compress(b"\0" * (64 * 1024 * 1024))
+    assert len(_load(hide_stdlib).decompress(blob, max_length=1024)) == 1024

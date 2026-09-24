@@ -179,10 +179,6 @@ halves.
 
 **What that buys**
 
-- **Exact rewriting, for a Python filter.** Two independent connections means a
-  replacement can be any length: there are no sequence numbers shared with the client to
-  desynchronise. Patterns do not rewrite on any layer — see **Regex** under *Filters* below
-  for why that was withdrawn. This is
 - **Reassembly is the kernel's problem.** Both sides are ordinary sockets, so
   out-of-order and retransmitted segments are sorted out before a filter ever sees them
    — rather than being rebuilt in userspace with the caveats that come with it.
@@ -261,10 +257,10 @@ What UDP on the proxy layer provides:
 - **Zero-downtime dynamic address addition.** Adding new addresses to a running UDP service
   dynamically binds new relay sockets through the control channel without restarting the
   engine or dropping existing connections.
-- **Exact rewriting, at any length, for a Python filter.** A datagram is
-  self-contained, so there are no sequence numbers for a longer or shorter payload to
-  desynchronise. The caveat that makes rewriting unstable on the NFQUEUE layer simply
-  does not apply.
+- **Relays answer only what was redirected to them.** Each relay is bound on an
+  ephemeral port of every address, because a redirect delivers to whichever address the
+  datagram arrived on; a datagram sent straight to that port, from anywhere, is dropped
+  by the rules rather than forwarded to your service.
 - **Per-flow filter state.** Each client address is a flow with its own filter state and
   its own Python module globals, released after a minute of silence — UDP has no close
   to observe, so a timeout is the only thing that can end one.
@@ -280,6 +276,14 @@ A service can be given a **limit on how many connections it carries at once**, a
 what to do with what does not fit. Both are on the proxy layer, which is the one that
 accepts a connection and dials the service; NFQUEUE hands the kernel a verdict on packets
 already in flight, and what it can run out of is queue — that is what fail-open is for.
+There is no limit unless you set one.
+
+On NFQUEUE the same setting, under **Advanced settings**, means something narrower, and
+only for a UDP service: **how many UDP flows keep their Python filters' state at once**.
+A datagram has no close to observe, so a flow's state is otherwise kept until it has been
+quiet for a minute. Past the limit nothing is refused — the flow quiet the longest loses
+what its filters were keeping, and starts over from a clean state when it next sends. A
+TCP stream lets go of its state when it closes, so the setting does not apply to one.
 
 Without a limit, connections that are opened and then say **nothing** are the cheapest
 attack there is. Each costs two descriptors — one from the client, one to the service,

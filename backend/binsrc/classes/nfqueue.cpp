@@ -19,13 +19,6 @@ using namespace std;
 namespace Firegex{
 namespace NfQueue{
 
-/*  Largest packet we are willing to hand back to the kernel in a verdict.
-    NFQUEUE payloads are carried in a netlink attribute whose length field is
-    16 bit wide, so anything above this can never be re-injected anyway; the
-    cap exists to stop a python filter from making us allocate an arbitrary
-    amount of memory through the payload it returns. */
-const size_t MAX_VERDICT_PACKET_SIZE = 0xffff;
-
 /*  Reads the fail-open policy once, tolerating a missing variable.
     `strcmp(getenv(...), "1")` was the previous spelling, which dereferences a
     null pointer the moment the binary is run without the variable set — by
@@ -320,40 +313,6 @@ class PktRequest {
 			mangle();
 		}else{
 			drop();
-		}
-	}
-
-	// Rewrite the application payload, keeping the headers the packet arrived with.
-	//
-	// A filter can no longer see or write anything below the application layer, so
-	// there is no packet to take from it — only the payload it produced. That is also
-	// the honest shape: the proxy layer terminates the connection and writes its own
-	// headers, so a filter that could rewrite an IP header here and not there would be
-	// a filter that means two different things depending on where it was attached.
-	void mangle_custom_data(const char* data_ptr, size_t data_len){
-		if (action == FilterAction::NOACTION){
-			try{
-				/*  The payload comes from the operator's python, and what is
-				    rebuilt from it is what goes back to the kernel in a verdict.
-				    A netlink attribute carries its length in 16 bits, so a
-				    bigger packet could never be re-injected anyway — refusing it
-				    here is what stops a filter from making this process
-				    allocate an arbitrary amount of memory for nothing. */
-				if (data_len + _header_size > MAX_VERDICT_PACKET_SIZE){
-					throw invalid_argument("Mangled packet is too big to be re-injected");
-				}
-				set_data(data_ptr, data_len);
-				reserialize();
-				action = FilterAction::MANGLE;
-			}catch(const std::exception& e){
-				#ifdef DEBUG
-				cerr << "[DEBUG] [PktRequest.mangle_custom_data] " << e.what() << endl;
-				#endif
-				action = FilterAction::DROP;
-			}
-			perform_action(false);
-		}else{
-			throw invalid_argument("Cannot mangle a packet that has already been accepted or dropped");
 		}
 	}
 

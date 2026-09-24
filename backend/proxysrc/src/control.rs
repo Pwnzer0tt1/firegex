@@ -159,14 +159,23 @@ pub async fn serve_stdin(
             continue;
         }
 
-        match parse_ruleset(trimmed).and_then(|filters| {
-            // Everything that has to be started is started here, while the old chain
-            // is still the one enforcing.
-            for filter in &filters {
-                filter.prepare()?;
-            }
-            Ok(filters)
-        }) {
+        // Everything that has to be started is started here, while the old chain is
+        // still the one enforcing — on a blocking thread, because starting a Python
+        // worker takes an interpreter's start-up and an import, and this task shares the
+        // runtime with every relay: with one worker thread, which is what a one-core
+        // host is given, the service carried nothing while a reload was loading a file.
+        let line = trimmed.to_string();
+        let prepared = tokio::task::spawn_blocking(move || {
+            parse_ruleset(&line).and_then(|filters| {
+                for filter in &filters {
+                    filter.prepare()?;
+                }
+                Ok(filters)
+            })
+        })
+        .await
+        .unwrap_or_else(|e| Err(format!("preparing the ruleset failed: {e}")));
+        match prepared {
             Ok(filters) => {
                 let n = filters.len();
                 chain.replace(FilterChain::new(filters, deadline));

@@ -1,6 +1,6 @@
 from firegex import _llhttp
 from firegex.pyfilters.internals.exceptions import NotReadyToRun
-from firegex.pyfilters.internals.data import DataStreamCtx
+from firegex.pyfilters.internals.data import DEFAULT_STREAM_MAX_SIZE, DataStreamCtx
 from firegex.pyfilters.internals.exceptions import (
     StreamFullDrop,
     StreamFullReject,
@@ -43,12 +43,12 @@ class InternalHTTPMessage:
     status_code: int | None = field(default=None)
     total_size: int = field(default=0)
     user_agent: str = field(default_factory=str)
-    content_encoding: str = field(default=str)
-    content_type: str = field(default=str)
+    content_encoding: str = field(default="")
+    content_type: str = field(default="")
     keep_alive: bool = field(default=False)
     should_upgrade: bool = field(default=False)
-    http_version: str = field(default=str)
-    method: str = field(default=str)
+    http_version: str = field(default="")
+    method: str = field(default="")
     content_length: int = field(default=0)
     stream: bytes = field(default_factory=bytes)
     ws_stream: list[Frame] = field(default_factory=list)  # Decoded websocket stream
@@ -61,6 +61,13 @@ class InternalHTTPMessage:
     #: keep-alive connection carries many messages through one parser, and a cursor kept
     #: per connection would start the second message part-way in.
     grpc_consumed: int = field(default=0)
+    #: How much of a gRPC frame that was flushed for being larger than the cap is still
+    #: to arrive. Passed over when it does, so the frame after it is found where it
+    #: starts rather than read out of the middle of the one before.
+    grpc_skip: int = field(default=0)
+    #: The body would have decoded to more than a filter may hold (`stream_max_size`),
+    #: so it was left as it arrived and the full-stream action decides what happens.
+    decoded_too_large: bool = field(default=False)
 
 
 @dataclass
@@ -75,6 +82,78 @@ class InternalHttpBuffer:
     _current_header_field: bytes = field(default_factory=bytes)
     _current_header_value: bytes = field(default_factory=bytes)
     _ws_packet_stream: bytes = field(default_factory=bytes)
+
+
+class _TooLarge(Exception):
+    """A body that would decode to more than the limit it was decoded under."""
+
+
+def _inflate(data: bytes, wbits: int, limit: int) -> bytes:
+    decoder = zlib.decompressobj(wbits)
+    out = decoder.decompress(data, limit + 1)
+    if len(out) > limit or decoder.unconsumed_tail:
+        raise _TooLarge()
+    out += decoder.flush(limit + 1 - len(out))
+    if len(out) > limit:
+        raise _TooLarge()
+    return out
+
+
+def _gunzip(data: bytes, limit: int) -> bytes:
+    with gzip.GzipFile(fileobj=io.BytesIO(data)) as f:
+        out = f.read(limit + 1)
+    if len(out) > limit:
+        raise _TooLarge()
+    return out
+
+
+def _unbrotli(data: bytes, limit: int) -> bytes:
+    decoder = brotli.Decompressor()
+    out = decoder.process(data, output_buffer_limit=limit + 1)
+    if len(out) > limit:
+        raise _TooLarge()
+    if not decoder.is_finished():
+        # What `brotli.decompress` says about a truncated stream, said here too: the
+        # incremental decoder just stops, and half a body is not the body.
+        raise brotli.error("the brotli stream ends before it is finished")
+    return out
+
+
+def _unzstd(data: bytes, limit: int) -> bytes:
+    out = zstd_compat.decompress(data, max_length=limit + 1)
+    if len(out) > limit:
+        raise _TooLarge()
+    return out
+
+
+def _flush_body(parser: "InternalCallbackHandler") -> None:
+    """Throw away the body in hand: the buffer it grows in, and not only the view of it.
+
+    Only the view used to be cleared, and the size it counted taken off the total — so on
+    a gRPC stream, whose body is handed over as it grows, the buffer went on growing past
+    every flush while the count went negative and stopped triggering one at all.
+    """
+    msg = parser.msg
+    buffered = parser.buffers._body_buffer
+    if parser.release_body_chunks:
+        # What has been framed is gone already. Of the rest, a header that has fully
+        # arrived says how long its frame is, and what is still to come of that frame is
+        # skipped; a partial header is a few bytes, and kept.
+        tail = buffered[msg.grpc_consumed:]
+        keep = tail
+        if len(tail) >= GRPC_HEADER_SIZE:
+            length = int.from_bytes(tail[1:GRPC_HEADER_SIZE], "big")
+            msg.grpc_skip = max(0, GRPC_HEADER_SIZE + length - len(tail))
+            keep = b""
+        msg.total_size -= len(buffered) - len(keep)
+        parser.buffers._body_buffer = keep
+        msg.body = keep
+        msg.grpc_consumed = 0
+        return
+    msg.total_size -= len(buffered) + len(msg.body or b"")
+    parser.buffers._body_buffer = b""
+    if msg.body is not None:
+        msg.body = b""
 
 
 class InternalCallbackHandler:
@@ -99,6 +178,11 @@ class InternalCallbackHandler:
     release_body_chunks = False
     #: Whether a chunk has arrived that has not been handed over yet.
     _body_chunk_pending = False
+    #: The most a body may decode to, and a WebSocket message decompress to. Set from
+    #: `stream_max_size` before every parse, because what a filter may hold is the
+    #: operator's number: a body arrives under that cap compressed, and a megabyte of
+    #: gzip is a gigabyte of zeroes — or of anything else that compresses as well.
+    max_decoded_size = DEFAULT_STREAM_MAX_SIZE
 
     def reset_data(self):
         self.msg = InternalHTTPMessage()
@@ -202,60 +286,69 @@ class InternalCallbackHandler:
         encodings = [ele.strip() for ele in self.content_encoding.lower().split(",")]
         decode_success = True
         decoding_body = self.msg.body
-        for enc in reversed(encodings):
-            if not enc:
-                continue
-            if enc == "deflate":
-                # Both spellings, because both are on the wire. RFC 7230 defines
-                # `deflate` as the zlib format of RFC 1950, and plenty of servers send
-                # the raw stream instead — browsers accept either, and a decoder that
-                # takes only one lets half the compressed traffic reach a filter still
-                # compressed, where a pattern finds nothing and the only trace is a line
-                # on stdout saying it skipped.
-                for wbits in (-zlib.MAX_WBITS, zlib.MAX_WBITS):
+        # Every step under the same limit, so a stack of encodings cannot multiply past it.
+        limit = self.max_decoded_size
+        try:
+            for enc in reversed(encodings):
+                if not enc:
+                    continue
+                if enc == "deflate":
+                    # Both spellings, because both are on the wire. RFC 7230 defines
+                    # `deflate` as the zlib format of RFC 1950, and plenty of servers
+                    # send the raw stream instead — browsers accept either, and a decoder
+                    # that takes only one lets half the compressed traffic reach a filter
+                    # still compressed, where a pattern finds nothing and the only trace
+                    # is a line on stdout saying it skipped.
+                    for wbits in (-zlib.MAX_WBITS, zlib.MAX_WBITS):
+                        try:
+                            decoding_body = _inflate(decoding_body, wbits, limit)
+                        except zlib.error:
+                            continue
+                        break
+                    else:
+                        print("Error decompressing deflate: neither raw nor zlib-wrapped: "
+                              "skipping", flush=True)
+                        decode_success = False
+                        break
+                elif enc == "br":
                     try:
-                        decompress = zlib.decompressobj(wbits)
-                        decoded = decompress.decompress(decoding_body)
-                        decoded += decompress.flush()
-                    except Exception:
-                        continue
-                    decoding_body = decoded
-                    break
+                        decoding_body = _unbrotli(decoding_body, limit)
+                    except _TooLarge:
+                        raise
+                    except Exception as e:
+                        print(f"Error decompressing brotli: {e}: skipping", flush=True)
+                        decode_success = False
+                        break
+                elif (
+                    enc == "gzip" or enc == "x-gzip"
+                ):  # https://datatracker.ietf.org/doc/html/rfc2616#section-3.5
+                    try:
+                        decoding_body = _gunzip(decoding_body, limit)
+                    except _TooLarge:
+                        raise
+                    except Exception as e:
+                        print(f"Error decompressing gzip: {e}: skipping", flush=True)
+                        decode_success = False
+                        break
+                elif enc == "zstd":
+                    try:
+                        decoding_body = _unzstd(decoding_body, limit)
+                    except _TooLarge:
+                        raise
+                    except Exception as e:
+                        print(f"Error decompressing zstd: {e}: skipping", flush=True)
+                        decode_success = False
+                        break
+                elif enc == "identity":
+                    pass  # No need to do anything https://datatracker.ietf.org/doc/html/rfc2616#section-3.5 (it's possible to be found also if it should't be used)
                 else:
-                    print("Error decompressing deflate: neither raw nor zlib-wrapped: "
-                          "skipping", flush=True)
                     decode_success = False
                     break
-            elif enc == "br":
-                try:
-                    decoding_body = brotli.decompress(decoding_body)
-                except Exception as e:
-                    print(f"Error decompressing brotli: {e}: skipping", flush=True)
-                    decode_success = False
-                    break
-            elif (
-                enc == "gzip" or enc == "x-gzip"
-            ):  # https://datatracker.ietf.org/doc/html/rfc2616#section-3.5
-                try:
-                    if "gzip" in self.content_encoding.lower():
-                        with gzip.GzipFile(fileobj=io.BytesIO(decoding_body)) as f:
-                            decoding_body = f.read()
-                except Exception as e:
-                    print(f"Error decompressing gzip: {e}: skipping", flush=True)
-                    decode_success = False
-                    break
-            elif enc == "zstd":
-                try:
-                    decoding_body = zstd_compat.decompress(decoding_body)
-                except Exception as e:
-                    print(f"Error decompressing zstd: {e}: skipping", flush=True)
-                    decode_success = False
-                    break
-            elif enc == "identity":
-                pass  # No need to do anything https://datatracker.ietf.org/doc/html/rfc2616#section-3.5 (it's possible to be found also if it should't be used)
-            else:
-                decode_success = False
-                break
+        except _TooLarge:
+            print(f"[WARNING] The body decodes to more than {limit} bytes "
+                  f"(FGEX_STREAM_MAX_SIZE): left as it arrived", flush=True)
+            self.msg.decoded_too_large = True
+            decode_success = False
 
         if decode_success:
             self.msg.body = decoding_body
@@ -386,7 +479,12 @@ class InternalCallbackHandler:
             return new_data
 
         parsing = Frame.parse(
-            read_exact, extensions=self._ws_extentions, mask=self._is_input()
+            read_exact, extensions=self._ws_extentions, mask=self._is_input(),
+            # A compressed message is inflated by the extension, and without a bound on
+            # it a frame of a few kilobytes is as many gigabytes as it says it is. Past
+            # the bound the frame is refused, and the connection's data is carried on as
+            # a plain stream — the same as any frame that will not parse.
+            max_size=self.max_decoded_size,
         )
         parsing.send(None)
         try:
@@ -497,6 +595,24 @@ class HttpHistory:
 
 
 HttpStreamHistory = HttpHistory
+
+
+def _held(entry: "InternalBasicHttpMetaClass") -> int:
+    msg = entry._message
+    return max(msg.total_size, len(msg.body or b"")) + len(msg.stream)
+
+
+def _trim_history(history: deque, budget: int) -> None:
+    """Keep a direction's history under the byte budget a stream is held to.
+
+    `FGEX_MAX_HISTORY_SIZE` counts messages, and each of them can be as large as the cap
+    on the stream — so a keep-alive connection could hold a hundred bodies of a megabyte
+    each, per direction, for as long as it stayed open. The oldest go first; the newest
+    is always kept, since it fitted under the cap on its own.
+    """
+    total = sum(_held(entry) for entry in history)
+    while len(history) > 1 and total > budget:
+        total -= _held(history.popleft())
 
 
 class InternalBasicHttpMetaClass:
@@ -648,6 +764,7 @@ class InternalBasicHttpMetaClass:
         # above is: parsing happens before any instance exists, and a flag applied
         # afterwards would take effect one packet late.
         parser.release_body_chunks = cls._should_release_body_chunks()
+        parser.max_decoded_size = internal_data.stream_max_size
 
 
         if not internal_data.call_mem.get(
@@ -675,8 +792,10 @@ class InternalBasicHttpMetaClass:
                         parser.messages.clear()
                         parser.msg.total_size -= len(parser.msg.stream)
                         parser.msg.stream = b""
-                        parser.msg.total_size -= len(parser.msg.body)
-                        parser.msg.body = b""
+                        # Whatever the body is at: none yet for a message still in its
+                        # headers — where `len(body)` used to raise, so headers past the cap
+                        # were an exception rather than a flush and the packet failed open.
+                        _flush_body(parser)
                         print("[WARNING] Flushing stream", flush=True)
                         if (
                             parser.total_size + len(internal_data.current_pkt.data)
@@ -706,6 +825,19 @@ class InternalBasicHttpMetaClass:
                     case ExceptionAction.NOACTION:
                         raise e
                     case ExceptionAction.ACCEPT:
+                        raise NotReadyToRun()
+
+            if any(msg.decoded_too_large for msg in parser.messages):
+                # Too large once decoded is too large: the operator's answer to a stream
+                # past the cap is the answer here too, rather than a second policy nobody
+                # chose. Flushing has nothing left to throw away, so the message goes on
+                # as it arrived — still encoded, as an encoding this cannot undo would.
+                match internal_data.full_stream_action:
+                    case FullStreamAction.REJECT:
+                        raise StreamFullReject()
+                    case FullStreamAction.DROP:
+                        raise StreamFullDrop()
+                    case FullStreamAction.ACCEPT:
                         raise NotReadyToRun()
 
             if parser.should_upgrade and not internal_data.current_pkt.is_input:
@@ -808,8 +940,10 @@ class InternalBasicHttpMetaClass:
                 msg.added_to_history = True
                 if internal_data.current_pkt.is_input:
                     req_history_deque.append(HttpFullRequest(parser, msg))
+                    _trim_history(req_history_deque, internal_data.stream_max_size)
                 else:
                     resp_history_deque.append(HttpFullResponse(parser, msg))
+                    _trim_history(resp_history_deque, internal_data.stream_max_size)
 
         if len(built_instances) == 1:
             res = built_instances[0]
@@ -981,6 +1115,10 @@ def _grpc_frames(msg: InternalHTTPMessage) -> list[GrpcFrame]:
     body = msg.body or b""
     taken: list[GrpcFrame] = []
     at = msg.grpc_consumed
+    if msg.grpc_skip:
+        passed = min(msg.grpc_skip, len(body) - at)
+        at += passed
+        msg.grpc_skip -= passed
     while len(body) - at >= GRPC_HEADER_SIZE:
         length = int.from_bytes(body[at + 1 : at + GRPC_HEADER_SIZE], "big")
         end = at + GRPC_HEADER_SIZE + length
@@ -992,6 +1130,22 @@ def _grpc_frames(msg: InternalHTTPMessage) -> list[GrpcFrame]:
         at = end
     msg.grpc_consumed = at
     return taken
+
+
+def _forget_framed(parser: InternalCallbackHandler, msg: InternalHTTPMessage) -> None:
+    """Drop what has been framed from a body that is still arriving.
+
+    A streaming RPC's body ends only when the stream does, and every frame in it had been
+    handed over already — so keeping it bought nothing but memory, one frame at a time,
+    for as long as the stream stayed open.
+    """
+    if msg is not parser.msg or msg.message_complete or not msg.grpc_consumed:
+        return
+    done = msg.grpc_consumed
+    parser.buffers._body_buffer = parser.buffers._body_buffer[done:]
+    msg.body = parser.buffers._body_buffer
+    msg.total_size -= done
+    msg.grpc_consumed = 0
 
 
 def _speaks_grpc(msg: InternalHTTPMessage) -> bool:
@@ -1079,6 +1233,7 @@ class GrpcMessage(InternalBasicHttpMetaClass):
                 piece._frame = frame
                 piece._is_input = internal_data.current_pkt.is_input
                 pieces.append(piece)
+            _forget_framed(one._parser, msg)
 
         if not pieces:
             # Not "nothing matched" but "there is nothing to show yet" — a body half-way

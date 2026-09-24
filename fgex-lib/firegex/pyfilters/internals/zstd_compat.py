@@ -15,15 +15,20 @@ same class of lie as a tester that disagrees with the engine, so this normalises
 more capable behaviour rather than to whichever backend is present.
 """
 
+import io
+
 try:  # Python 3.14 and later
+    from compression.zstd import ZstdFile as _ZstdFile
     from compression.zstd import decompress as _decompress
 
-except ImportError:  # Python 3.10 - 3.13
-    import io
+    def _read(data: bytes, size: int) -> bytes:
+        with _ZstdFile(io.BytesIO(data)) as f:
+            return f.read(size)
 
+except ImportError:  # Python 3.10 - 3.13
     import zstandard
 
-    def _decompress(data: bytes) -> bytes:
+    def _reader(data: bytes):
         """Every frame in `data`, streamed.
 
         `stream_reader` rather than `ZstdDecompressor.decompress`: the latter needs the
@@ -31,11 +36,31 @@ except ImportError:  # Python 3.10 - 3.13
         matches the standard library, which decompresses a concatenation of frames as
         one body — an encoder that flushed mid-response produces exactly that.
         """
-        reader = zstandard.ZstdDecompressor().stream_reader(
+        return zstandard.ZstdDecompressor().stream_reader(
             io.BytesIO(data), read_across_frames=True
         )
-        return reader.read()
+
+    def _decompress(data: bytes) -> bytes:
+        return _reader(data).read()
+
+    def _read(data: bytes, size: int) -> bytes:
+        reader = _reader(data)
+        out = bytearray()
+        while len(out) < size:
+            piece = reader.read(size - len(out))
+            if not piece:
+                break
+            out += piece
+        return bytes(out)
 
 
-def decompress(data: bytes) -> bytes:
-    return _decompress(data)
+def decompress(data: bytes, max_length: int | None = None) -> bytes:
+    """`data` decompressed, or its first `max_length` bytes when that is given.
+
+    Bounded by reading rather than by decompressing and measuring: a frame a few hundred
+    bytes long can declare gigabytes, and what arrives in an HTTP body is whatever the
+    other end chose to send.
+    """
+    if max_length is None:
+        return _decompress(data)
+    return _read(data, max_length)

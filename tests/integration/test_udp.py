@@ -183,3 +183,67 @@ def test_udp_on_an_interface_needs_an_address_to_bind_a_relay_to(api, service,
         pytest.skip("this host has no `lo` to resolve, or would not start the service")
     time.sleep(1.2)
     assert echo.exchange(b"through the interface") == b"through the interface"
+
+
+# --- how many flows keep their state, on NFQUEUE -------------------------------------
+
+REMEMBERS = """
+from firegex.pyfilters import pyfilter, ACCEPT, REJECT
+from firegex.pyfilters.models import RawPacket
+
+# Module level, so it is per flow: each one gets globals of its own.
+marked = False
+
+@pyfilter
+def remembers(packet: RawPacket):
+    global marked
+    if b"MARK" in packet.data:
+        marked = True
+        return ACCEPT
+    return REJECT if marked else ACCEPT
+"""
+
+
+def _from(port: int, echo, payload: bytes) -> bytes | None:
+    """One datagram from a fixed source port, so several exchanges are one flow."""
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.settimeout(1.5)
+    try:
+        sock.bind(("127.0.0.1", port))
+        sock.sendto(payload, (echo.host, echo.port))
+        return sock.recvfrom(65535)[0]
+    except (TimeoutError, OSError):
+        return None
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize("limit,kept", [(0, True), (2, False)], ids=["no-limit", "limit-2"])
+def test_a_queued_udp_service_keeps_flows_up_to_its_own_limit(api, service, udp_stand_in,
+                                                              limit, kept):
+    """`cpproxy` held at most 4096 flows' state, whatever the operator wanted, and let go
+    of an arbitrary one past that — a TCP stream's included. The number is the service's
+    own now, none by default, and past it the flow quiet the longest starts over."""
+    from helpers.net import free_port
+
+    echo = udp_stand_in()
+    service_id = service(f"flows-{limit}-{echo.port}", "127.0.0.1", echo.port, "nfqueue",
+                         proto="udp", max_connections=limit)
+    add_python_filter(api, service_id, REMEMBERS, name="remembers")
+    start_and_settle(api, service_id, wait=1.2)
+
+    first = free_port(udp=True)
+    assert _from(first, echo, b"MARK") == b"MARK"
+    assert _from(first, echo, b"again") is None, "the flow did not keep its state at all"
+    # Enough of them that some land on the first flow's thread: flows are shared out
+    # between the queue threads by a hash, and so is the limit.
+    for _ in range(200):
+        assert echo.exchange(b"another flow") == b"another flow"
+
+    answered = _from(first, echo, b"once more")
+    if kept:
+        assert answered is None, "with no limit, a flow lost its state to two others"
+    else:
+        assert answered == b"once more", "past the limit, the oldest flow kept its state"

@@ -780,6 +780,10 @@ async fn handle_connection(
         // connection of its own kind.
         return match published.upstream {
             Onward::Plain => {
+                // Each exchange dials a connection of its own, so the one opened before
+                // anything was known about the client goes now — held, it sat idle
+                // towards the service for as long as the client stayed.
+                drop(server);
                 crate::h2::carry_to_h1(
                     client,
                     crate::h1up::H1Upstream {

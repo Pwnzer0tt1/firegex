@@ -1,4 +1,3 @@
-#define DEBUG
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
@@ -56,9 +55,9 @@ __firegex_packet_info = {
 }
 
 Nothing below the application layer crosses this boundary as bytes: the addresses and
-ports are metadata a filter reads, and the payload is the only thing it can write. The
-proxy datapath terminates the connection and writes its own headers, so a filter that
-could rewrite one here and not there would mean two different things depending on which
+ports are metadata a filter reads, and nothing comes back but a verdict. The proxy
+datapath terminates the connection and writes its own headers, so a filter that could
+rewrite one here and not there would mean two different things depending on which
 network layer it happened to be attached to.
 
 The protocol is not passed in either: the library reads it off the filters' parameter
@@ -68,15 +67,14 @@ only for a RawPacket runs on anything.
 As result the packet handler is responsible to return a dictionary in the global context with the following dictionary:
 __firegex_pyfilter_result = {
 	"action": REJECT, # One of PyFilterResponse
-	"matched_by": "invalid_curl_agent", # The function that matched the packet (used if action = DROP or REJECT or MANGLE)
-	"mangled_data": b"new payload" # The rewritten application payload (used if action = MANGLE)
+	"matched_by": "invalid_curl_agent", # The function that matched the packet (used if action = DROP or REJECT)
 }
 
 PyFilterResponse {
 	ACCEPT = 0,
 	DROP = 1,
 	REJECT = 2,
-	MANGLE = 3,
+	// 3 was MANGLE, a payload rewrite; retired, and refused as INVALID
 	EXCEPTION = 4,
 	INVALID = 5
 };
@@ -120,13 +118,10 @@ void config_updater (){
 			cerr << "[fatal] [updater] Control socket error: " << e.what() << endl;
 			exit(EXIT_FAILURE);
 		}
-		#ifdef DEBUG
-		cerr << "[DEBUG] [updater] Received code: " << code << endl;
-		#endif
 		cerr << "[info] [updater] Updating configuration" << endl;
 		PyEval_AcquireThread(state); //Restore GIL before executing python code
 		try{
-			config.reset(new PyCodeConfig(code));
+			config.store(make_shared<PyCodeConfig>(code));
 			cerr << "[info] [updater] Config update done" << endl;
 			control_socket << "ACK OK" << endl;
 		}catch(const std::exception& e){
@@ -155,7 +150,7 @@ int main(int argc, char *argv[]) {
    	if (n_threads_str != nullptr) n_of_threads = ::atoi(n_threads_str);
 	if(n_of_threads <= 0) n_of_threads = 1;
 
-	config.reset(new PyCodeConfig());
+	config.store(make_shared<PyCodeConfig>());
 
 	MultiThreadQueue<PyProxyQueue> queue(n_of_threads);
 

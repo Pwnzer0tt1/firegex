@@ -178,3 +178,47 @@ def test_a_trailers_only_reply_carries_its_status():
          b"grpc-status: 7\r\ncontent-length: 0\r\n\r\n", False),
     )
     assert [s["payload"] for s in seen if not s["is_request"]] == []
+
+
+# --- a stream that stays open --------------------------------------------------------
+# A streaming RPC's body ends only when the stream does. Every frame in it had already
+# been handed over, and the body went on holding all of them: under the default flush the
+# buffer grew past every flush while the size it was counted by went negative.
+
+
+def _parser_after(cap: int, *chunks: tuple[bytes, bool]):
+    code = FILTER_CODE.replace(
+        "seen = []",
+        "from firegex.pyfilters import FullStreamAction\n"
+        f"FGEX_STREAM_MAX_SIZE = {cap}\n"
+        "FGEX_FULL_STREAM_ACTION = FullStreamAction.FLUSH\n"
+        "seen = []",
+    )
+    glob = {"__firegex_pyfilter_enabled": ["watch"]}
+    exec(code, glob, glob)
+    compile(glob)
+    for payload, is_input in chunks:
+        glob["__firegex_packet_info"] = packet(payload, is_input)
+        handle_packet(glob)
+    from firegex.pyfilters.internals.data import DataStreamCtx
+    return glob["seen"], DataStreamCtx(glob).data_handler_context["http_grpc_in"]
+
+
+def test_a_long_stream_holds_only_what_it_has_not_framed():
+    frames = [chunk(frame(b"x" * 295)) for _ in range(60)]
+    seen, parser = _parser_after(1000, (request_head(), True),
+                                 *[(f, True) for f in frames])
+    assert len(seen) == 60
+    assert len(parser.buffers._body_buffer) < 1000, "every frame handed over is still held"
+    assert parser.msg.total_size >= 0
+
+
+def test_a_frame_past_the_cap_is_skipped_and_the_next_one_still_found():
+    big = frame(b"z" * 3000)
+    pieces = [chunk(big[i:i + 400]) for i in range(0, len(big), 400)]
+    seen, parser = _parser_after(1000, (request_head(), True),
+                                 *[(p, True) for p in pieces],
+                                 (chunk(frame(b"after")), True))
+    assert [s["payload"] for s in seen] == [b"after"], \
+        "the frame after the flushed one was read out of the middle of it"
+    assert len(parser.buffers._body_buffer) < 1000

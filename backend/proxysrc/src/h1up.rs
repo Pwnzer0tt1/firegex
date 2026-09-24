@@ -289,7 +289,11 @@ impl Answer for H1Answer {
             .take()
             .ok_or_else(|| io::Error::other("the answer was already taken"))?;
         let response = pending.await.map_err(io::Error::other)?;
-        let (parts, body) = response.into_parts();
+        let (mut parts, body) = response.into_parts();
+        // This answer goes on in HTTP/2 or HTTP/3, where what an HTTP/1.1 connection says
+        // about itself has no place — and the rendering the chain is shown settles its own
+        // framing from what is left.
+        crate::http1::drop_connection_headers(&mut parts.headers);
         self.body = Some(body);
         Ok(http::Response::from_parts(parts, ()))
     }

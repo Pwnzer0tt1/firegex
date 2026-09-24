@@ -5,6 +5,7 @@
 #include <marshal.h>
 #include <vector>
 #include <memory>
+#include <atomic>
 #include <iostream>
 #include "../utils.cpp"
 
@@ -15,7 +16,9 @@ namespace PyProxy {
 
 class PyCodeConfig;
 
-shared_ptr<PyCodeConfig> config;
+// Atomic for the reason `regex_config` is: the updater swaps it while the queue threads
+// copy it for every new stream.
+std::atomic<shared_ptr<PyCodeConfig>> config;
 UnixClientConnection control_socket;
 
 PyObject* unmarshal_code(string encoded_code){
