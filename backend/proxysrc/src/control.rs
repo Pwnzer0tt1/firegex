@@ -11,16 +11,10 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use crate::filter::{ChainHandle, FilterChain};
 use crate::proxy::{Edge, Onward, Published, Targets};
 use crate::relays::Relays;
-use crate::rules::parse_ruleset;
+use crate::rules::parse_ruleset_reusing;
 
 fn ack(ok: bool, detail: &str) {
-    if ok {
-        println!("ACK OK");
-    } else {
-        println!("ACK FAIL {detail}");
-    }
-    use std::io::Write;
-    let _ = std::io::stdout().flush();
+    crate::report::reply(if ok { "ACK OK".to_string() } else { format!("ACK FAIL {detail}") });
 }
 
 /// Apply rulesets and handle control commands until stdin closes.
@@ -80,7 +74,7 @@ pub async fn serve_stdin(
             match target_str.parse::<SocketAddr>() {
                 Ok(upstream) => match relays.add_relay(upstream, onward).await {
                     Ok(port) => {
-                        println!("UDP {upstream}|{} {port}", onward.word());
+                        crate::report::reply(format!("UDP {upstream}|{} {port}", onward.word()));
                         ack(true, "");
                     }
                     Err(e) => {
@@ -165,8 +159,9 @@ pub async fn serve_stdin(
         // runtime with every relay: with one worker thread, which is what a one-core
         // host is given, the service carried nothing while a reload was loading a file.
         let line = trimmed.to_string();
+        let previous = chain.current().filters();
         let prepared = tokio::task::spawn_blocking(move || {
-            parse_ruleset(&line).and_then(|filters| {
+            parse_ruleset_reusing(&line, &previous).and_then(|filters| {
                 for filter in &filters {
                     filter.prepare()?;
                 }

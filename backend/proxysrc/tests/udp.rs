@@ -130,6 +130,61 @@ async fn flows_spend_the_same_budget_as_connections() {
     assert_eq!(stats.live.load(Ordering::Relaxed), 1, "a refused flow kept its place");
 }
 
+/// A service that goes away for a moment and comes back is answering again, for the
+/// client that kept talking through it.
+///
+/// A datagram sent while it was down is answered with ICMP "port unreachable", which the
+/// flow's connected socket reports as an error on its next call. That error ended the task
+/// carrying the answers back while the flow stayed in the table — and a client that kept
+/// sending kept it from ever going idle, so it never heard from the service again.
+#[tokio::test]
+async fn a_flow_outlives_its_service_restarting() {
+    let first = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let upstream = first.local_addr().unwrap();
+    let echo = |socket: UdpSocket| {
+        tokio::spawn(async move {
+            let mut buf = vec![0u8; 2048];
+            loop {
+                let Ok((n, from)) = socket.recv_from(&mut buf).await else {
+                    continue;
+                };
+                let _ = socket.send_to(&buf[..n], from).await;
+            }
+        })
+    };
+    let service = echo(first);
+    let relay = spawn_relay(upstream, "", 0, false, Arc::new(ProxyStats::default())).await;
+
+    // One source throughout: this is about a flow that already exists.
+    let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    assert_eq!(exchange(&client, relay, b"before").await.as_deref(), Some(&b"before"[..]));
+
+    service.abort();
+    let _ = service.await;
+    assert_eq!(exchange(&client, relay, b"while down").await, None);
+
+    echo(UdpSocket::bind(upstream).await.unwrap());
+    assert_eq!(
+        exchange(&client, relay, b"after").await.as_deref(),
+        Some(&b"after"[..]),
+        "the service came back and the flow that kept talking was not answered"
+    );
+}
+
+/// One datagram from `client`, and the answer if one comes.
+async fn exchange(
+    client: &UdpSocket,
+    relay: std::net::SocketAddr,
+    payload: &[u8],
+) -> Option<Vec<u8>> {
+    client.send_to(payload, relay).await.unwrap();
+    let mut buf = vec![0u8; 2048];
+    match tokio::time::timeout(Duration::from_millis(700), client.recv(&mut buf)).await {
+        Ok(Ok(n)) => Some(buf[..n].to_vec()),
+        _ => None,
+    }
+}
+
 /// Flows are counted in the unit the backend divides by: flows seen, flows refused.
 ///
 /// UDP counted neither, so a service refusing datagrams all day reported no connections

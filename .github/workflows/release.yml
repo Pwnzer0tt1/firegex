@@ -35,8 +35,31 @@ jobs:
       - name: Run tests
         run: cd tests && sudo ./run_tests.sh
 
+  # The proxy engine's own suite: HTTP/2, HTTP/3 and QUIC termination, the Python worker's
+  # framing and deadlines, the UDP relay — much of it reachable from no integration test,
+  # and none of it was run before a release. In the image stage built for it, which is
+  # the compiler plus the filter library the worker tests start. `backend/` is mounted
+  # rather than baked in because the worker tests launch `../modules/services/pyworker.py`.
+  engine_tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build the engine's test image
+        run: docker build --target enginetest -t firegex-enginetest .
+
+      - name: Run the engine's tests
+        run: >-
+          docker run --rm -v "$PWD/backend:/execute" -w /execute/proxysrc
+          firegex-enginetest cargo test
+
   docker_build:
-    needs: run_tests
+    needs: [run_tests, engine_tests]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -232,7 +255,7 @@ jobs:
   # installed is not, which is why the parser ships as source rather than as a `ctypes`
   # binding against the distribution's `libllhttp`.
   build_firegex_wheels:
-    needs: run_tests
+    needs: [run_tests, engine_tests]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -329,7 +352,7 @@ jobs:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
   pypi_publish_fgex_alias:
-    needs: run_tests
+    needs: [run_tests, engine_tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read

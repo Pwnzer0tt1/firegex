@@ -30,7 +30,22 @@ namespace PyProxy {
 
 class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	private:
-	u_int16_t latest_config_ver = 0;
+	// The configuration this thread's contexts were built from.
+	uint32_t latest_config_ver = 0;
+
+	// A new configuration reaches the connections already open, the way it does on the
+	// other two engines: `cppregex` resets its matchers on a new version and the proxy
+	// layer hands the next chunk to the new chain. This was declared and never read, so
+	// here a stream kept the code it had started with for as long as it stayed open — a
+	// function switched off, or a check added against the attack in progress, went on not
+	// reaching the one connection it was meant for. Its state starts again, as it does
+	// there.
+	void follow_config(){
+		const uint32_t current = config.load()->version;
+		if (current == latest_config_ver) return;
+		sctx.clean_filters();
+		latest_config_ver = current;
+	}
 	public:
 	stream_ctx sctx;
 	StreamFollower follower;
@@ -71,6 +86,14 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		}
 
 		handle_packet_code = unmarshal_code(py_handle_packet_code);
+		// Streams whose start this process did not see are followed from the packet it
+		// does see. They are otherwise not followed at all, and a packet of one was simply
+		// accepted: every connection open before the service started, or before its chain
+		// was rebuilt — which adding a filter does — and every one quiet for longer than
+		// the follower keeps a stream, carried whatever it said afterwards. A persistent
+		// connection was a way past any filter added after it opened. Recovery mode is
+		// switched on for them in `on_new_stream`.
+		follower.follow_partial_streams(true);
 		// Setting callbacks for the stream follower
 		follower.new_stream_callback(bind(on_new_stream, placeholders::_1, this));
 		follower.stream_termination_callback(bind(on_stream_close, placeholders::_1, this));
@@ -168,6 +191,13 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 					stream.ignore_server_data();
 					return pkt->accept();
 				}
+				// This context starts after its connection did: the process met the
+				// stream halfway, or new code replaced the context it had. What arrives
+				// first can be the middle of a message, and the library must not judge
+				// a message by its second half — see `_met_mid_message` there.
+				if (stream.is_partial_stream() || sctx.taken_over.erase(pkt->sid) > 0){
+					stream_match->set_item_to_glob("__firegex_joined_late", PyBool_FromLong(1));
+				}
 				sctx.streams_ctx.insert_or_assign(pkt->sid, stream_match);
 			}
 		}else{
@@ -204,7 +234,12 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	}
 
 
-	static void on_data_recv(Stream& stream, PyProxyQueue* pyq, const string& data, bool is_client) {
+	// The direction is the packet's own, from the mark the rules put on it, rather than
+	// which side of the stream the follower calls the client: on a stream followed from
+	// the middle that is whoever it happened to see first, and the service answering
+	// before the client speaks again made the filter read the answer as the request.
+	static void on_data_recv(Stream& stream, PyProxyQueue* pyq, const string& data, bool) {
+		const bool is_client = pyq->pkt->is_input;
 		pyq->pkt->fix_data_payload();
 		pyq->filter_action(pyq->pkt, stream, data, is_client); //Only here the rebuilt_tcp_data is set
 	}
@@ -255,6 +290,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 
 	void handle_next_packet(NfQueue::PktRequest<PyProxyQueue>* _pkt) override{
 		pkt = _pkt; // Setting packet context
+		follow_config();
 
 		if (pkt->l4_proto == NfQueue::L4Proto::UDP){
 			// Straight to the filter: the stream follower is TCP's, and so is every

@@ -15,6 +15,7 @@ pub mod http1;
 pub mod hyperscan;
 pub mod proxy;
 pub mod quic;
+pub mod quic_hello;
 pub mod pyworker;
 pub mod rules;
 pub mod spec;
@@ -22,6 +23,7 @@ pub mod capture;
 pub mod tls;
 pub mod transparent;
 pub mod relays;
+pub mod report;
 pub mod udp;
 
 pub use filter::{

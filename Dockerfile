@@ -45,6 +45,15 @@ RUN g++ binsrc/pyfilter.cpp -o cpproxy -std=c++23 -O3 -Wall -lnetfilter_queue -l
 COPY ./backend/proxysrc /execute/proxysrc
 RUN cd /execute/proxysrc && cargo build --release
 
+# Where the engine's own suite runs (`cargo test` in proxysrc). It starts real Python
+# workers through the filter library, so it needs the compiler stage *and* that library
+# with what it imports — without them the pyworker tests fail with a ModuleNotFoundError
+# buried in captured output. Nothing below copies from it, and it sits before `final` so a
+# build with no target (what compose does) is not handed this as the image.
+FROM --platform=$TARGETARCH compiler AS enginetest
+COPY ./fgex-lib /fgex-lib
+RUN python3.14 -m pip install --no-cache-dir --break-system-packages /fgex-lib
+
 #Building main conteiner
 FROM --platform=$TARGETARCH base AS final
 

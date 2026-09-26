@@ -18,8 +18,8 @@ engine dials the service as the client, two flows look almost identical:
 
 No address distinguishes them. Conntrack does: the first belongs to the intercepted,
 redirected connection, the second is a separate entry the engine opened itself. So
-`ct status dnat` lets the first out, and everything else from a protected service is
-marked home. That is what makes source preservation work even with the service on
+`ct status dnat` lets the first out, and everything else from a protected service — and
+anything answering a connection the engine opened, from whichever port — is marked home. That is what makes source preservation work even with the service on
 this very host — which is also the case that ruled tproxy out, since tproxy leaves no
 NAT entry to key off and so could never reach a local service at all.
 """
@@ -49,6 +49,16 @@ QUEUE_MARK_OUTPUT = 0x1338
 #: limit, it is a number of always-present chains worth paying for; nothing stops it
 #: growing except that every position costs two chains whether or not anyone uses it.
 MAX_CHAIN_POSITIONS = 8
+
+#: Where the NFQUEUE layer meets a connection this host opened to one of its own addresses
+#: that somebody rewrote on the way — a port a container runtime publishes. Docker's DNAT
+#: for this host's own traffic sits in `nat OUTPUT` at `dstnat` (-100) and sends it out
+#: towards the container, so it never comes back in through prerouting where the queue
+#: chains are, and neither does the container's answer: it arrives for a local socket
+#: and goes to `input`. These run after that rewrite on the way out and before it is
+#: undone on the way in (`srcnat`, 100), so both halves show the container's address and
+#: a stream follower sees one stream.
+LOCAL_QUEUE_PRIORITY = -90
 
 #: Where the proxy layer's redirect sits in the prerouting and output hooks.
 #:
@@ -193,6 +203,11 @@ def udp_relay_host(ip: str) -> str:
 #: `interface_addresses` — so the rule says which interface it belongs to itself.
 IFACE_COMMENT = "iface "
 
+#: Written on a rule that matches its address through conntrack rather than in the packet
+#: — `<l4> <port> <address>` — for the same reason: `get()` reads what a rule matches to
+#: know whose it is, and there is nothing in these for it to read.
+ADDRESS_COMMENT = "address "
+
 
 def interface_addresses(ip: str) -> list[str]:
     """Every address an interface carries right now, as a rule can match them.
@@ -324,6 +339,15 @@ class FiregexTables(NFTableManager):
     def queue_output_chain(position: int) -> str:
         return f"fgex_queue_out_{position}"
 
+    # And the connections this host opens to a rewritten address: see LOCAL_QUEUE_PRIORITY.
+    @staticmethod
+    def queue_local_request_chain(position: int) -> str:
+        return f"fgex_queue_lreq_{position}"
+
+    @staticmethod
+    def queue_local_reply_chain(position: int) -> str:
+        return f"fgex_queue_lrep_{position}"
+
     # External transport: hand the traffic to a proxy the operator runs
     hijack_in_chain = "fgex_hijack_in"
     hijack_local_chain = "fgex_hijack_local"
@@ -350,6 +374,10 @@ class FiregexTables(NFTableManager):
                                -307 + position),
                         _chain(self.queue_output_chain(position), "filter", "postrouting",
                                107 + position),
+                        _chain(self.queue_local_request_chain(position), "filter", "output",
+                               LOCAL_QUEUE_PRIORITY + position),
+                        _chain(self.queue_local_reply_chain(position), "filter", "input",
+                               LOCAL_QUEUE_PRIORITY + position),
                     )
                 ],
                 # Earlier than the queue chains, so traffic destined for somebody else's
@@ -380,6 +408,43 @@ class FiregexTables(NFTableManager):
                                         "op": "==",
                                         "left": {"socket": {"key": "transparent"}},
                                         "right": 1,
+                                    }
+                                },
+                                {"mangle": {"key": {"meta": {"key": "mark"}}, "value": PROXY_MARK}},
+                                {"accept": None},
+                            ],
+                        }
+                    }
+                },
+                # The same, for a reply the socket lookup cannot place: one to a connection
+                # the engine opened towards an address somebody rewrote — a port a container
+                # runtime publishes, above all. The engine dials the published address as
+                # the client, Docker's DNAT sends it on to the container, and the container
+                # answers from its own address: `socket transparent` looks for a socket
+                # talking to *that* and finds none, so the answer was routed on to the real
+                # client, which reset it. A client on another host reached a Docker service
+                # through the proxy layer only after the dial timed out and was retried as
+                # this host — slowly, and with the client's address lost. Conntrack still
+                # knows whose connection it is, by the mark `fgex_route` copied onto it.
+                {
+                    "add": {
+                        "rule": {
+                            "family": "inet",
+                            "table": self.table_name,
+                            "chain": self.divert_chain,
+                            "expr": [
+                                {
+                                    "match": {
+                                        "op": "==",
+                                        "left": {"ct": {"key": "direction"}},
+                                        "right": "reply",
+                                    }
+                                },
+                                {
+                                    "match": {
+                                        "op": "==",
+                                        "left": {"ct": {"key": "mark"}},
+                                        "right": PROXY_SELF_MARK,
                                     }
                                 },
                                 {"mangle": {"key": {"meta": {"key": "mark"}}, "value": PROXY_MARK}},
@@ -455,9 +520,8 @@ class FiregexTables(NFTableManager):
                     }
                 },
                 # Installed once. A packet on the intercepted (redirected) connection
-                # is the engine answering a client and has to leave normally; anything
-                # else from a protected service is a reply to the engine's own dial,
-                # and the per-service rule below marks it home.
+                # is the engine answering a client and has to leave normally; a reply to
+                # the engine's own dial is marked home by the two rules after this one.
                 {
                     "add": {
                         "rule": {
@@ -473,6 +537,64 @@ class FiregexTables(NFTableManager):
                                     }
                                 },
                                 {"accept": None},
+                            ],
+                        }
+                    }
+                },
+                # **A reply to a connection the engine opened, from whatever port it
+                # comes — and nothing else.** A per-address rule used to do this, knowing
+                # the service by the address it is protected on. That is where the engine
+                # dials it only while the address *is* the service: one published on
+                # another port is dialled there, and an HTTP/3 edge in front of an
+                # HTTP/1.1 service is dialled over TCP, and their answers were routed out
+                # towards the client instead of home. It also matched the answers on
+                # connections the engine never saw, the ones open before the service
+                # started, and brought those home to nobody. Conntrack knows who opened a
+                # connection: the engine's mark is copied onto it on the way out and read
+                # back off everything that answers it.
+                {
+                    "add": {
+                        "rule": {
+                            "family": "inet",
+                            "table": self.table_name,
+                            "chain": self.route_chain,
+                            "expr": [
+                                {
+                                    "match": {
+                                        "op": "==",
+                                        "left": {"meta": {"key": "mark"}},
+                                        "right": PROXY_SELF_MARK,
+                                    }
+                                },
+                                {"mangle": {"key": {"ct": {"key": "mark"}},
+                                            "value": PROXY_SELF_MARK}},
+                            ],
+                        }
+                    }
+                },
+                {
+                    "add": {
+                        "rule": {
+                            "family": "inet",
+                            "table": self.table_name,
+                            "chain": self.route_chain,
+                            "expr": [
+                                {
+                                    "match": {
+                                        "op": "==",
+                                        "left": {"ct": {"key": "direction"}},
+                                        "right": "reply",
+                                    }
+                                },
+                                {
+                                    "match": {
+                                        "op": "==",
+                                        "left": {"ct": {"key": "mark"}},
+                                        "right": PROXY_SELF_MARK,
+                                    }
+                                },
+                                {"mangle": {"key": {"meta": {"key": "mark"}},
+                                            "value": PROXY_MARK}},
                             ],
                         }
                     }
@@ -516,6 +638,19 @@ class FiregexTables(NFTableManager):
                  "table", self.PROXY_TABLE_ARG],
                 check=False, stderr=subprocess.DEVNULL,
             )
+
+    def intact(self) -> bool:
+        """Whether what `init()` put in the kernel is still there.
+
+        One small chain rather than the whole table, because this is asked every few
+        seconds: `init()` always leaves rules in the route chain, so a table that was
+        deleted (`nft flush ruleset`, which is how a Debian `/etc/nftables.conf` begins)
+        and one that was only emptied (`nft flush table`) both fail it.
+        """
+        code, listed, _ = self.raw_cmd({"list": {"chain": {
+            "family": "inet", "table": self.table_name, "name": self.route_chain,
+        }}})
+        return code == 0 and any("rule" in item for item in listed["nftables"])
 
     def reset(self):
         super().reset()
@@ -709,7 +844,57 @@ class FiregexTables(NFTableManager):
                 ],
                 insert=True,
             ))
+            if not is_ip_parse(ip):
+                # A connection this host opens is not matched by interface, for the reason
+                # the proxy layer's output-hook rules give — and what these catch is one
+                # to an address, rewritten.
+                continue
+            # This host dialling one of these addresses when something rewrote it on the
+            # way out: a port Docker publishes, which is how a CTF service is usually
+            # reached. Recognised by where the connection was *going*, which conntrack
+            # keeps, because by now the packet itself says the container's address.
+            # Without these the request and the answer both went round every queue here,
+            # and a payload the filter refuses from anywhere else reached the service
+            # from this host untouched.
+            original = self._rewritten_to(ip, port, family, l4)
+            note = f"{ADDRESS_COMMENT}{l4} {int(port)} {ip}"
+            cmds.append(self._rule(
+                self.queue_local_request_chain(position),
+                original + self._ct_direction("original") + [
+                    self.COUNTER,
+                    {"mangle": {"key": {"meta": {"key": "mark"}}, "value": QUEUE_MARK_INPUT}},
+                    queue,
+                ],
+                insert=True, comment=note,
+            ))
+            cmds.append(self._rule(
+                self.queue_local_reply_chain(position),
+                original + self._ct_direction("reply") + [
+                    {"mangle": {"key": {"meta": {"key": "mark"}}, "value": QUEUE_MARK_OUTPUT}},
+                    queue,
+                ],
+                insert=True, comment=note,
+            ))
         self.cmd(*cmds)
+
+    @staticmethod
+    def _rewritten_to(ip: str, port: int, family: str, l4: str) -> list:
+        """A connection that was headed for `ip:port` and had its destination rewritten."""
+        return [
+            {"match": {"op": "in", "left": {"ct": {"key": "status"}}, "right": "dnat"}},
+            {"match": {"op": "==", "left": {"meta": {"key": "l4proto"}}, "right": l4}},
+            {"match": {"op": "==",
+                       "left": {"ct": {"key": f"{family} daddr", "dir": "original"}},
+                       "right": nftables_int_to_json(ip)}},
+            {"match": {"op": "==",
+                       "left": {"ct": {"key": "proto-dst", "dir": "original"}},
+                       "right": int(port)}},
+        ]
+
+    @staticmethod
+    def _ct_direction(direction: str) -> list:
+        return [{"match": {"op": "==", "left": {"ct": {"key": "direction"}},
+                           "right": direction}}]
 
     def _add_external(self, srv: Service, addr: Address, ip: str, port: int, family: str,
                       l4: str):
@@ -783,14 +968,14 @@ class FiregexTables(NFTableManager):
             + self._match(ip, port, family, l4, "daddr", "dport")
             + [self.COUNTER, {"redirect": {"port": int(proxy_port)}}]
         )
+        # Nothing per service on the way back. The engine's answers are brought home by
+        # the conntrack mark on the connections it opened (`init()`), whatever address
+        # and port they come from. A rule here used to mark everything leaving the
+        # service's address and port as well, which added nothing for the engine and
+        # caught the connections that were open before the service started: nothing
+        # redirected those, so their answers belonged to the client, and a client on
+        # another host stopped hearing back the moment protection began.
         cmds = [self._rule(self.nat_chain, redirect)]
-        cmds.append(
-            self._rule(
-                self.route_chain,
-                self._match(ip, port, family, l4, "saddr", "sport")
-                + [{"mangle": {"key": {"meta": {"key": "mark"}}, "value": PROXY_MARK}}],
-            )
-        )
         if not is_iface:
             cmds.append(self._rule(self.nat_output_chain, redirect))
         else:
@@ -836,6 +1021,8 @@ class FiregexTables(NFTableManager):
         chains = [
             *[self.queue_input_chain(p) for p in range(MAX_CHAIN_POSITIONS)],
             *[self.queue_output_chain(p) for p in range(MAX_CHAIN_POSITIONS)],
+            *[self.queue_local_request_chain(p) for p in range(MAX_CHAIN_POSITIONS)],
+            *[self.queue_local_reply_chain(p) for p in range(MAX_CHAIN_POSITIONS)],
             self.hijack_in_chain,
             self.hijack_local_chain,
             self.hijack_out_chain,
@@ -844,9 +1031,22 @@ class FiregexTables(NFTableManager):
             self.nat_output_chain,
             self.route_chain,
         ]
-        for rule in self.list_rules(tables=[self.table_name], chains=chains):
+        for rule in self.list_rules(tables=[self.table_name], chains=chains, family="inet"):
             try:
                 expr = rule["expr"]
+                note = str(rule.get("comment") or "")
+                counter = next(
+                    (e["counter"] for e in expr if isinstance(e, dict) and "counter" in e),
+                    {},
+                )
+                if note.startswith(ADDRESS_COMMENT):
+                    proto, port, ip_int = note[len(ADDRESS_COMMENT):].split(" ", 2)
+                    res.append(InstalledRule(
+                        chain=rule["chain"], handle=int(rule["handle"]), proto=proto,
+                        port=int(port), ip_int=ip_int,
+                        packets=counter.get("packets", 0), bytes_=counter.get("bytes", 0),
+                    ))
+                    continue
                 # An intercept rule starts with the self-mark exclusion; every other
                 # per-service rule starts with the address. The two rules init()
                 # installs match on `socket` or on `ct`, and fall out here.
@@ -869,13 +1069,8 @@ class FiregexTables(NFTableManager):
                 # The comment does, and reading it back here is what lets the rest of
                 # this file go on treating the rule as the interface's — including
                 # `delete()`, which would otherwise never find it.
-                note = str(rule.get("comment") or "")
                 if note.startswith(IFACE_COMMENT):
                     ip_int = note[len(IFACE_COMMENT):]
-                counter = next(
-                    (e["counter"] for e in expr if isinstance(e, dict) and "counter" in e),
-                    {},
-                )
                 res.append(
                     InstalledRule(
                         chain=rule["chain"],
@@ -887,7 +1082,7 @@ class FiregexTables(NFTableManager):
                         bytes_=counter.get("bytes", 0),
                     )
                 )
-            except (KeyError, TypeError, IndexError):
+            except (KeyError, TypeError, IndexError, ValueError):
                 continue  # a rule of a shape we did not write; not ours to touch
         return res
 
@@ -912,7 +1107,9 @@ class FiregexTables(NFTableManager):
         # says. The engine already reports connections properly, so this reports nothing
         # there rather than a packet count that is off by the length of every flow.
         inbound = {
-            TRANSPORT.NFQUEUE: {self.queue_input_chain(0)},
+            # Two chains, but never both for one packet: from elsewhere a request passes
+            # prerouting, and from this host to a rewritten address it passes only output.
+            TRANSPORT.NFQUEUE: {self.queue_input_chain(0), self.queue_local_request_chain(0)},
             TRANSPORT.EXTERNAL: {self.hijack_in_chain, self.hijack_local_chain},
         }.get(srv.transport, set())
         targets = addresses if addresses is not None else srv.addresses
@@ -923,11 +1120,16 @@ class FiregexTables(NFTableManager):
                 total_bytes += rule.bytes
         return {"packets": packets, "bytes": total_bytes}
 
-    def delete(self, srv: Service, addresses: list[Address] | None = None):
+    def delete(self, srv: Service, addresses: list[Address] | None = None,
+               keep_guards: bool = False) -> set[tuple[str, int]]:
         """Take back the rules for these addresses, or for all of the service's.
 
         Passing a subset is how one address is removed from a running service: the
         others keep their rules, and the datapath keeps their connections.
+
+        `keep_guards` leaves the engine's ports guarded and hands them back instead, for
+        `release_guards` once the engine has gone: one draining the connections it still
+        carries is listening on them until then.
         """
         targets = addresses if addresses is not None else srv.addresses
         cmds = [
@@ -951,7 +1153,21 @@ class FiregexTables(NFTableManager):
         # so its port stays guarded until the engine goes; released earlier, the relay
         # would be reachable directly again with nothing steering traffic at it.
         if addresses is None:
-            for l4, port in self._guarded.pop(str(srv.id), set()):
+            guarded = self._guarded.pop(str(srv.id), set())
+            if keep_guards:
+                return guarded
+            self.release_guards(guarded)
+        return set()
+
+    def release_guards(self, ports: set[tuple[str, int]]) -> None:
+        """Stop guarding ports an engine no longer listens on.
+
+        Except one some running service is guarding now: an engine that drained for
+        minutes gave its port back, and the kernel is free to have handed it to another.
+        """
+        owned = set().union(*self._guarded.values()) if self._guarded else set()
+        for l4, port in ports:
+            if (l4, port) not in owned:
                 self._unguard(l4, port)
 
     def _element(self, verb: str, l4: str, port: int) -> dict:

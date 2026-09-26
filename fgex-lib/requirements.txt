@@ -1,4 +1,7 @@
 typer
+# Imported directly by the CLI and both simulators for their output. `typer` happens to
+# bring it today; `typer-slim` does not, and nothing here should rest on which one it is.
+rich
 pydantic>=2
 typing-extensions>=4.7.1
 pycryptodome

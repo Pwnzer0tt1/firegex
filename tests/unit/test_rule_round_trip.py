@@ -121,7 +121,10 @@ def test_the_nfqueue_layers_rules_are_all_taken_back(tables):
     srv = service(TRANSPORT.NFQUEUE)
 
     handle.add(srv, queue_nums=[1000, 1001])
-    assert len(fake.rules) == 4, "two positions, one pair of rules each"
+    # Two for traffic arriving, and two for this host's own to the address after a
+    # container runtime rewrote it — the ones matched through conntrack, which `get()`
+    # only finds by their comment.
+    assert len(fake.rules) == 8, "two positions, two pairs of rules each"
 
     handle.delete(srv)
     assert fake.rules == [], str(fake.rules)

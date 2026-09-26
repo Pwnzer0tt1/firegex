@@ -6,6 +6,7 @@
 #include <tins/tcp_ip/stream_identifier.h>
 #include <map>
 #include <list>
+#include <set>
 #include <cstdlib>
 #include <atomic>
 #include <chrono>
@@ -85,6 +86,11 @@ inline bool traceback_is_due() {
 		previous, now, std::memory_order_relaxed);
 }
 
+// How many dropped filter contexts may wait for a full collection, and how many have on
+// this queue thread — each thread runs an interpreter of its own, so each counts its own.
+constexpr unsigned COLLECT_EVERY = 64;
+static thread_local unsigned dropped_since_collect = 0;
+
 struct pyfilter_ctx {
 
 	PyObject * glob = nullptr;
@@ -108,7 +114,18 @@ struct pyfilter_ctx {
 	~pyfilter_ctx(){
 		Py_DECREF(glob);
 		Py_DECREF(py_handle_packet);
-		PyGC_Collect();
+		// The module's functions hold these globals and the globals hold the functions,
+		// so a context is a cycle only the collector frees. Left to the interpreter's
+		// own schedule, one that lived long enough to be promoted waits for a full pass,
+		// which is triggered by object counts rather than by bytes — measured, a filter
+		// building a table at module level held ~200 MB more across a stream of short
+		// connections. A full pass per context held memory flat and cost ~1 ms each, a
+		// ceiling of about two hundred connections a second per queue thread. One pass
+		// every `COLLECT_EVERY` contexts keeps both.
+		if (++dropped_since_collect >= COLLECT_EVERY){
+			dropped_since_collect = 0;
+			PyGC_Collect();
+		}
 	}
 
 	inline void set_item_to_glob(const char* key, PyObject* value){
@@ -160,8 +177,11 @@ struct pyfilter_ctx {
 
 		// Set packet info to the global context
 		set_item_to_glob("__firegex_packet_info", packet_info);
+		// No collection here. The interpreter's own collector is on (`before_loop`
+		// makes sure), and a full pass per packet cost about a millisecond with the
+		// library loaded — a ceiling of a thousand packets a second per queue thread,
+		// spent finding nothing.
 		PyObject * result = PyEval_EvalCode(py_handle_packet, glob, glob);
-		PyGC_Collect();
 		del_item_from_glob("__firegex_packet_info");
 
 		if (PyErr_Occurred()){
@@ -315,7 +335,13 @@ struct stream_ctx {
 	list<pair<stream_id, int64_t>> udp_recent;
 	map<stream_id, list<pair<stream_id, int64_t>>::iterator> udp_where;
 
+	// The TCP streams whose filter context was thrown away while they were open — new
+	// code arrived — so the context built for their next packet knows it is taking over
+	// halfway, possibly in the middle of a message.
+	set<stream_id> taken_over;
+
 	void clean_stream_by_id(stream_id sid){
+		taken_over.erase(sid);
 		auto stream_search = streams_ctx.find(sid);
 		if (stream_search != streams_ctx.end()){
 			auto stream_match = stream_search->second;
@@ -359,6 +385,22 @@ struct stream_ctx {
 		}
 	}
 
+	// Every filter context, TCP and UDP alike, for when the code they were built from is
+	// no longer the code in force. The sequence bookkeeping stays: it belongs to the
+	// connection, not to the filter, and a stream whose payload was already cut would
+	// have its acknowledgements go wrong without it.
+	void clean_filters(){
+		for (auto ele: streams_ctx){
+			if (udp_where.find(ele.first) == udp_where.end()){
+				taken_over.insert(ele.first);
+			}
+			delete ele.second;
+		}
+		streams_ctx.clear();
+		udp_recent.clear();
+		udp_where.clear();
+	}
+
 	void clean_tcp_ack_by_id(stream_id sid){
 		auto tcp_ack_search = tcp_ack_ctx.find(sid);
 		if (tcp_ack_search != tcp_ack_ctx.end()){
@@ -369,16 +411,12 @@ struct stream_ctx {
 	}
 
 	void clean(){
-		for (auto ele: streams_ctx){
-			delete ele.second;
-		}
+		clean_filters();
+		taken_over.clear();
 		for (auto ele: tcp_ack_ctx){
 			delete ele.second;
 		}
 		tcp_ack_ctx.clear();
-		streams_ctx.clear();
-		udp_recent.clear();
-		udp_where.clear();
 	}
 };
 

@@ -173,3 +173,66 @@ def test_switching_a_pattern_off_stops_it_deciding(api, blocking):
     assert api.services_edit_regex(service_id, filter_id, pattern_id, active=True)
     time.sleep(RELOAD)
     assert channel.is_blocked(b"carrying BLOCKME"), "it did not start deciding again"
+
+
+def _held_open(server, payload: bytes) -> bytes | bool:
+    """Send `payload` on the connection the test is holding and return the answer."""
+    try:
+        server.send_packet(payload)
+    except OSError:
+        return False
+    return server.recv_packet()
+
+
+def test_a_filter_added_to_a_running_service_reaches_a_connection_already_open(
+        api, protected, inspecting_layer):
+    """A new filter is for the attack in progress, which is on a connection already open.
+
+    On the NFQUEUE layer a new filter is a new process, and it meets that connection
+    halfway through. The stream follower it used threw away any stream whose handshake it
+    had not seen, so every connection open when a filter was added — or when the chain was
+    rebuilt for any other reason — went uninspected until it closed.
+    """
+    service_id, server, port = protected(inspecting_layer, name="rx-late")
+    add_regex_filter(api, service_id, "UNRELATED", name="first")
+    start_and_settle(api, service_id)
+
+    server.connect_client(timeout=3)
+    try:
+        assert _held_open(server, b"hello") == b"hello", \
+            "the connection did not work to begin with"
+        add_regex_filter(api, service_id, "BLOCKME", name="second")
+        time.sleep(RELOAD + 1)
+        # Picked up, not broken: the connection has to go on working for everything else.
+        assert _held_open(server, b"still fine") == b"still fine", \
+            "the connection stopped working when the new filter picked it up"
+        assert _held_open(server, b"carrying BLOCKME") != b"carrying BLOCKME", \
+            "a connection that was already open was never inspected by the new filter"
+    finally:
+        server.close_client()
+
+
+def test_a_connection_open_before_the_service_started_is_inspected(
+        api, protected, inspecting_layer):
+    """Starting a service protects the connections it finds, not only the ones after.
+
+    Only the queued layer can: it filters packets, so a connection that predates it is as
+    visible as any other. The proxy layer takes connections as they are made, and one
+    already made goes on straight to the service.
+    """
+    if inspecting_layer.transport != "nfqueue":
+        pytest.skip("this is the queued layer's guarantee")
+    service_id, server, port = protected(inspecting_layer, name="rx-before")
+    add_regex_filter(api, service_id, "BLOCKME")
+
+    server.connect_client(timeout=3)
+    try:
+        assert _held_open(server, b"hello") == b"hello", \
+            "the connection did not work to begin with"
+        start_and_settle(api, service_id)
+        assert _held_open(server, b"still fine") == b"still fine", \
+            "the connection stopped working when the service started"
+        assert _held_open(server, b"carrying BLOCKME") != b"carrying BLOCKME", \
+            "a connection open before the service started was never inspected"
+    finally:
+        server.close_client()

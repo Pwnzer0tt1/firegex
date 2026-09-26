@@ -199,6 +199,21 @@ impl FilterSession for HyperscanSession {
 /// All or nothing: a single bad rule rejects the update and leaves the running chain
 /// untouched, because half a ruleset is worse than the previous one.
 pub fn parse_ruleset(line: &str) -> Result<Vec<Arc<dyn Filter>>, String> {
+    parse_ruleset_reusing(line, &[])
+}
+
+/// [`parse_ruleset`], carrying over any filter of `previous` that the new ruleset
+/// describes exactly as it was (`Filter::reuse_key`).
+///
+/// A ruleset is sent whole on every edit, so without this a pattern changed in one
+/// filter restarted the Python worker of another, and the new worker met every open
+/// connection in the middle: its module globals were gone, its HTTP parser started on
+/// the second half of whatever request was in flight, and the addresses it had been told
+/// when each connection opened were never told again.
+pub fn parse_ruleset_reusing(
+    line: &str,
+    previous: &[Arc<dyn Filter>],
+) -> Result<Vec<Arc<dyn Filter>>, String> {
     let specs: Vec<RuleSpec> =
         serde_json::from_str(line).map_err(|e| format!("malformed ruleset: {e}"))?;
 
@@ -306,13 +321,21 @@ pub fn parse_ruleset(line: &str) -> Result<Vec<Arc<dyn Filter>>, String> {
                 } else {
                     command
                 };
-                out.push(Arc::new(PyWorkerRule::new(
-                    id,
-                    command,
-                    code_path,
-                    enabled,
-                    Duration::from_millis(timeout_ms),
-                )))
+                let deadline = Duration::from_millis(timeout_ms);
+                let key = PyWorkerRule::key_for(&id, &command, &code_path, &enabled, deadline);
+                let kept = key.as_deref().and_then(|key| {
+                    previous
+                        .iter()
+                        .find(|filter| filter.reuse_key() == Some(key))
+                        .cloned()
+                });
+                out.push(match kept {
+                    Some(filter) => filter,
+                    None => Arc::new(
+                        PyWorkerRule::new(id, command, code_path, enabled, deadline)
+                            .reusable_as(key),
+                    ),
+                })
             }
         }
     }

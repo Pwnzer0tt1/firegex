@@ -79,14 +79,14 @@ async fn spawn_quic_echo(cert: &str, key: &str, speaks: &[&str]) -> SocketAddr {
 }
 
 /// The relay, in front of that service.
-async fn spawn_relay(upstream: SocketAddr, filters: &str, offers: &[&str]) -> SocketAddr {
+async fn spawn_relay(upstream: SocketAddr, filters: &str) -> SocketAddr {
     let (cert, key) = self_signed();
     let chain = ChainHandle::new(FilterChain::new(
         parse_filters(filters).unwrap(),
         Duration::from_millis(500),
     ));
     let cfg = QuicConfig {
-        setup: Arc::new(QuicSetup::build(&cert, &key, alpn(offers)).unwrap()),
+        setup: Arc::new(QuicSetup::build(&cert, &key).unwrap()),
         // No mark and no impersonation: `SO_MARK` and `IP_TRANSPARENT` both need
         // CAP_NET_ADMIN, which a test run has no business requiring. What they change is
         // which address the service sees, and nothing here is asking about that.
@@ -188,7 +188,7 @@ async fn roundtrip(addr: SocketAddr, payload: &[u8], speaks: &[&str]) -> Exchang
 async fn carries_a_stream_through() {
     let (cert, key) = self_signed();
     let upstream = spawn_quic_echo(&cert, &key, &["fgex-raw"]).await;
-    let addr = spawn_relay(upstream, "", &["fgex-raw"]).await;
+    let addr = spawn_relay(upstream, "").await;
 
     let exchange = roundtrip(addr, b"hello over quic", &["fgex-raw"]).await;
     assert_eq!(exchange.echoed.unwrap(), b"hello over quic");
@@ -200,7 +200,7 @@ async fn carries_a_stream_through() {
 async fn rules_see_the_plaintext_inside_the_streams() {
     let (cert, key) = self_signed();
     let upstream = spawn_quic_echo(&cert, &key, &["fgex-raw"]).await;
-    let addr = spawn_relay(upstream, "block:FLAG{", &["fgex-raw"]).await;
+    let addr = spawn_relay(upstream, "block:FLAG{").await;
 
     let harmless = roundtrip(addr, b"harmless request", &["fgex-raw"]).await;
     assert_eq!(harmless.echoed.unwrap(), b"harmless request");
@@ -225,7 +225,7 @@ async fn rules_see_the_plaintext_inside_the_streams() {
 async fn a_refusal_takes_the_whole_connection() {
     let (cert, key) = self_signed();
     let upstream = spawn_quic_echo(&cert, &key, &["fgex-raw"]).await;
-    let addr = spawn_relay(upstream, "block:FLAG{", &["fgex-raw"]).await;
+    let addr = spawn_relay(upstream, "block:FLAG{").await;
 
     let mut config = tls::quic_client_config().unwrap();
     config.alpn_protocols = alpn(&["fgex-raw"]);
@@ -249,31 +249,47 @@ async fn a_refusal_takes_the_whole_connection() {
     );
 }
 
-/// The service picks the protocol, and the client is told that and nothing else.
+/// The service picks from what the client offered, and the client is told that and
+/// nothing else — the TLS path's mirroring, on QUIC.
 ///
-/// This is the ordering that had to change from the TLS path: there the ClientHello is
-/// held open and the service is asked what the *client* offered, which QUIC gives no
-/// opportunity to do. So the relay offers its candidates to the service and passes the
-/// answer on — and a service speaking something unusual is carried without firegex
-/// having to guess.
+/// The relay used to offer the service a list of its own, `h3` unless the operator named
+/// others, because the client's hello was taken to be unreadable. It is read off the
+/// Initial instead (`quic_hello`), so a service speaking something nobody configured is
+/// carried as it is.
 #[tokio::test]
-async fn the_service_chooses_the_protocol() {
+async fn the_service_chooses_from_what_the_client_offered() {
     let (cert, key) = self_signed();
     let upstream = spawn_quic_echo(&cert, &key, &["fgex-test"]).await;
-    let addr = spawn_relay(upstream, "", &["h3", "fgex-test"]).await;
+    let addr = spawn_relay(upstream, "").await;
 
     let exchange = roundtrip(addr, b"ping", &["h3", "fgex-test"]).await;
     assert_eq!(exchange.protocol.as_deref(), Some("fgex-test"));
     assert_eq!(exchange.echoed.unwrap(), b"ping");
 }
 
-/// A client that cannot speak what the service chose is refused by the handshake, which
-/// is the honest failure this ordering costs.
+/// A hello too big for one packet — which post-quantum key shares make ordinary — is read
+/// across the packets it came in.
+#[tokio::test]
+async fn a_hello_spanning_several_packets_is_read_whole() {
+    let (cert, key) = self_signed();
+    let upstream = spawn_quic_echo(&cert, &key, &["fgex-last"]).await;
+    let addr = spawn_relay(upstream, "").await;
+
+    let filler: Vec<String> = (0..40).map(|i| format!("fgex-unspoken-{i:02}-{}", "x".repeat(40))).collect();
+    let mut offers: Vec<&str> = filler.iter().map(String::as_str).collect();
+    offers.push("fgex-last");
+    let exchange = roundtrip(addr, b"ping", &offers).await;
+    assert_eq!(exchange.protocol.as_deref(), Some("fgex-last"));
+    assert_eq!(exchange.echoed.unwrap(), b"ping");
+}
+
+/// A client that speaks nothing the service does is refused by the service's handshake,
+/// the way it would be with no firegex in the way.
 #[tokio::test]
 async fn a_client_that_speaks_something_else_is_refused() {
     let (cert, key) = self_signed();
     let upstream = spawn_quic_echo(&cert, &key, &["fgex-test"]).await;
-    let addr = spawn_relay(upstream, "", &["fgex-test"]).await;
+    let addr = spawn_relay(upstream, "").await;
 
     let exchange = roundtrip(addr, b"ping", &["h3"]).await;
     assert!(
@@ -298,7 +314,7 @@ async fn connect(addr: SocketAddr, speaks: &[&str]) -> quinn::Connection {
 async fn datagrams_are_carried_both_ways() {
     let (cert, key) = self_signed();
     let upstream = spawn_quic_echo(&cert, &key, &["fgex-raw"]).await;
-    let addr = spawn_relay(upstream, "", &["fgex-raw"]).await;
+    let addr = spawn_relay(upstream, "").await;
 
     let connection = connect(addr, &["fgex-raw"]).await;
     assert!(
@@ -324,7 +340,7 @@ async fn datagrams_are_carried_both_ways() {
 async fn a_refused_datagram_is_dropped_and_the_connection_lives() {
     let (cert, key) = self_signed();
     let upstream = spawn_quic_echo(&cert, &key, &["fgex-raw"]).await;
-    let addr = spawn_relay(upstream, "block:forbidden", &["fgex-raw"]).await;
+    let addr = spawn_relay(upstream, "block:forbidden").await;
 
     let connection = connect(addr, &["fgex-raw"]).await;
     connection
@@ -361,7 +377,7 @@ async fn a_refused_datagram_is_dropped_and_the_connection_lives() {
 async fn a_datagram_flow_keeps_its_filter_state() {
     let (cert, key) = self_signed();
     let upstream = spawn_quic_echo(&cert, &key, &["fgex-raw"]).await;
-    let addr = spawn_relay(upstream, "block:secret", &["fgex-raw"]).await;
+    let addr = spawn_relay(upstream, "block:secret").await;
 
     let connection = connect(addr, &["fgex-raw"]).await;
     connection

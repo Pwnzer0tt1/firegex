@@ -22,11 +22,12 @@ import asyncio
 import json
 import os
 import sys
+import time
 import traceback
 from typing import NamedTuple
 
 from modules.services.models import (KIND, L4, PROTO, TRANSPORT, UPSTREAM, Filter,
-                                     Regex, quic_alpn, upstream_refusal)
+                                     Regex)
 from modules.services.nftables import (MAX_CHAIN_POSITIONS, NoRelayAddress,
                                        interface_addresses, service_at, udp_relay_host,
                                        udp_relay_key, udp_relay_slot)
@@ -52,8 +53,39 @@ PYWORKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyworker.py
 #: both network layers.
 PYWORKER_EXCEPTION_MARK = "[exception] [filter]"
 
-#: How long to wait for a binary to acknowledge a configuration push.
+#: How long to wait for a binary to acknowledge a control command, or to say it started.
 ACK_TIMEOUT = 3
+
+#: How long a binary may take over one filter's worth of a configuration push. Loading a
+#: Python filter runs its module body, which the code check lets take up to eight seconds
+#: (`CHECK_TIMEOUT` in the router) — so a push held to `ACK_TIMEOUT` gave up on a file the
+#: check had just accepted, and the answer that came afterwards was read as the answer to
+#: whichever command was sent next.
+LOAD_TIMEOUT = 10
+
+#: How long a proxy engine taken out of service may go on carrying the connections it
+#: already had. It is taken out of the rules at once — new connections go straight to the
+#: service, or to the engine that replaced it — and it exits as soon as it reports none
+#: left. Killed instead, which is what a stop used to do, every connection it carried
+#: was cut: a download, a websocket, a request half answered. The ceiling is for the ones
+#: that never close.
+DRAIN_LIMIT = 600
+#: The engine reports its connections every two seconds (`STATS_INTERVAL` in `main.rs`);
+#: a report sent before it was taken out of the rules cannot say it has none left.
+DRAIN_FRESH_AFTER = 2.5
+#: How many engines of one service may be draining at once. A service restarted over and
+#: over while clients hold connections open would otherwise keep one process per restart.
+MAX_DRAINING = 3
+
+#: Every engine taken out of service and still carrying connections, by service id.
+_draining: dict[str, list["ProxyTransport"]] = {}
+
+
+async def stop_draining() -> None:
+    """End every drain now: the rules that carry their connections home are going too."""
+    for engines in list(_draining.values()):
+        for engine in list(engines):
+            await engine._end_drain(None)
 
 
 class UnsupportedChain(Exception):
@@ -254,6 +286,17 @@ class Transport:
     async def stop(self) -> None:
         raise NotImplementedError
 
+    async def retire(self, keep_filtering: bool, then=None) -> None:
+        """Stop, sparing whatever connections this layer can spare. See `ProxyTransport`.
+
+        Only the proxy layer has any to spare: it is the one that terminates them. A
+        queued service's connections never belonged to its processes, and a handed-off
+        one's belong to the operator's proxy — both go on when the rules come off.
+        """
+        await self.stop()
+        if then:
+            then()
+
     async def _kill(self):
         if self.process and self.process.returncode is None:
             self.process.kill()
@@ -308,6 +351,21 @@ class Transport:
 
         return asyncio.create_task(run())
 
+    def _abandon(self, process, what: str, command: str, waited: float) -> None:
+        """Give up on a datapath process that stopped answering its control channel.
+
+        Killed rather than waited on further, because its answer may still come — and it
+        would then be read as the answer to the next command, and every command after that
+        would be told what the one before it got. Killed **without** being marked stopped,
+        so its watchdog reports it and the service is rebuilt from the saved configuration:
+        what was applied, if anything, cannot be known from here.
+        """
+        if self.on_engine:
+            self.on_engine(f"[error] [backend] {what} did not acknowledge {command} within "
+                           f"{waited:.0f}s; restarting it")
+        if process is not None and process.returncode is None:
+            process.kill()
+
     async def _died_because(self, fallback: str) -> str:
         """What to tell the operator when the datapath would not come up.
 
@@ -352,6 +410,9 @@ class _QueueStage:
         #: did not. Without the distinction every ordinary stop looks like a crash.
         self._stopped = False
         self._watchdog: asyncio.Task | None = None
+        #: What this process last acknowledged, so an edit elsewhere in the chain does
+        #: not send it the same filters again. See `reload`.
+        self._in_force: bytes | None = None
 
     async def start(self) -> int:
         if self.link.kind == KIND.PYFILTER:
@@ -453,25 +514,48 @@ class _QueueStage:
         self._sock_ready.set()
 
     async def _pump_output(self):
+        import codecs
+
+        # Whole lines only, decoded across reads: a line cut at a read boundary was two
+        # log entries, and a character cut there was two replacement marks.
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        pending = ""
         try:
             while True:
                 data = await self.process.stdout.read(10 * 1024)
                 if not data:
-                    return
-                text = data.decode(errors="replace")
-                # The binary's own diagnostics share this pipe with the user's output, so
-                # the reason it gives for dying is read here or not at all — and without
-                # it a stage that would not start was reported as merely "would not
-                # start", with the sentence that said why sitting in the log.
-                for line in text.splitlines():
-                    if "[fatal]" in line:
-                        self.owner._last_fatal = line.split("[fatal]", 1)[1].strip()
-                if self.owner.on_output:
-                    self.owner.on_output(self.srv.id, text)
+                    break
+                *lines, pending = (pending + decoder.decode(data)).split("\n")
+                self._forward_output(lines)
         except (asyncio.CancelledError, asyncio.IncompleteReadError):
             pass
         except Exception:
             traceback.print_exc()
+        if pending:
+            self._forward_output([pending])
+
+    def _forward_output(self, lines: list[str]) -> None:
+        """The binary's own diagnostics share this pipe with whatever the user's code prints.
+
+        So both go through the classifier the other datapaths' stderr goes through, which
+        reads a line's tag for its level, a traceback as an error, and an untagged line as
+        the user's own output. They used to go in as the user's output, all of them:
+        `[error]` lines and the traceback of a filter that raised were grey text among the
+        prints, where a warning is looked for and not found.
+        """
+        for line in lines:
+            # The reason it gives for dying is read here or not at all — and without it a
+            # stage that would not start was reported as merely "would not start", with
+            # the sentence that said why sitting in the log.
+            if "[fatal]" in line:
+                self.owner._last_fatal = line.split("[fatal]", 1)[1].strip()
+        text = "\n".join(lines)
+        if not text.strip():
+            return
+        if self.owner.on_engine:
+            self.owner.on_engine(text)
+        elif self.owner.on_output:
+            self.owner.on_output(self.srv.id, text)
 
     # --- shared ---------------------------------------------------------------
 
@@ -518,7 +602,16 @@ class _QueueStage:
             payload = self._regex_payload(link.regexes)
         else:
             payload = self._python_payload(link)
+        # Every stage is reloaded on every edit to the chain, and a new configuration is
+        # a clean slate for the connections under way: `cppregex` resets its matchers
+        # and `cpproxy` its filters' state. For the filter that was edited that is the
+        # point. For the others it cost every open connection its place — a request in
+        # the middle of an upload was read again from its second half — over a pattern
+        # changed in a filter they have nothing to do with.
+        if payload == self._in_force:
+            return
         await self._push(payload)
+        self._in_force = payload
 
     def _regex_payload(self, regexes: list[Regex]) -> bytes:
         """cppregex takes its patterns as hex codes, one per direction.
@@ -586,14 +679,25 @@ class _QueueStage:
         else:
             raise Exception("the nfqueue binary is not running")
         try:
-            ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
+            ok, detail = await asyncio.wait_for(self._ack, timeout=LOAD_TIMEOUT)
         except asyncio.TimeoutError:
-            await self.stop()
+            # Whether it took the new filters or is still at it cannot be known now, and
+            # an answer arriving later would be read as the answer to the next push. So
+            # it is killed *without* being marked stopped: the watchdog reports it and
+            # the service is rebuilt from what the database says — which, after an edit
+            # that was refused, is what it said before. At start the caller stops every
+            # stage anyway.
+            self.owner._abandon(self.process, f"the {self.link.filter.name} interceptor",
+                                "the filters", LOAD_TIMEOUT)
             raise Exception("the nfqueue binary did not acknowledge the filters")
         finally:
             self._ack = None
         if not ok:
-            await self.stop()
+            # Not fatal, and it must not be made so: both binaries answer `ACK FAIL` with
+            # the filters they had still in force. This used to stop the stage, which
+            # during an edit left a service reported active with nothing reading its
+            # queue — unfiltered where it fails open, silent where it does not — and
+            # stopped on purpose, so the watchdog had nothing to say about it.
             raise Exception(f"the nfqueue binary rejected the filters: {detail}")
 
     async def stop(self) -> None:
@@ -794,14 +898,6 @@ class ProxyTransport(Transport):
     @classmethod
     def check(cls, srv, chain: list[ChainLink]) -> None:
         super().check(srv, chain)
-        # Asked here as well as where each was set, because an address added afterwards
-        # can be one this instance cannot honour.
-        for addr in srv.addresses:
-            refusal = upstream_refusal(
-                srv.proto, addr.upstream, L4.l4_of(addr.edge) == L4.UDP
-            )
-            if refusal:
-                raise UnsupportedChain(refusal)
         if srv.carries(L4.UDP):
             from utils import get_interface_ips, is_ip_parse
             # Only the addresses that need a relay of their own. On an `http` service
@@ -831,6 +927,11 @@ class ProxyTransport(Transport):
         #: did not — the same distinction the NFQUEUE stages make.
         self._stopped = False
         self._watchdog: asyncio.Task | None = None
+        #: When the engine last reported its counters, for a drain to know that `live`
+        #: was counted after the engine was taken out of the rules.
+        self._stats_at = 0.0
+        self._drain: asyncio.Task | None = None
+        self._after_drain = None
 
     def _published(self) -> list[str]:
         """What this engine is told about its TCP addresses, one entry each.
@@ -944,21 +1045,13 @@ class ProxyTransport(Transport):
                 "FGEX_PROXY_TLS": "1",
                 "FGEX_PROXY_TLS_OPTIONAL": "1",
                 "FGEX_PROXY_QUIC": "1",
-                "FGEX_PROXY_QUIC_ALPN": ",".join(quic_alpn()),
             }
         if str(self.srv.proto) == L4.QUIC:
             return {
                 **material,
                 "FGEX_PROXY_QUIC": "1",
-                # What the engine offers the service, in this order. It cannot be asked
-                # of the client the way the TLS path asks: a QUIC ClientHello arrives
-                # inside an encrypted Initial whose processing *is* the handshake, so
-                # there is nothing to hold it at and nothing to read before answering.
-                # `h3` is what a QUIC service speaks nine times in ten; an instance in
-                # front of something else sets this in its own environment, the same way
-                # the filter deadline beside it is set. Per service it would be a column,
-                # and nothing yet has wanted one.
-                "FGEX_PROXY_QUIC_ALPN": ",".join(quic_alpn()),
+                # No protocol list: the engine offers the service what each client
+                # offered, read off the client's first packet — see `quic_hello.rs`.
             }
         return material
 
@@ -1135,13 +1228,19 @@ class ProxyTransport(Transport):
             # to an engine that was not there to apply it. The watchdog restarts a dead
             # engine from what the database holds.
             raise Exception("the proxy engine is not running")
+        # The engine answers once every Python filter of the chain has loaded, one after
+        # the other, so the wait grows with them.
+        python = sum(1 for link in chain
+                     if link.filter.active and link.kind == KIND.PYFILTER and link.code_path)
+        waited = LOAD_TIMEOUT * (1 + python)
         async with self._cmd_lock:
             self._ack = asyncio.get_running_loop().create_future()
             self.process.stdin.write((self._payload(chain) + "\n").encode())
             await self.process.stdin.drain()
             try:
-                ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
+                ok, detail = await asyncio.wait_for(self._ack, timeout=waited)
             except asyncio.TimeoutError:
+                self._abandon(self.process, "the proxy engine", "the chain", waited)
                 raise Exception("the proxy engine did not acknowledge the chain")
             finally:
                 self._ack = None
@@ -1181,6 +1280,7 @@ class ProxyTransport(Transport):
             try:
                 ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
             except asyncio.TimeoutError:
+                self._abandon(self.process, "the proxy engine", "ADD_UDP", ACK_TIMEOUT)
                 raise Exception(f"the proxy engine did not acknowledge ADD_UDP for {target}")
             finally:
                 self._ack = None
@@ -1221,6 +1321,7 @@ class ProxyTransport(Transport):
             try:
                 ok, detail = await asyncio.wait_for(self._ack, timeout=ACK_TIMEOUT)
             except asyncio.TimeoutError:
+                self._abandon(self.process, "the proxy engine", line.split()[0], ACK_TIMEOUT)
                 raise Exception(f"the proxy engine did not acknowledge {line.split()[0]}")
             finally:
                 self._ack = None
@@ -1253,6 +1354,7 @@ class ProxyTransport(Transport):
                         key, _, value = token.partition("=")
                         if value.isdigit():
                             self.counters[key] = int(value)
+                    self._stats_at = time.monotonic()
                     # Only the increase, and only when there is one: the engine counts
                     # from zero every time it starts, so handing the absolute number up
                     # would reset the durable trace on every restart of the service.
@@ -1280,6 +1382,103 @@ class ProxyTransport(Transport):
         # After the engine is gone, never before: a key removed while the process that
         # reads it is still running would be a key removed from under a restart.
         self._clear_crypto_material()
+
+    async def retire(self, keep_filtering: bool, then=None) -> None:
+        """Take the engine out of service without cutting the connections it carries.
+
+        The caller has already taken it out of the rules, so nothing new reaches it; what
+        conntrack already sent here keeps coming here, and is carried until it closes.
+        `keep_filtering` is a restart's answer — the connections go on under the filters
+        they started with — and a stop's is to carry them unfiltered: stopping is how an
+        operator takes a filter that is hurting the service out of the way, and a filter
+        that went on judging the connections already open would not be out of the way.
+
+        `then` runs once the engine has gone, which is when its ports can stop being
+        guarded: until then a relay would be reachable directly with nothing steering
+        traffic at it.
+        """
+        self._stopped = True
+        if self._watchdog and self._watchdog is not asyncio.current_task():
+            self._watchdog.cancel()
+        self._watchdog = None
+        self.port = None
+        self._after_drain = then
+        # The engine read these when it started and never again, and a restart writes
+        # its own copies for the engine replacing this one: removed later, they would be
+        # the new engine's.
+        self._clear_crypto_material()
+        if not self.process or self.process.returncode is not None:
+            await self._end_drain(None)
+            return
+        if not keep_filtering:
+            try:
+                await self.reload([])
+            except Exception:
+                # Not answering is `_abandon`'s to deal with, and it already has.
+                pass
+        engines = _draining.setdefault(self.srv.id, [])
+        engines.append(self)
+        while len(engines) > MAX_DRAINING:
+            oldest = engines[0]
+            await oldest._end_drain(
+                f"[warn] [drain] {oldest.counters.get('live', 0)} connection(s) carried "
+                f"from before an earlier restart were closed: {MAX_DRAINING} engines were "
+                f"already draining")
+        self._drain = asyncio.create_task(self._wait_out(keep_filtering, time.monotonic()))
+
+    async def _wait_out(self, kept_filtering: bool, began: float) -> None:
+        told = False
+        while self.process and self.process.returncode is None:
+            await asyncio.sleep(0.5)
+            fresh = self._stats_at >= began + DRAIN_FRESH_AFTER
+            live = self.counters.get("live", 0)
+            if fresh and live == 0:
+                if told:
+                    await self._end_drain("[info] [drain] the connections from before "
+                                          "have all closed")
+                else:
+                    await self._end_drain(None)
+                return
+            if fresh and not told:
+                told = True
+                self._say(
+                    f"[info] [drain] {live} connection(s) were open through the engine; "
+                    f"they carry on "
+                    f"{'under the filters they started with' if kept_filtering else 'unfiltered'}"
+                    f" until they close, for up to {DRAIN_LIMIT // 60} minutes")
+            if time.monotonic() - began >= DRAIN_LIMIT:
+                await self._end_drain(
+                    f"[warn] [drain] {live} connection(s) from before were still open after "
+                    f"{DRAIN_LIMIT // 60} minutes and were closed")
+                return
+        await self._end_drain(None)
+
+    async def _end_drain(self, said: str | None) -> None:
+        engines = _draining.get(self.srv.id, [])
+        if self in engines:
+            engines.remove(self)
+        if not engines:
+            _draining.pop(self.srv.id, None)
+        if self._drain and self._drain is not asyncio.current_task():
+            self._drain.cancel()
+        self._drain = None
+        if said:
+            self._say(said)
+        for task in (self._reader_task, self._stderr_pump):
+            if task:
+                task.cancel()
+        self._reader_task = self._stderr_pump = None
+        await self._kill()
+        then, self._after_drain = self._after_drain, None
+        if then:
+            try:
+                then()
+            except Exception:
+                traceback.print_exc()
+
+    def _say(self, line: str) -> None:
+        if self.on_engine:
+            self.on_engine(line)
 
 
 class ExternalTransport(Transport):

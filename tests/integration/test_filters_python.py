@@ -7,6 +7,7 @@ taking `(data, direction)`, so a filter written from the docs worked on one tran
 failed on the other.
 """
 
+import socket
 import time
 
 import pytest
@@ -201,6 +202,67 @@ def test_switching_one_function_off_stops_it_deciding_without_touching_the_code(
     assert "refuse_traversal" in stored, "the code was edited to switch a function off"
 
 
+def test_new_code_reaches_a_connection_already_open(api, protected, inspecting_layer):
+    """An edit is for the attack in progress, which is on a connection already open.
+
+    The proxy layer hands a connection's next chunk to the new chain, and `cppregex`
+    resets its matchers on a new configuration. `cpproxy` kept a version number for the
+    same purpose and never read it, so a stream went on running the code it had started
+    with for as long as it stayed open: a check added against one connection did not reach
+    that connection.
+    """
+    service_id, server, port = protected(inspecting_layer, name="py-live")
+    filter_id = add_python_filter(api, service_id, filter_code.BLOCK_MARKER)
+    start_and_settle(api, service_id)
+
+    server.connect_client(timeout=3)
+    try:
+        server.send_packet(b"carrying NEWRULE")
+        assert server.recv_packet() == b"carrying NEWRULE", \
+            "the connection did not work to begin with"
+        assert api.services_set_code(
+            service_id, filter_id, filter_code.BLOCK_MARKER.replace("PYBLOCK", "NEWRULE"))
+        time.sleep(RELOAD)
+        server.send_packet(b"carrying NEWRULE")
+        assert server.recv_packet() != b"carrying NEWRULE", \
+            "the connection that was already open went on running the old code"
+    finally:
+        server.close_client()
+
+
+def test_a_python_filter_added_later_reaches_a_connection_already_open(
+        api, protected, inspecting_layer):
+    """The same as for patterns, for the binary that runs code.
+
+    `cpproxy` read each stream's direction from which end it had seen open it, so besides
+    dropping a stream it met halfway it would have had nothing to go on. It takes the
+    direction from the packet now, which the kernel knows either way.
+    """
+    service_id, server, port = protected(inspecting_layer, name="py-late")
+    add_regex_filter(api, service_id, "UNRELATED")
+    start_and_settle(api, service_id)
+
+    server.connect_client(timeout=3)
+    try:
+        server.send_packet(b"carrying PYBLOCK")
+        assert server.recv_packet() == b"carrying PYBLOCK", \
+            "the connection did not work to begin with"
+        add_python_filter(api, service_id, filter_code.BLOCK_MARKER)
+        time.sleep(RELOAD + 1)
+        server.send_packet(b"still fine")
+        assert server.recv_packet() == b"still fine", \
+            "the connection stopped working when the new filter picked it up"
+        try:
+            server.send_packet(b"carrying PYBLOCK")
+            got = server.recv_packet()
+        except OSError:
+            got = False
+        assert got != b"carrying PYBLOCK", \
+            "a connection that was already open was never inspected by the new filter"
+    finally:
+        server.close_client()
+
+
 def test_saving_different_code_reconciles_the_list_of_functions(api, http_filter):
     """The code is what decides which functions exist.
 
@@ -273,3 +335,130 @@ def test_removing_a_filter_leaves_the_rest_of_the_chain_running(api, protected,
     time.sleep(1.0)
     assert channel.gets_through(b"carrying PYBLOCK"), "the removed filter still decides"
     assert channel.is_blocked(b"carrying BLOCKME"), "the rest of the chain stopped"
+
+
+#: Strict about what it cannot read, as an operator guarding against request smuggling
+#: would be — the setting under which judging half a request refused it.
+STRICT_HTTP = """from firegex.pyfilters import pyfilter, ACCEPT, REJECT, ExceptionAction
+from firegex.pyfilters.models import HttpRequest
+
+FGEX_INVALID_ENCODING_ACTION = ExceptionAction.REJECT
+
+@pyfilter
+def refuse_marked_url(req: HttpRequest):
+    return REJECT if "PYBLOCK" in (req.url or "") else ACCEPT
+"""
+
+
+def _answer(sock: socket.socket) -> bytes:
+    """One HTTP response off `sock`, or what arrived before it closed or went quiet."""
+    got = b""
+    try:
+        while b"\r\n\r\n" not in got:
+            chunk = sock.recv(65536)
+            if not chunk:
+                return got
+            got += chunk
+        head, _, body = got.partition(b"\r\n\r\n")
+        length = next((int(line.split(b":")[1]) for line in head.split(b"\r\n")
+                       if line.lower().startswith(b"content-length:")), 0)
+        while len(body) < length:
+            chunk = sock.recv(65536)
+            if not chunk:
+                break
+            body += chunk
+        return head + b"\r\n\r\n" + body
+    except OSError:
+        return got
+
+
+def test_a_request_in_flight_when_the_filter_changes_is_not_judged_by_its_second_half(
+        api, service, http_stand_in, inspecting_layer):
+    """A filter meeting a connection halfway leaves what it cannot read alone.
+
+    Half an upload is sent, the filter changes — a queued one is added, which rebuilds the
+    chain, or a proxied one gets new code — and the other half follows. Whatever runs the
+    filter now meets that connection in the middle of a body. It used to hand the body to
+    the HTTP parser as if it were the start of a request, which it is not: with the
+    strict setting on, a valid upload was refused in flight, and without it the log said
+    a working client was not speaking HTTP. Connections opened afterwards are filtered
+    from their first byte, as always.
+    """
+    http = http_stand_in(inspecting_layer.ipv6)
+    service_id = service(f"py-inflight-{http.port}", inspecting_layer.ip, http.port,
+                         inspecting_layer.transport)
+    queued = inspecting_layer.transport == "nfqueue"
+    if queued:
+        add_regex_filter(api, service_id, "UNRELATED")
+    else:
+        filter_id = add_python_filter(api, service_id, STRICT_HTTP)
+    start_and_settle(api, service_id)
+
+    body = b"x" * 3000
+    with socket.create_connection((inspecting_layer.ip, http.port), timeout=3) as sock:
+        sock.sendall(b"POST /upload HTTP/1.1\r\nHost: svc\r\nContent-Length: 3000\r\n\r\n"
+                     + body[:1500])
+        time.sleep(0.3)
+        if queued:
+            add_python_filter(api, service_id, STRICT_HTTP)
+        else:
+            assert api.services_set_code(service_id, filter_id, STRICT_HTTP + "\n# edited\n")
+        time.sleep(RELOAD + 1)
+        sock.sendall(body[1500:])
+        assert b"sent 3000 bytes" in _answer(sock), \
+            "a valid upload in flight was refused when the filter changed"
+
+    said = [e["text"] for e in api.services_logs(service_id)
+            if e["level"] in ("warn", "error") and "not HTTP" in e["text"]]
+    assert not said, f"a working client was reported as not speaking HTTP: {said}"
+
+    with socket.create_connection((inspecting_layer.ip, http.port), timeout=3) as sock:
+        sock.sendall(b"GET /PYBLOCK HTTP/1.1\r\nHost: svc\r\n\r\n")
+        assert b"200" not in _answer(sock), "a new connection was not filtered"
+
+
+#: Remembers, per connection, whether the client has said FIRST — so a verdict on
+#: SECOND says whether the filter's state for the connection survived.
+REMEMBERS = """from firegex.pyfilters import pyfilter, ACCEPT, REJECT
+from firegex.pyfilters.models import RawPacket
+
+said_first = False
+
+@pyfilter
+def second_after_first(packet: RawPacket):
+    global said_first
+    if packet.is_input and b"FIRST" in packet.data:
+        said_first = True
+    return REJECT if said_first and b"SECOND" in packet.data else ACCEPT
+"""
+
+
+def test_an_edit_to_another_filter_leaves_a_python_filters_connections_alone(
+        api, protected, inspecting_layer):
+    """A Python filter keeps its per-connection state through edits that are not its own.
+
+    Every edit reloads the whole chain. On both layers that restarted the Python filters
+    too — a new worker on the proxy, a clean slate in `cpproxy` — so changing a pattern
+    in one filter wiped what another had kept about every open connection: its module
+    globals, and the place its HTTP parser had reached in a request.
+    """
+    service_id, server, port = protected(inspecting_layer, name="py-kept")
+    add_python_filter(api, service_id, REMEMBERS)
+    regex_filter, _ = add_regex_filter(api, service_id, "UNRELATED")
+    start_and_settle(api, service_id)
+
+    server.connect_client(timeout=3)
+    try:
+        server.send_packet(b"FIRST")
+        assert server.recv_packet() == b"FIRST", "the connection did not work to begin with"
+        assert api.services_add_regex(service_id, regex_filter, "ALSOUNRELATED", mode="C")
+        time.sleep(RELOAD + 1)
+        try:
+            server.send_packet(b"SECOND")
+            got = server.recv_packet()
+        except OSError:
+            got = False
+        assert got != b"SECOND", \
+            "a pattern added to another filter wiped this filter's state for the connection"
+    finally:
+        server.close_client()

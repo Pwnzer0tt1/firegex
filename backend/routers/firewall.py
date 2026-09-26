@@ -50,6 +50,7 @@ async def startup():
     await firewall.init()
 
 async def shutdown():
+    firewall.stop_watching()
     if not firewall.keep_rules:
         await firewall.close()
     db.disconnect()

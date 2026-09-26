@@ -308,3 +308,4 @@ def test_the_index_name_is_still_understood_if_it_is_ever_reported():
 
     assert "proxy endpoint" in _address_taken(sqlite3.IntegrityError(
         "UNIQUE constraint failed: index 'unique_hijack_target'"))
+

@@ -141,7 +141,10 @@ class ServiceLog:
         final count — so the chart sat at whatever it happened to reach two seconds in.
         The last block of a burst is precisely the one worth hearing about.
         """
-        if not any(entry["level"] == LEVEL.BLOCK for entry in entries):
+        # A warning or an error changes the service list too: it carries the latest one
+        # (`last_problem`).
+        if not any(entry["level"] in (LEVEL.BLOCK, LEVEL.WARN, LEVEL.ERROR)
+                   for entry in entries):
             return
         waited = time.monotonic() - self._counters_told
         if waited >= COUNTER_INTERVAL:
@@ -169,6 +172,19 @@ class ServiceLog:
 
     def entries(self) -> list[dict]:
         return list(self.history)
+
+    def last_problem(self) -> dict | None:
+        """The newest warning or error still in the tail, for the service list to show.
+
+        The live log is on the service's own page, and a warning nobody has that page open
+        for is a warning nobody reads: a datapath that died and came back, a filter that
+        raised, a fallback that lost the client's address. The list carries the latest one
+        beside the service, and clearing the log is how it is acknowledged.
+        """
+        for entry in reversed(self.history):
+            if entry["level"] in (LEVEL.WARN, LEVEL.ERROR):
+                return entry
+        return None
 
     def clear(self) -> None:
         self.history.clear()

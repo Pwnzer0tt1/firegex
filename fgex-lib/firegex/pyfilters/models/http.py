@@ -21,6 +21,26 @@ from websockets.extensions.permessage_deflate import PerMessageDeflate
 from firegex._llhttp import PAUSED_H2_UPGRADE, PAUSED_UPGRADE
 
 
+#: Whether this process has said that it met connections in the middle of a message.
+#: Once per process rather than per connection: a filter taking over from another meets
+#: every connection that was open at that moment, and a line each would bury the log.
+_told_met_mid_message = False
+
+
+def _met_mid_message() -> None:
+    global _told_met_mid_message
+    if _told_met_mid_message:
+        return
+    _told_met_mid_message = True
+    print(
+        "[info] [http] connections already open when this filter took over were met in "
+        "the middle of a message; whatever could not be read from where it came in is "
+        "carried without its HTTP filters until that connection closes. Connections "
+        "opened from now on are filtered from their first byte.",
+        flush=True,
+    )
+
+
 @dataclass
 class InternalHTTPMessage:
     """Internal class to handle HTTP messages"""
@@ -754,6 +774,11 @@ class InternalBasicHttpMetaClass:
         )
         parser_key = f"{cls._parser_class()}_{'in' if internal_data.current_pkt.is_input else 'out'}"
 
+        # A connection this filter met already open, and in the middle of a message: it
+        # cannot be read from where it came in, and it did nothing wrong. See below.
+        if internal_data.data_handler_context.get(f"{parser_key}_met_mid_message"):
+            raise NotReadyToRun()
+
         parser = internal_data.data_handler_context.get(parser_key, None)
         if parser is None or parser.raised_error:
             parser: InternalHttpRequest | InternalHttpResponse = ParserType()
@@ -816,8 +841,47 @@ class InternalBasicHttpMetaClass:
             try:
                 parser.parse_data(internal_data.current_pkt.data)
             except Exception as e:
-                traceback.print_exc()
-                match internal_data.invalid_encoding_action:
+                # **Met already open, and not yet read a single thing cleanly.** The
+                # datapath says when this filter's state began after its connection did:
+                # a queued filter that started, or was rebuilt, with the connection open,
+                # or new code taking over one. Its first bytes here can be the middle of a
+                # request — the rest of an upload — and llhttp reads that as a malformed
+                # message. It is not one, and judging it as one refused valid uploads in
+                # flight whenever a filter changed (with REJECT), or reported a working
+                # client as "not HTTP" (without). That direction is carried unfiltered
+                # until the connection closes instead. A connection met at the start of
+                # a message parses, is in step from then on, and is judged as usual.
+                if (
+                    internal_data.filter_glob.get("__firegex_joined_late")
+                    and not internal_data.data_handler_context.get(f"{parser_key}_in_step")
+                ):
+                    internal_data.data_handler_context[f"{parser_key}_met_mid_message"] = True
+                    _met_mid_message()
+                    raise NotReadyToRun()
+                action = internal_data.invalid_encoding_action
+                # Said once per connection and direction, and in one line: the parser is
+                # started afresh on the next packet, so traffic it cannot read fails on
+                # every packet — and a traceback each was the whole log, several hundred
+                # times, saying less than this does.
+                told = f"{parser_key}_unreadable_told"
+                if not internal_data.data_handler_context.get(told):
+                    internal_data.data_handler_context[told] = True
+                    print(
+                        f"[warn] [http] this connection's "
+                        f"{'requests' if internal_data.current_pkt.is_input else 'responses'}"
+                        f" are not HTTP this filter can read ({e}): "
+                        + {
+                            ExceptionAction.ACCEPT: "they are carried without its HTTP "
+                            "filters seeing them. FGEX_INVALID_ENCODING_ACTION = "
+                            "ExceptionAction.REJECT refuses such connections instead.",
+                            ExceptionAction.REJECT: "the connection is refused "
+                            "(FGEX_INVALID_ENCODING_ACTION).",
+                            ExceptionAction.DROP: "the packet is dropped "
+                            "(FGEX_INVALID_ENCODING_ACTION).",
+                        }.get(action, "reported as the filter raising."),
+                        flush=True,
+                    )
+                match action:
                     case ExceptionAction.REJECT:
                         raise RejectConnection()
                     case ExceptionAction.DROP:
@@ -826,6 +890,9 @@ class InternalBasicHttpMetaClass:
                         raise e
                     case ExceptionAction.ACCEPT:
                         raise NotReadyToRun()
+
+            # Read cleanly once: from here on this direction is a stream like any other.
+            internal_data.data_handler_context[f"{parser_key}_in_step"] = True
 
             if any(msg.decoded_too_large for msg in parser.messages):
                 # Too large once decoded is too large: the operator's answer to a stream

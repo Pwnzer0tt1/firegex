@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { FaPlay, FaStop, FaTrash } from 'react-icons/fa';
 import { IoSettingsSharp } from 'react-icons/io5';
 import { MdChevronRight, MdMoreHoriz } from 'react-icons/md';
-import { TbHexagon, TbShieldLock } from 'react-icons/tb';
+import { TbAlertTriangle, TbHexagon, TbShieldLock } from 'react-icons/tb';
 import { bareAddress, errorNotify, isMediumScreen, okNotify } from '../../js/utils';
 import YesNoModal from '../YesNoModal';
 import AddEditService from './AddEditService';
@@ -36,6 +36,29 @@ export const transportSummary = (transport: string, proto: string) => {
     return proto === L4.UDP
         ? "Each address is relayed by a dedicated socket. Filters keep per-flow state, source IP transparency is preserved, and a new address is relayed without restarting the service."
         : "The connection is terminated and reopened, so the kernel reassembles and the chain has no length limit. It also carries bulk traffic several times faster than NFQUEUE, which pays a userspace round trip per packet; what it costs is fail-open being rebuilt in userspace rather than guaranteed by the kernel. The service still sees the real client address."
+}
+
+/** How long a warning stays on the row after it happened, unless the log is cleared first. */
+const PROBLEM_SHOWN_MS = 60 * 60 * 1000
+
+/**
+ * The newest warning or error in the service's log, on the row, for an hour.
+ *
+ * The log is on the service's own page, and a problem there waits for somebody to open
+ * it — the notification says it once, this keeps saying it for whoever looks at the list
+ * afterwards. Clearing the log is how it is dismissed.
+ */
+export function ProblemBadge({ service }: { service: Service }) {
+    const problem = service.problem
+    if (!problem || Date.now() - problem.at > PROBLEM_SHOWN_MS) return null
+    const error = problem.level === "error"
+    return <Tooltip position="bottom" multiline w={380}
+        label={`${new Date(problem.at).toLocaleTimeString(undefined, { hour12: false })} — ${problem.text}. Clear the service's log to dismiss this.`}>
+        <Badge color={error ? "red" : "orange"} variant="light" size="xs" radius="sm"
+            leftSection={<TbAlertTriangle size={10} />}>
+            {error ? "ERROR" : "WARNING"}
+        </Badge>
+    </Tooltip>
 }
 
 /** Where a service is reachable, short enough to sit on one line. */
@@ -135,6 +158,7 @@ export default function ServiceRow({ service, onClick }: { service: Service, onC
                             <Badge color={statusColor} variant="light" size="xs" radius="sm">
                                 {service.status.toUpperCase()}
                             </Badge>
+                            <ProblemBadge service={service} />
                             <Tooltip position="bottom" multiline w={340}
                                 label={transportSummary(service.transport, service.proto)}>
                                 <Badge color="indigo" variant="light" size="xs" radius="sm">

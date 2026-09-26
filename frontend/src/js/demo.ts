@@ -234,6 +234,10 @@ const addLog = (service_id: string, level: string, text: string) => {
     logs[service_id] = [...(logs[service_id] ?? []), entry].slice(-500)
     for (const cb of listeners["log"] ?? []) cb({ service_id, entries: [entry] })
 }
+// One warning already in the tail, so the list shows what a problem looks like: the line a
+// service at its connection limit really writes.
+addLog(svcShop, "warn", "the 512 connection limit turned away 37 more: they were refused. "
+    + "Raise the limit, or find out who is holding connections open.")
 let ticker: ReturnType<typeof setInterval> | null = null
 
 const emit = (...tags: string[][]) => {
@@ -261,6 +265,13 @@ const startTicker = () => {
         }
         if (changed) emit(["services"])
     }, 4000)
+    // And one warning a little after the start, the way a real one arrives: as a
+    // notification wherever you are, and as the badge on the service's row.
+    setTimeout(() => {
+        addLog(svcShop, "warn", "the 512 connection limit turned away 12 more: they were refused. "
+            + "Raise the limit, or find out who is holding connections open.")
+        emit(["services"])
+    }, 10_000)
 }
 
 let welcomed = false
@@ -325,6 +336,9 @@ const decorate = (s: Json) => ({
     addresses: addressesOf(s.service_id),
     n_filters: state.filters.filter(f => f.service_id === s.service_id).length,
     n_blocked: state.filters.filter(f => f.service_id === s.service_id).reduce((acc, f) => acc + f.blocked, 0),
+    // The newest warning or error in its tail, as the backend reports it.
+    problem: [...(logs[s.service_id] ?? [])].reverse()
+        .find(e => e.level === "warn" || e.level === "error") ?? null,
 })
 
 /**
@@ -589,7 +603,7 @@ const routes: [string, RegExp, Handler][] = [
         }
     }],
     ["GET", /^services\/([^/]+)\/logs$/, m => { service(m[1]); return logs[m[1]] ?? [] }],
-    ["DELETE", /^services\/([^/]+)\/logs$/, m => { service(m[1]); logs[m[1]] = []; return ok }],
+    ["DELETE", /^services\/([^/]+)\/logs$/, m => { service(m[1]); logs[m[1]] = []; emit(["services"]); return ok }],
 
     // ---- services: the filter chain
     ["GET", /^services\/([^/]+)\/filters$/, m => {

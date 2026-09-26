@@ -70,28 +70,6 @@ fn read_material() -> Result<Option<(String, String)>, String> {
     }
 }
 
-/// The protocols offered to the service, in the operator's order.
-///
-/// Offered to the *service*, which is what makes the list needed at all: the client's own
-/// list arrives inside an encrypted Initial and cannot be read before answering, so this
-/// is what firegex has to go on. `h3` alone by default, because that is what a QUIC
-/// service is nine times in ten; anything else — a game protocol, a CTF's own — is named
-/// here or its handshake fails saying so.
-fn quic_alpn() -> Vec<Vec<u8>> {
-    let raw = std::env::var("FGEX_PROXY_QUIC_ALPN").unwrap_or_default();
-    let listed: Vec<Vec<u8>> = raw
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.as_bytes().to_vec())
-        .collect();
-    if listed.is_empty() {
-        vec![b"h3".to_vec()]
-    } else {
-        listed
-    }
-}
-
 fn build_tls(material: Option<&(String, String)>, optional: bool) -> Result<TlsSetup, String> {
     let server = match material {
         Some((cert, key)) => Some(fgex_proxy::tls::server_config(cert, key)?),
@@ -383,9 +361,7 @@ async fn run() {
     // pair of numbers whichever half of it the traffic arrived on.
     let counters = proxy.stats();
 
-    println!("PORT {}", bound.port());
-    use std::io::Write;
-    let _ = std::io::stdout().flush();
+    fgex_proxy::report::reply(format!("PORT {}", bound.port()));
     eprintln!(
         "[info] [main] listening on {bound} -> {upstream_raw} \
          (spoof_source={spoof_source})"
@@ -405,8 +381,7 @@ async fn run() {
                 exit(2);
             }
         };
-        let alpn = quic_alpn();
-        let setup = match QuicSetup::build(cert, key, alpn.clone()) {
+        let setup = match QuicSetup::build(cert, key) {
             Ok(setup) => Arc::new(setup),
             Err(e) => {
                 eprintln!("[fatal] [main] {e}");
@@ -414,11 +389,8 @@ async fn run() {
             }
         };
         eprintln!(
-            "[info] [main] QUIC terminated here; offering the service {}",
-            alpn.iter()
-                .map(|p| String::from_utf8_lossy(p).into_owned())
-                .collect::<Vec<_>>()
-                .join(", ")
+            "[info] [main] QUIC terminated here; each client's own protocols are offered \
+             to the service"
         );
         Relays::Quic(QuicManager::new(
             chain_handle.clone(),
@@ -474,9 +446,7 @@ async fn run() {
                     // With what it speaks onward, because that is half of what names a
                     // relay: two addresses sending to one service port can want different
                     // answers, and each gets a relay of its own.
-                    println!("UDP {upstream}|{} {port}", onward.word());
-                    use std::io::Write;
-                    let _ = std::io::stdout().flush();
+                    fgex_proxy::report::reply(format!("UDP {upstream}|{} {port}", onward.word()));
                 }
                 Err(e) => {
                     eprintln!("[fatal] [main] cannot bind a UDP relay for {upstream}: {e}");
@@ -507,15 +477,16 @@ async fn run() {
             // the backend parses this line as key/value pairs, so a new number costs no
             // protocol. `over_limit` is cumulative on purpose — a service that hit the
             // wall once an hour ago still says so, which is the whole point of a trace.
-            println!(
+            // Dropped rather than waited for when the backend is behind: the next one
+            // carries the same cumulative numbers two seconds later.
+            fgex_proxy::report::event(format!(
                 "STATS seen={} refused={} live={} over_limit={} no_first_byte={}",
                 counters.accepted.load(std::sync::atomic::Ordering::Relaxed),
                 counters.closed_by_filter.load(std::sync::atomic::Ordering::Relaxed),
                 counters.live.load(std::sync::atomic::Ordering::Relaxed),
                 counters.over_limit.load(std::sync::atomic::Ordering::Relaxed),
                 counters.no_first_byte.load(std::sync::atomic::Ordering::Relaxed),
-            );
-            let _ = std::io::stdout().flush();
+            ));
         }
     });
 

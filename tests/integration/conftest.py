@@ -301,11 +301,12 @@ def quic_stand_in(certificate):
     from helpers.quicserver import QuicEcho
     started = []
 
-    def _serve(ipv6: bool = False, port: int | None = None) -> "QuicEcho":
+    def _serve(ipv6: bool = False, port: int | None = None,
+               alpn: list[str] | None = None) -> "QuicEcho":
         cert, key = certificate("::1" if ipv6 else "127.0.0.1")
         # A UDP probe: this one is going to bind a QUIC endpoint, and a port free for TCP
         # says nothing about whether it is free for UDP.
-        echo = QuicEcho(port or free_port(ipv6, udp=True), cert, key, ipv6)
+        echo = QuicEcho(port or free_port(ipv6, udp=True), cert, key, ipv6, alpn=alpn)
         echo.start()
         echo.material = (cert, key)
         started.append(echo)

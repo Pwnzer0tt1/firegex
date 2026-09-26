@@ -181,6 +181,14 @@ public:
 	}
 
 	void before_loop() override{
+		// Streams whose start this process did not see are followed from the packet it
+		// does see. They are otherwise not followed at all, and a packet of one was simply
+		// accepted: every connection open before the service started, or before its chain
+		// was rebuilt — which adding a filter does — and every one quiet for longer than
+		// the follower keeps a stream, carried whatever it said afterwards. A persistent
+		// connection was a way past any filter added after it opened. Recovery mode is
+		// switched on for them in `on_new_stream`.
+		follower.follow_partial_streams(true);
 		follower.new_stream_callback(bind(on_new_stream, placeholders::_1, this));
 		follower.stream_termination_callback(bind(on_stream_close, placeholders::_1, this));
 	}

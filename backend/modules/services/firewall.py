@@ -59,6 +59,24 @@ OVER_LIMIT_QUIET = 30
 #: was in the log pushed out behind it.
 RAISED_QUIET = 30
 
+#: How long a block's counters may wait in memory before being written. They used to be
+#: three writes per refused connection, each its own commit — about 17 ms a block, so the
+#: backend fell behind any flood of them, the engine's pipe filled, and the flood slowed
+#: every other client of the service. Once a second, in one transaction, whatever the
+#: rate. Anything reading the counters through the API writes what is waiting first.
+BLOCK_FLUSH = 1.0
+
+#: How often the kernel is asked whether firegex's rules are still there.
+#:
+#: Something else can remove them: `nft -f /etc/nftables.conf` begins with `flush
+#: ruleset` on Debian, and so does restarting the `nftables` unit. Every service then
+#: went on reading `ACTIVE` while nothing reached a filter, and nothing said so. Every few
+#: seconds is a short window and a cheap question — one small chain.
+TABLE_WATCH = 3.0
+#: And how long between two log lines about it, per service. Something removing them on a
+#: timer would otherwise write one every `TABLE_WATCH`.
+TABLE_TOLD_QUIET = 60
+
 
 def code_path(filter_id: str) -> str:
     return os.path.join(CODE_DIR, f"{filter_id}.py")
@@ -113,6 +131,16 @@ class ServiceManager:
         #: Carried between lines so a multi-line traceback keeps its severity.
         self._in_traceback = False
         self._engine_level = LEVEL.INFO
+        #: Blocks counted and not yet written, by the token the datapath reported.
+        self._unwritten_blocks: dict[str, int] = {}
+        #: Rules put back since the log last said so, and when it did.
+        self._rules_lost = 0
+        self._rules_lost_told = 0.0
+        self._block_flush: asyncio.TimerHandle | None = None
+        #: What a reported token is called and which filter owns it, looked up once per
+        #: token rather than once per block, and forgotten whenever the chain changes.
+        self._named: dict[tuple[str, str], str] = {}
+        self._owners: dict[str, str] = {}
 
     # --- reading the configuration -------------------------------------------
 
@@ -165,23 +193,13 @@ class ServiceManager:
         # token both network layers report. Split once, here, so there is a single place
         # that knows the format.
         rule_id, _, function = reported.partition("/")
-        if function:
-            self.db.query(
-                "UPDATE pyfilters SET blocked = blocked + 1 WHERE filter_id = ? AND name = ?;",
-                rule_id,
-                function,
-            )
-        # What is left is a regex rule or a whole filter, depending on which refused.
-        # Only one of these matches, and a blind update is cheaper than asking first.
-        self.db.query(
-            "UPDATE regexes SET blocked = blocked + 1 WHERE regex_id = ?;", rule_id
-        )
-        self.db.query(
-            "UPDATE filters SET blocked = blocked + 1 WHERE filter_id = ? OR filter_id = "
-            "(SELECT filter_id FROM regexes WHERE regex_id = ?);",
-            rule_id,
-            rule_id,
-        )
+        self._unwritten_blocks[reported] = self._unwritten_blocks.get(reported, 0) + 1
+        if self._block_flush is None:
+            try:
+                self._block_flush = asyncio.get_running_loop().call_later(
+                    BLOCK_FLUSH, self.flush_blocks)
+            except RuntimeError:
+                self.flush_blocks()
         # The chart is attributed to the filter, not to the pattern or the function: it
         # is about which link in the chain is carrying the traffic, and a chain of twenty
         # patterns would be a chart nobody can read. The finer totals are listed
@@ -192,20 +210,62 @@ class ServiceManager:
         stats.flush(self.db)
         self.log.add(LEVEL.BLOCK, f"connection refused by {self._describe(rule_id, function)}")
 
+    def flush_blocks(self) -> None:
+        """Write the counters of every block reported since the last time."""
+        if self._block_flush is not None:
+            self._block_flush.cancel()
+            self._block_flush = None
+        pending, self._unwritten_blocks = self._unwritten_blocks, {}
+        if not pending:
+            return
+        queries = []
+        for reported, count in pending.items():
+            rule_id, _, function = reported.partition("/")
+            if function:
+                queries.append((
+                    "UPDATE pyfilters SET blocked = blocked + ? "
+                    "WHERE filter_id = ? AND name = ?;",
+                    count, rule_id, function,
+                ))
+            # What is left is a regex rule or a whole filter, depending on which refused.
+            # Only one of these matches, and a blind update is cheaper than asking first.
+            queries.append((
+                "UPDATE regexes SET blocked = blocked + ? WHERE regex_id = ?;",
+                count, rule_id,
+            ))
+            queries.append((
+                "UPDATE filters SET blocked = blocked + ? WHERE filter_id = ? OR "
+                "filter_id = (SELECT filter_id FROM regexes WHERE regex_id = ?);",
+                count, rule_id, rule_id,
+            ))
+        try:
+            self.db.queries(queries)
+        except Exception:
+            traceback.print_exc()
+
     def _owning_filter(self, rule_id: str) -> str:
         """Which filter a block belongs to. The id is a filter's or a pattern's."""
-        found = self.db.query(
-            "SELECT filter_id FROM regexes WHERE regex_id = ?;", rule_id
-        )
-        return found[0]["filter_id"] if found else rule_id
+        owner = self._owners.get(rule_id)
+        if owner is None:
+            found = self.db.query(
+                "SELECT filter_id FROM regexes WHERE regex_id = ?;", rule_id
+            )
+            owner = self._owners[rule_id] = found[0]["filter_id"] if found else rule_id
+        return owner
 
     def _describe(self, rule_id: str, function: str = "") -> str:
         """Name what refused a connection, rather than echoing an opaque id.
 
-        One query per block, on a path that only runs when something was already
-        refused — a block is rare compared to the traffic that is not blocked, and an
-        operator reading `refused by 4f2a91c8` learns nothing.
+        Looked up once per rule and kept until the chain changes: a flood of refusals is
+        one rule refusing thousands of times, and an operator reading `refused by
+        4f2a91c8` learns nothing.
         """
+        named = self._named.get((rule_id, function))
+        if named is None:
+            named = self._named[(rule_id, function)] = self._look_up_name(rule_id, function)
+        return named
+
+    def _look_up_name(self, rule_id: str, function: str) -> str:
         if function:
             # A file holds several functions, so naming the file alone would leave the
             # operator to guess which of them refused the connection.
@@ -433,24 +493,71 @@ class ServiceManager:
                 f"{len([link for link in self.chain() if link.filter.active])} filter(s) active",
             )
 
-    async def disable(self, persist: bool = True):
+    async def disable(self, persist: bool = True, handing_over: bool = False,
+                      drain: bool = True):
+        """Stop filtering this service.
+
+        The connections the datapath is carrying are not cut (`drain`): the rules come
+        off first, so nothing new reaches it, and the transport carries what it already
+        has until it closes — see `ProxyTransport.retire`. `handing_over` is a restart,
+        whose connections carry on under the filters they started with; a stop carries
+        them unfiltered. Only shutting firegex down cuts them, since the rules that bring
+        their answers home go with it.
+        """
         # Under the lock for the same reason: a stop arriving while a start was still in
         # progress saw a service that was not active yet, returned at once, and the start
         # then finished — so the stop the operator asked for was simply lost.
         async with self.lock:
+            self.flush_blocks()
             if not self.active:
                 return
-            nft.delete(self.srv)
+            guarded = nft.delete(self.srv, keep_guards=drain)
             self._steer = {}
             if self.transport:
-                await self.transport.stop()
+                if drain:
+                    await self.transport.retire(
+                        keep_filtering=handing_over,
+                        then=lambda: nft.release_guards(guarded),
+                    )
+                else:
+                    await self.transport.stop()
                 self.transport = None
+            else:
+                nft.release_guards(guarded)
             self._set_status(False, persist=persist)
             self.log.add(LEVEL.INFO, "stopped")
 
     async def restart(self):
-        await self.disable()
+        await self.disable(handing_over=True)
         await self.enable()
+
+    async def put_rules_back(self) -> None:
+        """Steer this service at its datapath again, after something else removed the rules.
+
+        The datapath never went anywhere — the engine or the queue binaries are still
+        running and still listening where `_steer` says — so this is the second half of
+        `enable()` alone. Under the lock, like `disable()`, so a stop in progress cannot
+        have its rules put back behind it.
+        """
+        async with self.lock:
+            if not self.active or self.transport is None:
+                return
+            nft.delete(self.srv)
+            nft.add(self.srv, **self._steer)
+            self._rules_lost += 1
+            now = time.time()
+            if now - self._rules_lost_told < TABLE_TOLD_QUIET:
+                return
+            times = f" ({self._rules_lost} times since the last report)" \
+                if self._rules_lost > 1 else ""
+            self._rules_lost, self._rules_lost_told = 0, now
+            self.log.add(
+                LEVEL.ERROR,
+                "firegex's rules were removed from the kernel by something else — an "
+                "`nft flush ruleset`, or a firewall being reloaded — and traffic reached "
+                f"this service unfiltered until they were put back{times}. Make whatever "
+                "manages this host's nftables leave the `fgex` tables alone.",
+            )
 
     async def update_chain(self):
         """Push the current chain to a running datapath.
@@ -466,6 +573,11 @@ class ServiceManager:
         silently enforcing the old order.
         """
         restart = False
+        # What was refused before this edit is written under the names it had, and what
+        # is refused after it is looked up again.
+        self.flush_blocks()
+        self._named.clear()
+        self._owners.clear()
         async with self.lock:
             if not self.active or not self.transport:
                 return
@@ -633,7 +745,7 @@ class ServiceManager:
         """The service's own definition changed, which the datapath cannot absorb."""
         was_active = self.active
         if was_active:
-            await self.disable()
+            await self.disable(handing_over=True)
         self.srv = srv
         if was_active:
             await self.enable()
@@ -660,6 +772,7 @@ class FirewallManager:
         self.db = db
         self.services: dict[str, ServiceManager] = {}
         self.lock = asyncio.Lock()
+        self._watch: asyncio.Task | None = None
 
     async def init(self):
         nft.init()
@@ -670,6 +783,38 @@ class FirewallManager:
         # takes the tool with it.
         mirror.ensure()
         await self.reload()
+        if self._watch is None or self._watch.done():
+            self._watch = asyncio.create_task(self._watch_table())
+
+    async def _watch_table(self):
+        """Put the rules back whenever something outside firegex takes them away."""
+        while True:
+            await asyncio.sleep(TABLE_WATCH)
+            try:
+                if not nft.intact():
+                    await self._put_rules_back()
+            except Exception:
+                traceback.print_exc()
+
+    async def _put_rules_back(self):
+        async with self.lock:
+            # Asked again under the lock, which may have been held by something that
+            # rebuilt the table while this waited for it.
+            if nft.intact():
+                return
+            print("[error] [backend] firegex's nftables table was removed by something "
+                  "else; putting it back", flush=True)
+            nft.init()
+            for manager in list(self.services.values()):
+                try:
+                    await manager.put_rules_back()
+                except Exception as e:
+                    manager.log.add(LEVEL.ERROR, f"could not put its rules back: {e}")
+
+    def stop_watching(self) -> None:
+        if self._watch is not None:
+            self._watch.cancel()
+            self._watch = None
 
     async def reload(self):
         async with self.lock:
@@ -690,10 +835,10 @@ class FirewallManager:
                         # of it working.
                         traceback.print_exc()
 
-    async def remove(self, srv_id: str, persist: bool = True):
+    async def remove(self, srv_id: str, persist: bool = True, drain: bool = True):
         async with self.lock:
             if srv_id in self.services:
-                await self.services[srv_id].disable(persist=persist)
+                await self.services[srv_id].disable(persist=persist, drain=drain)
                 del self.services[srv_id]
                 if persist:
                     # A deleted service's log has nothing left to be about.
@@ -706,15 +851,31 @@ class FirewallManager:
         releasing here would make the device disappear and come back underneath whatever
         was capturing from it — the exact failure it was made persistent to avoid.
         """
+        # First, or a table deleted on the way down is one it would put back.
+        self.stop_watching()
+        # Cut, not drained: what brings a drained connection's answers home is this
+        # table's, and it is about to go — as is the process that would end the drain.
         for key in list(self.services.keys()):
             try:
-                await self.remove(key, persist=False)
+                await self.remove(key, persist=False, drain=False)
             except Exception:
                 self.services.pop(key, None)
+        await transports.stop_draining()
+        stats.flush(self.db, force=True)
 
     def release_capture(self) -> None:
         """Take the capture interface away, at process shutdown and nowhere else."""
         mirror.release()
+
+    def flush_blocks(self) -> None:
+        """Write every service's waiting block counters, before anything reads them.
+
+        The history behind the chart too: it waits up to `stats.FLUSH_INTERVAL` for the
+        next block, and at shutdown there is no next block.
+        """
+        for manager in self.services.values():
+            manager.flush_blocks()
+        stats.flush(self.db, force=True)
 
     def get(self, srv_id: str) -> ServiceManager:
         if srv_id not in self.services:

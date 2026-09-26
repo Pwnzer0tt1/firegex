@@ -114,6 +114,9 @@ pub struct PyWorkerRule {
     /// chunk, which runs where blocking is allowed and keeps an open ahead of the data.
     pending: Mutex<Vec<u8>>,
     pub stats: std::sync::Arc<WorkerStats>,
+    /// Everything that would make a new worker behave differently from this one; see
+    /// `Filter::reuse_key`. `None` when the file could not be read to say so.
+    reuse_key: Option<String>,
 }
 
 impl PyWorkerRule {
@@ -133,7 +136,37 @@ impl PyWorkerRule {
             child: Mutex::new(None),
             pending: Mutex::new(Vec::new()),
             stats: std::sync::Arc::new(WorkerStats::default()),
+            reuse_key: None,
         }
+    }
+
+    /// What this rule would be built from, as one string: the id, the command, which
+    /// functions are on, the deadline and the code itself. The same string means a new
+    /// worker would run exactly what this one runs, so it is kept instead — with the
+    /// state it holds for every open connection. The code is read rather than trusted to
+    /// its path, because saving a filter rewrites the same file.
+    pub fn key_for(
+        id: &str,
+        command: &[String],
+        code_path: &str,
+        enabled: &Option<Vec<String>>,
+        deadline: Duration,
+    ) -> Option<String> {
+        use std::hash::{Hash, Hasher};
+        let code = std::fs::read(code_path).ok()?;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        code.hash(&mut hasher);
+        Some(format!(
+            "{id}\0{command:?}\0{code_path}\0{enabled:?}\0{}\0{:016x}",
+            deadline.as_millis(),
+            hasher.finish()
+        ))
+    }
+
+    /// Answer to `key` from `Filter::reuse_key`.
+    pub fn reusable_as(mut self, key: Option<String>) -> Self {
+        self.reuse_key = key;
+        self
     }
 
     fn spawn(&self) -> Result<Child, String> {
@@ -342,6 +375,9 @@ impl Filter for PyWorkerRule {
     }
     fn prepare(&self) -> Result<(), String> {
         self.warm_up()
+    }
+    fn reuse_key(&self) -> Option<&str> {
+        self.reuse_key.as_deref()
     }
     fn inspect(&self, ctx: &FilterCtx<'_>) -> Verdict {
         match self.exchange(ctx.connection, ctx.direction, ctx.chunk) {

@@ -21,7 +21,7 @@ import sys
 import time
 import traceback
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
@@ -35,7 +35,7 @@ from modules.services.firewall import (
 from modules.services import stats
 from modules.services.logs import log_for
 from modules.services.models import (KIND, L4, MODE, PROTO, STATUS, Service,
-                                     TRANSPORT, UPSTREAM, upstream_refusal)
+                                     TRANSPORT, UPSTREAM)
 from modules.services.nftables import FiregexTables, hijack_endpoint
 from modules.services import transports
 from modules.services.transports import PROXY_ENGINE, PYWORKER, UnsupportedChain
@@ -50,7 +50,17 @@ from utils.models import ResetRequest, StatusMessageModel
 
 from utils.sqlite import SQLite
 
-app = APIRouter()
+def _counters_written() -> None:
+    """Every request sees the block counters as they are, and changes them from there.
+
+    They are written once a second (`BLOCK_FLUSH` in the manager), not per block — so a
+    read would otherwise be up to a second behind, and an edit that resets a pattern's
+    counter would have the old pattern's last blocks written onto the new one after it.
+    """
+    firewall.flush_blocks()
+
+
+app = APIRouter(dependencies=[Depends(_counters_written)])
 
 db = SQLite(
     "db/services.db",
@@ -262,6 +272,15 @@ class AddressForm(BaseModel):
     proxy_port: PortType | None = None
 
 
+class ProblemModel(BaseModel):
+    """The newest warning or error in a service's log. See `ServiceLog.last_problem`."""
+
+    #: Unix milliseconds, like every log line.
+    at: int
+    level: str
+    text: str
+
+
 class ServiceModel(BaseModel):
     service_id: str
     name: str
@@ -288,6 +307,9 @@ class ServiceModel(BaseModel):
     addresses: list[AddressModel] = []
     n_filters: int
     n_blocked: int
+    #: The newest warning or error still in its log, so the list can say something is
+    #: wrong without anybody having the service's page open. Cleared with the log.
+    problem: ProblemModel | None = None
 
 
 class ServiceAddForm(BaseModel):
@@ -534,6 +556,9 @@ async def shutdown():
 
 async def reset(params: ResetRequest):
     if not params.delete:
+        # Into the copy that is put back, or the last second of counters is written
+        # after it was taken and then overwritten by it.
+        firewall.flush_blocks()
         db.backup()
     await firewall.close()
     FiregexTables().reset()
@@ -709,6 +734,7 @@ def _with_addresses(row: dict) -> dict:
     row["addresses"] = [
         _address_row(a) for a in _addresses(row["service_id"])
     ]
+    row["problem"] = log_for(row["service_id"]).last_problem()
     return row
 
 
@@ -1052,14 +1078,7 @@ async def add_service(form: ServiceAddForm):
     # nobody asked for.
     for address in form.addresses:
         _address_target(form.transport, address)
-        edge = _address_edge(form.proto, address)
-        refusal = upstream_refusal(
-            form.proto,
-            _address_upstream(form.proto, edge, address),
-            L4.l4_of(edge) == L4.UDP,
-        )
-        if refusal:
-            raise HTTPException(status_code=400, detail=refusal)
+        _address_upstream(form.proto, _address_edge(form.proto, address), address)
     # The transport gets a look before the row exists. A chain it could not host is
     # caught later, when there is one; what is caught here is what the *service* makes
     # impossible on its own — a protocol this layer cannot carry — and it is worth
@@ -1254,6 +1273,11 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
         fields["tls_cert"] = form.tls_cert
     if form.tls_key is not None:
         fields["tls_key"] = form.tls_key
+    # Only what actually changes. The form sends every setting on every save, and a field
+    # that already holds the value it is sent is not an edit: counted as one, opening the
+    # dialog and saving it untouched restarted a running service and dropped every
+    # connection it was carrying.
+    fields = {key: value for key, value in fields.items() if row[key] != value}
     if not fields:
         return {"status": "ok"}
 
@@ -1275,12 +1299,6 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
                        + ", ".join(f"{_shown(a['ip_int'])}:{a['port']}" for a in published)
                        + " is published on another port. Take that off the address first.",
             )
-    for address in new_addresses:
-        refusal = upstream_refusal(proto, address["upstream"],
-                                   L4.l4_of(address["edge"]) == L4.UDP)
-        if refusal:
-            raise HTTPException(status_code=400, detail=refusal)
-
     # The service it would become, asked what a start would ask of the layer and the
     # chain. Without its addresses, the way a service is checked when it is created: what
     # an address still lacks on the new layer — the port of the operator's own proxy, say
@@ -1328,6 +1346,13 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
             status_code=400,
             detail=f"Another service already protects one of these addresses on {proto}",
         )
+
+    if set(fields) == {"name"}:
+        # A name is the operator's, not the datapath's: nothing running reads it, so it
+        # is not a reason to take the service down and bring it back.
+        manager.srv.name = fields["name"]
+        await refresh_frontend()
+        return {"status": "ok"}
 
     was_active = manager.active
     try:
@@ -1383,17 +1408,8 @@ async def add_address(service_id: str, form: AddressForm):
             detail="The external transport hands traffic to your own proxy and rewrites the "
                    "source address on return, which requires a concrete IP address rather than an interface.",
         )
-    # Before the row exists, because this is the address's own answer and it can be one
-    # this instance cannot honour. `ProxyTransport.check` says the same thing at start,
-    # and would leave the address behind to be undone.
-    edge = _address_edge(row["proto"], form)
-    refusal = upstream_refusal(
-        row["proto"],
-        _address_upstream(row["proto"], edge, form),
-        L4.l4_of(edge) == L4.UDP,
-    )
-    if refusal:
-        raise HTTPException(status_code=400, detail=refusal)
+    # Before the row exists: what the address says has to mean something on this service.
+    _address_upstream(row["proto"], _address_edge(row["proto"], form), form)
     try:
         address_id = _insert_address(service_id, row["proto"], row["transport"], form)
     except sqlite3.IntegrityError as e:
@@ -1469,9 +1485,6 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
         form.upstream = UPSTREAM.SAME
     target_port = _address_target(row["transport"], form)
     upstream = _address_upstream(row["proto"], edge, form)
-    refusal = upstream_refusal(row["proto"], upstream, L4.l4_of(edge) == L4.UDP)
-    if refusal:
-        raise HTTPException(status_code=400, detail=refusal)
 
     def write(ip_int, port, proto, edge, target_port, upstream, proxy_ip, proxy_port):
         db.query(
@@ -2356,6 +2369,8 @@ async def get_logs(service_id: str):
 async def clear_logs(service_id: str):
     _service_or_404(service_id)
     log_for(service_id).clear()
+    # The list shows the newest problem in the log, and clearing is how it is dismissed.
+    await refresh_frontend()
     return {"status": "ok"}
 
 

@@ -238,9 +238,12 @@ def test_a_queued_udp_service_keeps_flows_up_to_its_own_limit(api, service, udp_
     assert _from(first, echo, b"MARK") == b"MARK"
     assert _from(first, echo, b"again") is None, "the flow did not keep its state at all"
     # Enough of them that some land on the first flow's thread: flows are shared out
-    # between the queue threads by a hash, and so is the limit.
+    # between the queue threads by a hash, and so is the limit. Each from a port handed
+    # out once, rather than one the kernel picks: that can be the first flow's own, now
+    # that nothing holds it, and a datagram sent from it is the first flow — the one the
+    # filter was told to refuse — which failed this one run in a few hundred.
     for _ in range(200):
-        assert echo.exchange(b"another flow") == b"another flow"
+        assert _from(free_port(udp=True), echo, b"another flow") == b"another flow"
 
     answered = _from(first, echo, b"once more")
     if kept:

@@ -16,6 +16,7 @@ import pytest
 
 from integration import filter_code
 from integration.conftest import add_python_filter, add_regex_filter, start_and_settle
+from helpers.host import as_root, ruleset
 from helpers.traffic import Channel
 
 pytestmark = pytest.mark.instance
@@ -185,3 +186,33 @@ def test_the_kernel_keeps_forwarding_when_a_queued_filter_dies(api, protected,
 
     assert channel.gets_through(b"traffic after the binary was killed"), \
         "the kernel stopped forwarding when the filter died"
+
+
+@pytest.mark.root
+def test_rules_removed_from_under_firegex_are_put_back_and_said(api, protected,
+                                                                 inspecting_layer):
+    """Something else managing the host's nftables must not quietly switch firegex off.
+
+    `nft -f /etc/nftables.conf` begins with `flush ruleset` on Debian, and so does
+    restarting its unit. Every service went on reading ACTIVE with nothing reaching a
+    filter, and nothing said so. They are put back within a few seconds now — the
+    datapath never stopped, so nothing restarts — and the service's log says what
+    happened, as an error, because traffic went through unfiltered in between.
+    """
+    service_id, server, port = protected(inspecting_layer, name="flushed")
+    add_regex_filter(api, service_id, "BLOCKME")
+    start_and_settle(api, service_id)
+    channel = Channel(server, port, inspecting_layer.ipv6)
+    assert channel.is_blocked(b"carrying BLOCKME"), "it was not filtering to begin with"
+
+    if as_root("nft", "delete", "table", "inet", "fgex") is None:
+        pytest.skip("cannot remove the table from here")
+    deadline = time.time() + 10
+    while f"dport {port}" not in (ruleset() or "") and time.time() < deadline:
+        time.sleep(0.5)
+
+    assert channel.gets_through(b"harmless"), "the service stopped answering"
+    assert channel.is_blocked(b"carrying BLOCKME"), "the rules were not put back"
+    said = [e for e in api.services_logs(service_id)
+            if e["level"] == "error" and "removed from the kernel" in e["text"]]
+    assert said, "the rules were put back without a word about the gap"

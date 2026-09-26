@@ -7,6 +7,7 @@ import { getMainPath, HOME_SECTIONS } from '../js/utils';
 import { useLocation } from 'react-router';
 import { useNavbarStore, useSessionStore } from '../js/store';
 import { HiMenu } from "react-icons/hi";
+import ProblemNotifier from './Services/ProblemNotifier';
 
 
 function MainLayout({ children }:{ children:any }) {
@@ -26,6 +27,7 @@ function MainLayout({ children }:{ children:any }) {
   >
     <HeaderPage />
     <NavBar />
+    <ProblemNotifier />
     <AppShell.Main>
       <Container size="lg">
           {children}

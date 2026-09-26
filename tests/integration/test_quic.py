@@ -276,3 +276,36 @@ def test_what_the_service_speaks_can_be_changed_while_it_runs(api, service, quic
     answer = h3_request(quic.host, quic.port, "/which")
     assert answer.endswith("bytes"), \
         f"the edit was saved and the relay went on speaking HTTP/3: {answer!r}"
+
+
+# --- what a QUIC service negotiates --------------------------------------------------
+
+
+@needs_quic
+def test_a_quic_service_that_is_not_http3_is_reached_with_nothing_to_configure(
+        api, service, quic_stand_in):
+    """QUIC carries whatever its two ends agree on, and the engine has to say it to both.
+
+    It offered the service a list of its own — one environment variable for the whole
+    instance, `h3` unless firegex was restarted with another — because the client's hello
+    was taken to be unreadable. So a QUIC service speaking anything but HTTP/3 was not
+    reachable through firegex until somebody found that. The hello is read off the
+    client's first packet now and offered to the service as it is, the way the TLS path
+    has always mirrored it; there is nothing to set.
+    """
+    from helpers.quicserver import quic_exchange
+
+    server = quic_stand_in(alpn=["fgx-echo"])
+    cert, key = server.material
+    service_id = service(f"quic-alpn-{server.port}", "127.0.0.1", server.port, "proxy",
+                         proto="quic", tls_cert=cert, tls_key=key)
+    add_regex_filter(api, service_id, "BLOCKME")
+    start_and_settle(api, service_id)
+
+    assert quic_exchange(server.host, server.port, "fgx-echo", b"hello") == b"hello", \
+        "a QUIC service that is not HTTP/3 was not reached"
+    assert quic_exchange(server.host, server.port, "fgx-echo", b"x BLOCKME", timeout=3) \
+        != b"x BLOCKME", "a stream carrying a blocked pattern reached the service"
+    # And one speaking something the service does not is refused by the service, as it
+    # would be with nothing in the way.
+    assert quic_exchange(server.host, server.port, "fgx-other", b"hello", timeout=3) is None

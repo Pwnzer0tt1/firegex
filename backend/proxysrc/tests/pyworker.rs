@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use fgex_proxy::filter::{
     next_connection_id, ChainSessions, ConnectionMeta, Direction, FilterChain, Verdict, L4,
 };
-use fgex_proxy::rules::parse_ruleset;
+use fgex_proxy::rules::{parse_ruleset, parse_ruleset_reusing};
 
 /// Write a filter file and give back its path, kept for the process's lifetime.
 fn filter_file(name: &str, body: &str) -> String {
@@ -536,4 +536,74 @@ def refuse_b(packet: RawPacket):
     let off = chain_with(&path, Some(&none));
     assert_eq!(feed(&off, &[b"carrying AAA"]).await, vec![Verdict::Accept]);
     assert_eq!(feed(&off, &[b"carrying BBB"]).await, vec![Verdict::Accept]);
+}
+
+/// An edit elsewhere in the chain must not restart a Python filter that did not change.
+///
+/// Every edit sends the whole ruleset, and a new worker meets every open connection
+/// halfway: its module globals gone, its HTTP parser starting on the second half of the
+/// request in flight. The same filter, described the same way, is carried over with the
+/// state it keeps for each connection; new code is a new worker, as it has to be.
+#[tokio::test]
+async fn an_unchanged_worker_is_carried_into_the_next_ruleset_with_its_state() {
+    const REMEMBERS: &str = r#"from firegex.pyfilters import pyfilter, ACCEPT, REJECT
+from firegex.pyfilters.models import RawPacket
+
+# Module level, so it is per connection: the library gives each stream its own globals.
+said_first = False
+
+@pyfilter
+def second_after_first(packet: RawPacket):
+    global said_first
+    if b"FIRST" in packet.data:
+        said_first = True
+    return REJECT if said_first and b"SECOND" in packet.data else ACCEPT
+"#;
+    let path = filter_file("carried", REMEMBERS);
+    let json = format!(
+        r#"[{{"kind":"python","id":"py1","code_path":"{path}","timeout_ms":2000,
+             "command":["python3","{}"]}}]"#,
+        worker()
+    );
+    let deadline = Duration::from_secs(10);
+    let connection = next_connection_id();
+
+    let before = FilterChain::new(parse_ruleset(&json).unwrap(), deadline);
+    let mut sessions = ChainSessions::new(connection);
+    assert_eq!(
+        before.run(Direction::ClientToServer, b"FIRST", &mut sessions).await,
+        Verdict::Accept
+    );
+
+    // The same ruleset again, as an edit to some other filter would send it.
+    let after = FilterChain::new(
+        parse_ruleset_reusing(&json, &before.filters()).unwrap(),
+        deadline,
+    );
+    assert!(
+        std::sync::Arc::ptr_eq(&before.filters()[0], &after.filters()[0]),
+        "an unchanged Python filter was rebuilt"
+    );
+    let mut sessions = ChainSessions::new(connection);
+    assert_eq!(
+        after.run(Direction::ClientToServer, b"SECOND", &mut sessions).await,
+        Verdict::Reject(Some("py1/second_after_first".to_string())),
+        "the connection's state did not survive an edit that did not touch this filter"
+    );
+
+    // New code is a new worker, and starts every connection afresh.
+    filter_file("carried", &format!("{REMEMBERS}\n# edited\n"));
+    let edited = FilterChain::new(
+        parse_ruleset_reusing(&json, &after.filters()).unwrap(),
+        deadline,
+    );
+    assert!(
+        !std::sync::Arc::ptr_eq(&after.filters()[0], &edited.filters()[0]),
+        "edited code was not given a worker of its own"
+    );
+    let mut sessions = ChainSessions::new(connection);
+    assert_eq!(
+        edited.run(Direction::ClientToServer, b"SECOND", &mut sessions).await,
+        Verdict::Accept
+    );
 }

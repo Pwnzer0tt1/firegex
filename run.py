@@ -149,10 +149,9 @@ def load_config():
         "proxy_ip_header": None,
         "unsafe_disable_auth": False,
         # Anything the engine or the backend reads straight out of the environment and
-        # run.py has no opinion about: the filter deadline, the QUIC ALPN list, the
-        # stream size cap. Kept here because run.py **rewrites** the compose file on
+        # run.py has no opinion about: the filter deadline, the stream size cap. Kept here because run.py **rewrites** the compose file on
         # every start, so a variable hand-edited into it is gone by the next one — which
-        # is what the documentation telling an operator to set FGEX_PROXY_QUIC_ALPN
+        # is what the documentation telling an operator to set an engine variable
         # "in the container's environment" silently ran into.
         "env": {},
     }
@@ -216,7 +215,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_start.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_start.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_start.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
-    parser_start.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_QUIC_ALPN. Stored, so later runs keep it.')
+    parser_start.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_FILTER_TIMEOUT_MS. Stored, so later runs keep it.')
     parser_start.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_start.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_start.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=config.get("unsafe_disable_auth", False), help='UNSAFE: disable Firegex password/JWT authentication, making every request that reaches firegex a full administrator (for a trusted reverse proxy only)')
@@ -234,7 +233,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_restart.add_argument('--port', "-p", type=int, required=False, help=f'Port where open the web service of the firewall (default from config: {config["port"]})', default=config["port"])
     parser_restart.add_argument('--host', required=False, help=f'Host IP address to bind the service to (default from config: {config["host"]})', default=config["host"])
     parser_restart.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
-    parser_restart.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_QUIC_ALPN. Stored, so later runs keep it.')
+    parser_restart.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_FILTER_TIMEOUT_MS. Stored, so later runs keep it.')
     parser_restart.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_restart.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_restart.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=config.get("unsafe_disable_auth", False), help='UNSAFE: disable Firegex password/JWT authentication, making every request that reaches firegex a full administrator (for a trusted reverse proxy only)')
@@ -254,7 +253,7 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_config.add_argument('--host', required=False, help='Set default host IP address to bind the service to')
     parser_config.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
     parser_config.add_argument('--password', required=False, type=str, nargs='?', const='', help='Change the password of the firewall (omit the value to be prompted for it interactively)')
-    parser_config.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_QUIC_ALPN. Stored, so later runs keep it.')
+    parser_config.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_FILTER_TIMEOUT_MS. Stored, so later runs keep it.')
     parser_config.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
     parser_config.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
     parser_config.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=None, help='UNSAFE: turn Firegex password/JWT authentication off or back on, on the running instance and for the next start')
@@ -410,6 +409,19 @@ def get_web_interface_url():
     display_host = "localhost" if args.host == "0.0.0.0" else args.host
     return f"http://{display_host}:{args.port}"
 
+def compose_env(key: str, value) -> str:
+    """One operator-supplied `KEY=VALUE` for the compose file, as compose will read it back.
+
+    Quoted, because `dict_to_yaml` writes scalars as they come and this value is the
+    operator's: a `: ` in it made the entry a mapping compose refuses, and a ` #` cut it
+    short as a comment. And every `$` doubled, because compose interpolates variables in its
+    own file — a value naming `$HOME` would have arrived as a path. The standalone start
+    passes the same entries through `shlex.quote` for the neighbouring reason.
+    """
+    import json
+    return json.dumps(f"{key}={value}".replace("$", "$$"))
+
+
 def write_compose(skip_password = True):
     psw_set = get_password() if not skip_password else None
     with open(g.composefile,"wt") as compose:
@@ -434,7 +446,7 @@ def write_compose(skip_password = True):
                             *(["UNSAFE_DISABLE_AUTH=1"] if getattr(args, 'unsafe_disable_auth', False) else []),
                             # Whatever the operator asked to be here and run.py has no
                             # opinion about. Last, so it reads as the addition it is.
-                            *(f"{k}={v}" for k, v in sorted(getattr(args, 'env_vars', {}).items())),
+                            *(compose_env(k, v) for k, v in sorted(getattr(args, 'env_vars', {}).items())),
                         ],
                         "volumes": [
                             "firegex_data:/execute/db",
@@ -497,7 +509,7 @@ def write_compose(skip_password = True):
                             *([f"ALLOWED_IPS={args.allowed_ips}"] if getattr(args, 'allowed_ips', None) else []),
                             *([f"PROXY_IP_HEADER={args.proxy_ip_header}"] if getattr(args, 'proxy_ip_header', None) else []),
                             *(["UNSAFE_DISABLE_AUTH=1"] if getattr(args, 'unsafe_disable_auth', False) else []),
-                            *(f"{k}={v}" for k, v in sorted(getattr(args, 'env_vars', {}).items())),
+                            *(compose_env(k, v) for k, v in sorted(getattr(args, 'env_vars', {}).items())),
                         ],
                         "volumes": [
                             "firegex_data:/execute/db"

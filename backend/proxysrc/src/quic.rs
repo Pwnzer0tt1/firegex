@@ -12,16 +12,15 @@
 //! per address and for the same reason — `SO_ORIGINAL_DST` is TCP and SCTP only, so a
 //! single listener could not recover where a datagram was headed.
 //!
-//! **The ALPN is asked of the service, not of the client**, which is the one place this
-//! differs from the TLS path beside it. There the ClientHello is held open
-//! (`LazyConfigAcceptor`), the service is asked, and the client is told what the service
-//! picked. In QUIC the ClientHello arrives inside an encrypted Initial whose processing
-//! *is* the handshake, and there is nothing to hold it at. So the order is reversed: the
-//! service is offered the candidates, and the client is told the one thing the service
-//! agreed to. The invariant that matters is unchanged — the client is never told a
-//! protocol the service did not choose — and what is lost is knowing in advance whether
-//! the client would have accepted it. When it does not, the handshake fails and says so,
-//! rather than a protocol being quietly broken.
+//! **The ALPN is mirrored, exactly as over TLS.** The client's ClientHello travels inside
+//! an Initial packet, but Initial keys come from a connection ID the client sends in the
+//! clear, so [`crate::quic_hello`] reads the list the client offered off the socket before
+//! the handshake is answered. The service is dialled offering exactly that list, and the
+//! client is told the one protocol the service chose. It used to be a candidate list the
+//! operator wrote down per service, `h3` unless told otherwise, because the Initial was
+//! taken to be unreadable: a QUIC service speaking anything but HTTP/3 was unreachable
+//! until somebody found the setting. When a hello cannot be read — a QUIC version this
+//! does not know, say — `h3` is offered and the log says so.
 
 use std::collections::HashMap;
 use std::io;
@@ -34,6 +33,7 @@ use quinn::crypto::rustls::{QuicClientConfig, QuicServerConfig};
 use quinn::{Connection, Endpoint, Incoming, VarInt};
 
 use crate::capture::{Capture, Tap};
+use crate::quic_hello::{Hellos, SniffingSocket};
 use crate::filter::{
     next_connection_id, ChainHandle, ChainSessions, ConnectionId, ConnectionMeta, Direction,
     FilterChain, Verdict, L4,
@@ -63,28 +63,37 @@ const IDLE: Duration = Duration::from_secs(60);
 /// that sends faster than the chain judges would be buying memory in this process.
 const DATAGRAM_BUFFER: usize = 256 * 1024;
 
+/// How long a client's hello may take to arrive whole, when it spans more than one
+/// datagram. Past it, `h3` is offered and the log says the hello could not be read.
+const HELLO_WAIT: Duration = Duration::from_millis(1500);
+
+/// What is offered to a service when the client's own list could not be read.
+const FALLBACK_ALPN: &[u8] = b"h3";
+
 /// Everything a QUIC service needs decided once, before any client arrives.
+///
+/// No protocols among it: those are each client's own, and each connection's accepting
+/// and dialling configurations are built from them — a clone of a rustls config and a
+/// cipher-suite lookup, which is nothing beside the two handshakes they are for, and the
+/// same trade the TLS path makes per connection for the same reason.
 pub struct QuicSetup {
-    /// One accept-side configuration per protocol the service might pick, built up front
-    /// rather than per connection: the candidate list is short and known, and a rustls
-    /// config clone plus a cipher-suite lookup on the accept path is work done while a
-    /// client is waiting.
-    answering: HashMap<Vec<u8>, Arc<quinn::ServerConfig>>,
-    /// For the case the service agreed to nothing. QUIC requires ALPN, so this is a
-    /// configuration that will refuse — kept so the refusal is the handshake's, with a
-    /// reason, rather than a panic here.
+    /// The service's certificate, answering. Cloned per connection to advertise the one
+    /// protocol the service chose.
+    server: Arc<rustls::ServerConfig>,
+    /// Towards the service. Cloned per connection to offer what the client offered.
+    client: rustls::ClientConfig,
+    /// Without datagrams, for HTTP/3; with them, for everything else. See `build`.
+    streams_only: Arc<quinn::TransportConfig>,
+    with_datagrams: Arc<quinn::TransportConfig>,
+    /// What the endpoint answers with before a service has been asked: only ever used
+    /// for connections this relay turns away, which need a configuration to be turned
+    /// away *by*. It advertises nothing, so nothing is agreed on it.
     silent: Arc<quinn::ServerConfig>,
-    /// Offered to the service, in the operator's order.
-    client: quinn::ClientConfig,
-    candidates: Vec<Vec<u8>>,
 }
 
 impl QuicSetup {
-    /// Build both edges from the service's certificate and the protocols it may speak.
-    pub fn build(cert_pem: &str, key_pem: &str, candidates: Vec<Vec<u8>>) -> Result<Self, String> {
-        if candidates.is_empty() {
-            return Err("a QUIC service needs at least one ALPN protocol".to_string());
-        }
+    /// Build both edges from the service's certificate.
+    pub fn build(cert_pem: &str, key_pem: &str) -> Result<Self, String> {
         // Two of them, differing in one advertisement. **HTTP/3 connections do not carry
         // datagrams here**, and the honest way to say that is not to advertise the
         // extension on them: a peer then knows from the handshake and falls back, instead
@@ -95,58 +104,52 @@ impl QuicSetup {
         // far side. Everything that is not h3 has no such coupling and carries them.
         let streams_only = transport_config(false);
         let with_datagrams = transport_config(true);
-        let base = crate::tls::server_config(cert_pem, key_pem)?;
-
-        let mut answering = HashMap::new();
-        for protocol in &candidates {
-            let transport = if protocol == b"h3" { &streams_only } else { &with_datagrams };
-            answering.insert(
-                protocol.clone(),
-                Arc::new(server_config(&base, &[protocol.clone()], transport)?),
-            );
-        }
-        let silent = Arc::new(server_config(&base, &[], &streams_only)?);
-
-        let mut rustls_client = crate::tls::quic_client_config()?;
-        rustls_client.alpn_protocols = candidates.clone();
-        let crypto = QuicClientConfig::try_from(rustls_client)
-            .map_err(|e| format!("cannot configure QUIC towards the service: {e}"))?;
-        let mut client = quinn::ClientConfig::new(Arc::new(crypto));
-        // The service is dialled before it has said which protocol it speaks, so this
-        // edge is decided by the candidate list rather than by the answer: with h3 the
-        // only candidate there is nothing a datagram could be for, and advertising it
-        // upstream would invite what this end would then have to drop.
-        client.transport_config(if candidates.iter().all(|p| p == b"h3") {
-            Arc::clone(&streams_only)
-        } else {
-            Arc::clone(&with_datagrams)
-        });
-
+        let server = crate::tls::server_config(cert_pem, key_pem)?;
+        let silent = Arc::new(server_config(&server, &[], &streams_only)?);
         Ok(Self {
-            answering,
+            server,
+            client: crate::tls::quic_client_config()?,
+            streams_only,
+            with_datagrams,
             silent,
-            client,
-            candidates,
         })
     }
 
-    /// The configuration that advertises the one protocol the service agreed to.
-    fn answering_with(&self, agreed: Option<&[u8]>) -> Arc<quinn::ServerConfig> {
-        agreed
-            .and_then(|p| self.answering.get(p))
-            .map(Arc::clone)
-            .unwrap_or_else(|| Arc::clone(&self.silent))
+    fn transport_for(&self, protocols: &[Vec<u8>]) -> &Arc<quinn::TransportConfig> {
+        if protocols.iter().all(|p| p == b"h3") {
+            &self.streams_only
+        } else {
+            &self.with_datagrams
+        }
     }
 
-    /// What the endpoint answers with before a service has been asked. Only ever used
-    /// for the connections this relay turns away, which need a configuration to be
-    /// turned away *by*.
+    /// The configuration that advertises the one protocol the service agreed to — or
+    /// nothing, when it agreed to nothing, so the refusal is the handshake's with a reason.
+    fn answering_with(&self, agreed: Option<&[u8]>) -> Result<Arc<quinn::ServerConfig>, String> {
+        let alpn: Vec<Vec<u8>> = agreed.map(|p| vec![p.to_vec()]).unwrap_or_default();
+        if alpn.is_empty() {
+            return Ok(Arc::clone(&self.silent));
+        }
+        Ok(Arc::new(server_config(&self.server, &alpn, self.transport_for(&alpn))?))
+    }
+
+    /// Towards the service, offering exactly what the client offered. The service is
+    /// dialled before it has said which protocol it speaks, so the datagram extension is
+    /// decided by the list rather than by the answer: with nothing but h3 on it there is
+    /// nothing a datagram could be for, and advertising it upstream would invite what this
+    /// end would then have to drop.
+    fn client_for(&self, offered: &[Vec<u8>]) -> Result<quinn::ClientConfig, String> {
+        let mut rustls_client = self.client.clone();
+        rustls_client.alpn_protocols = offered.to_vec();
+        let crypto = QuicClientConfig::try_from(rustls_client)
+            .map_err(|e| format!("cannot configure QUIC towards the service: {e}"))?;
+        let mut client = quinn::ClientConfig::new(Arc::new(crypto));
+        client.transport_config(Arc::clone(self.transport_for(offered)));
+        Ok(client)
+    }
+
     fn default_server(&self) -> Arc<quinn::ServerConfig> {
-        self.candidates
-            .first()
-            .and_then(|p| self.answering.get(p))
-            .map(Arc::clone)
-            .unwrap_or_else(|| Arc::clone(&self.silent))
+        Arc::clone(&self.silent)
     }
 }
 
@@ -212,6 +215,10 @@ pub struct QuicRelay {
     chain: ChainHandle,
     cfg: QuicConfig,
     stats: Arc<ProxyStats>,
+    /// The hellos read off this endpoint's socket, for each client's own ALPN list.
+    hellos: Arc<Hellos>,
+    /// Whether a hello that could not be read has been said once already.
+    warned_hello: AtomicBool,
 }
 
 impl QuicRelay {
@@ -228,10 +235,13 @@ impl QuicRelay {
         let socket = std::net::UdpSocket::bind(listen)?;
         let runtime = quinn::default_runtime()
             .ok_or_else(|| io::Error::other("no async runtime for the QUIC endpoint"))?;
-        let endpoint = Endpoint::new(
+        // Everything quinn receives passes by the hello reader first.
+        let hellos = Arc::new(Hellos::new());
+        let sniffing = SniffingSocket::new(runtime.wrap_udp_socket(socket)?, Arc::clone(&hellos));
+        let endpoint = Endpoint::new_with_abstract_socket(
             quinn::EndpointConfig::default(),
             Some((*cfg.setup.default_server()).clone()),
-            socket,
+            Arc::new(sniffing),
             runtime,
         )?;
         Ok(Self {
@@ -240,6 +250,8 @@ impl QuicRelay {
             chain,
             cfg,
             stats,
+            hellos,
+            warned_hello: AtomicBool::new(false),
         })
     }
 
@@ -338,10 +350,11 @@ impl QuicRelay {
         // request to send.
         let (endpoint, behind, agreed) = match self.cfg.upstream {
             Onward::Same => {
+                let offered = self.offered(&incoming, client).await;
                 // The endpoint is held for as long as the connection is: it owns the
                 // socket the connection speaks through, and dropping it would take the
                 // connection with it.
-                let (endpoint, service) = self.dial_upstream(client).await?;
+                let (endpoint, service) = self.dial_upstream(client, &offered).await?;
                 let agreed = negotiated_protocol(&service);
                 (Some(endpoint), Behind::Quic(service), agreed)
             }
@@ -366,9 +379,12 @@ impl QuicRelay {
             ),
         };
 
-        let accepting = incoming
-            .accept_with(self.cfg.setup.answering_with(agreed.as_deref()))
+        let answering = self
+            .cfg
+            .setup
+            .answering_with(agreed.as_deref())
             .map_err(io::Error::other)?;
+        let accepting = incoming.accept_with(answering).map_err(io::Error::other)?;
         let peer = match tokio::time::timeout(self.cfg.connect_timeout, accepting).await {
             Ok(Ok(connection)) => connection,
             Ok(Err(e)) => {
@@ -420,8 +436,32 @@ impl QuicRelay {
         Ok(())
     }
 
-    /// Open the connection to the service, from the client's own address where we can.
-    async fn dial_upstream(&self, client: SocketAddr) -> io::Result<(Endpoint, Connection)> {
+    /// The protocols this client offered, read off its hello; `h3` if it could not be.
+    async fn offered(&self, incoming: &Incoming, client: SocketAddr) -> Vec<Vec<u8>> {
+        match self.hellos.offered(incoming.remote_address(), HELLO_WAIT).await {
+            Some(offered) if !offered.is_empty() => offered,
+            _ => {
+                if !self.warned_hello.swap(true, Ordering::Relaxed) {
+                    eprintln!(
+                        "[warn] [quic] could not read which protocols {client} offered; \
+                         offering {} to {} instead. A client speaking something else is \
+                         refused by the handshake.",
+                        String::from_utf8_lossy(FALLBACK_ALPN),
+                        self.upstream,
+                    );
+                }
+                vec![FALLBACK_ALPN.to_vec()]
+            }
+        }
+    }
+
+    /// Open the connection to the service, from the client's own address where we can,
+    /// offering what the client offered.
+    async fn dial_upstream(
+        &self,
+        client: SocketAddr,
+        offered: &[Vec<u8>],
+    ) -> io::Result<(Endpoint, Connection)> {
         let endpoint = match self.endpoint_as(client) {
             Ok(endpoint) => endpoint,
             Err(e) => {
@@ -447,7 +487,11 @@ impl QuicRelay {
         // authenticated — but rustls needs a name to put in the handshake.
         let name = self.upstream.ip().to_string();
         let connecting = endpoint
-            .connect_with(self.cfg.setup.client.clone(), self.upstream, &name)
+            .connect_with(
+                self.cfg.setup.client_for(offered).map_err(io::Error::other)?,
+                self.upstream,
+                &name,
+            )
             .map_err(io::Error::other)?;
         let connection = tokio::time::timeout(self.cfg.connect_timeout, connecting)
             .await

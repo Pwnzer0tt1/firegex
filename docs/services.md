@@ -162,9 +162,9 @@ allowed to do to the traffic. Pick by those.
 |  | **Proxy** | **NFQUEUE** |
 |---|---|---|
 | Unit of work | a connection | a packet |
-| Transparency | full — dials your service **from the client's own address** | full — the real packets, on their way to your service |
+| Transparency | dials your service **from the client's own address** (not its source port) | full — the real packets, on their way to your service |
 | Reassembly | the kernel's, on two real sockets | rebuilt in userspace with libtins |
-| Rewriting | patterns: no. Python: exact, any length | patterns: no. Python: unstable on TCP, exact on UDP |
+| Rewriting | none — a filter answers with a verdict | none — a filter answers with a verdict |
 | If a filter dies | the engine rebuilds fail-open by hand | **the kernel keeps forwarding**, by itself |
 | Cost | terminating a connection, once | **a userspace round trip per packet**, per filter |
 | Measured ([how](../tests/bench/README.md#performance)) | **4035 MB/s** at 1 thread, **13 984** at 8 | 1820 at 1 thread, 2956 at 8 |
@@ -207,13 +207,27 @@ halves.
 
 - **The kernel's fail-open backstop is gone**, and the engine has to rebuild it by hand:
   `catch_unwind`, a deadline per filter, a filter that misbehaves losing its say rather
-  than the traffic being held. It works — and it is code, where the other layer has a
-  kernel guarantee.
+  than the traffic being held. One that keeps missing its deadline — a Python filter
+  under a flood, usually — is asked again after half a minute rather than staying out;
+  one that crashed stays out until you next save a change to the filters. It works —
+  and it is code, where the other layer has a kernel guarantee.
 
 It stays invisible: it always dials your service **from the client's own address** on both
 TCP and UDP, so anything that logs, rate-limits or bans by IP keeps working. That is not
 a setting, because a service that suddenly saw one address for the whole internet would be
 a regression nobody would attribute to us.
+
+What it cannot keep is the client's **source port**: the connection to your service is a
+new one, from the client's address and a port the kernel picks. And a reset from either
+end reaches the other as an ordinary close.
+
+**A service in a container is the ordinary case.** Protect the port the container is
+published on (`docker run -p 8080:80` → this host's address, port `8080`), on either layer.
+Firegex's rules run before the container runtime rewrites the destination, so it sees the
+traffic first; the service is reached, filtered and shown the real client address whether
+the client is on another host or on this one. Both were measured with a container behind
+Docker's own rewrite, and `tests/integration/test_remote_clients.py` asks it of every
+release with a stand-in that needs no Docker.
 
 ### NFQUEUE
 
@@ -228,6 +242,11 @@ Nothing is terminated.
   timestamps intact.
 - **No connection termination.** Suitable for protocols that cannot be proxied or where
   terminating the transport is prohibited.
+- **Connections already open are protected too.** Starting a service, adding a filter or
+  rebuilding the chain inspects the connections that were open at that moment from their
+  next packet on. The proxy layer cannot do this: a connection made before its redirect
+  existed was never sent to it, and goes on straight to the service, unfiltered but
+  uninterrupted, until it closes.
 
 **What it costs**
 
@@ -427,10 +446,10 @@ its own connection to the service — dialled from the client's own address like
 dial firegex makes.
 
 What cannot be done, and is a limit rather than a missing setting: a QUIC edge carrying
-anything **other than HTTP/3**. Opaque bytes on a QUIC stream have no HTTP/1.1 form, so
-there is nothing to send a service that speaks one. In practice that means an instance
-whose `FGEX_PROXY_QUIC_ALPN` is not `h3`: the choice is refused there, on `QUIC` and
-`HTTPS` services alike, with the ALPN named.
+anything **other than HTTP/3** to a service that speaks HTTP/1.1. Opaque bytes on a QUIC
+stream have no HTTP/1.1 form, so there is nothing to send it. On such an address firegex
+answers the client itself, in HTTP/3, and a client offering only something else is
+refused by that handshake.
 
 #### What is carried through, and what cannot be
 
@@ -613,31 +632,16 @@ bytes are real and the framing is reconstructed.** Concretely —
 
 #### What is carried through, and what cannot be
 
-**ALPN is the service's answer, carried — asked in the other order.** On TLS over TCP the
-client's hello is held open, the service is asked with exactly the list the client
-offered, and the client is told what came back. In QUIC the hello arrives inside an
-encrypted Initial packet whose processing *is* the handshake, so there is nothing to hold
-it at. The order is therefore reversed: firegex opens its connection to the service
-first, offering the protocols it was told to offer, and tells the client the one thing
-the service agreed to. The invariant that matters is unchanged — the client is never told
-a protocol the service did not choose — and what is lost is knowing in advance whether
-the client would have accepted it. When it would not, its handshake fails and the log
-says which protocol the service picked.
-
-That list is `h3`, which is what a QUIC service speaks nine times in ten. An instance in
-front of something else sets `FGEX_PROXY_QUIC_ALPN` as a comma-separated list in
-preference order:
-
-```bash
-python3 run.py restart --env FGEX_PROXY_QUIC_ALPN=h3,doq
-```
-
-`run.py` stores it and puts it back on every later start — editing the generated compose
-file by hand does not survive one, because `run.py` rewrites that file each time. The
-list is **per instance, not per service**, and it is a superset rather than a choice:
-every QUIC service is offered all of it and each one picks what it actually speaks, so
-listing every protocol the instance carries is the way to run more than one kind of QUIC
-service at once.
+**ALPN is the service's answer, carried — and there is nothing to configure.** On TLS
+over TCP the client's hello is held open, the service is asked with exactly the list the
+client offered, and the client is told what came back. QUIC does the same. Its hello
+travels inside an Initial packet, but Initial packets are protected with keys anyone can
+derive from the packet itself — on purpose, so something in the path can read exactly
+this — and firegex reads the client's list off it before answering. Your service is then
+offered precisely what the client offered, and the client is told the one protocol your
+service chose. HTTP/3, DNS over QUIC, a game's protocol or a CTF's own all work the same
+way, with no list to keep in step. If a hello cannot be read (a QUIC version firegex does
+not know), `h3` is offered instead and the service log says so.
 
 **0-RTT is not offered.** Early data is replayable by anyone who watched it go past, and
 a filter that refused a request has no way to un-deliver the copy your service already
@@ -959,6 +963,12 @@ as it happens rather than polled:
   missing its deadline, a fallback, a ruleset that was refused. These used to go to the
   backend's stderr, where nobody looks during a competition.
 
+Warnings and errors do not wait for you to open the service: each one also pops up as a
+notification wherever you are in the interface (one per service every twenty seconds,
+the rest counted into it — except that an error always gets through a warning), and the service's row in the list carries a **WARNING** or
+**ERROR** badge for an hour, with the line itself on hover. Clearing the service's log
+dismisses it.
+
 It is bounded at both ends. A service under attack refuses thousands of connections a
 minute; the tail keeps the last few hundred lines and the rest fall off, and lines are
 coalesced before being sent so a burst arrives as one message instead of thousands.
@@ -1003,15 +1013,34 @@ would.
 
 Adding, removing, reordering, enabling and disabling filters, patterns and individual
 `@pyfilter` functions all take effect on live connections **without dropping any of
-them**. Both layers swap their configuration
-underneath the traffic.
+them**. Both layers swap their configuration underneath the traffic. The exception is
+adding, removing or reordering a whole filter on the NFQUEUE layer, where each filter
+is a process of its own: there the chain of processes is rebuilt, traffic passes
+unfiltered for the moment that takes, and the new processes take over the connections
+already open from their next packet.
+
+An edit reaches only the filter it was made to. A Python filter keeps what it knows about
+each open connection — its module globals, and how far into a request it has read —
+through edits to the other filters; its own new code starts each connection afresh. A
+filter that takes over a connection in the middle of a message (a request half uploaded)
+does not judge the half it sees: HTTP filters leave that direction alone until the
+connection closes, rather than refusing a valid request or calling it malformed.
 
 Adding an address does not drop anything either, and removing or moving one costs only
 the connections on that address.
 
-Changing the service's own definition — its protocol, network layer, or TLS — is
-different: that changes what the datapath *is*, so the service is stopped and started
-around it, and the connections it was carrying are dropped. The UI says so before you do it.
+Changing the service's own definition — its protocol, network layer, TLS or limits —
+changes what the datapath *is*, so the service is restarted around it. The connections it
+was carrying are not cut: new ones get the new settings, and the ones already open go on.
+
+Stopping a service does not cut them either. On the NFQUEUE layer the kernel simply stops
+asking the filters. The proxy layer terminates the connections it carries, so its engine
+is not killed: it is taken out of the rules at once, and new connections go straight to
+the service. It carries the ones it already had, unfiltered, until they close, and then
+exits. After a restart the old engine does the same, and keeps filtering those connections
+the way it did before. Either way it gives up after ten minutes, closing whatever is still
+open, and the service's log says so. Only shutting firegex itself down cuts them
+straight away.
 
 ## See also
 

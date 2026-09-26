@@ -25,7 +25,7 @@ try:
     from aioquic.h3.connection import H3_ALPN, H3Connection
     from aioquic.h3.events import DataReceived, HeadersReceived
     from aioquic.quic.configuration import QuicConfiguration
-    from aioquic.quic.events import ConnectionTerminated
+    from aioquic.quic.events import ConnectionTerminated, StreamDataReceived
     HAVE_AIOQUIC = True
 except ImportError:  # pragma: no cover - depends on what is installed
     HAVE_AIOQUIC = False
@@ -49,11 +49,16 @@ class QuicEcho:
     the suite is not. Stopping it closes the loop, which is what ends the server.
     """
 
-    def __init__(self, port: int, cert: str, key: str, ipv6: bool = False):
+    def __init__(self, port: int, cert: str, key: str, ipv6: bool = False,
+                 alpn: list[str] | None = None):
         self.port = port
         self.cert = cert
         self.key = key
         self.ipv6 = ipv6
+        #: What it negotiates. HTTP/3 unless told otherwise; anything else is a service
+        #: that echoes each stream back as it is — QUIC carrying a protocol of its own,
+        #: which is what a CTF's QUIC service usually is when it is not a web one.
+        self.alpn = alpn
         #: Every address a connection arrived from. What the *service* saw, which is the
         #: only way to check that the client's own address survived the relay.
         self.seen_peers: list[tuple] = []
@@ -89,11 +94,12 @@ class QuicEcho:
                 handle.write(material)
             os.chmod(path, 0o600)
             paths.append(path)
-        config = QuicConfiguration(is_client=False, alpn_protocols=H3_ALPN)
+        config = QuicConfiguration(is_client=False, alpn_protocols=self.alpn or H3_ALPN)
         config.load_cert_chain(paths[0], paths[1])
         seen = self.seen_peers
+        protocol = _EchoProtocol if not self.alpn else _RawEchoProtocol
         await serve(self.host, self.port, configuration=config,
-                    create_protocol=lambda *a, **kw: _EchoProtocol(seen, *a, **kw))
+                    create_protocol=lambda *a, **kw: protocol(seen, *a, **kw))
         for path in paths:
             os.unlink(path)
         self._ready.set()
@@ -143,6 +149,22 @@ if HAVE_AIOQUIC:
             ])
             self._http.send_data(stream_id, answer, end_stream=True)
             self.transmit()
+
+    class _RawEchoProtocol(QuicConnectionProtocol):
+        """Each stream back as it came, once the client has finished sending it."""
+
+        def __init__(self, seen_peers, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            self._streams: dict[int, bytes] = {}
+
+        def quic_event_received(self, event):
+            if isinstance(event, StreamDataReceived):
+                self._streams[event.stream_id] = \
+                    self._streams.get(event.stream_id, b"") + event.data
+                if event.end_stream:
+                    self._quic.send_stream_data(
+                        event.stream_id, self._streams.pop(event.stream_id), end_stream=True)
+                    self.transmit()
 
     class _RequestingProtocol(QuicConnectionProtocol):
         def __init__(self, *args, **kwargs):
@@ -206,6 +228,27 @@ async def _ask(host: str, port: int, method: str, path: str,
         return await asyncio.wait_for(
             client.ask(method, authority(host, port), path, body, declare_length), timeout
         )
+
+
+async def _raw(host: str, port: int, alpn: str, payload: bytes, timeout: float) -> bytes:
+    config = QuicConfiguration(is_client=True, alpn_protocols=[alpn])
+    config.verify_mode = ssl.CERT_NONE
+    async with connect(host, port, configuration=config) as client:
+        reader, writer = await client.create_stream()
+        writer.write(payload)
+        writer.write_eof()
+        return await asyncio.wait_for(reader.read(), timeout)
+
+
+def quic_exchange(host: str, port: int, alpn: str, payload: bytes,
+                  timeout: float = 8.0) -> bytes | None:
+    """One stream over a QUIC connection negotiating `alpn`: what came back, or `None`
+    when no connection could be made or nothing came back in time."""
+    try:
+        return asyncio.run(asyncio.wait_for(_raw(host, port, alpn, payload, timeout),
+                                            timeout + 2))
+    except (ConnectionError, OSError, asyncio.TimeoutError, TimeoutError):
+        return None
 
 
 def authority(host: str, port: int) -> str:

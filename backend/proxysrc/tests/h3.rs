@@ -207,7 +207,7 @@ async fn spawn_relay_to(
         Duration::from_millis(500),
     ));
     let cfg = QuicConfig {
-        setup: Arc::new(QuicSetup::build(&cert, &key, vec![b"h3".to_vec()]).unwrap()),
+        setup: Arc::new(QuicSetup::build(&cert, &key).unwrap()),
         self_mark: None,
         spoof_source: false,
         max_connections: 0,

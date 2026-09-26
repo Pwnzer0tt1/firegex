@@ -27,8 +27,14 @@ PyObject* unmarshal_code(string encoded_code){
 }
 
 class PyCodeConfig{
+	private:
+		// Only the updater thread builds configurations, so this needs no lock.
+		static inline uint32_t glob_seq = 0;
 	public:
 		string encoded_code;
+		// Which configuration this is, so a queue thread can tell that the contexts it
+		// holds were built from code no longer in force. 0 is the empty one it starts on.
+		uint32_t version = 0;
 
 		PyCodeConfig(const string& pycode){
 			PyObject* compiled_code = Py_CompileStringExFlags(pycode.c_str(), "<pyfilter>", Py_file_input, NULL, 2);
@@ -61,6 +67,7 @@ class PyCodeConfig{
 			}
 			encoded_code = string(PyBytes_AsString(code_dump), PyBytes_Size(code_dump));
 			Py_DECREF(code_dump);
+			version = ++glob_seq;
 		}
 
 		PyObject* compiled_code(){

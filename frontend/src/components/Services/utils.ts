@@ -218,6 +218,20 @@ export type Service = {
     addresses: Address[],
     n_filters: number,
     n_blocked: number,
+    /**
+     * The newest warning or error still in the service's log. The log lives on the
+     * service's own page, and this is what lets the list say something went wrong without
+     * that page being open. Clearing the log dismisses it.
+     */
+    problem?: Problem | null,
+}
+
+export type Problem = {
+    /** Unix milliseconds. */
+    at: number,
+    /** warn | error */
+    level: string,
+    text: string,
 }
 
 export type ServiceAddForm = {

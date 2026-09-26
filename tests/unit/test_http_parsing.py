@@ -83,20 +83,25 @@ def run(*chunks: tuple[bytes, bool]) -> list[dict]:
     return _feed(*chunks)[0]
 
 
-def run_with_verdict(*chunks: tuple[bytes, bool]) -> tuple[list[dict], int]:
+def run_with_verdict(*chunks: tuple[bytes, bool], settings: str = "") -> tuple[list[dict], int]:
     """The same, plus what the chain answered — which is the whole story when the
     parser refuses the traffic and the filter is therefore never called."""
-    return _feed(*chunks)
+    return _feed(*chunks, settings=settings)[:2]
 
 
-def _feed(*chunks: tuple[bytes, bool]) -> tuple[list[dict], int]:
+def _feed(*chunks: tuple[bytes, bool], settings: str = "",
+          joined_late: bool = False) -> tuple[list[dict], int, str]:
     glob = {"__firegex_pyfilter_enabled": ["watch_request", "watch_response"]}
-    exec(FILTER_CODE, glob, glob)
+    exec(FILTER_CODE + settings, glob, glob)
     compile(glob)
+    if joined_late:
+        # What the datapath sets on a context that began after its connection did.
+        glob["__firegex_joined_late"] = True
     for payload, is_input in chunks:
         glob["__firegex_packet_info"] = packet(payload, is_input)
         handle_packet(glob)
-    return glob["seen"], glob.get("__firegex_pyfilter_result", {}).get("action")
+    result = glob.get("__firegex_pyfilter_result") or {}
+    return glob["seen"], result.get("action"), result.get("matched_by")
 
 
 def final(seen: list[dict], kind: str) -> dict:
@@ -348,21 +353,101 @@ def test_an_identity_encoding_is_left_alone():
 # answers changed between 9.2.1 and 9.4.3, and both are decisions about what a filter is
 # shown rather than details of how it is parsed.
 
+EMPTY_TRANSFER_ENCODING = b"POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: \r\n\r\n"
+
+
 def test_an_empty_transfer_encoding_never_reaches_a_filter():
-    """`Transfer-Encoding:` with nothing after it is refused, and the connection with it.
+    """`Transfer-Encoding:` with nothing after it is not parsed into a request.
 
     This is the shape request smuggling is built out of: a header that one parser reads
     as "chunked follows" and another as "no framing here" is two readings of where the
     next request begins. llhttp accepted it until 9.4.3 — which means firegex parsed it,
     showed a filter an ordinary-looking request, and forwarded whatever the service then
-    made of it. Now the parse fails, `invalid_encoding_action` decides, and its default
-    is to reject: the filter is never called, because there is no one message here to
-    call it with.
+    made of it. Now the parse fails and `invalid_encoding_action` decides. The filter is
+    never called, because there is no one message here to call it with.
+
+    **By default the traffic is carried**, and said so: refusing whatever the parser cannot
+    read broke a service over any quirk of a client it would have accepted, with nobody
+    having chosen that. Refusing is one setting away.
     """
-    seen, action = run_with_verdict(
-        (b"POST / HTTP/1.1\r\nHost: a\r\nTransfer-Encoding: \r\n\r\n", True))
+    seen, action = run_with_verdict((EMPTY_TRANSFER_ENCODING, True))
+    assert seen == []
+    assert action == 0  # ACCEPT
+
+
+def test_traffic_the_parser_cannot_read_is_refused_when_asked_and_not_blamed_on_a_filter():
+    """The stricter answer, chosen in the file — and credited to the parser.
+
+    It used to be credited to the filter function, which had never been shown the
+    request: the operator was told their own code refused a connection it did not see.
+    """
+    seen, action, matched_by = _feed(
+        (EMPTY_TRANSFER_ENCODING, True),
+        settings="\nfrom firegex.pyfilters import ExceptionAction\n"
+                 "FGEX_INVALID_ENCODING_ACTION = ExceptionAction.REJECT\n")
     assert seen == []
     assert action == 2  # REJECT
+    assert matched_by == "@INVALID_ENCODING"
+
+
+def test_unreadable_traffic_is_reported_once_per_connection(capsys):
+    """The parser starts afresh on every packet, so every packet fails the same way.
+
+    A traceback each was the whole log, hundreds of times; one line says it and what was
+    done about it.
+    """
+    run_with_verdict(*[(EMPTY_TRANSFER_ENCODING, True)] * 4)
+    said = [line for line in capsys.readouterr().out.splitlines() if "[warn] [http]" in line]
+    assert len(said) == 1, said
+    assert "carried" in said[0], said
+
+
+STRICT = ("\nfrom firegex.pyfilters import ExceptionAction\n"
+          "FGEX_INVALID_ENCODING_ACTION = ExceptionAction.REJECT\n")
+
+
+def test_a_connection_met_in_the_middle_of_a_body_is_carried_not_refused(capsys, monkeypatch):
+    """What a filter taking over an open connection meets first can be half a request.
+
+    The rest of an upload is not a malformed request, and judging it as one refused valid
+    uploads in flight whenever a filter changed — under the strict setting, which is
+    exactly the one an operator worried about smuggling chooses. That direction of the
+    connection is carried, and said once, as information rather than as a problem.
+    """
+    from firegex.pyfilters.models import http
+    monkeypatch.setattr(http, "_told_met_mid_message", False)
+    seen, action, _ = _feed(
+        (b"x" * 200, True),
+        (b"GET /next HTTP/1.1\r\nHost: a\r\n\r\n", True),
+        settings=STRICT, joined_late=True)
+    assert action == 0, "a request met halfway was refused"
+    assert seen == [], "a direction met halfway was judged after all"
+    out = capsys.readouterr().out
+    assert "[warn] [http]" not in out, "a working client was reported as not speaking HTTP"
+    assert out.count("[info] [http]") == 1, out
+
+
+def test_a_connection_met_at_the_start_of_a_message_is_filtered_as_usual():
+    """Met between two requests — the ordinary idle keep-alive — nothing is lost."""
+    seen = _feed((b"GET /first HTTP/1.1\r\nHost: a\r\n\r\n", True),
+                 settings=STRICT, joined_late=True)[0]
+    assert final(seen, "request")["url"] == "/first"
+
+
+def test_once_in_step_a_connection_met_late_answers_to_the_usual_rules():
+    """Only the first thing met is given the benefit of the doubt; garbage after a clean
+    request is garbage, and the strict setting refuses it as it would anywhere."""
+    _, action, matched_by = _feed(
+        (b"GET /first HTTP/1.1\r\nHost: a\r\n\r\n", True),
+        (EMPTY_TRANSFER_ENCODING, True),
+        settings=STRICT, joined_late=True)
+    assert action == 2 and matched_by == "@INVALID_ENCODING"
+
+
+def test_a_connection_seen_from_its_start_gets_no_such_benefit():
+    """Unreadable from the first byte is not a connection met halfway."""
+    _, action, _ = _feed((b"x" * 200, True), settings=STRICT)
+    assert action == 2
 
 
 def test_tabs_around_a_content_length_are_tolerated():

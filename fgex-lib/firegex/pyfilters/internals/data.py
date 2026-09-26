@@ -210,7 +210,13 @@ class DataStreamCtx:
     filter_call_info = _Kept(list)
     stream_max_size = _Kept(DEFAULT_STREAM_MAX_SIZE, int)
     full_stream_action = _Kept(FullStreamAction.FLUSH, FullStreamAction)
-    invalid_encoding_action = _Kept(ExceptionAction.REJECT, ExceptionAction)
+    #: Traffic the HTTP parser cannot read is carried, and said so, unless the filter file
+    #: asks for it to be refused. It was refused by default — so a request the service
+    #: would have taken and llhttp would not (a quirk of one client, a protocol that only
+    #: resembles HTTP) closed the connection with nothing chosen by anybody, and the block
+    #: was credited to the filter function as if it had decided it. Refusing is the
+    #: stricter answer to request smuggling and stays one line away; it is the operator's.
+    invalid_encoding_action = _Kept(ExceptionAction.ACCEPT, ExceptionAction)
     data_handler_context = _Kept(dict)
 
     def __init__(self, glob: dict, init_pkt: bool = True):

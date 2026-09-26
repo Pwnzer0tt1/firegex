@@ -333,6 +333,13 @@ async fn replies(
     loop {
         let len = match upstream.recv(&mut buf).await {
             Ok(len) => len,
+            // The service's port answered a datagram with ICMP "unreachable", which a
+            // connected socket reports once, on its next call: the service was down for a
+            // moment — being restarted, most often. Nothing about the flow is over. This
+            // used to end the task, which left the flow in the relay's table with nobody
+            // reading the service's answers, so a client that went on talking never heard
+            // back again while its datagrams kept the flow from ever going idle.
+            Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => continue,
             Err(e) => {
                 eprintln!("[info] [udp] flow for {client} ended: {e}");
                 return;

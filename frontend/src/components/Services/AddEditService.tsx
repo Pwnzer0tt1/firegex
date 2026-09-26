@@ -440,8 +440,8 @@ export default function AddEditService({ opened, onClose, edit }: {
 
                 {edit ?
                     <Alert color="yellow" mt="md">
-                        Changing any of this restarts the service, which drops the connections it
-                        is carrying. Adding an address, or adding and reordering filters, does not.
+                        Changing any of this restarts the service. The connections it is carrying
+                        are not cut; new ones get the new settings.
                     </Alert> : null}
                 <Space h="md" />
             </Box>

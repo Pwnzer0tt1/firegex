@@ -12,7 +12,6 @@ that can host it, and the service does not have to be recreated to change either
 """
 
 import base64
-import os
 import uuid
 
 from utils import is_ip_parse
@@ -317,58 +316,6 @@ class Address:
 
     def __repr__(self):
         return f"<Address {self.ip_int}:{self.port}/{self.proto}>"
-
-
-def quic_alpn() -> tuple[str, ...]:
-    """What this instance offers a QUIC service's clients, in order.
-
-    Instance-wide (`FGEX_PROXY_QUIC_ALPN`) rather than per service, because nothing has
-    yet wanted a column for it: `h3` is what a QUIC service speaks nine times in ten, and
-    an instance in front of something else sets it in its own environment the way the
-    filter deadline beside it is set. Read here as well as where the engine is launched
-    so that the one question it decides — whether an exchange can be rendered at all —
-    has a single answer.
-    """
-    raw = os.getenv("FGEX_PROXY_QUIC_ALPN", "h3")
-    listed = tuple(p.strip() for p in raw.split(",") if p.strip())
-    return listed or ("h3",)
-
-
-def upstream_refusal(proto: str, upstream: str, edge_is_udp: bool) -> str | None:
-    """Why one address cannot be forwarded the way it was told to, or `None`.
-
-    Asked of an **address** rather than of the service, because that is where it is
-    chosen: what is behind `:443` is the same daemon as what is behind `:80`, but the two
-    reach it differently — one may be re-encrypted and the other handed the plaintext, and
-    on an `http` service the two are separate ports with separate answers. Asked from the
-    three places that would otherwise drift: when an address is created, when one is
-    added, and in `ProxyTransport.check`.
-
-    One thing is impossible, and it is impossible rather than unimplemented: a QUIC edge
-    carrying something that is **not HTTP/3**. What lets an HTTP/3 client reach a service
-    that speaks HTTP/1.1 is that the exchange is already rendered as HTTP/1.1 for the
-    chain, so sending that rendering on invents nothing. Opaque bytes on a QUIC stream
-    have no such form — there is no HTTP/1.1 spelling of "some bytes" — so an address
-    whose clients speak anything else has nothing that could be forwarded.
-
-    Which is a fact about the **ALPN**, not about the protocol: a `quic` service offering
-    `h3`, which is the default and the usual case, is exactly as renderable as an `http`
-    one, and an instance that has set `FGEX_PROXY_QUIC_ALPN` to something else is the one
-    that cannot do this — on both.
-    """
-    if str(upstream) == UPSTREAM.SAME:
-        return None
-    if str(proto) not in (L4.TLS, L4.QUIC, L4.HTTP):
-        return None
-    alpn = quic_alpn()
-    if edge_is_udp and "h3" not in alpn:
-        return (
-            f"This instance offers QUIC clients {', '.join(alpn)}, and only HTTP/3 can be "
-            f"rendered to a service that speaks HTTP/1.1 — anything else on a QUIC stream "
-            f"is opaque bytes with no HTTP/1.1 form to forward. Let this address be "
-            f"forwarded as it arrives, or take its HTTP/3 edge away."
-        )
-    return None
 
 
 class Service:

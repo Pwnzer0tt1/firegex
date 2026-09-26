@@ -206,7 +206,7 @@ def test_installed_rule_parsing():
 
     # Simulate get() parsing logic
     table = detached_table()
-    table.list_rules = lambda tables, chains: [raw_rule]
+    table.list_rules = lambda tables, chains, family=None: [raw_rule]
     rules = table.get()
     assert len(rules) == 1
     r = rules[0]
@@ -244,7 +244,7 @@ def test_an_interfaces_output_rule_is_read_back_as_the_interfaces():
         ],
     }
     table = detached_table()
-    table.list_rules = lambda tables, chains: [raw_rule]
+    table.list_rules = lambda tables, chains, family=None: [raw_rule]
     rule = table.get()[0]
     assert rule.ip_int == "wg0", "the rule was read back under the address it matches"
 
@@ -292,9 +292,12 @@ def test_proxy_rule_generation_interface_vs_ip(monkeypatch):
     # each, which is what makes a service protected on `lo` filter a local client.
     chains = [c["add"]["rule"]["chain"] for c in commands]
     assert chains.count("fgex_nat") == 1
-    assert chains.count("fgex_route") == 1
     assert chains.count("fgex_nat_out") == 2, "one per address the interface carries"
-    assert len(commands) == 4
+    # Nothing on the way back: the engine's answers come home by the conntrack mark on
+    # the connections it opened. A per-service rule there caught the answers on
+    # connections open before the service started, and a remote client lost them.
+    assert "fgex_route" not in chains
+    assert len(commands) == 3
 
     # Inbound stays the interface and nothing narrower. Pinning it to the addresses the
     # interface carries was tried and reverted: a name is what an operator reaches for
@@ -328,22 +331,13 @@ def test_proxy_rule_generation_interface_vs_ip(monkeypatch):
         for e in nat_rule["expr"]
     )
 
-    # Check expressions in route rule
-    route_rule = [c["add"]["rule"] for c in commands if c["add"]["rule"]["chain"] == "fgex_route"][0]
-    assert any(
-        e.get("match", {}).get("left", {}).get("meta", {}).get("key") == "oifname"
-        and e["match"]["right"] == "eth0"
-        for e in route_rule["expr"]
-    )
-
     # 2. IP target
     commands.clear()
     table._add_proxy(srv, "127.0.0.1/32", 80, "ip", "tcp", 38000)
-    # Should write to nat_chain, route_chain, AND nat_output_chain
-    assert len(commands) == 3
+    # Both hooks of the redirect, and nothing on the way back.
+    assert len(commands) == 2
     chains_ip = [c["add"]["rule"]["chain"] for c in commands]
     assert "fgex_nat" in chains_ip
-    assert "fgex_route" in chains_ip
     assert "fgex_nat_out" in chains_ip
 
 

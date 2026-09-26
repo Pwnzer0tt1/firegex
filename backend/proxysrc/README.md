@@ -227,13 +227,12 @@ terminates (`quic::QuicManager`) instead of something that forwards (`udp::UdpMa
 `relays::Relays` is the two-armed enum both the startup list and the control channel go
 through.
 
-- **The ALPN is asked of the service**, which is the one thing that could not be kept from
-  the TLS path: a QUIC ClientHello arrives inside an encrypted Initial whose processing
-  *is* the handshake, and quinn offers nothing to hold it at. So the order is reversed —
-  the service is dialled first with the candidate list (`FGEX_PROXY_QUIC_ALPN`, default
-  `h3`) and the client is advertised exactly the one it chose. The invariant survives; what
-  is lost is knowing in advance whether the client would take it, which shows up as a
-  failed handshake with a log line naming the protocol.
+- **The ALPN is mirrored, as on the TLS path.** quinn offers nothing to hold a ClientHello
+  at, but an Initial packet's keys come from the connection ID it carries in the clear, so
+  `quic_hello.rs` reads the client's list off the socket before the handshake is answered.
+  The service is dialled first offering exactly that list, and the client is advertised
+  the one protocol the service chose — nothing to configure, whatever the service speaks.
+  A hello that cannot be read falls back to offering `h3`, and says so.
 - **One stream is one connection to the chain**, with its own sessions and its own module
   globals, released when the stream ends. A filter's state follows a stream of bytes from
   start to end, which is what a QUIC stream is and what a QUIC connection is not.
@@ -486,7 +485,6 @@ outliving its control channel matters.
 | `FGEX_PROXY_TLS` / `_TLS_OPTIONAL` | terminate TLS on the TCP listener; `_OPTIONAL` means only for the connections that start a handshake |
 | `FGEX_PROXY_TLS_CERT` / `_TLS_KEY` | **paths**, never the material |
 | `FGEX_PROXY_QUIC` | bind the relays with a QUIC endpoint instead of a datagram socket |
-| `FGEX_PROXY_QUIC_ALPN` | what to offer the service, in order. Default `h3` |
 | `FGEX_PROXY_MAX_CONNECTIONS` | 0 is no limit |
 | `FGEX_PROXY_OVER_LIMIT_FORWARD` | forward what does not fit, unfiltered, instead of refusing it |
 | `FGEX_PROXY_FIRST_BYTE_TIMEOUT` | seconds; 0 is off |

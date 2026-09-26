@@ -198,7 +198,7 @@ def test_a_size_that_is_not_a_size_is_ignored_too():
 
 def test_the_other_two_knobs_want_their_own_enum():
     assert settings_of("").full_stream_action is FullStreamAction.FLUSH
-    assert settings_of("").invalid_encoding_action is ExceptionAction.REJECT
+    assert settings_of("").invalid_encoding_action is ExceptionAction.ACCEPT
 
     chosen = settings_of("from firegex.pyfilters import FullStreamAction\n"
                          "FGEX_FULL_STREAM_ACTION = FullStreamAction.REJECT\n")

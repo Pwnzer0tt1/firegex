@@ -42,11 +42,16 @@ async fn spawn_echo() -> std::net::SocketAddr {
 }
 
 async fn spawn_proxy(filters: &str, deadline_ms: u64) -> (std::net::SocketAddr, ChainHandle) {
-    let upstream = spawn_echo().await;
-    let chain = ChainHandle::new(FilterChain::new(
+    spawn_proxy_with(FilterChain::new(
         parse_filters(filters).unwrap(),
         Duration::from_millis(deadline_ms),
-    ));
+    ))
+    .await
+}
+
+async fn spawn_proxy_with(chain: FilterChain) -> (std::net::SocketAddr, ChainHandle) {
+    let upstream = spawn_echo().await;
+    let chain = ChainHandle::new(chain);
     let proxy = Proxy::bind(
         ProxyConfig::fixed("127.0.0.1:0".parse().unwrap(), upstream),
         chain.clone(),
@@ -105,7 +110,12 @@ async fn panicking_filter_keeps_traffic_flowing() {
 /// process-wide, and the harness runs tests in parallel within one process.
 #[tokio::test]
 async fn hanging_filter_fails_open_then_loses_its_say() {
-    let (addr, chain) = spawn_proxy("hang", 50).await;
+    let rearm = Duration::from_millis(1500);
+    let (addr, chain) = spawn_proxy_with(
+        FilterChain::new(parse_filters("hang").unwrap(), Duration::from_millis(50))
+            .rearming_after(rearm),
+    )
+    .await;
 
     // The deadline, not the filter, decides when the chunk moves.
     let started = Instant::now();
@@ -139,8 +149,24 @@ async fn hanging_filter_fails_open_then_loses_its_say() {
         "a disabled filter is still being called, so the thread leak is unbounded"
     );
 
-    // Let the abandoned threads exit, otherwise dropping the runtime waits on them.
+    // Slow is not broken: after a pause it is asked again, rather than staying out until
+    // somebody next edits a rule. It used to stay out for the life of the chain — which
+    // for a Python filter meant a flood, the one moment it was wanted, switched it off.
+    tokio::time::sleep(rearm + Duration::from_millis(300)).await;
+    let answered = roundtrip(addr, b"again").await.unwrap();
+    let asked = live.stats.timeouts.load(Ordering::Relaxed) - leaked;
+    let back_in = live.disabled_filters().is_empty();
+    let bypassed = live.is_bypassed();
+
+    // Let the abandoned threads exit, otherwise dropping the runtime waits on them — and
+    // before asserting, so a failure below fails the test rather than hanging it.
     fgex_proxy::spec::release_hangs();
+
+    assert_eq!(answered, b"again");
+    // Once per direction: the echo comes back through the chain as well.
+    assert_eq!(asked, 2, "the filter was not asked again after its pause");
+    assert!(back_in, "two misses after the pause took it out again");
+    assert!(!bypassed);
 }
 
 /// Failing open is only worth anything if the filters do something when healthy.

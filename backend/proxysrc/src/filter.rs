@@ -8,7 +8,8 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 /// Which half of the connection a chunk came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -189,6 +190,18 @@ pub trait Filter: Send + Sync + 'static {
     /// process of its own — has no other way to learn that it can let go, and would
     /// otherwise grow for as long as the service runs.
     fn connection_closed(&self, _connection: ConnectionId) {}
+
+    /// What makes this filter the same filter in the next ruleset, if anything does.
+    ///
+    /// A ruleset is rebuilt whole on every edit, and a filter that keeps per-connection
+    /// state outside its sessions loses all of it when it is rebuilt: the Python worker
+    /// is a process, and a new one meets every open connection halfway. A filter that
+    /// answers here, with a key that changes whenever its configuration does, is carried
+    /// over into the new chain instead when the key matches. `None` — the default — is
+    /// always rebuilt.
+    fn reuse_key(&self) -> Option<&str> {
+        None
+    }
 }
 
 /// One filter's state for one direction of one connection.
@@ -250,11 +263,30 @@ pub struct ChainStats {
 /// because zero means "no sessions opened yet".
 static CHAIN_GENERATION: AtomicU64 = AtomicU64::new(1);
 
+/// How long a filter that kept missing its deadline sits out before it is asked again.
+///
+/// Slow is not broken. A Python filter misses its deadline when exchanges queue behind one
+/// another, which is what a flood does — the one moment its protection is wanted — and
+/// disabled for the life of the chain it stayed off until somebody next edited a rule,
+/// with one log line to say so. So it is tried again after a pause, and if it is still
+/// slow it loses its say again after the same few misses: a filter that genuinely never
+/// returns strands a few threads per pause rather than one per chunk. A panic is broken
+/// code, and stays out until the chain is replaced.
+pub const REARM_AFTER: Duration = Duration::from_secs(30);
+
+/// Milliseconds on a monotonic clock, never zero, so zero can mean "not scheduled".
+fn monotonic_ms() -> u64 {
+    static START: OnceLock<Instant> = OnceLock::new();
+    START.get_or_init(Instant::now).elapsed().as_millis() as u64 + 1
+}
+
 struct Slot {
     filter: Arc<dyn Filter>,
     /// Set once the filter has misbehaved enough to lose its say.
     disabled: AtomicBool,
     consecutive_timeouts: AtomicU64,
+    /// When a filter that timed out is asked again (`monotonic_ms`), or 0 for never.
+    rearm_at_ms: AtomicU64,
 }
 
 /// An immutable set of filters. Swapping the whole chain is how configuration
@@ -266,6 +298,10 @@ pub struct FilterChain {
     generation: u64,
     deadline: Duration,
     max_consecutive_timeouts: u64,
+    /// How long a filter that timed out sits out. `REARM_AFTER` but for tests.
+    rearm_after: Duration,
+    /// The earliest `rearm_at_ms` of any slot, or 0: what lets the hot path skip the clock.
+    next_rearm_ms: AtomicU64,
     /// Trips when no filter is left to consult, making the chain a pure relay.
     degraded: AtomicBool,
     pub stats: Arc<ChainStats>,
@@ -274,6 +310,12 @@ pub struct FilterChain {
 impl FilterChain {
     pub fn new(filters: Vec<Arc<dyn Filter>>, deadline: Duration) -> Self {
         Self::with_policy(filters, deadline, 3)
+    }
+
+    /// The filters this chain consults, in order — for the next ruleset to carry over
+    /// the ones it has not changed (`Filter::reuse_key`).
+    pub fn filters(&self) -> Vec<Arc<dyn Filter>> {
+        self.slots.iter().map(|slot| slot.filter.clone()).collect()
     }
 
     pub fn with_policy(
@@ -299,14 +341,24 @@ impl FilterChain {
                     filter,
                     disabled: AtomicBool::new(false),
                     consecutive_timeouts: AtomicU64::new(0),
+                    rearm_at_ms: AtomicU64::new(0),
                 })
                 .collect(),
             generation: CHAIN_GENERATION.fetch_add(1, Ordering::Relaxed),
             deadline,
             max_consecutive_timeouts,
+            rearm_after: REARM_AFTER,
+            next_rearm_ms: AtomicU64::new(0),
             degraded,
             stats: Arc::new(ChainStats::default()),
         }
+    }
+
+    /// The same chain, with filters that time out asked again after `after` rather than
+    /// `REARM_AFTER`.
+    pub fn rearming_after(mut self, after: Duration) -> Self {
+        self.rearm_after = after;
+        self
     }
 
     pub fn empty() -> Self {
@@ -333,11 +385,26 @@ impl FilterChain {
             return; // already out of the loop, do not double count
         }
         self.stats.filters_disabled.fetch_add(1, Ordering::Relaxed);
-        eprintln!(
-            "[warn] [filter] '{}' disabled after {:?}: traffic keeps flowing without it",
-            slot.filter.name(),
-            reason
-        );
+        match reason {
+            DisableReason::TimedOut => {
+                let at = monotonic_ms() + self.rearm_after.as_millis() as u64;
+                slot.rearm_at_ms.store(at, Ordering::Relaxed);
+                let _ = self.next_rearm_ms.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
+                    |next| (next == 0 || at < next).then_some(at));
+                eprintln!(
+                    "[warn] [filter] '{}' kept missing its {:?} deadline: traffic keeps \
+                     flowing without it, and it is asked again in {}s",
+                    slot.filter.name(),
+                    self.deadline,
+                    self.rearm_after.as_secs(),
+                );
+            }
+            DisableReason::Panicked => eprintln!(
+                "[warn] [filter] '{}' panicked: traffic keeps flowing without it until the \
+                 filters are next applied — save a change to them, or restart the service",
+                slot.filter.name(),
+            ),
+        }
         if self
             .slots
             .iter()
@@ -367,6 +434,38 @@ impl FilterChain {
 
     /// Run the chain over one chunk.
     ///
+    /// Put back the filters whose pause is over. See `REARM_AFTER`.
+    fn rearm(&self) {
+        let now = monotonic_ms();
+        let mut next = 0;
+        for slot in &self.slots {
+            let at = slot.rearm_at_ms.load(Ordering::Relaxed);
+            if at == 0 {
+                continue;
+            }
+            if now < at {
+                next = if next == 0 { at } else { next.min(at) };
+                continue;
+            }
+            // Whoever wins this puts the filter back; everybody else sees it done.
+            if slot
+                .rearm_at_ms
+                .compare_exchange(at, 0, Ordering::Relaxed, Ordering::Relaxed)
+                .is_ok()
+            {
+                slot.consecutive_timeouts.store(0, Ordering::Relaxed);
+                slot.disabled.store(false, Ordering::Relaxed);
+                self.degraded.store(false, Ordering::Relaxed);
+                eprintln!(
+                    "[info] [filter] '{}' is back in the chain after sitting out {}s",
+                    slot.filter.name(),
+                    self.rearm_after.as_secs(),
+                );
+            }
+        }
+        self.next_rearm_ms.store(next, Ordering::Relaxed);
+    }
+
     /// Any way a filter can fail — panic, or simply never returning — resolves to
     /// `Accept` for the chunk in flight. The chunk is never held hostage by the
     /// filter's failure.
@@ -376,6 +475,10 @@ impl FilterChain {
         data: &[u8],
         sessions: &mut ChainSessions,
     ) -> Verdict {
+        let due = self.next_rearm_ms.load(Ordering::Relaxed);
+        if due != 0 && monotonic_ms() >= due {
+            self.rearm();
+        }
         if self.is_bypassed() {
             self.stats.bypassed_chunks.fetch_add(1, Ordering::Relaxed);
             return Verdict::Accept;
@@ -418,9 +521,7 @@ impl FilterChain {
                     Ok(Verdict::Reject(by)) => {
                         self.stats.rejected.fetch_add(1, Ordering::Relaxed);
                         let id = by.clone().unwrap_or_else(|| slot.filter.name().to_string());
-                        println!("BLOCKED {id}");
-                        use std::io::Write;
-                        let _ = std::io::stdout().flush();
+                        crate::report::blocked(&id);
                         return Verdict::Reject(by);
                     }
                     Err(_) => {
@@ -456,9 +557,7 @@ impl FilterChain {
                             // The backend attributes the block to a rule by this id,
                             // the same way cppregex reports `BLOCKED <id>`.
                             let id = by.clone().unwrap_or_else(|| slot.filter.name().to_string());
-                            println!("BLOCKED {id}");
-                            use std::io::Write;
-                            let _ = std::io::stdout().flush();
+                            crate::report::blocked(&id);
                             return Verdict::Reject(by);
                         }
                     }

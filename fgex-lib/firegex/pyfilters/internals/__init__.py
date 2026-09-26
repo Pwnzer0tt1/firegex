@@ -182,11 +182,14 @@ def get_code_proto(code:str) -> str:
 #: What a model raises while being built, and the verdict it means. `NotReadyToRun` is
 #: not here: it is the ordinary "there is nothing to give this filter yet", handled by
 #: skipping the call rather than by ending the packet.
+#: Each is credited to what actually decided it, never to the filter function: those two
+#: are raised only when the parser could not read the traffic, and a function the
+#: operator wrote was listed as having refused a connection it was never shown.
 _RAISED_VERDICT = {
     StreamFullDrop: (Action.DROP, "@MAX_STREAM_SIZE_REACHED"),
     StreamFullReject: (Action.REJECT, "@MAX_STREAM_SIZE_REACHED"),
-    DropPacket: (Action.DROP, None),
-    RejectConnection: (Action.REJECT, None),
+    DropPacket: (Action.DROP, "@INVALID_ENCODING"),
+    RejectConnection: (Action.REJECT, "@INVALID_ENCODING"),
 }
 
 

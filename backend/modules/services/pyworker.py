@@ -271,6 +271,13 @@ class Filters:
         if ctx is None:
             ctx = {}
             exec(self.code, ctx, ctx)  # noqa: S102
+            # No open frame came for it, so this worker is taking over a connection
+            # already under way — new code, or one restarted after the last died — and
+            # its first chunk can be the middle of a message. The library then carries
+            # what it cannot read instead of judging half a message; see
+            # `_met_mid_message` in the HTTP model.
+            if connection not in self.endpoints:
+                ctx["__firegex_joined_late"] = True
             self.contexts[connection] = ctx
         return ctx
 

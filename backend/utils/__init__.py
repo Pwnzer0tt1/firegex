@@ -311,15 +311,27 @@ class NFTableManager(Singleton):
     def reset(self):
         self.raw_cmd(*self.__reset_cmds)
 
-    def list_rules(self, tables = None, chains = None):
-        for filter in [ele["rule"] for ele in self.raw_list() if "rule" in ele ]:
+    def list_rules(self, tables = None, chains = None, family: str | None = None):
+        for filter in [ele["rule"] for ele in self.raw_list(tables, family) if "rule" in ele ]:
             if tables and filter["table"] not in tables:
                 continue
             if chains and filter["chain"] not in chains:
                 continue
             yield filter
-    
-    def raw_list(self):
+
+    def raw_list(self, tables = None, family: str | None = None):
+        # One table of ours when that is all that is asked for, rather than the host's
+        # whole ruleset: on a node running Docker or Kubernetes that is thousands of rules
+        # of somebody else's, serialised and parsed on every lookup — and a lookup runs
+        # inside the backend's one event loop, on every start, stop, address change and
+        # statistics request. A table that is not there is simply no rules.
+        if tables and family:
+            out = []
+            for table in tables:
+                code, listed, _ = self.raw_cmd({"list": {"table": {"family": family, "name": table}}})
+                if code == 0:
+                    out.extend(listed["nftables"])
+            return out
         return self.cmd({"list": {"ruleset": None}})["nftables"]
 
 def _json_like(obj: BaseModel|List[BaseModel], unset=False, convert_keys:dict[str, str]=None, exclude:list[str]=None, mode:str="json"):

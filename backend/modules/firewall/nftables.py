@@ -27,15 +27,22 @@ practice. Everything installed is visible under one prefix and removed by deleti
 tables per family.
 
 One thing did change, and `dnat_rules` is what puts it back: sharing iptables' own
-`FORWARD` chain, traffic Docker or podman accepted for a published port never met
-firegex's policy, while a chain of our own is evaluated on its own — so a drop policy
-dropped every connection to a published container port. `allow_dnat` (on by default)
-leaves destination-NATed traffic no rule of ours matched to the rules that published it.
+`FORWARD` chain, traffic Docker or podman accepted never met firegex's policy, while a
+chain of our own is evaluated on its own — so a drop policy dropped every connection to a
+published container port, every connection between two containers and every one a
+container made to the outside. `allow_dnat` (on by default) leaves that traffic, when no
+rule of ours matched it, to the container runtime's rules as it always was.
 """
 
 from modules.firewall.models import FirewallSettings, Action, Rule, Protocol, Mode, Table
 from utils import nftables_int_to_json, ip_family, NFTableManager, is_ip_parse
 import copy
+
+#: The bridges a container runtime forwards through: Docker's default one and its user
+#: networks (`br-<id>`), and podman's. Traffic arriving from one of them is a container
+#: talking — to another container, or out — and iptables' `FORWARD`, where Docker and
+#: podman accept it, is where firegex's rules used to sit too.
+CONTAINER_BRIDGES = ("docker0", "br-*", "docker_gwbridge", "podman*", "cni-podman*")
 
 #: Where a rule's `table` — which is the operator's word, stored in the database and
 #: shown in the interface — actually lands. The two are deliberately not the same string
@@ -257,6 +264,17 @@ class FiregexTables(NFTableManager):
             )
         ])
 
+    def intact(self) -> bool:
+        """Whether the firewall firegex installed is still in the kernel.
+
+        The input chain of the IPv4 filter table always holds its jump, so it is the one
+        place a deleted table and an emptied one both show.
+        """
+        code, listed, _ = self.raw_cmd({"list": {"chain": {
+            "family": "ip", "table": self.filter_table, "name": "fgex_input",
+        }}})
+        return code == 0 and any("rule" in item for item in listed["nftables"])
+
     def set(self, srvs:list[Rule], policy:str=Action.ACCEPT, opt:FirewallSettings = None):
         srvs = list(srvs)
         self.reset()
@@ -298,15 +316,23 @@ class FiregexTables(NFTableManager):
         """
         if opt is None or not opt.allow_dnat:
             return []
+        matches = [
+            {"match": {"op": "in", "left": {"ct": {"key": "status"}}, "right": "dnat"}},
+            # What the containers send, to each other and out. Leaving only the published
+            # ports to the runtime was the first version, and with the policy at drop it
+            # cut a web container off from its database on the same bridge, and every
+            # container off from the network — neither of which met firegex's policy
+            # while its rules lived in iptables' `FORWARD` beside Docker's own accepts.
+            *({"match": {"op": "==", "left": {"meta": {"key": "iifname"}}, "right": bridge}}
+              for bridge in CONTAINER_BRIDGES),
+        ]
         return [
             {"add": {"rule": {
                 "family": family, "table": self.filter_table, "chain": "fgex_forward",
-                "expr": [
-                    {"match": {"op": "in", "left": {"ct": {"key": "status"}}, "right": "dnat"}},
-                    {"accept": None},
-                ],
+                "expr": [match, {"accept": None}],
             }}}
             for family in ("ip", "ip6")
+            for match in matches
         ]
 
     def get_rules(self,*srvs:Rule):
@@ -314,15 +340,23 @@ class FiregexTables(NFTableManager):
         final_srvs:list[Rule] = []
         for ele in srvs:
             if ele.proto == Protocol.BOTH:
+                # Copies both ways: the rule handed in is the caller's, and rewriting its
+                # protocol in place turned a stored "both" into "tcp" for whoever read it
+                # next.
                 udp_rule = copy.deepcopy(ele)
                 udp_rule.proto = Protocol.UDP.value
-                ele.proto = Protocol.TCP.value
-                final_srvs.append(udp_rule)
+                tcp_rule = copy.deepcopy(ele)
+                tcp_rule.proto = Protocol.TCP.value
+                final_srvs.extend((udp_rule, tcp_rule))
+                continue
             final_srvs.append(ele)
-            
-        families = ["ip", "ip6"]
-                
+
         for srv in final_srvs:
+            # Per rule. It was set once, before the loop, and narrowed by the first rule
+            # naming an address — so every rule after that one was installed for that
+            # family only: an "accept port 80" written below an IPv4 rule did not exist
+            # for IPv6, and with the policy at drop every IPv6 client was refused.
+            families = ["ip", "ip6"]
             ip_filters = []
             
             if srv.src != "":
