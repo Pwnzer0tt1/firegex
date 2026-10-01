@@ -536,6 +536,7 @@ async def refresh_frontend(extra: list[str] | None = None):
 
 async def startup():
     db.init()
+    _prune_orphan_code()
     try:
         await firewall.init()
     except Exception as e:
@@ -546,6 +547,32 @@ async def startup():
     # neither passes through a start or an edit to say so.
     for row in db.query("SELECT service_id FROM services;"):
         _note_filtering(row["service_id"])
+
+
+def _prune_orphan_code() -> None:
+    """Remove the filter files no filter refers to.
+
+    The code lives beside the database rather than in it, so the two can drift apart, and
+    an import is where they did: it replaced the database and wrote the backup's files,
+    but left every file the backup did not have — the code of every Python filter created
+    since, kept on disk for filters that no longer existed. Done at every start, which is
+    also what an import ends with, so the directory holds exactly what the database uses.
+    Only `<filter id>.py` files are touched; anything else in there is not ours to judge.
+    """
+    if not os.path.isdir(CODE_DIR):
+        return
+    used = {
+        row["filter_id"]
+        for row in db.query("SELECT filter_id FROM filters WHERE kind = ?;", KIND.PYFILTER)
+    }
+    for name in os.listdir(CODE_DIR):
+        stem, ext = os.path.splitext(name)
+        if ext != ".py" or stem in used:
+            continue
+        try:
+            os.remove(os.path.join(CODE_DIR, name))
+        except OSError:
+            traceback.print_exc()
 
 
 async def shutdown():

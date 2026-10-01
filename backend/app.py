@@ -481,21 +481,41 @@ async def import_db(data: dict):
     # them), so preserve this instance's own values instead of losing them on import.
     kept = {key: db.get(key) for key in ("password", "secret", "auth_disabled", AUTH_HOST_KEY)}
 
-    for db_path, db_data in db_imports:
-        temp_db = SQLite(str(db_path))
-        # Load into the existing schema; SQLite.load only writes to tables/columns
-        # that actually exist, so unknown fields in the backup are ignored.
-        temp_db.load(db_data)
+    # Every database is loaded once for nothing first, and only if all of them would load
+    # is any of them loaded for real. They used to go one after another: a refusal from
+    # one left the ones before it replaced and the rest of the import never ran — so a
+    # backup listing `firegex.db` first wiped its `keys_values` and never put this
+    # instance's password and secret back, leaving it asking the next visitor to choose a
+    # password. Load into the existing schema: SQLite.load only writes to tables and
+    # columns that actually exist, so unknown fields in the backup are ignored.
+    try:
+        for dry_run in (True, False):
+            for db_path, db_data in db_imports:
+                temp_db = SQLite(str(db_path))
+                try:
+                    temp_db.load(db_data, dry_run=dry_run)
+                except Exception as e:
+                    if dry_run:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Invalid backup: '{os.path.basename(db_path)}' cannot be "
+                                   f"loaded, so nothing was imported: {e}",
+                        )
+                    raise
+                finally:
+                    temp_db.disconnect()
 
-    if filter_imports:
-        os.makedirs('db/service_filters', exist_ok=True)
-        for filter_path, decoded in filter_imports:
-            with open(filter_path, 'wb') as script_file:
-                script_file.write(decoded)
-
-    for key, value in kept.items():
-        if value is not None:
-            db.put(key, value)
+        if filter_imports:
+            os.makedirs('db/service_filters', exist_ok=True)
+            for filter_path, decoded in filter_imports:
+                with open(filter_path, 'wb') as script_file:
+                    script_file.write(decoded)
+    finally:
+        # Whatever happened above: these are this instance's, and an import that stopped
+        # half way must not be the end of them.
+        for key, value in kept.items():
+            if value is not None and db.get(key) != value:
+                db.put(key, value)
 
     # Restart the application state, without re-deciding authentication: nothing about the
     # deployment changed, and deciding again from the environment is what a boot does.

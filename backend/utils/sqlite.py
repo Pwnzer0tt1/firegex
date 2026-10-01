@@ -144,7 +144,19 @@ class SQLite():
                 res[tname] = self.query(f"SELECT * FROM {tname};")
         return res
         
-    def load(self, data: dict):
+    def load(self, data: dict, dry_run: bool = False):
+        """Replace the tables named in `data` with its rows, all in one transaction.
+
+        `dry_run` does every write and then rolls it back: what an import uses to find out
+        whether each of its databases *would* load before it changes any of them. Loaded
+        one after another for real, a refusal from the third left the first two replaced —
+        `keys_values` among them, which is where the password and the signing secret live.
+
+        Every identifier is quoted. Columns are taken from the table itself rather than
+        from the backup, so quoting cannot let anything in, and leaving them bare made a
+        column called `table` — the firewall's — a syntax error: no backup holding a
+        single firewall rule could be imported at all.
+        """
         self.connect()
         cur = self.conn.cursor()
         try:
@@ -157,7 +169,7 @@ class SQLite():
                 # Ignore anything that isn't a proper list of row objects
                 if not isinstance(rows, list) or not all(isinstance(r, dict) for r in rows):
                     continue
-                cur.execute(f"DELETE FROM {table_name};")
+                cur.execute(f'DELETE FROM "{table_name}";')
                 if rows:
                     # Column names are identifiers and can't be parameterized, so only
                     # keep the ones that actually exist on the table - this stops a
@@ -168,11 +180,11 @@ class SQLite():
                     if not cols:
                         continue
                     placeholders = ", ".join(["?"] * len(cols))
-                    col_names = ", ".join(cols)
-                    query = f"INSERT INTO {table_name} ({col_names}) VALUES ({placeholders})"
+                    col_names = ", ".join(f'"{c}"' for c in cols)
+                    query = f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})'
                     for row in rows:
                         cur.execute(query, [row.get(c) for c in cols])
-            cur.execute("COMMIT")
+            cur.execute("ROLLBACK" if dry_run else "COMMIT")
         except Exception as e:
             cur.execute("ROLLBACK")
             raise e

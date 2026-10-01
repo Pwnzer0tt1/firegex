@@ -111,6 +111,16 @@ class FiregexAPI:
         req = self.s.post(f"{self.address}api/import", json=backup)
         return verify(req)
 
+    # --- Firewall rules ----------------------------------------------------------
+    def firewall_rules(self):
+        """`{policy, rules, enabled}`, as the firewall page reads them."""
+        return self.s.get(f"{self.address}api/firewall/rules").json()
+
+    def firewall_set_rules(self, rules: list, policy: str):
+        req = self.s.post(f"{self.address}api/firewall/rules",
+                          json={"rules": rules, "policy": policy})
+        return verify(req)
+
     # --- Services: the network layer -------------------------------------------
     def services_list(self):
         req = self.s.get(f"{self.address}api/services")

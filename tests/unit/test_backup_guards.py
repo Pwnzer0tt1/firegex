@@ -112,6 +112,41 @@ def test_everything_else_in_a_table_is_carried(tmp_path):
     db.disconnect()
 
 
+def test_a_column_named_like_a_keyword_is_loaded_back(tmp_path):
+    """The firewall's rules have a column called `table`. Left unquoted, loading it was a
+    syntax error, and no backup holding a single firewall rule could be imported."""
+    db = SQLite(str(tmp_path / "firewall-rules.db"), {})
+    db.connect()
+    db.create_schema({"rules": {"rule_id": "INT PRIMARY KEY", "`table`": "TEXT"}})
+    db.query("INSERT INTO rules (rule_id, `table`) VALUES (0, 'filter');")
+    dumped = db.dump()
+
+    db.query("DELETE FROM rules;")
+    db.load(dumped)
+    assert db.query("SELECT * FROM rules;") == [{"rule_id": 0, "table": "filter"}]
+    db.disconnect()
+
+
+def test_a_dry_run_loads_nothing_and_still_finds_what_would_fail(tmp_path):
+    """What an import runs over every database before it changes any of them: one
+    refusing after others were replaced is how an import wiped this instance's
+    password and secret."""
+    db = SQLite(str(tmp_path / "things.db"), {})
+    db.connect()
+    db.create_schema({"things": {"id": "VARCHAR(10) PRIMARY KEY",
+                                 "v": "TEXT NOT NULL CHECK (v IN ('a', 'b'))"}})
+    db.query("INSERT INTO things (id, v) VALUES ('kept', 'a');")
+
+    db.load({"things": [{"id": "new", "v": "b"}]}, dry_run=True)
+    assert db.query("SELECT * FROM things;") == [{"id": "kept", "v": "a"}], \
+        "a dry run changed the database"
+
+    with pytest.raises(Exception):
+        db.load({"things": [{"id": "bad", "v": "not allowed"}]}, dry_run=True)
+    assert db.query("SELECT * FROM things;") == [{"id": "kept", "v": "a"}]
+    db.disconnect()
+
+
 # --- whether authentication starts off ----------------------------------------
 # A container's environment is fixed when it is created. Docker starting it again by
 # itself — a reboot, a daemon restart, a crash under `restart: unless-stopped` — brings that
@@ -142,3 +177,31 @@ def test_with_nothing_decided_since_the_environment_stands():
 
     assert boot_auth_mode(None, False, False) == (False, False)
     assert boot_auth_mode(None, False, True) == (True, False)
+
+
+# --- the code beside the database ----------------------------------------------
+
+
+def test_filter_files_no_filter_refers_to_are_removed_at_start(tmp_path, monkeypatch):
+    """An import replaced the database and wrote the backup's files, and left every file
+    the backup did not have: the code of each Python filter created since, on disk for a
+    filter that no longer existed."""
+    import routers.services as router
+
+    class Db:
+        def query(self, sql, *args):
+            return [{"filter_id": "kept"}]
+
+    for name in ("kept.py", "orphan.py", "notes.txt"):
+        (tmp_path / name).write_text("x")
+    monkeypatch.setattr(router, "CODE_DIR", str(tmp_path))
+    monkeypatch.setattr(router, "db", Db())
+    router._prune_orphan_code()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["kept.py", "notes.txt"]
+
+
+def test_no_code_directory_is_nothing_to_prune(tmp_path, monkeypatch):
+    import routers.services as router
+
+    monkeypatch.setattr(router, "CODE_DIR", str(tmp_path / "missing"))
+    router._prune_orphan_code()
