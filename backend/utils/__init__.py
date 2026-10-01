@@ -1,16 +1,18 @@
 import asyncio
 from ipaddress import ip_address, ip_interface
 import os
+import re
 import socket
 import psutil
 import sys
-import nftables
+try:
+    import nftables
+except ImportError:
+    nftables = None
 from socketio import AsyncServer
 from typing import Annotated, List, Union
-from functools import wraps
-from pydantic import BaseModel, ValidationError, Field
+from pydantic import BaseModel, Field
 import traceback
-from utils.models import StatusMessageModel
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -103,6 +105,40 @@ API_VERSION = _get_version()
 
 PortType = Annotated[int, Field(gt=0, lt=65536)]   
 
+#: What a backup entry may be called: a plain basename of one of the two shapes
+#: `export_db()` produces — `<name>.db` for a database and `<id>.py` for a filter's code.
+#: The charset forbids path separators and `..`, so a crafted key cannot escape the
+#: directory it is joined onto.
+#:
+#: Here rather than in `app.py`, beside `safe_join`, because the two are one defence in
+#: two halves: this decides what a name may contain and that one decides where it may
+#: land. Keeping them apart meant the charset could only be exercised by importing the
+#: whole application — a server, a JWT library and everything else `app.py` pulls in —
+#: to check two regular expressions.
+#:
+#: Matched with `fullmatch`, never `match`: in Python `$` also matches *before a trailing
+#: newline*, so `"services.db\n"` satisfied a pattern written to mean "this and nothing
+#: else".
+SAFE_DB_NAME = re.compile(r'[A-Za-z0-9_-]+\.db')
+SAFE_PY_NAME = re.compile(r'[A-Za-z0-9_-]+\.py')
+
+
+def boot_auth_mode(held: str | None, fresh_boot: bool, env_disabled: bool) -> tuple[bool, bool]:
+    """Whether authentication starts off disabled, and whether the host's stored decision
+    is kept — `(disabled, keep_held)`.
+
+    `held` is what `run.py config` last stored for the host (`"1"`, `"0"` or `None`). A
+    fresh boot — a container or a standalone start `run.py` has just written the
+    environment for — takes the environment, which already says what the configuration
+    says, and the stored decision is dropped. Any other boot is Docker starting an existing
+    container again with the environment it was created with, which may be older than the
+    stored decision, and the stored decision wins.
+    """
+    if fresh_boot or held is None:
+        return env_disabled, False
+    return held == "1", True
+
+
 def safe_join(base_dir: Union[str, Path], *paths: str) -> Path:
     """
     Safely join a base directory with one or more path components.
@@ -187,6 +223,31 @@ def is_ip_parse(ip:str):
     except Exception:
         return False
 
+def is_interface_name(name: str) -> bool:
+    if not isinstance(name, str):
+        return False
+    name = name.strip()
+    return bool(re.match(r'^[a-zA-Z0-9_.:-]+$', name)) and 0 < len(name) <= 15
+
+def parse_ip_or_int(ip: str) -> str:
+    """Normalise what an operator typed into what the rules and the key will use.
+
+    **Stripped once, before either question is asked.** `is_interface_name` strips and
+    `is_ip_parse` does not, so surrounding whitespace used to decide *which of the two an
+    address was*: `" 10.0.0.1 "` failed the IP test, passed the interface-name test —
+    every character in it is in that charset — and was stored verbatim. Nothing then
+    broke loudly, which is the problem: the rules still matched (both sides re-parse the
+    value), but `"10.0.0.1"` and `"10.0.0.1/32"` are different strings, so the
+    `(ip_int, port, proto)` uniqueness key no longer saw them as the same address and two
+    services could each believe they were protecting it.
+    """
+    ip_str = str(ip).strip()
+    if is_ip_parse(ip_str):
+        return ip_parse(ip_str)
+    if is_interface_name(ip_str):
+        return ip_str
+    raise ValueError(f"'{ip}' is neither a valid IP address nor a valid interface name")
+
 def addr_parse(ip:str):
     return str(ip_address(ip))
 
@@ -201,18 +262,21 @@ def get_interfaces():
                     yield {"name": int_name, "addr":interf.address}
     return list(_get_interfaces())
 
+def get_interface_ips(iface_name: str) -> list[str]:
+    ips = []
+    for int_name, interfs in psutil.net_if_addrs().items():
+        if int_name == iface_name:
+            for interf in interfs:
+                if interf.family in [socket.AF_INET, socket.AF_INET6]:
+                    ips.append(interf.address)
+    return ips
+
 def nftables_int_to_json(ip_int):
     ip_int = ip_parse(ip_int)
     ip_addr = str(ip_int).split("/")[0]
     ip_addr_cidr = int(str(ip_int).split("/")[1])
     return {"prefix": {"addr": ip_addr, "len": ip_addr_cidr}}
 
-def nftables_json_to_int(ip_json_int):
-    if isinstance(ip_json_int,str):
-        return str(ip_parse(ip_json_int))
-    else:
-        return f'{ip_json_int["prefix"]["addr"]}/{ip_json_int["prefix"]["len"]}'
-    
 class Singleton(object):
     __instance = None
     def __new__(class_, *args, **kwargs):
@@ -222,12 +286,12 @@ class Singleton(object):
 
 class NFTableManager(Singleton):
     
-    table_name = "firegex"
+    table_name = "fgex"
     
     def __init__(self, init_cmd, reset_cmd):
         self.__init_cmds = init_cmd
         self.__reset_cmds = reset_cmd
-        self.nft = nftables.Nftables()
+        self.nft = nftables.Nftables() if nftables is not None else None
     
     def raw_cmd(self, *cmds):
         return self.nft.json_cmd({"nftables": list(cmds)})
@@ -247,15 +311,27 @@ class NFTableManager(Singleton):
     def reset(self):
         self.raw_cmd(*self.__reset_cmds)
 
-    def list_rules(self, tables = None, chains = None):
-        for filter in [ele["rule"] for ele in self.raw_list() if "rule" in ele ]:
+    def list_rules(self, tables = None, chains = None, family: str | None = None):
+        for filter in [ele["rule"] for ele in self.raw_list(tables, family) if "rule" in ele ]:
             if tables and filter["table"] not in tables:
                 continue
             if chains and filter["chain"] not in chains:
                 continue
             yield filter
-    
-    def raw_list(self):
+
+    def raw_list(self, tables = None, family: str | None = None):
+        # One table of ours when that is all that is asked for, rather than the host's
+        # whole ruleset: on a node running Docker or Kubernetes that is thousands of rules
+        # of somebody else's, serialised and parsed on every lookup — and a lookup runs
+        # inside the backend's one event loop, on every start, stop, address change and
+        # statistics request. A table that is not there is simply no rules.
+        if tables and family:
+            out = []
+            for table in tables:
+                code, listed, _ = self.raw_cmd({"list": {"table": {"family": family, "name": table}}})
+                if code == 0:
+                    out.extend(listed["nftables"])
+            return out
         return self.cmd({"list": {"ruleset": None}})["nftables"]
 
 def _json_like(obj: BaseModel|List[BaseModel], unset=False, convert_keys:dict[str, str]=None, exclude:list[str]=None, mode:str="json"):
@@ -274,36 +350,6 @@ def json_like(obj: BaseModel|List[BaseModel], unset=False, convert_keys:dict[str
     if isinstance(obj, list):
         return [_json_like(ele, unset=unset, convert_keys=convert_keys, exclude=exclude, mode=mode) for ele in obj]
     return _json_like(obj, unset=unset, convert_keys=convert_keys, exclude=exclude, mode=mode)
-
-def register_event(sio_server: AsyncServer, event_name: str, model: BaseModel, response_model: BaseModel|None = None):
-    def decorator(func):
-        @sio_server.on(event_name)  # Automatically registers the event
-        @wraps(func)
-        async def wrapper(sid, data):
-            try:
-                # Parse and validate incoming data
-                parsed_data = model.model_validate(data)
-            except ValidationError:
-                return json_like(StatusMessageModel(status=f"Invalid {event_name} request"))
-            
-            # Call the original function with the parsed data
-            result = await func(sid, parsed_data)
-            # If a response model is provided, validate the output
-            if response_model:
-                try:
-                    parsed_result = response_model.model_validate(result)
-                except ValidationError:
-                    traceback.print_exc()
-                    return json_like(StatusMessageModel(status=f"SERVER ERROR: Invalid {event_name} response"))
-            else:
-                parsed_result = result
-            # Emit the validated result
-            if parsed_result:
-                if isinstance(parsed_result, BaseModel):
-                    return json_like(parsed_result)
-                return parsed_result
-        return wrapper
-    return decorator
 
 def nicenessify(priority:int, pid:int|None=None):
     try:

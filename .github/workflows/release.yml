@@ -24,11 +24,42 @@ jobs:
       - name: Build and run firegex
         run: python3 run.py start -P testpassword
 
+      # No apt-get: the tests' dependencies are pure python. `iperf3`, matplotlib and
+      # numpy belong to the benchmarks, which CI does not run — a measurement has no
+      # pass or fail to gate a release on.
+      #
+      # As root, because what needs root **skips** otherwise — and a case that always
+      # skips is not a case this gate is checking. Through the script rather than `sudo
+      # pytest`, because the script installs the dependencies into the environment it is
+      # running in; a root process does not read the invoking user's site-packages.
       - name: Run tests
-        run: sudo apt-get install -y iperf3 && cd tests && ./run_tests.sh
+        run: cd tests && sudo ./run_tests.sh
+
+  # The proxy engine's own suite: HTTP/2, HTTP/3 and QUIC termination, the Python worker's
+  # framing and deadlines, the UDP relay — much of it reachable from no integration test,
+  # and none of it was run before a release. In the image stage built for it, which is
+  # the compiler plus the filter library the worker tests start. `backend/` is mounted
+  # rather than baked in because the worker tests launch `../modules/services/pyworker.py`.
+  engine_tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build the engine's test image
+        run: docker build --target enginetest -t firegex-enginetest .
+
+      - name: Run the engine's tests
+        run: >-
+          docker run --rm -v "$PWD/backend:/execute" -w /execute/proxysrc
+          firegex-enginetest cargo test
 
   docker_build:
-    needs: run_tests
+    needs: [run_tests, engine_tests]
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -217,8 +248,72 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # `firegex` carries a C extension — the llhttp binding in `fgex-lib/llhttp/` — so it
+  # is no longer one universal wheel. A wheel is built per platform and per interpreter
+  # here, and the sdist goes up beside them: where no wheel matches, pip compiles from
+  # that. Compiling is a thing pip knows how to do; assuming a system library is already
+  # installed is not, which is why the parser ships as source rather than as a `ctypes`
+  # binding against the distribution's `libllhttp`.
+  build_firegex_wheels:
+    needs: [run_tests, engine_tests]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest        # manylinux + musllinux, x86_64
+          - os: ubuntu-24.04-arm     # and the same for aarch64
+          # arm64 and x86_64 both, from one runner: the Intel macOS image this used to ask
+          # for (`macos-13`) has been retired, and a matrix entry naming a runner that no
+          # longer exists fails — which, with the publish job needing this one, blocked
+          # every PyPI release. The x86_64 wheel is cross-compiled; see CIBW_TEST_SKIP.
+          - os: macos-latest
+          - os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract tag name
+        id: tag
+        shell: bash
+        run: echo TAG_NAME=$(echo $GITHUB_REF | cut -d / -f 3) >> $GITHUB_OUTPUT
+      - name: Update version
+        shell: bash
+        run: >-
+          sed -i.bak "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/setup.py;
+          sed -i.bak "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/firegex/__init__.py;
+      - name: Build wheels
+        # 3.x, because 2.x predates CPython 3.14 and quietly built nothing for it: the
+        # selector below matched no identifier it knew, which is not an error.
+        uses: pypa/cibuildwheel@v3.2.0
+        with:
+          package-dir: fgex-lib
+          output-dir: wheelhouse
+        env:
+          # The library declares `python_requires>=3.10`, so build what it claims to
+          # support and nothing else. PyPy is excluded: the datapath embeds CPython.
+          # 3.10 and 3.11 build because the binding declares its 3.12-only module slot
+          # only where it exists (`llhttp_module.c`) — unguarded, it failed to compile
+          # there, and the whole job with it.
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
+          CIBW_SKIP: "*-musllinux_i686 *_i686 pp*"
+          CIBW_ARCHS_MACOS: "arm64 x86_64"
+          # An x86_64 wheel built on an arm64 runner cannot be imported there without
+          # Rosetta, which the runner is not promised to have; the arm64 wheels, built
+          # from the same sources in the same job, are what the smoke test checks.
+          CIBW_TEST_SKIP: "*-macosx_x86_64"
+          # A wheel that imports is the only kind worth publishing, and the extension is
+          # the whole reason this job exists. The checks live in a file rather than in a
+          # `-c` string because the one that matters needs a `try`: the parser has to
+          # raise its *own* exception on malformed traffic, and this clean environment —
+          # no `pyllhttp`, no developer's leftovers — is the only place that is tested.
+          CIBW_TEST_COMMAND: python {package}/wheel_smoke.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.os }}
+          path: wheelhouse/*.whl
+
   pypi_publish_firegex:
-    needs: run_tests
+    needs: build_firegex_wheels
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -240,8 +335,16 @@ jobs:
         run: >-
           sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/setup.py;
           sed -i "s/{{VERSION_PLACEHOLDER}}/${{ steps.tag.outputs.TAG_NAME }}/g" fgex-lib/firegex/__init__.py;
-      - name: Build package
-        run: cd fgex-lib && python -m build && mv ./dist ../
+      # The sdist is what pip falls back to where no wheel matches, so it has to carry
+      # the parser's C sources — `MANIFEST.in` is what puts them in.
+      - name: Build the sdist
+        run: cd fgex-lib && python -m build --sdist && mv ./dist ../
+      - name: Collect the wheels built for every platform
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          merge-multiple: true
+          path: dist
       - name: Publish package
         uses: pypa/gh-action-pypi-publish@27b31702a0e7fc50959f5ad993c78deac1bdfc29
         with:
@@ -249,7 +352,7 @@ jobs:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
   pypi_publish_fgex_alias:
-    needs: run_tests
+    needs: [run_tests, engine_tests]
     runs-on: ubuntu-latest
     permissions:
       contents: read

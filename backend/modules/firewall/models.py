@@ -77,3 +77,8 @@ class FirewallSettings(BaseModel):
     allow_upnp: bool
     drop_invalid: bool
     allow_dhcp: bool
+    #: Forwarded traffic whose destination another NAT rewrote — a port Docker or podman
+    #: published, a router's port forward — is left to the rules that published it when no
+    #: firegex rule matched it, instead of meeting the forward policy. Defaulted, so a
+    #: client or a backup that predates it still validates.
+    allow_dnat: bool = True

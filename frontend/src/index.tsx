@@ -23,7 +23,12 @@ const root = ReactDOM.createRoot(
 async function loadShiki() {
   const { createHighlighter } = await import('shiki');
   const shiki = await createHighlighter({
-    langs: ['python'],
+    // Every language a code fence in docs/*.md or a CodeHighlight in the app actually
+    // asks for. Shiki throws for one it was not given, and that throw is uncaught: it
+    // takes the whole page down, not just the block it could not colour. The docs have
+    // carried `bash` and `json` fences for a while, so this was one navigation away the
+    // whole time.
+    langs: ['python', 'bash', 'json'],
     themes: ['one-dark-pro', 'one-light']
   });
 

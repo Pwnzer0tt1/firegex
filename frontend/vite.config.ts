@@ -9,7 +9,7 @@ export default defineConfig({
     tsconfigPaths: true,
   },
   server: {
-    // Allows reading ../fgex-lib/README.md (the nfproxy docs source) from outside the project root
+    // Allows reading ../fgex-lib/README.md (the pyfilters docs source) from outside the project root
     fs: { allow: ['..'] },
   },
 })

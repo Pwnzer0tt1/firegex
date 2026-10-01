@@ -41,7 +41,7 @@ jobs:
         working-directory: frontend/dist
         run: |
           # GitHub Pages serves 404.html for any path it has no file for. Handing it the
-          # SPA entrypoint is what makes deep links like /nfproxy/<id> resolve.
+          # SPA entrypoint is what makes deep links like /services/<id> resolve.
           cp index.html 404.html
           echo 'demo.firegex.pwnzer0tt1.it' > CNAME
 

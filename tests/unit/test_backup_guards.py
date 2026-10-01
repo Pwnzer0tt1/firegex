@@ -1,0 +1,207 @@
+"""What a backup may carry, and what it may be named.
+
+`/api/import` takes a JSON object an operator uploaded and writes files out of it. Two
+things stand between that and the filesystem — a charset for the key, and `safe_join` —
+and one thing stands between a restore and this instance's own credentials, which is what
+`dump()` refuses to export.
+
+All three have integration coverage, which means they are checked against a live instance
+by someone who has one. They are pure functions; checking them here costs a millisecond
+and covers the cases nobody would stage against a running firewall.
+"""
+
+import re
+from pathlib import Path
+
+import pytest
+from fastapi import HTTPException
+
+from utils import SAFE_DB_NAME, SAFE_PY_NAME, safe_join
+from utils.sqlite import SQLite
+
+
+# --- what a backup entry may be called ---------------------------------------
+
+
+@pytest.mark.parametrize("name", ["services.db", "firegex.db", "a.db", "A-b_9.db"])
+def test_the_shapes_export_db_produces_are_accepted(name):
+    assert SAFE_DB_NAME.fullmatch(name)
+
+
+@pytest.mark.parametrize("name", [
+    "../services.db", "db/services.db", "/etc/services.db", "..", ".db",
+    "services.DB", "services.db.py", "services db.db", "services.db\x00",
+])
+def test_anything_that_is_not_a_plain_basename_is_refused(name):
+    assert not SAFE_DB_NAME.fullmatch(name)
+
+
+def test_a_trailing_newline_does_not_get_past_the_guard():
+    """`$` matches before a trailing newline, so `match` accepted `"services.db\\n"`.
+
+    It was never a way out of the directory — `safe_join` contains the result whatever
+    the name — so this cost nothing. It is fixed because a pattern anchored to mean
+    "this and nothing else" should mean that: the next thing written against one of
+    these guards should not have to know about the exception.
+    """
+    assert re.match(r'^[A-Za-z0-9_-]+\.db$', "services.db\n"), "the old spelling accepted it"
+    assert not SAFE_DB_NAME.fullmatch("services.db\n")
+    assert not SAFE_PY_NAME.fullmatch("abc123.py\n")
+
+
+def test_the_two_shapes_do_not_accept_each_other():
+    assert not SAFE_PY_NAME.fullmatch("services.db")
+    assert not SAFE_DB_NAME.fullmatch("abc123.py")
+
+
+# --- and where it may be written ---------------------------------------------
+
+
+def test_a_name_that_climbs_out_is_refused(tmp_path):
+    """Defence in depth on top of the charset: the regex is what is *meant* to catch
+    these, and this is what catches them if the regex is ever loosened."""
+    for attempt in ("../escape.db", "a/../../escape.db", ".."):
+        with pytest.raises(HTTPException) as raised:
+            safe_join(tmp_path, attempt)
+        assert raised.value.status_code == 403
+
+
+def test_an_absolute_path_is_taken_as_a_relative_one(tmp_path):
+    """Not refused but *contained*, which is the same outcome by a different route."""
+    landed = safe_join(tmp_path, "/etc/passwd")
+    assert landed.is_relative_to(Path(tmp_path).resolve())
+
+
+def test_an_ordinary_name_lands_where_it_should(tmp_path):
+    assert safe_join(tmp_path, "services.db") == Path(tmp_path).resolve() / "services.db"
+
+
+# --- what a backup must never carry ------------------------------------------
+
+
+def test_a_backup_carries_neither_credentials_nor_the_auth_mode(tmp_path):
+    """The third one is the newest and the easiest to lose.
+
+    `password` and `secret` are this instance's credentials. `auth_disabled` is not a
+    credential — it is *whether credentials are asked for*, which belongs to the
+    deployment and not to the configuration being restored. A backup able to carry it is
+    a backup able to turn a firewall's authentication off.
+    """
+    db = SQLite(str(tmp_path / "firegex.db"), {})
+    db.connect()
+    db.create_schema({})
+    for key, value in (("password", "$pbkdf2$secret"), ("secret", "jwt-signing-key"),
+                       ("auth_disabled", "1"), ("auth_disabled_host", "1"),
+                       ("something_else", "kept")):
+        db.query("INSERT INTO keys_values (key, value) VALUES (?, ?);", key, value)
+
+    carried = {row["key"] for row in db.dump()["keys_values"]}
+    assert carried == {"something_else"}, carried
+    db.disconnect()
+
+
+def test_everything_else_in_a_table_is_carried(tmp_path):
+    """The exclusion is four named keys, not a table nobody exports."""
+    db = SQLite(str(tmp_path / "other.db"), {})
+    db.connect()
+    db.create_schema({"things": {"id": "VARCHAR(10) PRIMARY KEY", "v": "TEXT"}})
+    db.query("INSERT INTO things (id, v) VALUES ('a', 'kept');")
+
+    dumped = db.dump()
+    assert dumped["things"] == [{"id": "a", "v": "kept"}]
+    db.disconnect()
+
+
+def test_a_column_named_like_a_keyword_is_loaded_back(tmp_path):
+    """The firewall's rules have a column called `table`. Left unquoted, loading it was a
+    syntax error, and no backup holding a single firewall rule could be imported."""
+    db = SQLite(str(tmp_path / "firewall-rules.db"), {})
+    db.connect()
+    db.create_schema({"rules": {"rule_id": "INT PRIMARY KEY", "`table`": "TEXT"}})
+    db.query("INSERT INTO rules (rule_id, `table`) VALUES (0, 'filter');")
+    dumped = db.dump()
+
+    db.query("DELETE FROM rules;")
+    db.load(dumped)
+    assert db.query("SELECT * FROM rules;") == [{"rule_id": 0, "table": "filter"}]
+    db.disconnect()
+
+
+def test_a_dry_run_loads_nothing_and_still_finds_what_would_fail(tmp_path):
+    """What an import runs over every database before it changes any of them: one
+    refusing after others were replaced is how an import wiped this instance's
+    password and secret."""
+    db = SQLite(str(tmp_path / "things.db"), {})
+    db.connect()
+    db.create_schema({"things": {"id": "VARCHAR(10) PRIMARY KEY",
+                                 "v": "TEXT NOT NULL CHECK (v IN ('a', 'b'))"}})
+    db.query("INSERT INTO things (id, v) VALUES ('kept', 'a');")
+
+    db.load({"things": [{"id": "new", "v": "b"}]}, dry_run=True)
+    assert db.query("SELECT * FROM things;") == [{"id": "kept", "v": "a"}], \
+        "a dry run changed the database"
+
+    with pytest.raises(Exception):
+        db.load({"things": [{"id": "bad", "v": "not allowed"}]}, dry_run=True)
+    assert db.query("SELECT * FROM things;") == [{"id": "kept", "v": "a"}]
+    db.disconnect()
+
+
+# --- whether authentication starts off ----------------------------------------
+# A container's environment is fixed when it is created. Docker starting it again by
+# itself — a reboot, a daemon restart, a crash under `restart: unless-stopped` — brings that
+# environment back, older than what `run.py config` has said since: authentication turned
+# back on with `run.py config --password` was off again after the next reboot.
+
+
+def test_a_fresh_boot_takes_the_environment():
+    """`run.py` has just written it from the current configuration."""
+    from utils import boot_auth_mode
+
+    assert boot_auth_mode(None, True, True) == (True, False)
+    assert boot_auth_mode("0", True, True) == (True, False), \
+        "a container run.py has just created is told the current answer by its environment"
+    assert boot_auth_mode("1", True, False) == (False, False)
+
+
+def test_a_restarted_container_keeps_what_the_host_decided_since():
+    from utils import boot_auth_mode
+
+    assert boot_auth_mode("0", False, True) == (False, True), \
+        "authentication re-enabled with run.py config came back off after a reboot"
+    assert boot_auth_mode("1", False, False) == (True, True)
+
+
+def test_with_nothing_decided_since_the_environment_stands():
+    from utils import boot_auth_mode
+
+    assert boot_auth_mode(None, False, False) == (False, False)
+    assert boot_auth_mode(None, False, True) == (True, False)
+
+
+# --- the code beside the database ----------------------------------------------
+
+
+def test_filter_files_no_filter_refers_to_are_removed_at_start(tmp_path, monkeypatch):
+    """An import replaced the database and wrote the backup's files, and left every file
+    the backup did not have: the code of each Python filter created since, on disk for a
+    filter that no longer existed."""
+    import routers.services as router
+
+    class Db:
+        def query(self, sql, *args):
+            return [{"filter_id": "kept"}]
+
+    for name in ("kept.py", "orphan.py", "notes.txt"):
+        (tmp_path / name).write_text("x")
+    monkeypatch.setattr(router, "CODE_DIR", str(tmp_path))
+    monkeypatch.setattr(router, "db", Db())
+    router._prune_orphan_code()
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["kept.py", "notes.txt"]
+
+
+def test_no_code_directory_is_nothing_to_prune(tmp_path, monkeypatch):
+    import routers.services as router
+
+    monkeypatch.setattr(router, "CODE_DIR", str(tmp_path / "missing"))
+    router._prune_orphan_code()

@@ -9,7 +9,7 @@ function toHighlightLanguage(lang: string | undefined): string {
 
 const GITHUB_BLOB_BASE = "https://github.com/Pwnzer0tt1/firegex/blob/main/";
 
-// Cross-references between doc files (e.g. "nfregex.md", "../fgex-lib/README.md")
+// Cross-references between doc files (e.g. "pyfilter.md", "../fgex-lib/README.md")
 // are relative to the file's position in the repo, which only resolves correctly
 // on GitHub - inside the app they'd resolve against the current page's URL instead.
 // Repoint any relative link at the equivalent file on GitHub, given where the
@@ -53,7 +53,7 @@ function buildMarkdownComponents(sourcePath: string): Components {
 // Renders a markdown documentation source (imported elsewhere via `?raw`) with
 // Firegex's Mantine styling, so every module's docs page shares one renderer
 // and one on-disk source of truth instead of duplicating hand-written JSX.
-// `sourcePath` is the file's repo-relative path (e.g. "docs/nfproxy.md"), used
+// `sourcePath` is the file's repo-relative path (e.g. "docs/pyfilter.md"), used
 // to resolve relative cross-references to other doc files.
 export const MarkdownDocs = ({ content, sourcePath }: { content: string; sourcePath: string }) => {
     return (

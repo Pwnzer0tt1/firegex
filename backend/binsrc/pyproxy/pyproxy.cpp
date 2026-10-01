@@ -30,7 +30,22 @@ namespace PyProxy {
 
 class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	private:
-	u_int16_t latest_config_ver = 0;
+	// The configuration this thread's contexts were built from.
+	uint32_t latest_config_ver = 0;
+
+	// A new configuration reaches the connections already open, the way it does on the
+	// other two engines: `cppregex` resets its matchers on a new version and the proxy
+	// layer hands the next chunk to the new chain. This was declared and never read, so
+	// here a stream kept the code it had started with for as long as it stayed open — a
+	// function switched off, or a check added against the attack in progress, went on not
+	// reaching the one connection it was meant for. Its state starts again, as it does
+	// there.
+	void follow_config(){
+		const uint32_t current = config.load()->version;
+		if (current == latest_config_ver) return;
+		sctx.clean_filters();
+		latest_config_ver = current;
+	}
 	public:
 	stream_ctx sctx;
 	StreamFollower follower;
@@ -71,6 +86,14 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		}
 
 		handle_packet_code = unmarshal_code(py_handle_packet_code);
+		// Streams whose start this process did not see are followed from the packet it
+		// does see. They are otherwise not followed at all, and a packet of one was simply
+		// accepted: every connection open before the service started, or before its chain
+		// was rebuilt — which adding a filter does — and every one quiet for longer than
+		// the follower keeps a stream, carried whatever it said afterwards. A persistent
+		// connection was a way past any filter added after it opened. Recovery mode is
+		// switched on for them in `on_new_stream`.
+		follower.follow_partial_streams(true);
 		// Setting callbacks for the stream follower
 		follower.new_stream_callback(bind(on_new_stream, placeholders::_1, this));
 		follower.stream_termination_callback(bind(on_stream_close, placeholders::_1, this));
@@ -78,10 +101,6 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 
 	inline void print_blocked_reason(const string& func_name){
 		control_socket << "BLOCKED " << func_name << endl;
-	}
-
-	inline void print_mangle_reason(const string& func_name){
-		control_socket << "MANGLED " << func_name << endl;
 	}
 
 	inline void print_exception_reason(){
@@ -97,11 +116,60 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 		pyq->pkt->drop();// This is needed because the callback has to take the updated pkt pointer!
 	}
 
+	// One datagram, judged on its own.
+	//
+	// No stream to follow and no sequence numbers to fix: a datagram is complete in
+	// itself. Each flow still gets its own module globals, keyed the same way a
+	// connection is.
+	void filter_action_udp(NfQueue::PktRequest<PyProxyQueue>* pkt, const string& data){
+		// Idle flows first, so a limit is never met by flows that have already gone.
+		sctx.udp_expire(UDP_IDLE_SECONDS);
+		auto stream_search = sctx.streams_ctx.find(pkt->sid);
+		pyfilter_ctx* stream_match;
+		if (stream_search == sctx.streams_ctx.end()){
+			shared_ptr<PyCodeConfig> conf = config.load();
+			PyObject* compiled_code = conf->compiled_code();
+			if (compiled_code == nullptr){
+				return pkt->accept(); // no filter configured; nothing to ask
+			}
+			try{
+				stream_match = new pyfilter_ctx(compiled_code, handle_packet_code);
+			}catch(invalid_argument& e){
+				cerr << "[error] [filter_action_udp] Failed to create the filter context" << endl;
+				print_exception_reason();
+				return pkt->accept();
+			}
+			sctx.udp_make_room(max_udp_flows());
+			sctx.streams_ctx.insert_or_assign(pkt->sid, stream_match);
+		}else{
+			stream_match = stream_search->second;
+		}
+		sctx.udp_touch(pkt->sid);
+
+		auto result = stream_match->handle_packet(pkt, data, pkt->is_input);
+		switch(result.action){
+			case PyFilterResponse::ACCEPT:
+				return pkt->accept();
+			// There is no connection to close, so refusing means this datagram is not
+			// delivered. The next one from the same flow is judged afresh, which is the
+			// only thing "refuse" can mean without a connection to refuse.
+			case PyFilterResponse::DROP:
+			case PyFilterResponse::REJECT:
+				print_blocked_reason(*result.filter_match_by);
+				return pkt->drop();
+			case PyFilterResponse::EXCEPTION:
+			case PyFilterResponse::INVALID:
+				print_exception_reason();
+				sctx.clean_stream_by_id(pkt->sid);
+				return pkt->accept();
+		}
+	}
+
 	void filter_action(NfQueue::PktRequest<PyProxyQueue>* pkt, Stream& stream, const string& data, bool is_client){
 		auto stream_search = sctx.streams_ctx.find(pkt->sid);
 		pyfilter_ctx* stream_match;
 		if (stream_search == sctx.streams_ctx.end()){
-			shared_ptr<PyCodeConfig> conf = config;
+			shared_ptr<PyCodeConfig> conf = config.load();
 			//If config is not set, ignore the stream
 			PyObject* compiled_code = conf->compiled_code();
 			if (compiled_code == nullptr){
@@ -122,6 +190,13 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 					stream.ignore_client_data();
 					stream.ignore_server_data();
 					return pkt->accept();
+				}
+				// This context starts after its connection did: the process met the
+				// stream halfway, or new code replaced the context it had. What arrives
+				// first can be the middle of a message, and the library must not judge
+				// a message by its second half — see `_met_mid_message` there.
+				if (stream.is_partial_stream() || sctx.taken_over.erase(pkt->sid) > 0){
+					stream_match->set_item_to_glob("__firegex_joined_late", PyBool_FromLong(1));
 				}
 				sctx.streams_ctx.insert_or_assign(pkt->sid, stream_match);
 			}
@@ -145,16 +220,6 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 				stream.client_data_callback(bind(keep_fin_packet, this));
 				stream.server_data_callback(bind(keep_fin_packet, this));
 				return pkt->reject();
-			case PyFilterResponse::MANGLE:
-				pkt->mangle_custom_pkt(result.mangled_packet->c_str(), result.mangled_packet->size());
-				if (pkt->get_action() == NfQueue::FilterAction::DROP){
-					cerr << "[ERROR] [filter_action] Failed to mangle: Malformed Packet... the packet was dropped" << endl;
-					print_blocked_reason(*result.filter_match_by);
-					print_exception_reason();
-				}else{
-					print_mangle_reason(*result.filter_match_by);
-				}
-				return;
 			case PyFilterResponse::EXCEPTION:
 			case PyFilterResponse::INVALID:
 				print_exception_reason();
@@ -169,7 +234,12 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	}
 
 
-	static void on_data_recv(Stream& stream, PyProxyQueue* pyq, const string& data, bool is_client) {
+	// The direction is the packet's own, from the mark the rules put on it, rather than
+	// which side of the stream the follower calls the client: on a stream followed from
+	// the middle that is whoever it happened to see first, and the service answering
+	// before the client speaks again made the filter read the answer as the request.
+	static void on_data_recv(Stream& stream, PyProxyQueue* pyq, const string& data, bool) {
+		const bool is_client = pyq->pkt->is_input;
 		pyq->pkt->fix_data_payload();
 		pyq->filter_action(pyq->pkt, stream, data, is_client); //Only here the rebuilt_tcp_data is set
 	}
@@ -220,6 +290,18 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 
 	void handle_next_packet(NfQueue::PktRequest<PyProxyQueue>* _pkt) override{
 		pkt = _pkt; // Setting packet context
+		follow_config();
+
+		if (pkt->l4_proto == NfQueue::L4Proto::UDP){
+			// Straight to the filter: the stream follower is TCP's, and so is every
+			// piece of machinery above it. This used to fall into the check below and
+			// throw — with a message claiming UDP was supported.
+			filter_action_udp(pkt, string(pkt->data(), pkt->data_size()));
+			if (pkt->get_action() == NfQueue::FilterAction::NOACTION){
+				return pkt->accept();
+			}
+			return;
+		}
 
 		if (pkt->l4_proto != NfQueue::L4Proto::TCP){
 			throw invalid_argument("Only TCP and UDP are supported");

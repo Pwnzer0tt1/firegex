@@ -5,6 +5,7 @@
 #include <marshal.h>
 #include <vector>
 #include <memory>
+#include <atomic>
 #include <iostream>
 #include "../utils.cpp"
 
@@ -15,7 +16,9 @@ namespace PyProxy {
 
 class PyCodeConfig;
 
-shared_ptr<PyCodeConfig> config;
+// Atomic for the reason `regex_config` is: the updater swaps it while the queue threads
+// copy it for every new stream.
+std::atomic<shared_ptr<PyCodeConfig>> config;
 UnixClientConnection control_socket;
 
 PyObject* unmarshal_code(string encoded_code){
@@ -24,8 +27,14 @@ PyObject* unmarshal_code(string encoded_code){
 }
 
 class PyCodeConfig{
+	private:
+		// Only the updater thread builds configurations, so this needs no lock.
+		static inline uint32_t glob_seq = 0;
 	public:
 		string encoded_code;
+		// Which configuration this is, so a queue thread can tell that the contexts it
+		// holds were built from code no longer in force. 0 is the empty one it starts on.
+		uint32_t version = 0;
 
 		PyCodeConfig(const string& pycode){
 			PyObject* compiled_code = Py_CompileStringExFlags(pycode.c_str(), "<pyfilter>", Py_file_input, NULL, 2);
@@ -58,6 +67,7 @@ class PyCodeConfig{
 			}
 			encoded_code = string(PyBytes_AsString(code_dump), PyBytes_Size(code_dump));
 			Py_DECREF(code_dump);
+			version = ++glob_seq;
 		}
 
 		PyObject* compiled_code(){
@@ -78,7 +88,7 @@ string py_handle_packet_code;
 
 void init_handle_packet_code(){
 	PyObject* compiled_code = Py_CompileStringExFlags(
-		"firegex.nfproxy.internals.handle_packet(globals())\n", "<pyfilter>",
+		"firegex.pyfilters.internals.handle_packet(globals())\n", "<pyfilter>",
 	Py_file_input, NULL, 2);
 	PyObject* code_dump = PyMarshal_WriteObjectToString(compiled_code, 4);
 	Py_DECREF(compiled_code);

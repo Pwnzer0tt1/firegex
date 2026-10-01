@@ -7,13 +7,10 @@ import { Outlet, Route, Routes } from 'react-router';
 import MainLayout from './components/MainLayout';
 import { PasswordSend, ServerStatusResponse } from './js/models';
 import { errorNotify, getstatus, HomeRedirector, IS_DEV, login, setpassword, socketio } from './js/utils';
-import NFRegex from './pages/NFRegex';
-import ServiceDetailsNFRegex from './pages/NFRegex/ServiceDetails';
-import PortHijack from './pages/PortHijack';
+import Services from './pages/Services';
+import ServiceDetails from './pages/Services/ServiceDetails';
 import { Firewall } from './pages/Firewall';
 import { useQueryClient } from '@tanstack/react-query';
-import NFProxy from './pages/NFProxy';
-import ServiceDetailsNFProxy from './pages/NFProxy/ServiceDetails';
 import { useAuthStore, useSystemStore } from './js/store';
 
 const AuthShell = ({ children }: { children: React.ReactNode }) => (
@@ -186,21 +183,15 @@ function App() {
   }
 }
 
-import TLSDecrypt from './pages/TLSDecrypt';
 
 const PageRouting = ({ getStatus }: { getStatus: () => void }) => {
 
   return <Routes>
     <Route element={<MainLayout><Outlet /></MainLayout>}>
-      <Route path="tls-decrypt" element={<TLSDecrypt />} />
-      <Route path="nfregex" element={<NFRegex><Outlet /></NFRegex>} >
-        <Route path=":srv" element={<ServiceDetailsNFRegex />} />
-      </Route>
-      <Route path="nfproxy" element={<NFProxy><Outlet /></NFProxy>} >
-        <Route path=":srv" element={<ServiceDetailsNFProxy />} />
+      <Route path="services" element={<Services><Outlet /></Services>} >
+        <Route path=":srv" element={<ServiceDetails />} />
       </Route>
       <Route path="firewall" element={<Firewall />} />
-      <Route path="porthijack" element={<PortHijack />} />
       <Route path="*" element={<HomeRedirector />} />
     </Route>
   </Routes>

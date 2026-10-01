@@ -3,10 +3,11 @@ import { ActionIcon, Container, Menu, Space, Tooltip } from '@mantine/core';
 import { AppShell } from '@mantine/core';
 import NavBar from './NavBar';
 import HeaderPage from './Header';
-import { getMainPath } from '../js/utils';
+import { getMainPath, HOME_SECTIONS } from '../js/utils';
 import { useLocation } from 'react-router';
 import { useNavbarStore, useSessionStore } from '../js/store';
 import { HiMenu } from "react-icons/hi";
+import ProblemNotifier from './Services/ProblemNotifier';
 
 
 function MainLayout({ children }:{ children:any }) {
@@ -14,7 +15,8 @@ function MainLayout({ children }:{ children:any }) {
   const { setHomeSection } = useSessionStore()
   const location = useLocation()
   useEffect(()=>{
-    if (location.pathname !== "/"){
+    // Only a page that exists is worth coming back to: "/" redirects to it.
+    if (HOME_SECTIONS.includes(getMainPath())){
       setHomeSection(getMainPath())
     }
   },[location.pathname])
@@ -25,6 +27,7 @@ function MainLayout({ children }:{ children:any }) {
   >
     <HeaderPage />
     <NavBar />
+    <ProblemNotifier />
     <AppShell.Main>
       <Container size="lg">
           {children}

@@ -43,6 +43,9 @@ export function SettingsModal({ opened, onClose }:{ opened:boolean, onClose:()=>
                     <Switch label="Allow UPnP protocol" checked={settings.allow_upnp} onChange={v => setSettings({...settings, allow_upnp:v.target.checked})}/>
                     <Switch label="Drop invalid packet" checked={settings.drop_invalid} onChange={v => setSettings({...settings, drop_invalid:v.target.checked})}/>
                     <Switch label="Allow DHCP" checked={settings.allow_dhcp} onChange={v => setSettings({...settings, allow_dhcp:v.target.checked})}/>
+                    <Switch label="Leave container traffic to the container runtime"
+                        description="Published ports (and any other destination NAT), and what containers send to each other or out: when no rule here matches it, it does not meet the forward policy. Rules in forward mode still apply to it first."
+                        checked={settings.allow_dnat} onChange={v => setSettings({...settings, allow_dnat:v.target.checked})}/>
                 </Stack>
             </Card>
             <Space h="md" />

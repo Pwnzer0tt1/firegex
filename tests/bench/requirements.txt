@@ -1,0 +1,6 @@
+# On top of ../requirements.txt.
+# `iperf3` is a binding against libiperf, so the library has to be installed first
+# (`apt-get install iperf3`, `dnf install iperf3`).
+iperf3
+matplotlib
+numpy
