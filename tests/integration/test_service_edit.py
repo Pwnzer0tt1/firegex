@@ -99,3 +99,21 @@ def test_a_running_service_whose_edit_will_not_start_is_put_back(api, protected,
     now = api.services_get(service_id)
     assert (now["status"], now["proto"]) == ("active", "tcp"), str(now)
     assert channel.gets_through(b"after"), "the service was not started again as it was"
+
+
+def test_leaving_the_hand_off_layer_gives_the_proxy_endpoint_back(api, service):
+    """The endpoint of the operator's own proxy is the hand-off layer's alone. It stayed
+    on the rows when a service moved off that layer — read by nothing, and still in the
+    unique index, refusing another service's hand-off the endpoint."""
+    from helpers.net import free_port
+
+    endpoint = free_port()
+    first = service(f"handoff-a-{endpoint}", "127.0.0.1", free_port(), "external",
+                    proxy_ip="127.0.0.1", proxy_port=endpoint)
+    assert api.services_edit(first, transport="proxy")
+    address = api.services_addresses(first)[0]
+    assert address["proxy_port"] is None and address["proxy_ip"] is None, address
+
+    second = service(f"handoff-b-{endpoint}", "127.0.0.1", free_port(), "external",
+                     proxy_ip="127.0.0.1", proxy_port=endpoint)
+    assert second, "the endpoint was still held by a service no longer handing off"

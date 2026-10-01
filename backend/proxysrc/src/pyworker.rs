@@ -261,7 +261,7 @@ impl PyWorkerRule {
             let _ = child.kill();
             let _ = child.wait();
             self.stats.restarts.fetch_add(1, Ordering::Relaxed);
-            eprintln!("[warn] [pyworker] '{}' killed: {why}", self.id);
+            crate::diag!("[warn] [pyworker] '{}' killed: {why}", self.id);
         }
     }
 

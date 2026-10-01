@@ -254,7 +254,7 @@ class FiregexTables(NFTableManager):
         # one because deleting the table around them was not an option. `add` before
         # `delete` is there because a batch is atomic and deleting a table that is not
         # there fails the whole thing; adding one that already exists does nothing.
-        super().__init__(self.init_comands(), [
+        self._teardown = [
             command
             for family in ("ip", "ip6")
             for table in (self.filter_table, self.mangle_table)
@@ -262,7 +262,8 @@ class FiregexTables(NFTableManager):
                 {"add": {"table": {"name": table, "family": family}}},
                 {"delete": {"table": {"name": table, "family": family}}},
             )
-        ])
+        ]
+        super().__init__(self.init_comands(), self._teardown)
 
     def intact(self) -> bool:
         """Whether the firewall firegex installed is still in the kernel.
@@ -276,8 +277,16 @@ class FiregexTables(NFTableManager):
         return code == 0 and any("rule" in item for item in listed["nftables"])
 
     def set(self, srvs:list[Rule], policy:str=Action.ACCEPT, opt:FirewallSettings = None):
+        """Replace the whole firewall with this one, or leave the one in force alone.
+
+        **One batch, teardown included.** nft applies a batch whole or not at all, and the
+        teardown used to be a batch of its own sent first: when nft then refused a rule —
+        an interface name longer than the kernel allows was enough — the old tables were
+        already gone and the new ones never arrived. A default-deny firewall became no
+        firewall at all, and the watcher putting it back failed the same way every few
+        seconds. Sent together, a refusal leaves the previous firewall exactly as it was.
+        """
         srvs = list(srvs)
-        self.reset()
         if policy == Action.REJECT:
             policy = Action.DROP
             srvs.append(Rule(
@@ -296,7 +305,7 @@ class FiregexTables(NFTableManager):
         # No hooking step any more: the base chains are firegex's own and `_skeleton`
         # already pointed each of them at its rules chain.
         rules = self.init_comands(policy, opt) + self.get_rules(*srvs) + self.dnat_rules(opt)
-        self.cmd(*rules)
+        self.cmd(*self._teardown, *rules)
 
     def dnat_rules(self, opt: FirewallSettings | None) -> list[dict]:
         """Leave port-forwarded traffic to the rules that forwarded it, when no rule of

@@ -250,3 +250,94 @@ def test_a_queued_udp_service_keeps_flows_up_to_its_own_limit(api, service, udp_
         assert answered is None, "with no limit, a flow lost its state to two others"
     else:
         assert answered == b"once more", "past the limit, the oldest flow kept its state"
+
+
+# --- flows conntrack is still carrying -------------------------------------------------
+#
+# Conntrack translates a flow at its first packet, and a UDP flow lasts for as long as
+# datagrams keep arriving. So on the proxy layer, which is a translation, what a flow
+# already had decided where each of its datagrams went — until firegex started forgetting
+# the flows whose answer the rules had just changed.
+
+
+def _proxy_only(layer: Layer):
+    if layer.transport != "proxy":
+        pytest.skip("NFQUEUE queues every packet as it goes by; conntrack decides nothing")
+
+
+def test_a_flow_open_before_the_service_started_meets_its_filters(api, service,
+                                                                 udp_stand_in, udp_layer):
+    """Nothing redirected it, and nothing would: it went on straight to the service,
+    unfiltered, for as long as it kept talking — a way past the protection for anybody
+    who opened one before it went up."""
+    echo = udp_stand_in(udp_layer.ipv6)
+    service_id = service(f"udp-early-{echo.port}", udp_layer.ip, echo.port,
+                         udp_layer.transport, proto="udp")
+    add_regex_filter(api, service_id, "DENYME")
+    with echo.flow() as flow:
+        assert flow.exchange(b"before the service") == b"before the service"
+        start_and_settle(api, service_id, wait=1.2)
+        assert flow.exchange(b"carrying DENYME") is None, \
+            "a flow older than the service went on unfiltered"
+        assert flow.exchange(b"still talking") == b"still talking", \
+            "the flow stopped being answered once the service started"
+
+
+def test_a_flow_carried_across_a_restart_meets_the_new_filters(api, udp_service, udp_layer):
+    """A restart hands the connections over to the engine replacing the old one; a flow
+    stayed with the old one instead, under the filters it started with, for as long as
+    it kept talking."""
+    _proxy_only(udp_layer)
+    service_id, echo = udp_service
+    with echo.flow() as flow:
+        assert flow.exchange(b"before the restart") == b"before the restart"
+        # Anything but its name rebuilds the datapath.
+        assert api.services_edit(service_id, max_connections=500)
+        time.sleep(1.2)
+        add_regex_filter(api, service_id, "LATECOMER", name="later")
+        time.sleep(0.5)
+        assert flow.exchange(b"carrying LATECOMER") is None, \
+            "the flow was still carried by the engine from before the restart"
+        assert flow.exchange(b"after the restart") == b"after the restart"
+
+
+def _engines_relaying_to(port: int) -> list[int]:
+    """The proxy engines holding a UDP relay towards `port`, by their environment."""
+    import os
+    found = []
+    for pid in filter(str.isdigit, os.listdir("/proc")):
+        try:
+            with open(f"/proc/{pid}/environ", "rb") as f:
+                environ = f.read().split(b"\0")
+        except OSError:
+            continue
+        for entry in environ:
+            if entry.startswith(b"FGEX_PROXY_UDP=") and f":{port}|".encode() in entry:
+                found.append(int(pid))
+    return found
+
+
+@pytest.mark.root
+def test_a_flow_is_answered_again_after_its_engine_is_killed(api, udp_service, udp_layer):
+    """Conntrack went on sending the flow to the relay port of an engine that no longer
+    existed, every datagram refreshing the entry that did so: a client that kept talking
+    was cut off from the service until it fell silent for two minutes."""
+    import os
+    import signal
+
+    _proxy_only(udp_layer)
+    _, echo = udp_service
+    with echo.flow() as flow:
+        assert flow.exchange(b"before the crash") == b"before the crash"
+        engines = _engines_relaying_to(echo.port)
+        if not engines:
+            pytest.skip("cannot find the engine to kill; is the instance elsewhere?")
+        for pid in engines:
+            os.kill(pid, signal.SIGKILL)
+        answered, deadline, n = None, time.monotonic() + 10, 0
+        while answered is None and time.monotonic() < deadline:
+            n += 1
+            answered = flow.exchange(f"after the crash {n}".encode())
+        assert answered is not None, "the flow was never answered again after the engine died"
+        assert flow.exchange(b"carrying DENYME") is None, \
+            "the engine that came back is not filtering the flow"

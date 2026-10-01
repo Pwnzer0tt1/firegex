@@ -285,6 +285,17 @@ What UDP on the proxy layer provides:
   to observe, so a timeout is the only thing that can end one.
 - **Both directions inspected**, and replies leave through the listener socket so
   conntrack rewrites them to appear from the address the client dialled.
+- **One slow client holds up only itself.** Each flow's datagrams are judged in order by
+  a task of their own, so a filter taking its time over one client's datagram does not
+  keep the relay from reading everyone else's.
+- **Flows already open follow the rules in force.** The kernel remembers where a UDP flow
+  was sent for as long as datagrams keep arriving, so firegex tells it to forget the
+  flows of an address whenever what steers them changes: one open before the service
+  started is filtered from its next datagram instead of going round the protection, one
+  carried across a restart moves to the new engine and its filters, one whose engine died
+  is answered again as soon as the engine is back, and once the service is stopped they go
+  straight to it. A QUIC connection an engine is still carrying is left with it until it
+  closes, because moving it to another engine would end it.
 
 `REJECT` means something narrower here: there is no connection to close, so the datagram
 is simply not forwarded, and the next one from that client is judged afresh.

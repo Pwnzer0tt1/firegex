@@ -86,6 +86,16 @@ class UdpEcho:
         finally:
             sock.close()
 
+    def flow(self, timeout: float = 1.5) -> "HeldFlow":
+        """One client socket kept across several exchanges — one flow, to conntrack.
+
+        `exchange` opens a socket per datagram, so every one of them is a flow of its own
+        and meets whatever rules are in force when it is sent. What a long-lived client
+        does is keep its socket, and that is the case where what conntrack remembers
+        decides where the next datagram goes.
+        """
+        return HeldFlow(self, timeout)
+
     def answered_from(self, payload: bytes, timeout: float = 1.5) -> tuple | None:
         """Which address the answer came back from.
 
@@ -103,3 +113,39 @@ class UdpEcho:
             return None
         finally:
             sock.close()
+
+
+class HeldFlow:
+    """A UDP client that keeps its source port for as long as it is open. See `flow`."""
+
+    def __init__(self, echo: UdpEcho, timeout: float):
+        self.echo = echo
+        self.sock = socket.socket(socket.AF_INET6 if echo.ipv6 else socket.AF_INET,
+                                  socket.SOCK_DGRAM)
+        self.sock.settimeout(timeout)
+
+    def exchange(self, payload: bytes) -> bytes | None:
+        """Send one datagram on this flow and return its echo, or `None` if none came.
+
+        Answers to earlier datagrams arriving late are passed over rather than taken for
+        this one's, which on one socket is a real possibility.
+        """
+        try:
+            self.sock.sendto(payload, (self.echo.host, self.echo.port))
+            deadline = time.monotonic() + (self.sock.gettimeout() or 1.5)
+            while time.monotonic() < deadline:
+                data = self.sock.recvfrom(65535)[0]
+                if data == payload:
+                    return data
+        except (TimeoutError, OSError):
+            pass
+        return None
+
+    def close(self):
+        self.sock.close()
+
+    def __enter__(self) -> "HeldFlow":
+        return self
+
+    def __exit__(self, *exc):
+        self.close()

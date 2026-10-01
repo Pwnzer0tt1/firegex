@@ -164,7 +164,7 @@ pub(crate) async fn carry(carrier: &Carrier) {
     {
         Ok(connection) => connection,
         Err(e) => {
-            eprintln!("[info] [h3] the client's HTTP/3 connection did not start: {e}");
+            crate::diag_throttled!("[info] [h3] HTTP/3 connections that did not start", 20, 10, "[info] [h3] the client's HTTP/3 connection did not start: {e}");
             return;
         }
     };
@@ -178,7 +178,7 @@ pub(crate) async fn carry(carrier: &Carrier) {
             {
                 Ok(pair) => pair,
                 Err(e) => {
-                    eprintln!("[warn] [h3] {} does not speak HTTP/3: {e}", carrier.upstream);
+                    crate::diag_throttled!("[warn] [h3] connections to a service that did not speak HTTP/3", 1, 30, "[warn] [h3] {} does not speak HTTP/3: {e}", carrier.upstream);
                     carrier.peer.close(0u32.into(), b"the service did not speak HTTP/3");
                     return;
                 }
@@ -226,7 +226,7 @@ async fn accept_loop<O>(
                 }
             } => {
                 if let Some(reason) = reason {
-                    eprintln!("[info] [h3] the service ended the connection: {reason}");
+                    crate::diag_throttled!("[info] [h3] connections the service ended", 20, 10, "[info] [h3] the service ended the connection: {reason}");
                 }
                 carrier.peer.close(0u32.into(), b"the service closed the connection");
                 break;
@@ -243,14 +243,14 @@ async fn accept_loop<O>(
                     // refused request and a completed one both end it.
                     carrier.chain.current().connection_closed(connection);
                     if let Err(e) = outcome {
-                        eprintln!("[info] [h3] request ended: {e}");
+                        crate::diag_throttled!("[info] [h3] requests that ended with an error", 20, 10, "[info] [h3] request ended: {e}");
                     }
                 });
             }
             // The client is done with the connection, which is the ordinary way out.
             Ok(None) => break,
             Err(e) => {
-                eprintln!("[info] [h3] the client's connection ended: {e}");
+                crate::diag_throttled!("[info] [h3] client connections that ended with an error", 20, 10, "[info] [h3] the client's connection ended: {e}");
                 break;
             }
         }
@@ -286,7 +286,7 @@ async fn exchange<O: Outbound>(
     // request as it came, so two that disagree would be a filter reading one host while
     // the service answers for another. Malformed, and the stream is stopped as such.
     if let Some(why) = conflicting_authority(&request) {
-        eprintln!(
+        crate::diag_throttled!("[warn] [h3] requests with two authorities", 5, 30,
             "[warn] [h3] {}: {why}, so the filters would be shown one host while the \
              service routes on the other. The stream is stopped as malformed.",
             carrier.client
@@ -297,7 +297,7 @@ async fn exchange<O: Outbound>(
     // Malformed as well (RFC 9114 §4.2), and not refused by the h3 crate: see
     // `connection_specific`. HTTP/2 needs no such line, because h2 refuses them itself.
     if let Some(why) = connection_specific(request.headers()) {
-        eprintln!(
+        crate::diag_throttled!("[warn] [h3] requests carrying connection-specific headers", 5, 30,
             "[warn] [h3] {}: {why}. The stream is stopped as malformed.",
             carrier.client
         );

@@ -391,7 +391,7 @@ impl FilterChain {
                 slot.rearm_at_ms.store(at, Ordering::Relaxed);
                 let _ = self.next_rearm_ms.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
                     |next| (next == 0 || at < next).then_some(at));
-                eprintln!(
+                crate::diag!(
                     "[warn] [filter] '{}' kept missing its {:?} deadline: traffic keeps \
                      flowing without it, and it is asked again in {}s",
                     slot.filter.name(),
@@ -399,7 +399,7 @@ impl FilterChain {
                     self.rearm_after.as_secs(),
                 );
             }
-            DisableReason::Panicked => eprintln!(
+            DisableReason::Panicked => crate::diag!(
                 "[warn] [filter] '{}' panicked: traffic keeps flowing without it until the \
                  filters are next applied — save a change to them, or restart the service",
                 slot.filter.name(),
@@ -411,7 +411,7 @@ impl FilterChain {
             .all(|s| s.disabled.load(Ordering::Relaxed))
         {
             self.degraded.store(true, Ordering::Relaxed);
-            eprintln!("[warn] [filter] every filter is disabled, chain is now a plain relay");
+            crate::diag!("[warn] [filter] every filter is disabled, chain is now a plain relay");
         }
     }
 
@@ -456,7 +456,7 @@ impl FilterChain {
                 slot.consecutive_timeouts.store(0, Ordering::Relaxed);
                 slot.disabled.store(false, Ordering::Relaxed);
                 self.degraded.store(false, Ordering::Relaxed);
-                eprintln!(
+                crate::diag!(
                     "[info] [filter] '{}' is back in the chain after sitting out {}s",
                     slot.filter.name(),
                     self.rearm_after.as_secs(),

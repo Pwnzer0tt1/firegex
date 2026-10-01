@@ -64,3 +64,107 @@ def test_container_traffic_is_left_to_the_container_runtime():
     assert all(c["add"]["rule"]["chain"] == "fgex_forward" for c in commands)
 
     assert FiregexTables().dnat_rules(settings(allow_dnat=False)) == []
+
+
+# --- replacing the firewall whole, or not at all ------------------------------
+
+
+def test_the_firewall_is_replaced_in_one_batch_with_its_teardown(monkeypatch):
+    """The teardown used to be a batch of its own, sent first. When nft then refused a rule
+    the old tables were already gone and the new ones never arrived: a default-deny
+    firewall became no firewall. One batch is applied whole or not at all."""
+    tables = FiregexTables()
+    sent = []
+
+    def cmd(*commands):
+        sent.append(commands)
+        return {"nftables": []}
+
+    def raw_cmd(*commands):
+        sent.append(commands)
+        return 0, {"nftables": []}, ""
+
+    monkeypatch.setattr(tables, "cmd", cmd)
+    monkeypatch.setattr(tables, "raw_cmd", raw_cmd)
+    tables.set([rule()], policy=Action.DROP, opt=settings())
+
+    assert len(sent) == 1, f"the firewall went out in {len(sent)} batches"
+    batch = sent[0]
+    deleted = [i for i, c in enumerate(batch) if "delete" in c]
+    chains = [i for i, c in enumerate(batch) if "chain" in c.get("add", {})]
+    assert deleted and chains, "the batch neither tears down nor builds"
+    assert max(deleted) < min(chains), "the teardown has to come before what replaces it"
+
+
+def test_a_refused_firewall_leaves_nothing_half_applied(monkeypatch):
+    """nft refusing the batch must not leave a separate teardown behind it."""
+    tables = FiregexTables()
+    sent = []
+
+    def cmd(*commands):
+        sent.append(commands)
+        raise Exception("Error: syntax error")
+
+    monkeypatch.setattr(tables, "cmd", cmd)
+    monkeypatch.setattr(tables, "raw_cmd", lambda *c: sent.append(c) or (1, {}, "no"))
+    try:
+        tables.set([rule()], policy=Action.DROP, opt=settings())
+    except Exception:
+        pass
+    assert len(sent) == 1, "something was sent to the kernel besides the refused batch"
+
+
+# --- what the router lets through, and what it does when nft says no -----------
+
+
+def test_an_address_field_is_an_address_or_an_interface_the_kernel_takes():
+    import pytest
+    from fastapi import HTTPException
+
+    from modules.firewall.models import RuleModel
+    from routers.firewall import parse_and_check_rule
+
+    def model(**kw) -> RuleModel:
+        fields = dict(active=True, name="r", proto="tcp", table="filter", src="", dst="",
+                      port_src_from=1, port_dst_from=80, port_src_to=65535,
+                      port_dst_to=80, action="accept", mode="in")
+        fields.update(kw)
+        return RuleModel(**fields)
+
+    assert parse_and_check_rule(model(src="eth0")).src == "eth0"
+    assert parse_and_check_rule(model(src=" br-* ")).src == "br-*"
+    assert parse_and_check_rule(model(src="10.0.0.1")).src == "10.0.0.1/32"
+    for bad in ("a-name-far-too-long-for-a-kernel", 'eth0"', "eth 0", "10.0.0.0/33x"):
+        with pytest.raises(HTTPException) as refused:
+            parse_and_check_rule(model(src=bad))
+        assert refused.value.status_code == 400, bad
+
+
+def test_a_change_nft_refuses_puts_the_database_back(monkeypatch):
+    """Kept, the refused configuration is what the watcher retries every few seconds and
+    what the next boot comes up with — failing each time, with no firewall behind it."""
+    import asyncio
+
+    import pytest
+    from fastapi import HTTPException
+
+    import routers.firewall as router
+
+    attempts = []
+
+    async def reload():
+        attempts.append(len(attempts))
+        if len(attempts) == 1:
+            raise Exception("Error: Could not process rule")
+
+    async def refresh():
+        pass
+
+    undone = []
+    monkeypatch.setattr(router.firewall, "reload", reload)
+    monkeypatch.setattr(router, "refresh_frontend", refresh)
+    with pytest.raises(HTTPException) as refused:
+        asyncio.run(router.apply_changes(lambda: undone.append(True)))
+    assert refused.value.status_code == 400
+    assert undone == [True], "the database was left holding what nft refused"
+    assert len(attempts) == 2, "the previous firewall was not put back after the undo"

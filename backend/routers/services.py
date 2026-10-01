@@ -36,11 +36,13 @@ from modules.services import stats
 from modules.services.logs import log_for
 from modules.services.models import (KIND, L4, MODE, PROTO, STATUS, Service,
                                      TRANSPORT, UPSTREAM)
-from modules.services.nftables import FiregexTables, hijack_endpoint
+from modules.services.nftables import FiregexTables, hijack_endpoint, one_address
 from modules.services import transports
 from modules.services.transports import PROXY_ENGINE, PYWORKER, UnsupportedChain
 from utils import (
     PortType,
+    ip_family,
+    ip_parse,
     is_ip_parse,
     parse_ip_or_int,
     refactor_name,
@@ -654,6 +656,11 @@ def _note_filtering(service_id: str) -> None:
     has a real gap in the middle of its history, and moving the mark forward would hide
     it; clearing it would make the chart claim the earlier hours never happened.
     """
+    manager = firewall.services.get(service_id)
+    if manager is not None and not manager.active:
+        # Meant to run and not running — one that could not start at boot, say — has not
+        # begun filtering, whatever the stored status says.
+        return
     row = db.query(
         "SELECT s.filtering_since since, s.status status, "
         "(SELECT COUNT(*) FROM filters f WHERE f.service_id = s.service_id AND f.active = 1) n "
@@ -688,17 +695,33 @@ async def _apply_chain(service_id: str, undo=None):
     the list, and the next start would fail for a reason they thought they had avoided.
     A refusal has to mean nothing changed.
     """
+    undo = _once(undo)
     try:
-        await firewall.get(service_id).update_chain()
+        await firewall.get(service_id).update_chain(undo)
     except UnsupportedChain as e:
-        if undo:
-            undo()
+        undo()
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        if undo:
-            undo()
+        undo()
         raise HTTPException(status_code=500, detail=str(e))
     _note_filtering(service_id)
+
+
+def _once(undo):
+    """`undo`, or nothing, made safe to call from both the manager and the caller.
+
+    A rebuild that fails has the manager put the database back before it starts the
+    service again, and the caller then reaches its own `except` — where the undo it has
+    always run is now the second one.
+    """
+    done = []
+
+    def run():
+        if undo is not None and not done:
+            done.append(True)
+            undo()
+
+    return run
 
 
 # --- services ----------------------------------------------------------------
@@ -731,11 +754,26 @@ def _address_row(row: dict) -> dict:
 
 def _with_addresses(row: dict) -> dict:
     row = dict(row)
+    row["status"] = _running_status(row)
     row["addresses"] = [
         _address_row(a) for a in _addresses(row["service_id"])
     ]
     row["problem"] = log_for(row["service_id"]).last_problem()
     return row
+
+
+def _running_status(row: dict) -> str:
+    """Whether the service is running, not whether it is meant to.
+
+    The stored status is what the operator asked for, and what the next boot starts: a
+    service that could not come back up at boot kept `active` there, and the interface
+    showed it as active while nothing was filtering it — the one failure this whole module
+    is arranged to avoid. The reason is in its log, and on the list as its problem.
+    """
+    manager = firewall.services.get(row["service_id"])
+    if manager is None:
+        return row["status"]
+    return STATUS.ACTIVE if manager.active else STATUS.STOP
 
 
 @app.get("", response_model=list[ServiceModel])
@@ -851,6 +889,24 @@ def _hijack_ip(transport: str, service_ip: str, form: AddressForm) -> str | None
     """
     if str(transport) != TRANSPORT.EXTERNAL:
         return None
+    if form.proxy_ip and str(form.proxy_ip).strip():
+        # Checked here, where the row is written: it used to be stored as typed and only
+        # parsed when the rules were built, so a mistyped endpoint was a service that
+        # would not start, with the reason in its log rather than in this answer.
+        proxy = str(form.proxy_ip).strip()
+        if not is_ip_parse(proxy) or _shown(ip_parse(proxy)) != one_address(ip_parse(proxy)):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Your proxy's address has to be one IP address, not {proxy!r}",
+            )
+        if is_ip_parse(service_ip) and ip_family(proxy) != ip_family(service_ip):
+            raise HTTPException(
+                status_code=400,
+                detail="Your proxy's address has to be in the same family as the address "
+                       "it stands in for: the rewrite changes the destination and nothing "
+                       "else, so an IPv4 packet cannot be sent to an IPv6 proxy.",
+            )
+        form.proxy_ip = proxy
     if not form.proxy_port:
         return form.proxy_ip or None
     return hijack_endpoint(form.proxy_ip, service_ip)
@@ -1107,6 +1163,14 @@ async def add_service(form: ServiceAddForm):
             detail="The external transport hands traffic to your own proxy and rewrites the "
                    "source address on return, which requires a concrete IP address rather than an interface.",
         )
+    # What the rows will hold, worked out before the first one is written: the addresses
+    # go in after the service, so a refusal half way through left the service and the
+    # addresses before it behind — holding the name, unknown to the running firewall.
+    for address in form.addresses:
+        try:
+            _hijack_ip(form.transport, parse_ip_or_int(address.ip_int), address)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     service_id = gen_id()
     try:
         db.query(
@@ -1137,12 +1201,16 @@ async def add_service(form: ServiceAddForm):
     try:
         for address in form.addresses:
             _insert_address(service_id, form.proto, form.transport, address)
-    except sqlite3.IntegrityError as e:
+    except BaseException as e:
         # All of it or none: a service that came up on half the addresses the operator
-        # listed is one they would believe is protecting the other half.
+        # listed is one they would believe is protecting the other half. Whatever the
+        # reason — a refusal from a check on the way in used to leave the service and its
+        # first addresses behind, holding the name and unknown to the running firewall.
         db.query("DELETE FROM service_addresses WHERE service_id = ?;", service_id)
         db.query("DELETE FROM services WHERE service_id = ?;", service_id)
-        return {"status": _address_taken(e)}
+        if isinstance(e, sqlite3.IntegrityError):
+            return {"status": _address_taken(e)}
+        raise
     await firewall.reload()
     await refresh_frontend()
     return {"status": "ok", "service_id": service_id}
@@ -1285,6 +1353,12 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
     transport = str(fields.get("transport", row["transport"]))
     old_addresses = _addresses(service_id)
     new_addresses = [_address_under(address, proto) for address in old_addresses]
+    if transport != TRANSPORT.EXTERNAL:
+        # The endpoint of the operator's own proxy is the hand-off layer's alone. Left
+        # on the rows it is read by nothing and still sits in the unique index, refusing
+        # another service's hand-off the endpoint this one no longer uses.
+        new_addresses = [{**address, "proxy_ip": None, "proxy_port": None}
+                         for address in new_addresses]
 
     # What the addresses say has to mean something on the layer they land on. A port the
     # service is published on takes a layer that dials; on the others it would be read by
@@ -1329,9 +1403,10 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
         )]
         for address in addresses:
             queries.append((
-                "UPDATE service_addresses SET proto = ?, edge = ?, upstream = ? "
-                "WHERE address_id = ?;",
-                address["proto"], address["edge"], address["upstream"], address["address_id"],
+                "UPDATE service_addresses SET proto = ?, edge = ?, upstream = ?, "
+                "proxy_ip = ?, proxy_port = ? WHERE address_id = ?;",
+                address["proto"], address["edge"], address["upstream"],
+                address["proxy_ip"], address["proxy_port"], address["address_id"],
             ))
         return queries
 
@@ -1414,6 +1489,7 @@ async def add_address(service_id: str, form: AddressForm):
         address_id = _insert_address(service_id, row["proto"], row["transport"], form)
     except sqlite3.IntegrityError as e:
         raise HTTPException(status_code=400, detail=_address_taken(e))
+    @_once
     def undo():
         # The row *and* the manager's copy of it: the manager re-read the list on its
         # way in, so leaving it there would mean the next start protecting an address
@@ -1422,7 +1498,7 @@ async def add_address(service_id: str, form: AddressForm):
         firewall.get(service_id).reload_addresses()
 
     try:
-        await firewall.get(service_id).address_added(address_id)
+        await firewall.get(service_id).address_added(address_id, undo)
     except UnsupportedChain as e:
         undo()
         raise HTTPException(status_code=400, detail=str(e))
@@ -1524,7 +1600,11 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
         await restore()
         raise HTTPException(status_code=400, detail=_address_taken(e))
     try:
-        await manager.address_added(address_id)
+        # A rebuild failing on the new address stops the service before it finds out;
+        # the manager puts the old row back and starts it again on that.
+        await manager.address_added(address_id, lambda: write(
+            was["ip_int"], was["port"], was["proto"], was["edge"], was["target_port"],
+            was["upstream"], was["proxy_ip"], was["proxy_port"]))
     except UnsupportedChain as e:
         await restore()
         raise HTTPException(status_code=400, detail=str(e))

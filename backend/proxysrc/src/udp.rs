@@ -46,23 +46,27 @@ const IDLE: Duration = Duration::from_secs(60);
 /// How often idle flows are swept.
 const SWEEP: Duration = Duration::from_secs(10);
 
+/// How many of one flow's datagrams may wait for its verdicts. Past it they are dropped,
+/// which is what the socket buffer would have done with them: a flow whose filter is slow
+/// falls behind on its own, and the budget bounds what it can make this process hold.
+const FLOW_QUEUE: usize = 32;
+
 struct Flow {
-    /// The socket this relay dials the service from, bound to the client's own address
-    /// where the kernel allows it.
-    upstream: Arc<UdpSocket>,
+    /// This flow's datagrams, on their way to be judged and sent on — by a task of the
+    /// flow's own, so a slow verdict holds up this client and nobody else.
+    ///
+    /// The receive loop used to judge every datagram itself, one after the other, for
+    /// every client of the address: a filter taking a second over one client's datagram
+    /// was a second in which no other client's was even read, and the socket buffer
+    /// overflowing behind it dropped theirs.
+    to_service: tokio::sync::mpsc::Sender<Vec<u8>>,
+    forward_task: tokio::task::JoinHandle<()>,
     connection: ConnectionId,
-    /// Filter state for the client→service direction. Owned by the receive loop, which
-    /// is single-threaded, so it needs no lock.
-    sessions: ChainSessions,
     /// What this flow is judged by: the service's chain, or no chain at all for a flow
     /// admitted past the limit because the operator chose to forward what does not fit.
     /// Decided once, when the flow opens — the same trade a TCP connection admitted past
     /// the limit makes for its whole life.
     chain: ChainHandle,
-    /// Whether anything of this flow has been refused yet, in either direction. A refusal
-    /// is counted once per flow, because the number it goes into is compared with flows
-    /// seen, and one flow refusing a thousand datagrams is still one flow refused.
-    refused: Arc<AtomicBool>,
     reply_task: tokio::task::JoinHandle<()>,
     last_seen: Instant,
     /// This flow's place in the service's count of what it is carrying, released when the
@@ -140,7 +144,7 @@ impl UdpRelay {
                     // A per-datagram error (an ICMP port-unreachable landing on the
                     // socket, most often) must not end the relay.
                     Err(e) => {
-                        eprintln!("[warn] [udp] receive failed: {e}");
+                        crate::diag_throttled!("[warn] [udp] failed receives", 5, 10, "[warn] [udp] receive failed: {e}");
                         continue;
                     }
                 },
@@ -173,7 +177,7 @@ impl UdpRelay {
                     let chain = if over {
                         self.stats.over_limit.fetch_add(1, Ordering::Relaxed);
                         if !self.stats.warned_limit.swap(true, Ordering::Relaxed) {
-                            eprintln!(
+                            crate::diag!(
                                 "[warn] [udp] {limit} concurrent connections and flows \
                                  reached; new flows are being {} until it clears",
                                 if self.over_limit_forwards { "carried unfiltered" } else { "dropped" },
@@ -202,38 +206,32 @@ impl UdpRelay {
                             flows.entry(client).or_insert(flow)
                         }
                         Err(e) => {
-                            eprintln!("[warn] [udp] cannot reach {} for {client}: {e}", self.upstream);
+                            crate::diag_throttled!("[warn] [udp] flows that could not reach the service", 5, 10, "[warn] [udp] cannot reach {} for {client}: {e}", self.upstream);
                             continue;
                         }
                     }
                 }
             };
             flow.last_seen = Instant::now();
-
-            // Re-read the handle every datagram, so a chain swapped in mid-flow takes
-            // effect without anyone losing their session.
-            let verdict = flow
-                .chain
-                .current()
-                .run(Direction::ClientToServer, &buf[..len], &mut flow.sessions)
-                .await;
-            let payload: &[u8] = match &verdict {
-                Verdict::Accept => &buf[..len],
-                Verdict::Reject(_) => {
-                    if !flow.refused.swap(true, Ordering::Relaxed) {
-                        self.stats.closed_by_filter.fetch_add(1, Ordering::Relaxed);
-                    }
-                    continue;
+            match flow.to_service.try_send(buf[..len].to_vec()) {
+                Ok(()) => {}
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    crate::diag_throttled!("[warn] [udp] datagrams dropped behind a slow verdict", 5, 10, "[warn] [udp] {client} is sending faster than its datagrams are judged; one was dropped");
                 }
-            };
-            if let Err(e) = flow.upstream.send(payload).await {
-                eprintln!("[warn] [udp] cannot forward to {}: {e}", self.upstream);
+                // Its task is gone — it only ends when the flow does — so the flow goes
+                // too, and the client's next datagram opens a new one.
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    if let Some(flow) = flows.remove(&client) {
+                        flow.close();
+                    }
+                }
             }
         }
     }
 
-    /// Start relaying one client's flow: a socket towards the service, and a task
-    /// carrying the answers back, both judged by `chain`.
+    /// Start relaying one client's flow: a socket towards the service, a task judging and
+    /// sending on what the client sends, and one carrying the answers back, all by
+    /// `chain`.
     async fn open(&self, client: SocketAddr, chain: ChainHandle, slot: Slot) -> io::Result<Flow> {
         let upstream = if self.spoof_source {
             match crate::transparent::connect_as_udp(client.ip(), self.upstream, self.self_mark).await {
@@ -241,7 +239,7 @@ impl UdpRelay {
                 Err(e) => {
                     self.stats.source_spoof_failures.fetch_add(1, Ordering::Relaxed);
                     if !self.stats.warned_spoof.swap(true, Ordering::Relaxed) {
-                        eprintln!(
+                        crate::diag!(
                             "[warn] [udp] cannot reach {} as {}: {e}. \
                              Falling back to our own address — the service will not see real client IPs.",
                             self.upstream,
@@ -270,6 +268,16 @@ impl UdpRelay {
         );
 
         let refused = Arc::new(AtomicBool::new(false));
+        let (to_service, datagrams) = tokio::sync::mpsc::channel(FLOW_QUEUE);
+        let forward_task = tokio::spawn(forward(
+            datagrams,
+            Arc::clone(&upstream),
+            self.upstream,
+            chain.clone(),
+            connection,
+            Arc::clone(&refused),
+            Arc::clone(&self.stats),
+        ));
         let reply_task = tokio::spawn(replies(
             Arc::clone(&upstream),
             Arc::clone(&self.listener),
@@ -281,11 +289,10 @@ impl UdpRelay {
         ));
 
         Ok(Flow {
-            upstream,
+            to_service,
+            forward_task,
             connection,
-            sessions: ChainSessions::new(connection),
             chain,
-            refused,
             reply_task,
             last_seen: Instant::now(),
             _slot: slot,
@@ -306,9 +313,50 @@ impl UdpRelay {
             .collect();
         for addr in done {
             if let Some(flow) = flows.remove(&addr) {
-                flow.reply_task.abort();
-                flow.chain.current().connection_closed(flow.connection);
+                flow.close();
             }
+        }
+    }
+}
+
+impl Flow {
+    /// Let go of everything this flow holds, and tell the filters it is over.
+    fn close(self) {
+        self.forward_task.abort();
+        self.reply_task.abort();
+        self.chain.current().connection_closed(self.connection);
+    }
+}
+
+/// Judge one flow's datagrams in the order they arrived, and send on what is accepted.
+async fn forward(
+    mut datagrams: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    upstream: Arc<UdpSocket>,
+    service: SocketAddr,
+    chain: ChainHandle,
+    connection: ConnectionId,
+    refused: Arc<AtomicBool>,
+    stats: Arc<ProxyStats>,
+) {
+    // This direction's own filter state, exactly as the TCP pumps keep theirs.
+    let mut sessions = ChainSessions::new(connection);
+    while let Some(datagram) = datagrams.recv().await {
+        // Re-read the handle every datagram, so a chain swapped in mid-flow takes effect
+        // without anyone losing their session.
+        let verdict = chain
+            .current()
+            .run(Direction::ClientToServer, &datagram, &mut sessions)
+            .await;
+        if let Verdict::Reject(_) = verdict {
+            // There is no connection to close, so refusing the datagram is the whole of
+            // what refusing can mean here.
+            if !refused.swap(true, Ordering::Relaxed) {
+                stats.closed_by_filter.fetch_add(1, Ordering::Relaxed);
+            }
+            continue;
+        }
+        if let Err(e) = upstream.send(&datagram).await {
+            crate::diag_throttled!("[warn] [udp] datagrams that could not be forwarded", 5, 10, "[warn] [udp] cannot forward to {service}: {e}");
         }
     }
 }
@@ -341,7 +389,7 @@ async fn replies(
             // back again while its datagrams kept the flow from ever going idle.
             Err(e) if e.kind() == io::ErrorKind::ConnectionRefused => continue,
             Err(e) => {
-                eprintln!("[info] [udp] flow for {client} ended: {e}");
+                crate::diag_throttled!("[info] [udp] flows that ended with an error", 20, 10, "[info] [udp] flow for {client} ended: {e}");
                 return;
             }
         };
@@ -361,7 +409,7 @@ async fn replies(
             }
         };
         if let Err(e) = listener.send_to(payload, client).await {
-            eprintln!("[warn] [udp] cannot answer {client}: {e}");
+            crate::diag_throttled!("[warn] [udp] answers that could not be delivered", 5, 10, "[warn] [udp] cannot answer {client}: {e}");
         }
     }
 }
@@ -424,7 +472,7 @@ impl UdpManager {
         map.insert(upstream, port);
         tokio::spawn(async move {
             if let Err(e) = relay.serve().await {
-                eprintln!("[fatal] [udp] relay for {upstream} died: {e}");
+                crate::diag!("[fatal] [udp] relay for {upstream} died: {e}");
             }
         });
         Ok(port)

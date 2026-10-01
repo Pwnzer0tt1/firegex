@@ -274,7 +274,7 @@ pub(crate) fn carried(
     trailers: Option<http::HeaderMap>,
 ) -> Option<http::HeaderMap> {
     if framing == Framing::Sized && trailers.is_some() {
-        eprintln!(
+        crate::diag_throttled!("[warn] [http] trailer sections dropped from a message of declared length", 5, 30,
             "[warn] [{}] {}: a trailer section arrived on a message that declared its \
              length. The HTTP/1.1 the filters are shown has nowhere to put one, so it is \
              dropped rather than forwarded unread.",

@@ -365,7 +365,7 @@ impl Proxy {
                 // Per-connection accept errors (fd limits, a client gone between
                 // SYN and accept) must not be fatal.
                 Err(e) => {
-                    eprintln!("[warn] [proxy] accept failed: {e}");
+                    crate::diag_throttled!("[warn] [proxy] failed accepts", 5, 10, "[warn] [proxy] accept failed: {e}");
                     // Out of descriptors, the condition does not clear by trying again
                     // immediately: the loop spins on `accept` → `EMFILE` → print →
                     // `accept`, which was measured burning about 40% of a core with four
@@ -390,7 +390,7 @@ impl Proxy {
                 // is that connections are arriving faster than they leave, and a line
                 // each would be the flood arriving twice.
                 if !self.stats.warned_limit.swap(true, Ordering::Relaxed) {
-                    eprintln!(
+                    crate::diag!(
                         "[warn] [proxy] {limit} concurrent connections reached; further \
                          connections are being {} until it clears",
                         if self.cfg.over_limit_forwards { "forwarded unfiltered" } else { "refused" },
@@ -424,7 +424,7 @@ impl Proxy {
                     handle_connection(client, peer, cfg, chain, stats).await
                 };
                 if let Err(e) = result {
-                    eprintln!("[info] [proxy] connection from {peer} ended: {e}");
+                    crate::diag_throttled!("[info] [proxy] connections that ended with an error", 20, 10, "[info] [proxy] connection from {peer} ended: {e}");
                 }
             });
         }
@@ -465,7 +465,7 @@ async fn dial(
                     Ok(Err(e)) => e.to_string(),
                     _ => "timed out (is the return path diverted?)".to_string(),
                 };
-                eprintln!(
+                crate::diag!(
                     "[warn] [proxy] cannot reach {upstream} as {}: {why}. \
                      Falling back to our own address — the service will not see real client IPs.",
                     peer.ip()
@@ -583,7 +583,7 @@ async fn handle_connection(
         // which of the two ends is wrong. It is nearly always the address: a port carrying
         // the cleartext site declared as the encrypted one. Naming the address and what
         // was expected turns an afternoon into a sentence.
-        eprintln!(
+        crate::diag_throttled!("[warn] [proxy] clients that spoke something other than TLS at an encrypted address", 1, 30,
             "[warn] [proxy] {peer} spoke something that is not TLS to {original}, which \
              this service declares as its encrypted address. The connection is refused \
              rather than carried to a service expecting HTTPS. If that address is meant \

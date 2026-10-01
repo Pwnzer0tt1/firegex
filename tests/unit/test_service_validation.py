@@ -309,3 +309,16 @@ def test_the_index_name_is_still_understood_if_it_is_ever_reported():
     assert "proxy endpoint" in _address_taken(sqlite3.IntegrityError(
         "UNIQUE constraint failed: index 'unique_hijack_target'"))
 
+
+
+def test_an_endpoint_is_one_address_in_the_family_of_what_it_stands_in_for():
+    """Stored as typed, a mistyped endpoint was a service that would not start, with the
+    reason in its log instead of in the answer to the request that caused it."""
+    assert "one IP address" in refusal(_hijack_ip, TRANSPORT.EXTERNAL, "10.0.0.1/32",
+                                       form(proxy_ip="not-an-ip", proxy_port=8080))
+    assert "one IP address" in refusal(_hijack_ip, TRANSPORT.EXTERNAL, "10.0.0.1/32",
+                                       form(proxy_ip="10.0.0.0/24", proxy_port=8080))
+    assert "same family" in refusal(_hijack_ip, TRANSPORT.EXTERNAL, "10.0.0.1/32",
+                                    form(proxy_ip="::1", proxy_port=8080))
+    assert _hijack_ip(TRANSPORT.EXTERNAL, "10.0.0.1/32",
+                      form(proxy_ip=" 127.0.0.2 ", proxy_port=8080)) == "127.0.0.2"

@@ -145,3 +145,21 @@ def test_a_restart_hands_over_without_cutting_connections(api, protected, proxy_
     channel = Channel(server, port, proxy_layer.ipv6)
     assert channel.gets_through(b"harmless"), "the new engine did not take new connections"
     assert channel.is_blocked(b"carrying BLOCKME"), "the new engine came up without the filters"
+
+
+def test_a_refused_address_leaves_no_half_made_service_behind(api):
+    """The addresses are written after the service, and a refusal half way through left
+    the service and the addresses before it — holding the name, unknown to the running
+    firewall, and failing every start with a bare 500."""
+    name = "half-made"
+    why = api.services_add_error(
+        name=name, transport="proxy", proto="tcp",
+        addresses=[{"ip_int": "127.0.0.1", "port": 40123},
+                   {"ip_int": "not an address!", "port": 40124}],
+    )
+    assert why, "an address that is neither an IP nor an interface was accepted"
+    assert name not in [s["name"] for s in api.services_list()], \
+        "the refused service was left behind"
+    service_id = api.services_add(name, "127.0.0.1", 40123, "proxy")
+    assert service_id, "the name of a refused service stayed taken"
+    api.services_delete(service_id)

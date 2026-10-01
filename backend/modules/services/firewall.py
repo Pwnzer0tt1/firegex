@@ -20,14 +20,16 @@ import os
 import time
 import traceback
 
+from modules.services import conntrack
 from modules.services import mirror
 from modules.services import transports
 from modules.services import stats
 from modules.services.logs import LEVEL, forget as forget_log, log_for
 from modules.services.models import (KIND, L4, STATUS, UPSTREAM, Address, Filter,
                                      Regex, Service)
-from modules.services.nftables import (FiregexTables, NoRelayAddress,
+from modules.services.nftables import (PROXY_SELF_MARK, FiregexTables, NoRelayAddress,
                                        interface_addresses, udp_relay_host)
+from utils import is_ip_parse
 from utils.sqlite import SQLite
 
 nft = FiregexTables()
@@ -141,6 +143,8 @@ class ServiceManager:
         #: token rather than once per block, and forgotten whenever the chain changes.
         self._named: dict[tuple[str, str], str] = {}
         self._owners: dict[str, str] = {}
+        #: Work started after an engine has gone, kept referenced until it is done.
+        self._background: set[asyncio.Task] = set()
 
     # --- reading the configuration -------------------------------------------
 
@@ -487,6 +491,7 @@ class ServiceManager:
                 self.transport = None
                 raise
             self._set_status(True)
+            await self._claim_udp(self.srv.addresses)
             self.log.add(
                 LEVEL.INFO,
                 f"started on the {self.srv.transport} layer, "
@@ -510,20 +515,29 @@ class ServiceManager:
         async with self.lock:
             self.flush_blocks()
             if not self.active:
+                # One that was meant to run and could not — at boot, or after a failed
+                # rebuild — is not running, and stopping it is still a decision: kept as
+                # it was, the next boot would try to start it again.
+                if persist and self.srv.status == STATUS.ACTIVE:
+                    self._set_status(False)
                 return
-            guarded = nft.delete(self.srv, keep_guards=drain)
+            guarded = nft.delete(self.srv, keep_guards=True)
             self._steer = {}
+            # A restart claims them again in a moment, from the engine replacing this one.
+            if not handing_over:
+                await self._release_udp(self.srv.addresses)
             if self.transport:
                 if drain:
                     await self.transport.retire(
                         keep_filtering=handing_over,
-                        then=lambda: nft.release_guards(guarded),
+                        then=lambda: self._in_background(self._engine_gone(guarded)),
                     )
                 else:
                     await self.transport.stop()
+                    await self._engine_gone(guarded)
                 self.transport = None
             else:
-                nft.release_guards(guarded)
+                await self._engine_gone(guarded)
             self._set_status(False, persist=persist)
             self.log.add(LEVEL.INFO, "stopped")
 
@@ -544,6 +558,9 @@ class ServiceManager:
                 return
             nft.delete(self.srv)
             nft.add(self.srv, **self._steer)
+            # Whatever arrived while the rules were gone went straight to the service, and
+            # a datagram flow that did so would go on doing it.
+            await self._claim_udp(self.srv.addresses)
             self._rules_lost += 1
             now = time.time()
             if now - self._rules_lost_told < TABLE_TOLD_QUIET:
@@ -559,7 +576,29 @@ class ServiceManager:
                 "manages this host's nftables leave the `fgex` tables alone.",
             )
 
-    async def update_chain(self):
+    async def _back_as_it_was(self, undo) -> None:
+        """A rebuild the new configuration could not survive: put the old one back, and
+        the service with it.
+
+        The rebuild stopped the service before it found out, so undoing the edit in the
+        database alone left it stopped — the operator was told their change had been
+        refused, which reads as "nothing happened", while the service they had been
+        editing was no longer protecting anything.
+        """
+        if undo:
+            undo()
+        self.reload_addresses()
+        if self.active:
+            return
+        try:
+            await self.enable()
+        except Exception as e:
+            self.log.add(LEVEL.ERROR, f"could not start it again as it was either: {e}")
+            return
+        self.log.add(LEVEL.WARN, "the change was refused, so the service was started again "
+                                 "as it was before it")
+
+    async def update_chain(self, undo=None):
         """Push the current chain to a running datapath.
 
         Editing a rule costs nobody their connection: the datapath swaps its
@@ -571,6 +610,11 @@ class ServiceManager:
         own chain priority, so the shape of the chain *is* the arrangement of processes
         and rules. That has to be rebuilt, which is a visible interruption — better than
         silently enforcing the old order.
+
+        `undo` puts the database back as it was before the edit. A rebuild that fails has
+        already stopped the service, so it is not enough for the caller to undo the edit
+        afterwards: the service is started again on what `undo` restored — see
+        `_back_as_it_was`.
         """
         restart = False
         # What was refused before this edit is written under the names it had, and what
@@ -587,7 +631,11 @@ class ServiceManager:
                 restart = True
         if restart:
             self.log.add(LEVEL.INFO, "the chain changed shape; rebuilding it")
-            await self.restart()
+            try:
+                await self.restart()
+            except Exception:
+                await self._back_as_it_was(undo)
+                raise
             return
         self.log.add(
             LEVEL.INFO,
@@ -596,7 +644,7 @@ class ServiceManager:
             f"(no connection was dropped)",
         )
 
-    async def address_added(self, address_id: str):
+    async def address_added(self, address_id: str, undo=None):
         """Steer one more address at the datapath that is already running.
 
         Deliberately not a restart. The chain is unchanged and the datapath is already
@@ -628,7 +676,11 @@ class ServiceManager:
                 LEVEL.INFO,
                 "the first IPv6 address needs a listener that can accept one; rebuilding",
             )
-            await self.restart()
+            try:
+                await self.restart()
+            except Exception:
+                await self._back_as_it_was(undo)
+                raise
             return
         added = [addr for addr in self.srv.addresses if addr.id == address_id]
         if not added:
@@ -684,6 +736,7 @@ class ServiceManager:
                         host, addr.target_port or addr.port, UPSTREAM.env(addr.upstream)
                     )
             nft.add(self.srv, added, **self._steer)
+            await self._claim_udp(added)
         self.log.add(
             LEVEL.INFO,
             f"also protecting {added[0].ip_int}:{added[0].port} (no connection was dropped)",
@@ -696,6 +749,7 @@ class ServiceManager:
             async with self.lock:
                 if self.active:
                     nft.delete(self.srv, gone)
+                    await self._release_udp(gone)
                     # And the engine's own note of where this address fronted, so its
                     # map cannot come to disagree with the rules that feed it.
                     for addr in gone:
@@ -718,6 +772,95 @@ class ServiceManager:
         # would put the address straight back, and the next restart would re-protect an
         # address that no longer exists.
         self.srv.addresses = [addr for addr in self.srv.addresses if addr.id != address_id]
+
+    # --- UDP flows conntrack is still carrying -------------------------------------
+
+    def _udp_edges(self, addresses: list[Address]) -> tuple[list, list]:
+        """The datagram addresses and the QUIC ones among these, as `(address, port)`
+        pairs a flow can be matched against — an interface by what it carries."""
+        plain, quic = [], []
+        for addr in addresses:
+            if L4.l4_of(addr.proto or self.srv.proto) != L4.UDP:
+                continue
+            hosts = ([addr.ip_int] if is_ip_parse(addr.ip_int)
+                     else interface_addresses(addr.ip_int))
+            (quic if str(addr.edge) == L4.QUIC else plain).extend(
+                (host, addr.port) for host in hosts)
+        return plain, quic
+
+    async def _forget_flows(self, work, said: str) -> None:
+        """Run a conntrack sweep off the event loop, and say what it did.
+
+        Never fatal: at worst a flow goes on where it was going, which is what happened
+        before anything here existed.
+        """
+        try:
+            gone = await asyncio.to_thread(work)
+        except Exception as e:
+            self.log.add(LEVEL.WARN, f"could not re-steer the UDP flows already open: {e}")
+            return
+        if gone:
+            self.log.add(LEVEL.INFO, said.format(gone=gone))
+
+    async def _claim_udp(self, addresses: list[Address]) -> None:
+        """Make the UDP flows already open to these addresses meet the rules just installed.
+
+        Conntrack translates a flow at its first packet, so a datagram flow older than the
+        redirect went on straight to the service — unfiltered, for as long as it kept
+        talking — and one a previous engine carried stayed with it. Forgotten, each one's
+        next datagram is a new flow and is redirected like any other. A QUIC edge keeps
+        the connections an engine is still carrying, since moving one would end it.
+        """
+        if self.srv.transport != transports.TRANSPORT.PROXY:
+            return
+        plain, quic = self._udp_edges(addresses)
+        if not plain and not quic:
+            return
+        await self._forget_flows(
+            lambda: conntrack.forget_udp(moved=plain, unsteered=quic,
+                                         spare_mark=PROXY_SELF_MARK),
+            "{gone} UDP flow(s) already open reach the filters from their next datagram",
+        )
+
+    async def _release_udp(self, addresses: list[Address]) -> None:
+        """Send the datagram flows the engine carried straight to the service.
+
+        What stopping means for them. Left alone, each went on to the engine being retired
+        for as long as it kept talking — kept the engine alive until the drain gave up, and
+        then went nowhere at all. QUIC connections are the engine's, and are carried until
+        they close.
+        """
+        if self.srv.transport != transports.TRANSPORT.PROXY:
+            return
+        plain, _ = self._udp_edges(addresses)
+        if not plain:
+            return
+        await self._forget_flows(
+            lambda: conntrack.forget_udp(moved=plain, spare_mark=PROXY_SELF_MARK),
+            "{gone} UDP flow(s) go straight to the service from their next datagram",
+        )
+
+    async def _engine_gone(self, guarded: set[tuple[str, int]]) -> None:
+        """What is left to do once an engine has exited: its ports stop being guarded, and
+        the UDP flows still pointed at them are let go.
+
+        Those flows were headed for a relay nobody listens on now, and every datagram
+        refreshed the entry that sent it there — a client that kept talking was cut off
+        from the service until it happened to fall silent for two minutes.
+        """
+        nft.release_guards(guarded)
+        ports = [port for l4, port in guarded if l4 == L4.UDP]
+        if not ports:
+            return
+        await self._forget_flows(
+            lambda: conntrack.forget_udp_redirected_to(ports, conntrack.local_addresses()),
+            "{gone} UDP flow(s) left pointing at a stopped engine were let go",
+        )
+
+    def _in_background(self, work) -> None:
+        task = asyncio.get_running_loop().create_task(work)
+        self._background.add(task)
+        task.add_done_callback(self._background.discard)
 
     def traffic(self) -> dict:
         """How much has arrived, and how much of it was refused.

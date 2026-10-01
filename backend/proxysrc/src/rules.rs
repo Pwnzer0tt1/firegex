@@ -152,7 +152,7 @@ impl Filter for HyperscanRule {
             // engine could not allocate scratch space, which is the traffic paying
             // for our problem.
             Err(e) => {
-                eprintln!("[warn] [filter] '{}' could not open a scanner ({e}): this connection goes unfiltered", self.label);
+                crate::diag_throttled!("[warn] [filter] connections a scanner could not be opened for", 5, 10, "[warn] [filter] '{}' could not open a scanner ({e}): this connection goes unfiltered", self.label);
                 None
             }
         }
@@ -187,7 +187,7 @@ impl FilterSession for HyperscanSession {
             // goes through. Reset the scanner so future chunks/datagrams can still be scanned.
             Err(e) => {
                 let _ = self.scanner.reset();
-                eprintln!("[warn] [filter] scan failed ({e}): scanner reset, chunk forwarded");
+                crate::diag_throttled!("[warn] [filter] scans that failed", 5, 10, "[warn] [filter] scan failed ({e}): scanner reset, chunk forwarded");
                 Verdict::Accept
             }
         }

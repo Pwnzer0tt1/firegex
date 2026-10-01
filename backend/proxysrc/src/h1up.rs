@@ -108,7 +108,7 @@ impl H1Upstream {
                     Ok(Err(e)) => e.to_string(),
                     _ => "timed out (is the return path diverted?)".to_string(),
                 };
-                eprintln!(
+                crate::diag_throttled!("[warn] [h1] dials that could not keep the client's address", 1, 60,
                     "[warn] [h1] cannot reach {} as {}: {why}. Falling back to our own \
                      address — the service will not see real client IPs.",
                     self.upstream,
@@ -210,7 +210,7 @@ impl H1Upstream {
         // detached — one connection per exchange is what makes that safe to say.
         let driving = tokio::spawn(async move {
             if let Err(e) = connection.await {
-                eprintln!("[info] [h1] the connection to the service ended: {e}");
+                crate::diag_throttled!("[info] [h1] connections to the service that ended with an error", 20, 10, "[info] [h1] the connection to the service ended: {e}");
             }
         });
         // Not awaited here: the service is allowed to answer before it has read the whole

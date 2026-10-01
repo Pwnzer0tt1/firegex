@@ -408,12 +408,12 @@ where
                         // refused request and a completed one both end it.
                         ctx.chain.current().connection_closed(connection);
                         if let Err(e) = outcome {
-                            eprintln!("[info] [h2] stream ended: {e}");
+                            crate::diag_throttled!("[info] [h2] streams that ended with an error", 20, 10, "[info] [h2] stream ended: {e}");
                         }
                     });
                 }
                 Some(Err(e)) => {
-                    eprintln!("[info] [h2] the client's connection ended: {e}");
+                    crate::diag_throttled!("[info] [h2] client connections that ended with an error", 20, 10, "[info] [h2] the client's connection ended: {e}");
                     break;
                 }
                 // The client is done with the connection, which is the ordinary way out.
@@ -425,7 +425,7 @@ where
             // shared driver to outlive and nothing to watch here.
             reason = async { driving.as_mut().unwrap().await }, if driving.is_some() => {
                 if let Ok(Err(e)) = reason {
-                    eprintln!("[info] [h2] the service ended the connection: {e}");
+                    crate::diag_throttled!("[info] [h2] connections the service ended", 20, 10, "[info] [h2] the service ended the connection: {e}");
                 }
                 break;
             }
@@ -526,7 +526,7 @@ async fn exchange<O: Outbound>(
     // A tunnel is opaque bytes with no HTTP/1.1 message to render, so it is refused rather
     // than shown to the chain as something it is not. Naming it beats a stream that hangs.
     if head.method() == http::Method::CONNECT {
-        eprintln!(
+        crate::diag_throttled!("[warn] [h2] CONNECT streams refused", 5, 30,
             "[warn] [h2] {}: a CONNECT stream arrived. firegex terminates HTTP/2 to show \
              the filters each exchange as HTTP/1.1, and a tunnel has no such exchange in \
              it, so the stream is refused rather than carried unread.",
@@ -541,7 +541,7 @@ async fn exchange<O: Outbound>(
     // request as it came, so two that disagree would be a filter reading one host while
     // the service answers for another. Malformed by RFC 9113 §8.3.1, and treated so.
     if let Some(why) = conflicting_authority(&head) {
-        eprintln!(
+        crate::diag_throttled!("[warn] [h2] requests with two authorities", 5, 30,
             "[warn] [h2] {}: {why}, so the filters would be shown one host while the \
              service routes on the other. The stream is reset as malformed.",
             ctx.client

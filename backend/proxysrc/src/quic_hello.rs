@@ -20,7 +20,7 @@
 //! ordinary) is reassembled from its CRYPTO frames across datagrams, in whatever order
 //! they arrive.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fmt;
 use std::io::{self, IoSliceMut};
 use std::net::SocketAddr;
@@ -34,20 +34,33 @@ use quinn::{AsyncUdpSocket, UdpPoller};
 use rustls::quic::{Suite, Version};
 use rustls::Side;
 
-/// How many clients' hellos may be in progress at once. Past it new ones are not read —
-/// their connections fall back rather than this growing without end under a flood of
-/// forged Initials, which cost the sender nothing: the keys are public, so a valid one can
-/// be made from any address. With `MAX_HELLO` this bounds what a flood can make this
-/// process hold to 16 MiB.
+/// How many clients' hellos may be in progress at once. Past it the one that has been
+/// waiting longest makes room — a hello is claimed within milliseconds of arriving, so the
+/// oldest is the one least likely to still be wanted. Forged Initials cost the sender
+/// nothing (the keys are public, so a valid one can be made from any address), and with
+/// `MAX_HELLO` this bounds what a flood can make this process hold to 16 MiB.
+///
+/// It used to refuse newcomers instead, so a thousand forged Initials every `KEPT_FOR`
+/// were enough to stop every real client's hello from being read.
 const MAX_PENDING: usize = 1024;
 
 /// How long an unfinished or unclaimed hello is kept.
 const KEPT_FOR: Duration = Duration::from_secs(10);
 
+/// How often the table is swept for hellos older than `KEPT_FOR`. Not on every packet: a
+/// sweep walks the whole table, and every packet of a flood would pay for it.
+const SWEEP_EVERY: Duration = Duration::from_secs(1);
+
 /// Most CRYPTO bytes kept for one hello. A ClientHello is one or two kilobytes, a few with
 /// post-quantum key shares and a resumption ticket; this is a cap on what a peer can make
 /// this process hold, not a size anybody meets.
 const MAX_HELLO: usize = 16 * 1024;
+
+/// Most CRYPTO fragments kept for one hello, whatever their size. Real clients split a
+/// hello into a handful; the cap is what stops a peer sending pieces nobody counted —
+/// empty ones, which `MAX_HELLO` did not see at all, grew one hello without end and had
+/// every packet sort all of them again, inside the endpoint's receive path.
+const MAX_FRAGMENTS: usize = 64;
 
 /// One client's hello as it arrives.
 struct Pending {
@@ -60,9 +73,56 @@ struct Pending {
     since: Instant,
 }
 
+/// The hellos in progress, and the order they began in.
+struct Table {
+    by_client: HashMap<SocketAddr, Pending>,
+    /// When each entry began, oldest first. An entry replaced or claimed leaves its line
+    /// here behind it; eviction skips a line whose time no longer matches the entry's.
+    order: VecDeque<(SocketAddr, Instant)>,
+    swept: Instant,
+}
+
+impl Table {
+    fn new() -> Self {
+        Self { by_client: HashMap::new(), order: VecDeque::new(), swept: Instant::now() }
+    }
+
+    fn sweep(&mut self, now: Instant) {
+        if now.duration_since(self.swept) < SWEEP_EVERY && self.by_client.len() < MAX_PENDING {
+            return;
+        }
+        self.swept = now;
+        self.by_client.retain(|_, p| now.duration_since(p.since) < KEPT_FOR);
+        let by_client = &self.by_client;
+        self.order.retain(|(from, since)| by_client.get(from).is_some_and(|p| p.since == *since));
+    }
+
+    /// Make room for one more by letting go of the entry that began longest ago.
+    fn evict_oldest(&mut self) {
+        while let Some((from, since)) = self.order.pop_front() {
+            if self.by_client.get(&from).is_some_and(|p| p.since == since) {
+                self.by_client.remove(&from);
+                return;
+            }
+        }
+    }
+
+    fn start(&mut self, from: SocketAddr, dcid: Vec<u8>, now: Instant) -> &mut Pending {
+        self.order.push_back((from, now));
+        self.by_client.insert(from, Pending {
+            dcid,
+            fragments: Vec::new(),
+            held: 0,
+            alpn: None,
+            since: now,
+        });
+        self.by_client.get_mut(&from).expect("just inserted")
+    }
+}
+
 /// The hellos being read, by the address they came from.
 pub struct Hellos {
-    pending: Mutex<HashMap<SocketAddr, Pending>>,
+    pending: Mutex<Table>,
     arrived: tokio::sync::Notify,
     suite: Suite,
 }
@@ -88,7 +148,7 @@ impl Hellos {
             .and_then(|s| s.quic_suite())
             .expect("TLS13_AES_128_GCM_SHA256 carries QUIC");
         Self {
-            pending: Mutex::new(HashMap::new()),
+            pending: Mutex::new(Table::new()),
             arrived: tokio::sync::Notify::new(),
             suite,
         }
@@ -106,39 +166,48 @@ impl Hellos {
     }
 
     fn absorb(&self, from: SocketAddr, packet: Initial) {
-        let Ok(mut pending) = self.pending.lock() else { return };
+        let Ok(mut table) = self.pending.lock() else { return };
         let now = Instant::now();
-        if pending.len() >= MAX_PENDING {
-            pending.retain(|_, p| now.duration_since(p.since) < KEPT_FOR);
-            if pending.len() >= MAX_PENDING && !pending.contains_key(&from) {
-                return;
+        table.sweep(now);
+        // A new attempt — a Retry answered, another connection from the same port — or one
+        // kept past its time starts again; an address seen for the first time needs room.
+        let fresh = match table.by_client.get(&from) {
+            Some(entry) => entry.dcid != packet.dcid || now.duration_since(entry.since) >= KEPT_FOR,
+            None => {
+                if table.by_client.len() >= MAX_PENDING {
+                    table.evict_oldest();
+                }
+                true
             }
-        }
-        let entry = pending.entry(from).or_insert_with(|| Pending {
-            dcid: packet.dcid.clone(),
-            fragments: Vec::new(),
-            held: 0,
-            alpn: None,
-            since: now,
-        });
-        if entry.dcid != packet.dcid {
-            *entry = Pending {
-                dcid: packet.dcid.clone(),
-                fragments: Vec::new(),
-                held: 0,
-                alpn: None,
-                since: now,
-            };
-        }
+        };
+        let entry = if fresh {
+            table.start(from, packet.dcid.clone(), now)
+        } else {
+            table.by_client.get_mut(&from).expect("looked up above")
+        };
         if entry.alpn.is_some() {
             return;
         }
+        let mut grew = false;
         for (offset, data) in packet.crypto {
-            if entry.held + data.len() > MAX_HELLO {
-                return;
+            // An empty piece says nothing, and one past where any hello could reach is not
+            // part of one; neither is worth keeping.
+            if data.is_empty() {
+                continue;
+            }
+            let reaches = offset.saturating_add(data.len() as u64);
+            if reaches > MAX_HELLO as u64
+                || entry.fragments.len() >= MAX_FRAGMENTS
+                || entry.held + data.len() > MAX_HELLO
+            {
+                break;
             }
             entry.held += data.len();
             entry.fragments.push((offset, data));
+            grew = true;
+        }
+        if !grew {
+            return;
         }
         if let Some(alpn) = client_hello_alpn(&entry.fragments) {
             entry.alpn = Some(alpn);
@@ -148,9 +217,9 @@ impl Hellos {
     }
 
     fn take(&self, from: SocketAddr) -> Option<Vec<Vec<u8>>> {
-        let mut pending = self.pending.lock().ok()?;
-        if pending.get(&from)?.alpn.is_some() {
-            return pending.remove(&from).and_then(|p| p.alpn);
+        let mut table = self.pending.lock().ok()?;
+        if table.by_client.get(&from)?.alpn.is_some() {
+            return table.by_client.remove(&from).and_then(|p| p.alpn);
         }
         None
     }
@@ -534,6 +603,63 @@ mod tests {
         tampered[last] ^= 0xff;
         hellos.observe(from(), &tampered);
         assert_eq!(hellos.take(from()), None);
+    }
+
+    fn kept_for(hellos: &Hellos, client: SocketAddr) -> Option<usize> {
+        hellos.pending.lock().unwrap().by_client.get(&client).map(|p| p.fragments.len())
+    }
+
+    /// Empty CRYPTO frames cost nothing to send and were counted by nothing: an Initial
+    /// full of them grew one client's hello by hundreds of pieces per packet, without end,
+    /// and every packet sorted all of them again inside the endpoint's receive path.
+    #[test]
+    fn empty_pieces_are_not_kept() {
+        let hellos = Hellos::new();
+        let empties: Vec<(u64, &[u8])> = (0..300u64).map(|i| (i, &b""[..])).collect();
+        let dcid = b"\x31\x32\x33\x34\x35\x36\x37\x38";
+        for number in 0..50 {
+            hellos.observe(from(), &client_initial(dcid, number, &empties));
+        }
+        assert_eq!(kept_for(&hellos, from()), Some(0));
+    }
+
+    /// Pieces that never join up from the start are held, but only so many of them.
+    #[test]
+    fn a_hello_is_kept_in_a_bounded_number_of_pieces() {
+        let hellos = Hellos::new();
+        let dcid = b"\x41\x42\x43\x44\x45\x46\x47\x48";
+        for number in 0..200u64 {
+            hellos.observe(from(), &client_initial(dcid, number, &[(100 + number * 2, b"x")]));
+        }
+        let kept = kept_for(&hellos, from()).unwrap();
+        assert!(kept <= MAX_FRAGMENTS, "{kept} pieces kept for one hello");
+    }
+
+    #[test]
+    fn a_piece_beyond_any_hello_is_not_kept() {
+        let hellos = Hellos::new();
+        let dcid = b"\x51\x52\x53\x54\x55\x56\x57\x58";
+        hellos.observe(from(), &client_initial(dcid, 0, &[(MAX_HELLO as u64 + 1, b"far")]));
+        assert_eq!(kept_for(&hellos, from()), Some(0));
+    }
+
+    /// A table full of hellos nobody finished makes room rather than turning newcomers
+    /// away: refusing them meant a thousand forged Initials every few seconds stopped
+    /// every real client's hello from being read.
+    #[test]
+    fn a_full_table_makes_room_for_the_next_client() {
+        let hellos = Hellos::new();
+        let unfinished = hello_with(&[b"h3"]);
+        for n in 0..MAX_PENDING as u32 {
+            let forged = SocketAddr::from(([10, (n >> 16) as u8, (n >> 8) as u8, n as u8], 443));
+            let dcid = n.to_be_bytes().repeat(2);
+            hellos.observe(forged, &client_initial(&dcid, 0, &[(0, &unfinished[..10])]));
+        }
+        assert_eq!(hellos.pending.lock().unwrap().by_client.len(), MAX_PENDING);
+        let hello = hello_with(&[b"fgex-late"]);
+        hellos.observe(from(), &client_initial(b"\x61\x62\x63\x64\x65\x66\x67\x68", 0, &[(0, &hello)]));
+        assert_eq!(hellos.take(from()), Some(vec![b"fgex-late".to_vec()]));
+        assert!(hellos.pending.lock().unwrap().by_client.len() <= MAX_PENDING);
     }
 
     #[tokio::test]

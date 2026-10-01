@@ -7,13 +7,13 @@ Firewall Rules is a plain [nftables](https://netfilter.org/) allow/drop/reject r
 Each rule matches on:
 
 - **Protocol**: `tcp`, `udp`, `both` (adds a matching TCP and UDP rule) or `any` (matches all protocols, ports are ignored).
-- **Source / Destination**: an IP/CIDR, or an interface name (e.g. `eth0`) instead of an address.
+- **Source / Destination**: an IP/CIDR, or an interface name (e.g. `eth0`) instead of an address — at most 15 characters of letters, digits and `_.:-`, as the kernel takes them, optionally ending in `*` to match every interface starting that way (`br-*`).
 - **Source / Destination port range**: `from`/`to` for each side; leave as the full `1-65535` range to match any port.
 - **Direction** (`mode`): `in` (incoming traffic — the nftables `INPUT`/`PREROUTING` hook), `out` (outgoing traffic — `OUTPUT`/`POSTROUTING`), or `forward` (traffic routed through this host, `FORWARD` — only meaningful with the `filter` table, see below).
 - **Table**: `filter` — standard firewall rules evaluated at the normal input/output/forward hooks; `mangle` — rules evaluated earlier in the pipeline (`prerouting`/`postrouting`, before routing decisions), useful when a rule needs to run before other processing (e.g. before a an external-proxy [service](services.md) or TLS rule takes effect on the same traffic).
 - **Action**: `accept`, `drop`, or `reject` (closes the connection with an ICMP/RST reply instead of silently dropping it). `reject` on outgoing (`out`) traffic isn't meaningful — Firegex silently treats it as `drop` in that direction.
 
-Rules are evaluated in order; the first match wins. Traffic that matches no rule falls through to the global **policy** (`accept`/`drop`/`reject`), which applies to incoming and forwarded traffic — outgoing traffic is always allowed by default regardless of the policy, so Firegex itself is never at risk of losing its own outbound connectivity by misconfiguring rules.
+Rules are evaluated in order; the first match wins. A change nftables refuses is refused as a whole: the firewall already in force stays exactly as it was, and so does the saved configuration. Traffic that matches no rule falls through to the global **policy** (`accept`/`drop`/`reject`), which applies to incoming and forwarded traffic — outgoing traffic is always allowed by default regardless of the policy, so Firegex itself is never at risk of losing its own outbound connectivity by misconfiguring rules.
 
 ### Global settings
 

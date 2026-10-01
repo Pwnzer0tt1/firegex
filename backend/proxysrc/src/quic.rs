@@ -265,7 +265,7 @@ impl QuicRelay {
             let relay = Arc::clone(&self);
             tokio::spawn(async move { relay.admit(incoming).await });
         }
-        eprintln!("[warn] [quic] the endpoint for {} closed", self.upstream);
+        crate::diag!("[warn] [quic] the endpoint for {} closed", self.upstream);
     }
 
     /// Decide whether this connection is carried at all, and on what terms.
@@ -296,7 +296,7 @@ impl QuicRelay {
         if over {
             self.stats.over_limit.fetch_add(1, Ordering::Relaxed);
             if !self.stats.warned_limit.swap(true, Ordering::Relaxed) {
-                eprintln!(
+                crate::diag!(
                     "[warn] [quic] {limit} concurrent connections reached; further \
                      connections are being {} until it clears",
                     if self.cfg.over_limit_forwards {
@@ -331,7 +331,7 @@ impl QuicRelay {
 
         let _slot = slot;
         if let Err(e) = self.serve_connection(incoming, client, chain).await {
-            eprintln!("[info] [quic] connection from {client} ended: {e}");
+            crate::diag_throttled!("[info] [quic] connections that ended with an error", 20, 10, "[info] [quic] connection from {client} ended: {e}");
         }
     }
 
@@ -394,7 +394,7 @@ impl QuicRelay {
                 // and with HTTP/1.1 behind it is `h3`, which is what firegex itself is
                 // offering to speak on the service's behalf.
                 if let Some(protocol) = &agreed {
-                    eprintln!(
+                    crate::diag_throttled!("[warn] [quic] clients that refused the protocol the service chose", 5, 30,
                         "[warn] [quic] {client} would not take `{}`, which is what {} chose: {e}",
                         String::from_utf8_lossy(protocol),
                         match behind {
@@ -442,7 +442,7 @@ impl QuicRelay {
             Some(offered) if !offered.is_empty() => offered,
             _ => {
                 if !self.warned_hello.swap(true, Ordering::Relaxed) {
-                    eprintln!(
+                    crate::diag!(
                         "[warn] [quic] could not read which protocols {client} offered; \
                          offering {} to {} instead. A client speaking something else is \
                          refused by the handshake.",
@@ -471,7 +471,7 @@ impl QuicRelay {
                     .source_spoof_failures
                     .fetch_add(1, Ordering::Relaxed);
                 if !self.stats.warned_spoof.swap(true, Ordering::Relaxed) {
-                    eprintln!(
+                    crate::diag!(
                         "[warn] [quic] cannot reach {} as {}: {e}. Falling back to our own \
                          address — the service will not see real client IPs.",
                         self.upstream,
@@ -594,7 +594,7 @@ impl QuicRelay {
             // have no HTTP/1.1 form to be sent in. Refused here, once, with a reason the
             // client can read — rather than carried into a translation nobody could
             // describe, or dropped silently.
-            eprintln!(
+            crate::diag_throttled!("[warn] [quic] connections that agreed on something other than HTTP/3", 5, 30,
                 "[warn] [quic] {client}: this service is reached over HTTP/1.1, so only \
                  HTTP/3 can be carried to it — the connection agreed on something else.",
             );
@@ -721,7 +721,7 @@ fn log_end(client: SocketAddr, side: &str, e: quinn::ConnectionError) {
         quinn::ConnectionError::ApplicationClosed(_)
         | quinn::ConnectionError::LocallyClosed
         | quinn::ConnectionError::ConnectionClosed(_) => {}
-        other => eprintln!("[info] [quic] {client}: the {side} ended the connection: {other}"),
+        other => crate::diag_throttled!("[info] [quic] connections ended by one side", 20, 10, "[info] [quic] {client}: the {side} ended the connection: {other}"),
     }
 }
 
@@ -867,7 +867,7 @@ impl Carrier {
                 // reason as the first and the thousandth would too.
                 if !complained {
                     complained = true;
-                    eprintln!("[info] [quic] {}: cannot carry a datagram: {e}", self.client);
+                    crate::diag_throttled!("[info] [quic] connections whose datagrams could not be carried", 20, 10, "[info] [quic] {}: cannot carry a datagram: {e}", self.client);
                 }
             }
         }
@@ -906,7 +906,7 @@ impl Carrier {
             let (far_send, far_recv) = match far {
                 Ok(pair) => pair,
                 Err(e) => {
-                    eprintln!("[info] [quic] cannot carry a stream through: {e}");
+                    crate::diag_throttled!("[info] [quic] streams that could not be carried", 20, 10, "[info] [quic] cannot carry a stream through: {e}");
                     chain.current().connection_closed(connection);
                     return;
                 }
@@ -963,7 +963,7 @@ impl Carrier {
             let far_send = match far {
                 Ok(send) => send,
                 Err(e) => {
-                    eprintln!("[info] [quic] cannot carry a stream through: {e}");
+                    crate::diag_throttled!("[info] [quic] streams that could not be carried", 20, 10, "[info] [quic] cannot carry a stream through: {e}");
                     chain.current().connection_closed(connection);
                     return;
                 }
