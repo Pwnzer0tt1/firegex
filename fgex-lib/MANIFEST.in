@@ -1,4 +1,3 @@
-include requirements.txt
 recursive-include llhttp *.c *.h
 include llhttp/PROVENANCE.md
 include llhttp/LICENSE.pyllhttp

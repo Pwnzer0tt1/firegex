@@ -66,7 +66,7 @@ there — a file only processed for *site* directories, so putting that path in 
 imports pytest and still leaves `pyworker.py --check` unable to find the filter library.
 The script installs into the environment it is running in, which resolves all of it. Two
 things that trip a root run were found by trying it, and both are fixed rather than worked
-around: `tests/requirements.txt` was missing `fastapi` (see the file for why one unit test
+around: the `test` group in `tests/pyproject.toml` was missing `fastapi` (see the file for why one unit test
 needs the backend's own dependency, and why its absence stops the *whole* run rather than
 one file), and `./run_tests.sh unit` — advertised in the script's own help — took `unit` as
 a **password** and ran everything against an instance it could not authenticate to.
@@ -108,7 +108,7 @@ Mount `backend/`, not `backend/proxysrc/`: `tests/pyworker.rs` launches `../modu
 
 The suite runs against an instance with authentication turned off as well: `login()` reads a 403 there as "there is nothing to log in to" rather than as a failure, since every request is already allowed. `integration/test_auth.py` is the exception and skips itself — it is about passwords, and those endpoints answer 403 in that mode by design. Note `BearerSession.post` copies the header dict rather than writing into it: the form `Content-Type` belongs to the login request alone, and it used to stick, which went unnoticed only because a successful login replaces the whole dict a moment later.
 
-CI (`.github/workflows/release.yml`) runs **only on `release: published`**, not on pushes or pull requests — nothing validates a PR automatically. Two jobs gate every publish job below them, both on `ubuntu-latest` and `ubuntu-24.04-arm`: `run_tests` does `python3 run.py start -P testpassword` then `cd tests && sudo ./run_tests.sh`, and `engine_tests` runs the Rust suite (`cargo test` in `proxysrc`) in the Dockerfile's `enginetest` stage — the compiler stage plus the filter library the pyworker tests start. That suite was not run before a release at all, though much of what it covers (HTTP/2, HTTP/3 and QUIC termination, the worker's framing, the UDP relay) no integration test reaches. `enginetest` sits **before** `final` on purpose: a build with no target, which is what compose does, takes the last stage. The tests' dependencies are pure python; `iperf3`, matplotlib and numpy belong to `bench/requirements.txt` and CI installs none of them.
+CI (`.github/workflows/release.yml`) runs **only on `release: published`**, not on pushes or pull requests — nothing validates a PR automatically. Two jobs gate every publish job below them, both on `ubuntu-latest` and `ubuntu-24.04-arm`: `run_tests` does `python3 run.py start -P testpassword` then `cd tests && sudo ./run_tests.sh`, and `engine_tests` runs the Rust suite (`cargo test` in `proxysrc`) in the Dockerfile's `enginetest` stage — the compiler stage plus the filter library the pyworker tests start. That suite was not run before a release at all, though much of what it covers (HTTP/2, HTTP/3 and QUIC termination, the worker's framing, the UDP relay) no integration test reaches. `enginetest` sits **before** `final` on purpose: a build with no target, which is what compose does, takes the last stage. The tests' dependencies are pure python; `iperf3`, matplotlib and numpy belong to the `bench` group of `tests/pyproject.toml` and CI installs none of them.
 
 ## Architecture
 

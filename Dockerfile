@@ -57,12 +57,12 @@ RUN python3.14 -m pip install --no-cache-dir --break-system-packages /fgex-lib
 #Building main conteiner
 FROM --platform=$TARGETARCH base AS final
 
-COPY ./backend/requirements.txt /execute/requirements.txt
+COPY ./backend/pyproject.toml /execute/pyproject.toml
 COPY ./fgex-lib /execute/fgex-lib
 
 RUN dnf -y update && dnf install -y gcc-c++ python3.14-devel uv git &&\
     uv pip install --no-cache --system ./fgex-lib &&\
-    uv pip install --no-cache --system -r /execute/requirements.txt &&\
+    uv pip install --no-cache --system -r /execute/pyproject.toml &&\
     uv cache clean && dnf remove -y gcc-c++ python3.14-devel uv git && dnf clean all
 
 COPY ./backend/ /execute/

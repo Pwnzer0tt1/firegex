@@ -23,32 +23,12 @@ LLHTTP = setuptools.Extension(
     extra_compile_args=["-O3"],
 )
 
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
-
-with open('requirements.txt', 'r', encoding='utf-8') as f:
-    required = [ele.strip() for ele in f.read().splitlines() if not ele.strip().startswith("#") and ele.strip() != ""]
-
+# Everything else about the package is in pyproject.toml. The version stays here because
+# the release workflow writes the tag over the placeholder, which is not a valid version
+# until it has.
 VERSION = "{{VERSION_PLACEHOLDER}}"
 
 setuptools.setup(
-    name="firegex",
-    version= VERSION if "{" not in VERSION else "0.0.0", #uv pip install -U . --no-cache-dir for testing
-    author="Pwnzer0tt1",
-    author_email="pwnzer0tt1@poliba.it",
-    scripts=["fgex"],
-    py_modules=["firegex"],
-    install_requires=required,
-    include_package_data=True,
-    description="Firegex client",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/pwnzer0tt1/firegex",
-    packages=setuptools.find_packages(),
+    version=VERSION if "{" not in VERSION else "0.0.0", #uv pip install -U . --no-cache-dir for testing
     ext_modules=[LLHTTP],
-    classifiers=[
-        "Programming Language :: Python :: 3",
-        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
-    ],
-    python_requires='>=3.10',
 )

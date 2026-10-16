@@ -47,7 +47,10 @@ fi
 ADDRESS="${FIREGEX_ADDRESS:-http://127.0.0.1:4444/}"
 ADDRESS="${ADDRESS%/}/"
 
-pip3 install -q -r requirements.txt
+# The `test` group of pyproject.toml, read here rather than with `pip install --group`,
+# which needs pip 25.1 — older than what CI's runners ship.
+python3 -c 'import tomllib; print("\n".join(tomllib.load(open("pyproject.toml", "rb"))["dependency-groups"]["test"]))' \
+    | pip3 install -q -r /dev/stdin
 # The filter library is imported straight out of the source tree, and it carries a C
 # extension — the llhttp binding that parses HTTP — which therefore has to be built. An
 # editable install builds it in place; without this `unit/` cannot even be collected.

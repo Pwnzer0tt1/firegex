@@ -379,7 +379,7 @@ type Handler = (m: RegExpMatchArray, body: Json, query: Record<string, string>) 
 const routes: [string, RegExp, Handler][] = [
 
     // ---- global
-    ["GET", /^status$/, () => ({ status: "run", loggined: true, version: "demo", auth_disabled: false })],
+    ["GET", /^status$/, () => ({ status: "run", loggined: true, version: import.meta.env.VITE_VERSION || "demo", auth_disabled: false })],
     ["POST", /^login$/, () => ({ access_token: "demo-token", token_type: "bearer" })],
     ["POST", /^set-password$/, () => ok],
     ["POST", /^change-password$/, () => ({ ...ok, access_token: "demo-token" })],

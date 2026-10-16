@@ -248,6 +248,55 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # The README's picture of the interface, retaken for every release so it never shows a
+  # version that no longer exists. From the demo build served locally rather than from the
+  # published demo: that deploys on its own schedule, and could still be the old one.
+  update_readme_screenshot:
+    needs: [run_tests, engine_tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright
+          playwright install --with-deps chromium
+
+      - name: Build the demo
+        working-directory: frontend
+        run: bun install --frozen-lockfile && VITE_VERSION="${{ github.ref_name }}" bun run build:demo
+
+      - name: Screenshot it
+        working-directory: frontend
+        run: |
+          bunx vite preview --port 4173 --strictPort &
+          timeout 60 bash -c 'until curl -sf http://localhost:4173/ > /dev/null; do sleep 0.5; done'
+          python3 ../docs/screenshot_demo.py http://localhost:4173/
+
+      - name: Commit the new screenshot
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update README screenshot for ${{ github.ref_name }}"
+          file_pattern: 'docs/Firegex_Screenshot.png'
+          branch: main
+
   # `firegex` carries a C extension — the llhttp binding in `fgex-lib/llhttp/` — so it
   # is no longer one universal wheel. A wheel is built per platform and per interpreter
   # here, and the sdist goes up beside them: where no wheel matches, pip compiles from
@@ -351,8 +400,11 @@ jobs:
           user: __token__
           password: ${{ secrets.PYPI_API_TOKEN }}
 
+  # After `firegex`, never beside it: this package is nothing but `firegex==<tag>`, so
+  # published while a wheel job failed it is an alias for a version that does not exist,
+  # and `pip install fgex` fails for everybody until somebody notices.
   pypi_publish_fgex_alias:
-    needs: [run_tests, engine_tests]
+    needs: pypi_publish_firegex
     runs-on: ubuntu-latest
     permissions:
       contents: read

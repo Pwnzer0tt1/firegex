@@ -12,9 +12,9 @@ most of this page is about. `pytest` does not collect this directory.
 | `stress_test_history.py` | a soak test for `HttpHistory` under load |
 | `results_plotter.py` | redraws the SVGs in `results/` from the CSVs beside them |
 
-These need more than the tests do — `pip3 install -r requirements.txt` here, on top of
-the one a directory up, and `iperf3` itself installed as a package because the python
-binding links against it.
+These need more than the tests do — the `bench` group of `../pyproject.toml`
+(`pip3 install --group ../pyproject.toml:bench` from here, pip 25.1 or later), and `iperf3`
+itself installed as a package because the python binding links against it.
 
 # Running a benchmark
 

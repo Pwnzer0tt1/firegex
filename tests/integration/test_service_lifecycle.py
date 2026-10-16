@@ -110,7 +110,10 @@ def test_stopping_a_proxied_service_does_not_cut_its_connections(api, protected,
             "a stopped service went on filtering the connections it had"
         time.sleep(3)
         assert _held_open(server, b"a while later") == b"a while later"
-        assert _log_says(api, service_id, "carry on unfiltered"), \
+        # The line waits for a STATS report taken after the stop, which the engine sends
+        # every two seconds and drops while the backend is behind — under a full suite on
+        # a busy machine, ten seconds was once not enough to see one.
+        assert _log_says(api, service_id, "carry on unfiltered", wait=30), \
             "the log did not say connections were still being carried"
     finally:
         server.close_client()
