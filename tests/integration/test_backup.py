@@ -130,8 +130,15 @@ def test_a_deleted_service_comes_back_whole_and_filtering(api, protected, filter
     _filters_as_configured(channel)
 
     # Read through the services API first, which writes the counters still waiting: what
-    # is compared afterwards includes them.
+    # is compared afterwards includes them. Until two reads agree, because on NFQUEUE a
+    # block reaches the backend after the client has already seen the refusal — one
+    # counted between this snapshot and the export failed the 5.0.0 release run.
     before = _snapshot(api, service_id)
+    for _ in range(10):
+        time.sleep(SETTLE)
+        before, settled = _snapshot(api, service_id), before
+        if before == settled:
+            break
     backup = api.export_backup()
 
     assert api.services_delete(service_id)
