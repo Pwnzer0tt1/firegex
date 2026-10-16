@@ -64,7 +64,9 @@ it work at all: `pip install --user` put every dependency in the invoking user's
 site-packages, which a root process does not read, and the editable `firegex` is a `.pth`
 there — a file only processed for *site* directories, so putting that path in `PYTHONPATH`
 imports pytest and still leaves `pyworker.py --check` unable to find the filter library.
-The script installs into the environment it is running in, which resolves all of it. Two
+The script installs into a venv of its own (`tests/.venv`), which resolves all of it — and
+not into the system interpreter, where a root pip on Ubuntu cannot replace what apt
+installed (`typing_extensions`, no RECORD file) and stopped the 5.0.0 release gate. Two
 things that trip a root run were found by trying it, and both are fixed rather than worked
 around: the `test` group in `tests/pyproject.toml` was missing `fastapi` (see the file for why one unit test
 needs the backend's own dependency, and why its absence stops the *whole* run rather than

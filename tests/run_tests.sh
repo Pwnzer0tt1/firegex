@@ -47,14 +47,23 @@ fi
 ADDRESS="${FIREGEX_ADDRESS:-http://127.0.0.1:4444/}"
 ADDRESS="${ADDRESS%/}/"
 
+# Into a venv of its own, never the system interpreter. As root on Ubuntu, pip into the
+# system Python has to replace packages apt installed, and it cannot: `typing_extensions`
+# has no RECORD file, the install stops, and the run went on to report "No module named
+# pytest" — which is how the 5.0.0 release gate failed. A venv is also a site directory,
+# so the editable `firegex` below is found by `sys.executable` subprocesses too.
+VENV="${FIREGEX_TEST_VENV:-.venv}"
+[[ -x "$VENV/bin/python3" ]] || python3 -m venv "$VENV" || exit 1
+PY="$VENV/bin/python3"
+
 # The `test` group of pyproject.toml, read here rather than with `pip install --group`,
 # which needs pip 25.1 — older than what CI's runners ship.
-python3 -c 'import tomllib; print("\n".join(tomllib.load(open("pyproject.toml", "rb"))["dependency-groups"]["test"]))' \
-    | pip3 install -q -r /dev/stdin
+"$PY" -c 'import tomllib; print("\n".join(tomllib.load(open("pyproject.toml", "rb"))["dependency-groups"]["test"]))' \
+    | "$PY" -m pip install -q -r /dev/stdin || exit 1
 # The filter library is imported straight out of the source tree, and it carries a C
 # extension — the llhttp binding that parses HTTP — which therefore has to be built. An
 # editable install builds it in place; without this `unit/` cannot even be collected.
-pip3 install -q -e ../fgex-lib
+"$PY" -m pip install -q -e ../fgex-lib || exit 1
 
 printf 'Waiting for firegex at %s' "$ADDRESS"
 until curl --output /dev/null --silent --fail "${ADDRESS}api/status"; do
@@ -69,4 +78,4 @@ if [[ "$SET_PASSWORD" == "1" ]]; then
     echo "Password set."
 fi
 
-exec python3 -m pytest --fg-address "$ADDRESS" --fg-password "$PASSWORD" "$@"
+exec "$PY" -m pytest --fg-address "$ADDRESS" --fg-password "$PASSWORD" "$@"

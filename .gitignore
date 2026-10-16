@@ -67,3 +67,4 @@
 /fgex-lib/firegex/_llhttp*.so
 /fgex-lib/firegex/_llhttp*.pyd
 /fgex-lib/build/
+tests/.venv/
