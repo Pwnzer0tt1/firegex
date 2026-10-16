@@ -421,6 +421,9 @@ async def reset_firegex(form: ResetRequest):
 @api.get('/export')
 async def export_db():
     """Export all configuration databases as JSON"""
+    # Block counters are written once a second; without this a backup misses the last ones.
+    from routers.services import firewall
+    firewall.flush_blocks()
     dbs = {}
     if not os.path.exists('db'):
         return dbs
