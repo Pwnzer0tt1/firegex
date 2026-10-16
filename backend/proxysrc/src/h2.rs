@@ -86,11 +86,11 @@ const GOAWAY_GRACE: Duration = Duration::from_secs(2);
 impl Incoming for h2::RecvStream {
     type Error = h2::Error;
 
-    fn data(&mut self) -> impl std::future::Future<Output = Result<Option<Bytes>, h2::Error>> + Send {
+    async fn data(&mut self) -> Result<Option<Bytes>, h2::Error> {
         // Named through the trait's own path rather than `self.data()`: the inherent
         // method has the same name, and which one a bare call resolves to is not something
         // this file should depend on.
-        async move { h2::RecvStream::data(self).await.transpose() }
+        h2::RecvStream::data(self).await.transpose()
     }
 
     fn trailers(

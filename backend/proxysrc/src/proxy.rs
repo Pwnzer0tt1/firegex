@@ -1099,7 +1099,6 @@ where
 // Seven arguments rather than a struct: every one of them is moved into the task and
 // used exactly once, so a struct would be a wrapper around the argument list.
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn pump<R, W>(
     mut rd: R,
     mut wr: W,

@@ -53,7 +53,7 @@ http = "1"
 
 [dev-dependencies]
 # Test certificates are generated, never committed.
-rcgen = "0.13"
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
 # The QUIC tests stand a real client and a real service either side of the relay: the
 # same crates the engine links, so what they prove is what will run.
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
