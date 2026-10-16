@@ -43,8 +43,8 @@ where
 {
     type Error = StreamError;
 
-    fn data(&mut self) -> impl Future<Output = Result<Option<Bytes>, StreamError>> + Send {
-        async move { Ok(self.recv_data().await?.map(collect)) }
+    async fn data(&mut self) -> Result<Option<Bytes>, StreamError> {
+        Ok(self.recv_data().await?.map(collect))
     }
 
     fn trailers(
@@ -61,8 +61,8 @@ where
 {
     type Error = StreamError;
 
-    fn data(&mut self) -> impl Future<Output = Result<Option<Bytes>, StreamError>> + Send {
-        async move { Ok(self.recv_data().await?.map(collect)) }
+    async fn data(&mut self) -> Result<Option<Bytes>, StreamError> {
+        Ok(self.recv_data().await?.map(collect))
     }
 
     fn trailers(

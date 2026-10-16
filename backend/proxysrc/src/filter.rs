@@ -389,7 +389,7 @@ impl FilterChain {
             DisableReason::TimedOut => {
                 let at = monotonic_ms() + self.rearm_after.as_millis() as u64;
                 slot.rearm_at_ms.store(at, Ordering::Relaxed);
-                let _ = self.next_rearm_ms.fetch_update(Ordering::Relaxed, Ordering::Relaxed,
+                let _ = self.next_rearm_ms.try_update(Ordering::Relaxed, Ordering::Relaxed,
                     |next| (next == 0 || at < next).then_some(at));
                 crate::diag!(
                     "[warn] [filter] '{}' kept missing its {:?} deadline: traffic keeps \

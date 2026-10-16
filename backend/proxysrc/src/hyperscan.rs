@@ -235,6 +235,10 @@ impl Database {
         self.count
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
     pub fn mode(&self) -> Mode {
         self.mode
     }
@@ -278,7 +282,7 @@ extern "C" fn on_first_match(
     // SAFETY: `context` is the `&mut FirstMatch` passed to hs_scan_stream, which
     // outlives the scan and is not aliased — hyperscan calls this synchronously.
     let res = unsafe { &mut *(context as *mut FirstMatch) };
-    res.hit = Some(id as u32);
+    res.hit = Some(id);
     -1 // stop scanning: one match is enough to decide a verdict
 }
 
@@ -405,7 +409,7 @@ extern "C" fn on_every_match(
 ) -> c_int {
     // SAFETY: as above — synchronous, single-threaded, outlives the scan.
     let res = unsafe { &mut *(context as *mut AllMatches) };
-    res.hits.push(Match { id: id as u32, from, to });
+    res.hits.push(Match { id, from, to });
     // A pathological pattern over a large sample can match at nearly every offset;
     // the debugger wants a readable answer, not every one of them.
     if res.hits.len() >= res.limit {
