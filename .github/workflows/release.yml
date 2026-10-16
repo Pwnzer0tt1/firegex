@@ -355,7 +355,7 @@ jobs:
           # `-c` string because the one that matters needs a `try`: the parser has to
           # raise its *own* exception on malformed traffic, and this clean environment —
           # no `pyllhttp`, no developer's leftovers — is the only place that is tested.
-          CIBW_TEST_COMMAND: python {package}/wheel_smoke.py
+          CIBW_TEST_COMMAND: python -I {package}/wheel_smoke.py
       - uses: actions/upload-artifact@v4
         with:
           name: wheels-${{ matrix.os }}
