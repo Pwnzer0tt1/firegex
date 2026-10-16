@@ -248,6 +248,7 @@ export const Firewall = () => {
                     initialCustomInterfaces={[...src_custom_int, ...customInt]}
                     value={item.src}
                     onChange={v => ip_setter(item, v, { src: true })}
+                    placeholder="Any source"
                     includeInterfaceNames
                   />
                   <Group gap="xs" wrap="nowrap">
@@ -279,8 +280,12 @@ export const Firewall = () => {
                 <Stack gap="xs" style={{ flex: 1, minWidth: isMedium ? 0 : "100%" }}>
                   <InterfaceInput
                     initialCustomInterfaces={[...dst_custom_int, ...customInt]}
-                    defaultValue={item.dst}
+                    // Controlled, like the source beside it: uncontrolled, the box kept
+                    // whatever it was first rendered with, so a rule reordered or reset
+                    // under it went on showing the old destination.
+                    value={item.dst}
                     onChange={v => ip_setter(item, v, { dst: true })}
+                    placeholder="Any destination"
                     includeInterfaceNames
                   />
                   <Group gap="xs" wrap="nowrap">

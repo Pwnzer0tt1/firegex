@@ -2,6 +2,17 @@
 
 chown nobody -R /execute/
 
+# Whether this is the first boot of this container, told to the backend. A container's
+# environment is fixed when it is created, and Docker starting it again by itself — after
+# a reboot, a restart of the daemon, a crash under `restart: unless-stopped` — brings back
+# that environment, which may be older than what `run.py config` has said since. The
+# marker lives in the container's own layer: it survives a restart and is gone from a
+# container `run.py` creates anew.
+if [ ! -e /execute/.firegex-booted ]; then
+    touch /execute/.firegex-booted
+    export FIREGEX_FRESH_BOOT=1
+fi
+
 # Create socket directory if SOCKET_DIR is set
 if [ -n "$SOCKET_DIR" ]; then
     mkdir -p "$SOCKET_DIR"
@@ -20,18 +31,34 @@ fi
 
 echo "[*] Attempting to start with capabilities..."
 
-if capsh --caps="cap_net_admin,cap_setpcap,cap_setuid,cap_setgid,cap_sys_nice+eip" \
-    --keep=1 \
-    --user=nobody \
-    --addamb=cap_net_admin,cap_sys_nice \
-    -- -c "exit 0"
-then
-  exec capsh --caps="cap_net_admin,cap_setpcap,cap_setuid,cap_setgid,cap_sys_nice+eip" \
-    --keep=1 \
-    --user=nobody \
-    --addamb=cap_net_admin,cap_sys_nice \
-    --shell=/usr/bin/python3 \
-    -- /execute/app.py DOCKER
+# Two sets, tried in order, because they are not equally important.
+#
+# `cap_net_raw` is what lets the proxy engine open the packet socket it writes decrypted
+# traffic to, for an operator capturing `firegex0`. It is a capture aid: a host that will
+# not grant it should lose the capture, not the firewall. So the set without it is tried
+# next, and only if *that* fails does anything run as root.
+try_caps() {
+    caps="$1"
+    ambient="$2"
+    capsh --caps="$caps" --keep=1 --user=nobody --addamb="$ambient" -- -c "exit 0" 2>/dev/null
+}
+
+run_caps() {
+    exec capsh --caps="$1" --keep=1 --user=nobody --addamb="$2" \
+        --shell=/usr/bin/python3 -- /execute/app.py DOCKER
+}
+
+FULL="cap_net_admin,cap_net_raw,cap_setpcap,cap_setuid,cap_setgid,cap_sys_nice+eip"
+FULL_AMB="cap_net_admin,cap_net_raw,cap_sys_nice"
+BASE="cap_net_admin,cap_setpcap,cap_setuid,cap_setgid,cap_sys_nice+eip"
+BASE_AMB="cap_net_admin,cap_sys_nice"
+
+if try_caps "$FULL" "$FULL_AMB"; then
+    run_caps "$FULL" "$FULL_AMB"
+elif try_caps "$BASE" "$BASE_AMB"; then
+    echo "[!] no cap_net_raw: TLS services will run, but their decrypted traffic"
+    echo "    cannot be written to the capture interface"
+    run_caps "$BASE" "$BASE_AMB"
 else
     echo "[!] capsh failed, running with root user"
     exec python3 /execute/app.py DOCKER

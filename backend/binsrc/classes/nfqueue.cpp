@@ -19,14 +19,10 @@ using namespace std;
 namespace Firegex{
 namespace NfQueue{
 
-/*  Largest packet we are willing to hand back to the kernel in a verdict.
-    NFQUEUE payloads are carried in a netlink attribute whose length field is
-    16 bit wide, so anything above this can never be re-injected anyway; the
-    cap exists to stop a python filter from making us allocate an arbitrary
-    amount of memory through mangle_custom_pkt(). */
-const size_t MAX_VERDICT_PACKET_SIZE = 0xffff;
-
 /*  Reads the fail-open policy once, tolerating a missing variable.
+    `strcmp(getenv(...), "1")` was the previous spelling, which dereferences a
+    null pointer the moment the binary is run without the variable set — by
+    hand, or by anything that is not the backend.
     Note that this only drives NFQA_CFG_F_FAIL_OPEN (what the kernel does when
     the queue is full) and the fallback verdict used when a packet cannot be
     parsed; the "what happens when this process is not running at all" half of
@@ -174,6 +170,35 @@ class PktRequest {
 		return packet.data()+_header_size;
 	}
 
+	// The metadata a filter is allowed to know about the layers below it. Read-only by
+	// construction: these are copies pulled out of the headers, and there is no way
+	// back from them to the bytes they came from.
+	string src_ip(){
+		if (is_ipv6){
+			return ipv6 ? ipv6->src_addr().to_string() : string();
+		}
+		return ipv4 ? ipv4->src_addr().to_string() : string();
+	}
+
+	string dst_ip(){
+		if (is_ipv6){
+			return ipv6 ? ipv6->dst_addr().to_string() : string();
+		}
+		return ipv4 ? ipv4->dst_addr().to_string() : string();
+	}
+
+	uint16_t src_port(){
+		if (tcp) return tcp->sport();
+		if (udp) return udp->sport();
+		return 0;
+	}
+
+	uint16_t dst_port(){
+		if (tcp) return tcp->dport();
+		if (udp) return udp->dport();
+		return 0;
+	}
+
 	size_t data_size(){
 		return packet.size()-_header_size;
 	}
@@ -207,58 +232,6 @@ class PktRequest {
 			return ipv6;
 		}
 		return nullptr;
-	}
-
-	void set_packet(const char* data, size_t data_size){
-		// Parsing only the header with libtins
-		Tins::PDU *data_pdu = nullptr;
-		size_t total_size;
-		// The ipv6 branch has to patch the payload length before handing the
-		// buffer to libtins, and for a mangled packet `data` points straight at
-		// the bytes object owned by the python filter: work on a private copy
-		// instead of mutating the caller's memory.
-		string raw_packet(data, data_size);
-		char* raw = raw_packet.data();
-		if (is_ipv6){
-			delete ipv6;
-			ipv6 = nullptr;
-			if (data_size >= 40){ // 40 == fixed size of ipv6 header
-				// Resetting payload length before parsing to libtins
-				uint16_t payload_len = htons(data_size-40);
-				memcpy(((uint8_t *)raw)+4, &payload_len, 2);
-			}
-			ipv6 = new Tins::IPv6((uint8_t*)raw, data_size);
-			if (tcp){
-				tcp = ipv6->find_pdu<Tins::TCP>();
-				data_pdu = tcp;
-			}else if (udp){
-				udp = ipv6->find_pdu<Tins::UDP>();
-				data_pdu = udp;
-			}else{
-				data_pdu = ipv6;
-			}
-			total_size = ipv6->size();
-		}else{
-			delete ipv4;
-			ipv4 = nullptr;
-			ipv4 = new Tins::IP((uint8_t*)raw, data_size);
-			if (tcp){
-				tcp = ipv4->find_pdu<Tins::TCP>();
-				data_pdu = tcp;
-			}else if(udp){
-				udp = ipv4->find_pdu<Tins::UDP>();
-				data_pdu = udp;
-			}else{
-				data_pdu = ipv4;
-			}
-			total_size = ipv4->size();
-		}
-		_header_size = total_size - inner_data_size(data_pdu);
-		if (_header_size > data_size){
-			throw invalid_argument("Parsed header is larger than the packet itself");
-		}
-		// Libtins can skip data if the lenght is changed to a bigger len (due to ip header total lenght), so we need to specify the data section manually
-		set_data(raw+_header_size, data_size-_header_size);
 	}
 
 	void fix_tcp_ack(){
@@ -340,27 +313,6 @@ class PktRequest {
 			mangle();
 		}else{
 			drop();
-		}
-	}
-
-	void mangle_custom_pkt(const char* raw_pkt, size_t raw_pkt_size){
-		if (action == FilterAction::NOACTION){
-			try{
-				if (raw_pkt_size > MAX_VERDICT_PACKET_SIZE){
-					throw invalid_argument("Mangled packet is too big to be re-injected");
-				}
-				set_packet(raw_pkt, raw_pkt_size);
-				reserialize();
-				action = FilterAction::MANGLE;
-			}catch(const std::exception& e){
-				#ifdef DEBUG
-				cerr << "[DEBUG] [PktRequest.mangle_custom_pkt] " << e.what() << endl;
-				#endif
-				action = FilterAction::DROP;
-			}
-			perform_action(false);
-		}else{
-			throw invalid_argument("Cannot mangle a packet that has already been accepted or dropped");
 		}
 	}
 

@@ -5,6 +5,11 @@
 #include <iostream>
 #include <tins/tcp_ip/stream_identifier.h>
 #include <map>
+#include <list>
+#include <set>
+#include <cstdlib>
+#include <atomic>
+#include <chrono>
 #include <Python.h>
 #include "../classes/netfilter.cpp"
 #include "../classes/nfqueue.cpp"
@@ -20,37 +25,71 @@ namespace PyProxy {
 class PyCodeConfig;
 class PyProxyQueue;
 
+// The library's `Action` values, which are the wire format between it and this binary.
+// 3 was `MANGLE`, a rewrite of the payload; it is gone from the library, and the number
+// stays unused so that nothing old can ever mean something new. Anything outside the
+// valid set is `INVALID`, which fails open and is reported like an exception.
 enum PyFilterResponse {
 	ACCEPT = 0,
 	DROP = 1,
 	REJECT = 2,
-	MANGLE = 3,
 	EXCEPTION = 4,
 	INVALID = 5
 };
 
-const PyFilterResponse VALID_PYTHON_RESPONSE[4] = {
+const PyFilterResponse VALID_PYTHON_RESPONSE[3] = {
 	PyFilterResponse::ACCEPT,
 	PyFilterResponse::DROP,
 	PyFilterResponse::REJECT,
-	PyFilterResponse::MANGLE
 };
 
 struct py_filter_response {
 	PyFilterResponse action;
 	string* filter_match_by = nullptr;
-	string* mangled_packet = nullptr;
 
-	py_filter_response(PyFilterResponse action, string* filter_match_by = nullptr, string* mangled_packet = nullptr):
-		action(action), filter_match_by(filter_match_by), mangled_packet(mangled_packet){}
+	py_filter_response(PyFilterResponse action, string* filter_match_by = nullptr):
+		action(action), filter_match_by(filter_match_by){}
 
 	~py_filter_response(){
-		delete mangled_packet;
 		delete filter_match_by;
 	}
 };
 
 typedef Tins::TCPIP::StreamIdentifier stream_id;
+
+// How long between two tracebacks out of this process, in seconds.
+//
+// Filter code that throws throws on every packet — a typo does not fire once — and a
+// traceback is a dozen lines. Unthrottled, one broken filter writes thousands of lines a
+// minute into a log that is a bounded ring, so the flood does not merely repeat itself:
+// it pushes out the first traceback, which was the one worth reading, along with
+// everything that was in the log before the filter broke.
+//
+// The `EXCEPTION` sent to the backend is deliberately *not* throttled with it. That is
+// one token, it costs nothing, and it is what the backend counts to say "still raising,
+// N more since" — so the operator still learns how often this is happening while being
+// shown the traceback once.
+constexpr int64_t TRACEBACK_QUIET_SECONDS = 30;
+
+// Process-wide rather than per stream: the flood is one broken filter, not one broken
+// connection, and throttling per connection would let a hundred connections print a
+// hundred copies of the same fault. Relaxed ordering is enough — two threads racing here
+// print one traceback each, which is not a problem worth a lock.
+static std::atomic<int64_t> last_traceback_at{-TRACEBACK_QUIET_SECONDS * 2};
+
+inline bool traceback_is_due() {
+	const int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+	int64_t previous = last_traceback_at.load(std::memory_order_relaxed);
+	if (now - previous < TRACEBACK_QUIET_SECONDS) return false;
+	return last_traceback_at.compare_exchange_strong(
+		previous, now, std::memory_order_relaxed);
+}
+
+// How many dropped filter contexts may wait for a full collection, and how many have on
+// this queue thread — each thread runs an interpreter of its own, so each counts its own.
+constexpr unsigned COLLECT_EVERY = 64;
+static thread_local unsigned dropped_since_collect = 0;
 
 struct pyfilter_ctx {
 
@@ -75,7 +114,18 @@ struct pyfilter_ctx {
 	~pyfilter_ctx(){
 		Py_DECREF(glob);
 		Py_DECREF(py_handle_packet);
-		PyGC_Collect();
+		// The module's functions hold these globals and the globals hold the functions,
+		// so a context is a cycle only the collector frees. Left to the interpreter's
+		// own schedule, one that lived long enough to be promoted waits for a full pass,
+		// which is triggered by object counts rather than by bytes — measured, a filter
+		// building a table at module level held ~200 MB more across a stream of short
+		// connections. A full pass per context held memory flat and cost ~1 ms each, a
+		// ceiling of about two hundred connections a second per queue thread. One pass
+		// every `COLLECT_EVERY` contexts keeps both.
+		if (++dropped_since_collect >= COLLECT_EVERY){
+			dropped_since_collect = 0;
+			PyGC_Collect();
+		}
 	}
 
 	inline void set_item_to_glob(const char* key, PyObject* value){
@@ -111,22 +161,38 @@ struct pyfilter_ctx {
 		PyObject * packet_info = PyDict_New();
 		
 		pkt->reserialize();
+		// The application payload, and metadata about everything under it. No header
+		// bytes cross this boundary in either direction: a filter reads where the
+		// traffic came from and edits what it carries, which is the one contract both
+		// network layers can honestly offer.
+		string src_ip = pkt->src_ip(), dst_ip = pkt->dst_ip();
 		set_item_to_dict(packet_info, "data", PyBytes_FromStringAndSize(data.c_str(), data.size()));
-		set_item_to_dict(packet_info, "l4_size", PyLong_FromLong(pkt->data_size()));
-		set_item_to_dict(packet_info, "raw_packet", PyBytes_FromStringAndSize(pkt->packet.c_str(), pkt->packet.size()));
 		set_item_to_dict(packet_info, "is_input", PyBool_FromLong(is_client));
 		set_item_to_dict(packet_info, "is_ipv6", PyBool_FromLong(pkt->is_ipv6));
 		set_item_to_dict(packet_info, "is_tcp", PyBool_FromLong(pkt->l4_proto == NfQueue::L4Proto::TCP));
+		set_item_to_dict(packet_info, "src_ip", PyUnicode_FromStringAndSize(src_ip.c_str(), src_ip.size()));
+		set_item_to_dict(packet_info, "dst_ip", PyUnicode_FromStringAndSize(dst_ip.c_str(), dst_ip.size()));
+		set_item_to_dict(packet_info, "src_port", PyLong_FromLong(pkt->src_port()));
+		set_item_to_dict(packet_info, "dst_port", PyLong_FromLong(pkt->dst_port()));
 
 		// Set packet info to the global context
 		set_item_to_glob("__firegex_packet_info", packet_info);
+		// No collection here. The interpreter's own collector is on (`before_loop`
+		// makes sure), and a full pass per packet cost about a millisecond with the
+		// library loaded — a ceiling of a thousand packets a second per queue thread,
+		// spent finding nothing.
 		PyObject * result = PyEval_EvalCode(py_handle_packet, glob, glob);
-		PyGC_Collect();
 		del_item_from_glob("__firegex_packet_info");
 
 		if (PyErr_Occurred()){
-			cerr << "[error] [handle_packet] Failed to execute the code " << result << endl;
-			PyErr_Print();
+			// Shown at most once every TRACEBACK_QUIET_SECONDS; the EXCEPTION below goes
+			// every time, and is what carries the count.
+			if (traceback_is_due()){
+				cerr << "[error] [handle_packet] Failed to execute the code " << result << endl;
+				PyErr_Print();
+			} else {
+				PyErr_Clear();
+			}
 			#ifdef DEBUG
 			cerr << "[DEBUG] [handle_packet] Exception raised" << endl;
 			#endif
@@ -210,28 +276,8 @@ struct pyfilter_ctx {
 			del_item_from_glob("__firegex_pyfilter_result");
 			return py_filter_response(action_enum, func_name);
 		}
-		if (action_enum == PyFilterResponse::MANGLE){
-			PyObject* mangled_packet = PyDict_GetItemString(result, "mangled_packet");
-			if (mangled_packet == nullptr){
-				del_item_from_glob("__firegex_pyfilter_result");
-				#ifdef DEBUG
-				cerr << "[DEBUG] [handle_packet] No result mangled_packet found" << endl;
-				#endif
-				return py_filter_response(PyFilterResponse::INVALID);
-			}
-			if (!PyBytes_Check(mangled_packet)){
-				#ifdef DEBUG
-				cerr << "[DEBUG] [handle_packet] mangled_packet is not a bytes" << endl;
-				#endif
-				del_item_from_glob("__firegex_pyfilter_result");
-				return py_filter_response(PyFilterResponse::INVALID);
-			}
-			string* pkt_str = new string(PyBytes_AsString(mangled_packet), PyBytes_Size(mangled_packet));
-			del_item_from_glob("__firegex_pyfilter_result");
-			return py_filter_response(PyFilterResponse::MANGLE, func_name, pkt_str);
-		}
-		
 		//Should never reach this point, but just in case of new action not managed...
+		delete func_name;
 		del_item_from_glob("__firegex_pyfilter_result");
 		return py_filter_response(PyFilterResponse::INVALID);
 	}
@@ -241,19 +287,118 @@ struct pyfilter_ctx {
 typedef map<stream_id, pyfilter_ctx*> matching_map;
 
 
+// How long a UDP flow keeps its filter's state with nothing arriving. A datagram has no
+// close to observe, so this is the only thing that ends a flow — the same minute the
+// proxy layer's relay gives one.
+constexpr int64_t UDP_IDLE_SECONDS = 60;
+
+inline long long env_number(const char* name){
+	const char* env = getenv(name);
+	if (env == nullptr) return 0;
+	char* end = nullptr;
+	long long parsed = strtoll(env, &end, 10);
+	return end != env ? parsed : 0;
+}
+
+// How many UDP flows one queue thread may hold a filter's state for at once: the
+// service's own "most connections at once", shared out between the threads — each holds
+// the contexts of the flows hashed to it, so a limit applied per thread would be the
+// operator's number times the thread count. 0, missing or unreadable means no limit, and
+// idle flows still go after `UDP_IDLE_SECONDS`, which is what keeps that from growing
+// without end.
+inline size_t max_udp_flows(){
+	static const size_t value = [](){
+		const long long limit = env_number("FIREGEX_MAX_FLOWS");
+		if (limit <= 0) return (size_t)0;
+		const long long threads = env_number("NTHREADS") > 0 ? env_number("NTHREADS") : 1;
+		return (size_t)((limit + threads - 1) / threads);
+	}();
+	return value;
+}
+
+inline int64_t steady_seconds(){
+	return std::chrono::duration_cast<std::chrono::seconds>(
+		std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 struct stream_ctx {
 
 	matching_map streams_ctx;
 
 	NfQueue::tcp_ack_map tcp_ack_ctx;
 
+	// The UDP flows holding a context, most recently used first, with when each was
+	// last seen — so the one to let go of, whether for being idle or to make room, is
+	// always at the back. TCP contexts are not in here and are never evicted: a TCP
+	// stream is released when libtins sees it close, and dropping its state while it
+	// is still open would have its next packet parsed from a clean slate mid-message.
+	list<pair<stream_id, int64_t>> udp_recent;
+	map<stream_id, list<pair<stream_id, int64_t>>::iterator> udp_where;
+
+	// The TCP streams whose filter context was thrown away while they were open — new
+	// code arrived — so the context built for their next packet knows it is taking over
+	// halfway, possibly in the middle of a message.
+	set<stream_id> taken_over;
+
 	void clean_stream_by_id(stream_id sid){
+		taken_over.erase(sid);
 		auto stream_search = streams_ctx.find(sid);
 		if (stream_search != streams_ctx.end()){
 			auto stream_match = stream_search->second;
 			delete stream_match;
 			streams_ctx.erase(stream_search->first);
 		}
+		auto flow = udp_where.find(sid);
+		if (flow != udp_where.end()){
+			udp_recent.erase(flow->second);
+			udp_where.erase(flow);
+		}
+	}
+
+	// This UDP flow was just used.
+	void udp_touch(const stream_id& sid){
+		auto flow = udp_where.find(sid);
+		if (flow != udp_where.end()){
+			udp_recent.erase(flow->second);
+		}
+		udp_recent.emplace_front(sid, steady_seconds());
+		udp_where[sid] = udp_recent.begin();
+	}
+
+	// Let go of the UDP flows nothing has arrived on for `idle` seconds.
+	void udp_expire(int64_t idle){
+		const int64_t now = steady_seconds();
+		while (!udp_recent.empty() && now - udp_recent.back().second >= idle){
+			stream_id sid = udp_recent.back().first;
+			clean_stream_by_id(sid);
+		}
+	}
+
+	// Make room for one more UDP flow under `limit`, letting the least recently used go;
+	// a limit of zero is none. Only UDP flows are counted and only UDP flows go: the
+	// ceiling used to be applied to every context, so a burst of datagrams could take the
+	// state of a TCP connection still in the middle of a request.
+	void udp_make_room(size_t limit){
+		while (limit > 0 && udp_where.size() >= limit && !udp_recent.empty()){
+			stream_id sid = udp_recent.back().first;
+			clean_stream_by_id(sid);
+		}
+	}
+
+	// Every filter context, TCP and UDP alike, for when the code they were built from is
+	// no longer the code in force. The sequence bookkeeping stays: it belongs to the
+	// connection, not to the filter, and a stream whose payload was already cut would
+	// have its acknowledgements go wrong without it.
+	void clean_filters(){
+		for (auto ele: streams_ctx){
+			if (udp_where.find(ele.first) == udp_where.end()){
+				taken_over.insert(ele.first);
+			}
+			delete ele.second;
+		}
+		streams_ctx.clear();
+		udp_recent.clear();
+		udp_where.clear();
 	}
 
 	void clean_tcp_ack_by_id(stream_id sid){
@@ -266,14 +411,12 @@ struct stream_ctx {
 	}
 
 	void clean(){
-		for (auto ele: streams_ctx){
-			delete ele.second;
-		}
+		clean_filters();
+		taken_over.clear();
 		for (auto ele: tcp_ack_ctx){
 			delete ele.second;
 		}
 		tcp_ack_ctx.clear();
-		streams_ctx.clear();
 	}
 };
 

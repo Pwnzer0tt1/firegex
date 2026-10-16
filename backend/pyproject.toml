@@ -1,0 +1,15 @@
+# Not a package: only read for its dependencies (`uv pip install -r pyproject.toml` in the
+# Dockerfile). The version firegex reports is in utils/__init__.py.
+[project]
+name = "firegex-backend"
+version = "0.0.0"
+dependencies = [
+    "fastapi[all]",
+    "httpx",
+    "uvicorn[standard]",
+    "psutil",
+    "python-jose[cryptography]",
+    "python-socketio",
+    "brotli",
+    # nftables comes from the distribution (python3-nftables), not from PyPI.
+]

@@ -3,13 +3,14 @@ import { ActionIcon, Divider, Image, Menu, Tooltip, Burger, Space, AppShell, Box
 import { errorNotify, getMainPath, isLargeScreen, logout } from '../../js/utils';
 import { AiFillHome } from "react-icons/ai"
 import { useNavigate } from 'react-router';
-import { FaLock } from 'react-icons/fa';
+import { FaLock, FaUnlockAlt } from 'react-icons/fa';
 import { MdOutlineSettingsBackupRestore } from 'react-icons/md';
 import { ImExit } from 'react-icons/im';
+import AuthModeModal from './AuthModeModal';
 import ResetPasswordModal from './ResetPasswordModal';
 import ResetModal from './ResetModal';
 import { MenuDropDownWithButton } from '../MainLayout';
-import { useNavbarStore, useSystemStore } from '../../js/store';
+import { useAuthStore, useNavbarStore, useSystemStore } from '../../js/store';
 
 
 function HeaderPage(props: any) {
@@ -17,6 +18,9 @@ function HeaderPage(props: any) {
   const navigator = useNavigate()
   const { navOpened, toggleNav } = useNavbarStore()
   const { version, authDisabled } = useSystemStore()
+  // A session from before authentication was turned off is what lets this browser put
+  // it back; without one the host is the only way, and offering the button would lie.
+  const { access_token } = useAuthStore()
   
   const logout_action = () => {
     logout().then(r => {
@@ -31,6 +35,7 @@ function HeaderPage(props: any) {
   }
 
   const [changePasswordModal, setChangePasswordModal] = useState(false);
+  const [authModeModal, setAuthModeModal] = useState(false);
   const [resetFiregexModal, setResetFiregexModal] = useState(false);
   return <AppShell.Header className="firegex__header__header" {...props}>
         <Burger
@@ -59,6 +64,14 @@ function HeaderPage(props: any) {
           {!authDisabled && <>
             <Menu.Label>Firewall Access</Menu.Label>
             <Menu.Item leftSection={<FaLock size={14} />} onClick={() => setChangePasswordModal(true)}>Change Password</Menu.Item>
+            <Menu.Item color="red" leftSection={<FaUnlockAlt size={14} />}
+              onClick={() => setAuthModeModal(true)}>Turn Authentication Off</Menu.Item>
+            <Divider />
+          </>}
+          {authDisabled && access_token && <>
+            <Menu.Label>Firewall Access</Menu.Label>
+            <Menu.Item color="teal" leftSection={<FaLock size={14} />}
+              onClick={() => setAuthModeModal(true)}>Turn Authentication On</Menu.Item>
             <Divider />
           </>}
           <Menu.Label>Actions</Menu.Label>
@@ -77,6 +90,8 @@ function HeaderPage(props: any) {
             <ImExit size={23} style={{marginTop:"3px", marginLeft:"2px"}}/></ActionIcon>
         </Tooltip>}        
         <ResetPasswordModal opened={changePasswordModal} onClose={() => setChangePasswordModal(false)} />
+        <AuthModeModal opened={authModeModal} onClose={() => setAuthModeModal(false)}
+          disable={!authDisabled} />
         <ResetModal opened={resetFiregexModal} onClose={() => setResetFiregexModal(false)} />
         <Space w="xl" />
   </AppShell.Header>

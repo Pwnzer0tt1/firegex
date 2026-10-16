@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "firegex"
+# Set in setup.py, where the release workflow writes the tag.
+dynamic = ["version"]
+description = "Firegex client"
+readme = "README.md"
+authors = [{ name = "Pwnzer0tt1", email = "pwnzer0tt1@poliba.it" }]
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+]
+dependencies = [
+    "typer",
+    # Imported directly by the CLI and both simulators for their output. `typer` happens to
+    # bring it today; `typer-slim` does not, and nothing here should rest on which one it is.
+    "rich",
+    "pydantic>=2",
+    "typing-extensions>=4.7.1",
+    "pycryptodome",
+    "watchfiles",
+    "websockets",
+    # 1.2 is the first with `output_buffer_limit`, which is what lets a body be decoded only
+    # as far as a filter may hold it. See `_unbrotli` in pyfilters/models/http.py.
+    "brotli>=1.2.0",
+    # Python 3.14 has `compression.zstd` in the standard library; this fills the gap
+    # below it. See firegex/pyfilters/internals/zstd_compat.py.
+    "zstandard; python_version < '3.14'",
+]
+
+[project.urls]
+Homepage = "https://github.com/pwnzer0tt1/firegex"
+
+[project.scripts]
+fgex = "firegex.cli:run"
+
+[tool.setuptools.packages.find]
+include = ["firegex*"]

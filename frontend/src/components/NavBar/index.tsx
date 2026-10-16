@@ -1,13 +1,11 @@
 import { Divider, Group, MantineColor, ScrollArea, Text, ThemeIcon, Title, UnstyledButton, Box, AppShell } from "@mantine/core";
 import { useState } from "react";
-import { TbPlugConnected, TbShieldLock } from "react-icons/tb";
+import { TbHexagon } from "react-icons/tb";
 import { useNavigate } from "react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { GrDirections } from "react-icons/gr";
 import { PiWallLight } from "react-icons/pi";
 import { useNavbarStore } from "../../js/store";
 import { getMainPath, getapi, postapi, okNotify, errorNotify } from "../../js/utils";
-import { BsRegex } from "react-icons/bs";
 import { MdDownload, MdUpload } from "react-icons/md";
 
 function NavBarButton({ navigate, closeNav, name, icon, color, disabled, onClick }:
@@ -39,11 +37,8 @@ export default function NavBar() {
         </Box>
         <Divider my="xs" />
         <Box style={{ flexGrow: 1 }} component={ScrollArea} px="xs" mt="xs">
-            <NavBarButton navigate="nfregex" closeNav={closeNav} name="Netfilter Regex" color="grape" icon={<BsRegex size={19} />} />
+            <NavBarButton navigate="services" closeNav={closeNav} name="Services" color="grape" icon={<TbHexagon size={19} />} />
             <NavBarButton navigate="firewall" closeNav={closeNav} name="Firewall Rules" color="red" icon={<PiWallLight size={19} />} />
-            <NavBarButton navigate="porthijack" closeNav={closeNav} name="Hijack Port to Proxy" color="blue" icon={<GrDirections size={19} />} />
-            <NavBarButton navigate="nfproxy" closeNav={closeNav} name="Netfilter Proxy" color="lime" icon={<TbPlugConnected size={19} />} />
-            <NavBarButton navigate="tls-decrypt" closeNav={closeNav} name="TLS Decryption" color="cyan" icon={<TbShieldLock size={19} />} />
             <Box px="xs" mt="lg">
                 <Title order={5}>Backup & Restore</Title>
             </Box>

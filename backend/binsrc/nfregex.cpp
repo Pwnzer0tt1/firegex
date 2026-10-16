@@ -38,8 +38,9 @@ void config_updater (){
 			}
 		}
 		try{
-			regex_config.reset(new RegexRules(raw_rules, regex_config->stream_mode()));
-			cerr << "[info] [updater] Config update done to ver "<< regex_config->ver() << endl;
+			auto next = make_shared<RegexRules>(raw_rules, regex_config.load()->stream_mode());
+			regex_config.store(next);
+			cerr << "[info] [updater] Config update done to ver "<< next->ver() << endl;
 			osyncstream(cout) << "ACK OK" << endl;
 		}catch(const std::exception& e){
 			cerr << "[error] [updater] Failed to build new configuration!" << endl;
@@ -81,7 +82,7 @@ int main(int argc, char *argv[]){
 	
 	bool fail_open = Firegex::NfQueue::nfqueue_fail_open();
 
-	regex_config.reset(new RegexRules(stream_mode));
+	regex_config.store(make_shared<RegexRules>(stream_mode));
 
 	MultiThreadQueue<RegexNfQueue> queue_manager(n_of_threads);
 	osyncstream(cout) << "QUEUE " << queue_manager.queue_num() << endl;

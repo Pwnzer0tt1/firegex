@@ -1,4 +1,5 @@
 import asyncio
+import traceback
 from modules.firewall.nftables import FiregexTables
 from modules.firewall.models import Rule, FirewallSettings
 from utils.sqlite import SQLite
@@ -6,18 +7,44 @@ from modules.firewall.models import Action
 
 nft = FiregexTables()
 
+#: How often the kernel is asked whether the firewall is still there. The services
+#: module asks the same of its own table, for the same reason: `nft flush ruleset` —
+#: the first line of a Debian `/etc/nftables.conf` — takes this with it, and a
+#: default-deny firewall silently became no firewall at all.
+TABLE_WATCH = 3.0
+
 class FirewallManager:
     def __init__(self, db:SQLite):
         self.db = db
         self.lock = asyncio.Lock()
+        self._watch: asyncio.Task | None = None
 
     async def close(self):
+        self.stop_watching()
         async with self.lock:
             nft.reset()
     
     async def init(self):
         nft.init()
         await self.reload()
+        if self._watch is None or self._watch.done():
+            self._watch = asyncio.create_task(self._watch_table())
+
+    async def _watch_table(self):
+        while True:
+            await asyncio.sleep(TABLE_WATCH)
+            try:
+                if self.enabled and not nft.intact():
+                    print("[error] [firewall] the firewall's nftables tables were removed "
+                          "by something else; putting them back", flush=True)
+                    await self.reload()
+            except Exception:
+                traceback.print_exc()
+
+    def stop_watching(self) -> None:
+        if self._watch is not None:
+            self._watch.cancel()
+            self._watch = None
 
     async def reload(self):
         async with self.lock:
@@ -40,7 +67,8 @@ class FirewallManager:
                 multicast_dns=self.multicast_dns,
                 allow_upnp=self.allow_upnp,
                 drop_invalid=self.drop_invalid,
-                allow_dhcp=self.allow_dhcp
+                allow_dhcp=self.allow_dhcp,
+                allow_dnat=self.allow_dnat,
             )
     
     @settings.setter
@@ -53,6 +81,7 @@ class FirewallManager:
         self.allow_upnp=value.allow_upnp
         self.drop_invalid=value.drop_invalid
         self.allow_dhcp=value.allow_dhcp
+        self.allow_dnat=value.allow_dnat
 
     @property
     def policy(self):
@@ -133,4 +162,12 @@ class FirewallManager:
     @allow_dhcp.setter
     def allow_dhcp(self, value):
         self.db.set("allow_dhcp", "1" if value else "0")
+
+    @property
+    def allow_dnat(self):
+        return self.db.get("allow_dnat", "1") == "1"
+
+    @allow_dnat.setter
+    def allow_dnat(self, value):
+        self.db.set("allow_dnat", "1" if value else "0")
 

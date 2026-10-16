@@ -2,130 +2,105 @@
 
 ## [GO BACK](../README.md)
 
-Tests are a quick and dirty way to check if your modification to the backend code didn't break anything.
+One suite, one runner. Everything here is `pytest`; the **benchmarks** live in
+[`bench/`](bench/README.md) and are not tests — they measure, so they have no pass or fail
+and `pytest` does not collect them.
 
-# Running all the tests
-If you are working on the same machine firegex is running on, you can just run run_tests.sh
+## Running them
+
 ```bash
-$ ./run_tests.sh
+./run_tests.sh                    # everything this host can run
+./run_tests.sh --set-pass         # against an instance still in its initial-setup state
+./run_tests.sh mypassword         # a different password
 ```
-It will automatically perform a general API test, Netfilter and Proxy Regex test.
-You can also run tests manually:
+
+`run_tests.sh` installs the dependencies, waits for the instance to answer, and hands
+everything else straight to pytest — so anything pytest understands works there, and
+`pytest` on its own works too once the dependencies are in place.
+
+Part of "in place" is a **build**: `unit/` imports the filter library out of
+`../fgex-lib`, and that library carries a C extension — the llhttp binding that parses
+HTTP. `run_tests.sh` builds it for you; doing it by hand once is enough:
+
 ```bash
-$ ./api_test.py -h
-usage: api_test.py [-h] [--address ADDRESS] --password PASSWORD
-
-$ ./nfregex_test.py -h
-usage: nfregex_test.py [-h] [--address ADDRESS] --password PASSWORD [--service_name SERVICE_NAME] [--port PORT]
-                [--ipv6] [--proto {tcp,udp}]
-
-optional arguments:
--h, --help            show this help message and exit
---address ADDRESS, -a ADDRESS
-                        Address of firegex backend
---password PASSWORD, -p PASSWORD
-                        Firegex password
---service_name SERVICE_NAME, -n SERVICE_NAME
-                        Name of the test service
---port PORT, -P PORT  Port of the test service
---ipv6, -6            Test Ipv6
---proto {tcp,udp}, -m {tcp,udp}
-                    Select the protocol
-
-$ ./px_test.py -h
-usage: px_test.py [-h] [--address ADDRESS] --password PASSWORD [--service_name SERVICE_NAME] [--port PORT]
-
-optional arguments:
--h, --help            show this help message and exit
---address ADDRESS, -a ADDRESS
-                        Address of firegex backend
---password PASSWORD, -p PASSWORD
-                        Firegex password
---service_name SERVICE_NAME, -n SERVICE_NAME
-                        Name of the test service
---port PORT, -P PORT  Port of the test service
+pip install -e ../fgex-lib
 ```
-# Running a Benchmark
+
+Without it those tests cannot be collected at all, and pytest says
+`ImportError: cannot import name '_llhttp' from 'firegex'`.
+
 ```bash
-./benchmark.py
-options:
--h, --help            show this help message and exit
---address ADDRESS, -a ADDRESS
-                        Address of firegex backend
---port PORT, -P PORT  Port of the Benchmark service
---internal-port INTERNAL_PORT, -I INTERNAL_PORT
-                        Internal port of the Benchmark service
---service-name SERVICE_NAME, -n SERVICE_NAME
-                        Name of the Benchmark service
---password PASSWORD, -p PASSWORD
-                        Firegex password
---num-of-regexes NUM_OF_REGEXES, -r NUM_OF_REGEXES
-                        Number of regexes to benchmark with
---duration DURATION, -d DURATION
-                        Duration of the Benchmark in seconds
---output-file OUTPUT_FILE, -o OUTPUT_FILE
-                        Output results csv file
---num-of-streams NUM_OF_STREAMS, -s NUM_OF_STREAMS
-                        Number of concurrent streams
---mode {netfilter,proxy}, -m {netfilter,proxy}
-                        Type of filtering
-```
-Benchmarks let you evaluate the performance of the filters. You can run one by typing in a shell  ```test.py -p FIREGEX_PASSWORD -r NUM_OF_REGEX -d BENCHMARK_DURATION -m proxy``` to benchmark the Proxy based regex filter, or ``` -m netfilter ``` to benchmark the Netfilter based regex filtering.
-It uses iperf3 to benchmark the throughput in MB/s of the server, both with filters, without filters, and for each new added regex. It will automatically add a new random regex untill it has reached NUM_OF_REGEX specified in the arguments.
-
-You will find a new benchmark.csv file containg the results.
-
-# Firegex Performance Results
-
-The test was performed on:
-- Macbook Air M2 16GB RAM
-- On a VM powered by OrbStack with Fedora Linux 41 (Container Image) aarch64
-- Linux 6.12.13-orbstack-00304-gede1cf3337c4
-
-Command: `./benchmark.py -p testpassword -r 50 -d 1 -s 50`
-
-NOTE: 8 threads performance before 2.5.0 do not change due to the fact that the source and destination ip is always the same, so the packets are sent to the same thread by the kernel.
-[https://netfilter.vger.kernel.narkive.com/sTP7613Y/meaning-of-nfqueue-s-queue-balance-option](https://netfilter.vger.kernel.narkive.com/sTP7613Y/meaning-of-nfqueue-s-queue-balance-option)
-
-Internally the kernel hashes the source and dest ip and choose the target thread based on the hash. If the source and dest ip are the same, the hash will be the same and the packets will be sent to the same thread.
-This is a problem in a CTF, where we usually have a NAT to hide real IPs.
-
-Firegex 2.5.0 changes the way the threads are assigned to the packets, this is done userland, so we can have a better distribution of the packets between the threads.
-
-The charts are labeled as follows: `[version]-[n_thread]T` eg. `2.5.0-8T` means Firegex version 2.5.0 with 8 threads.
-
-![Firegex Benchmark](results/Benchmark-chart.svg)
-
-
-From the benchmark above we can't see the real advantage of multithreading in 2.5.1, we can better see the advantage of multithreading in the chart below where a fake load in filtering is done.
-
-The load is simulated by this code:
-```cpp
-volatile int x = 0;
-for (int i=0; i<50000; i++){
-    x+=1;
-}
+pytest                            # the same thing, if you already have the dependencies
+pytest unit                       # the ones that need nothing running at all
+pytest -k udp                     # one subject
+pytest -m "not slow"              # skip the ones that sit and wait on a real timeout
+pytest --layer proxy --no-ipv6    # one network layer, one address family
+pytest --fg-address http://box:4444/ --fg-password hunter2
 ```
 
-![Firegex Benchmark](results/Benchmark-chart-with-load.svg)
+| Option | What it does |
+|---|---|
+| `--fg-address` | where the instance under test is (or `FIREGEX_ADDRESS`) |
+| `--fg-password` | its password (or `FIREGEX_PASSWORD`) |
+| `--layer` | only these network layers — `proxy`, `nfqueue`, `external`; repeatable |
+| `--no-ipv6` | skip the IPv6 half of every parametrised case |
+| `--no-tls` | skip the TLS cases |
 
-In the chart above we can see that the 2.5.1 version with 8 threads has a better performance than the 2.5.1 version with 1 threads, and we can see it as much as the load increases.
+Markers: `instance` (needs a live firegex), `root` (needs root and a Linux kernel with
+nftables), `slow` (waits on a real timeout), `ipv6`, `tls`, `quic` (needs `aioquic` to
+speak it) and `http2` (needs `grpcio` to stand up a real HTTP/2 service). The list here
+and the one in `pytest.ini` are the same list — `--strict-markers` is on, so a marker
+that is only in one of them is an error rather than a silent no-op.
 
-Command: `./comparemark.py nfproxy -p testpassword -d 1 -s 50 -V 100`
+## What is where
 
-The code used to test matches the following regex with the python re module:
+| Directory | Needs a running instance | What it covers |
+|---|---|---|
+| `unit/` | no | `firegex.regex` against libhs, the `firegex.pyfilters` models and knobs, and the address-to-nftables translation in the backend's own modules |
+| `integration/` | yes | the product: both network layers, both filter kinds, TLS, UDP, IPv6, the hand-off, addresses on a running service, statistics, logs, limits, resilience |
+| `standalone/` | yes, and it restarts it | settings that are only read at process startup, so the test has to bounce the instance itself — **not** collected by default |
+| `helpers/` | — | the API client, the stand-in services, certificates, and the traffic channel |
+| `bench/` | yes | [measurement, not testing](bench/README.md) |
+
+Most of `integration/` is **parametrised over the combinations**, which is the point of
+the suite rather than a detail of it: a service is a network layer and a chain of filters
+chosen independently, so the same filters are exercised on `proxy` and on `nfqueue`, over
+IPv4 and IPv6, with and without TLS. A filter that works on one layer and not the other is
+exactly the failure the unified model exists to prevent, and it only shows up if both are
+run. Each case is a test with its own name, so a failure says which combination broke:
+
 ```
-(?:[a-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[a-z0-9!#$%&'*+/=?^_`{|}~-]+)*|"(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21\x23-\x5b\x5d-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])*")@(?:(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?|[a-z0-9-]*[a-z0-9]:(?:[\x01-\x08\x0b\x0c\x0e-\x1f\x21-\x5a\x53-\x7f]|\\[\x01-\x09\x0b\x0c\x0e-\x7f])+)\])
+integration/test_filters_regex.py::test_a_matching_pattern_blocks[nfqueue-ipv6] FAILED
 ```
 
-![nfproxy benchmarks](results/whisker_nfproxy.svg)
+This used to be a shell script invoking one 1100-line program eight times with different
+flags. The first failure in a run ended it, so the seven other combinations were never
+reached, and a host without IPv6 on loopback failed rather than skipped.
 
-![nfproxy benchmarks](results/istogramma_nfproxy.svg)
+**Run the suite twice in a row** when you have changed anything about addresses or TLS:
+state left behind by the first pass only shows up on the second.
 
-# Comparing nfproxy with nfregex
+## Two that are not in the default run
 
-Nfproxy has obviously a worse performance than nfregex, but it is more flexible and can be used in more complex scenarios.
+- **`standalone/test_ip_filter.py`.** Access control by CIDR is read once, at process
+  startup, so there is no way to test it against a running instance — it drives
+  `run.py stop`/`start` itself for each scenario and restores an unrestricted instance at
+  the end. Run it on its own, and expect it to bounce whatever you have running:
+  ```bash
+  pytest standalone
+  ```
+- **`bench/`.** Minutes rather than seconds, and it answers a different question. See
+  [bench/README.md](bench/README.md).
 
-![nfproxy benchmarks](results/whisker_compare.svg)
+## Adding a test
 
-![nfproxy benchmarks](results/istrogramma_compare.svg)
+Put it in the directory that matches what it needs, and take the fixtures from the
+conftest rather than building a service by hand — `protected` gives you a started-service
+shape for whichever layer is being parametrised, `service` cleans up whatever you create,
+and `Channel` asks a protected service a question without the test having to know whether
+TLS is in the way. A leaked service is not untidiness: it holds a port and an nftables
+rule, so the next test to want that port fails for a reason belonging to yours.
+
+If a case cannot run on some hosts, **skip it with a reason** rather than letting it fail.
+A red test nobody can act on teaches less than a summary line saying which half of the
+suite this machine declined to run and why.

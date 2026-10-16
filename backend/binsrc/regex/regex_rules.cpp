@@ -8,6 +8,7 @@
 #include <vector>
 #include <hs.h>
 #include <memory>
+#include <atomic>
 
 using namespace std;
 
@@ -194,7 +195,11 @@ class RegexRules{
 		}
 };
 
-shared_ptr<RegexRules> regex_config;
+// Atomic, because it is swapped by the updater thread while every queue thread copies
+// it per packet. A plain shared_ptr read and reset from two threads at once is a data
+// race: the copy can take a reference on a control block the reset has just freed, and
+// an operator editing a pattern under load could crash the binary with it.
+std::atomic<shared_ptr<RegexRules>> regex_config;
 
 void inline scratch_setup(regex_ruleset &conf, hs_scratch_t* & scratch){
 	if (scratch == nullptr && conf.hs_db != nullptr){
