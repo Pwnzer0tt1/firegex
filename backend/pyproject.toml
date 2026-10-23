@@ -10,6 +10,7 @@ dependencies = [
     "psutil",
     "python-jose[cryptography]",
     "python-socketio",
-    "brotli",
+    # Floor set by CVE-2026-111497; see fgex-lib/pyproject.toml.
+    "brotli>=1.2.1",
     # nftables comes from the distribution (python3-nftables), not from PyPI.
 ]
