@@ -25,8 +25,11 @@ dependencies = [
     "watchfiles",
     "websockets",
     # 1.2 is the first with `output_buffer_limit`, which is what lets a body be decoded only
-    # as far as a filter may hold it. See `_unbrotli` in pyfilters/models/http.py.
-    "brotli>=1.2.0",
+    # as far as a filter may hold it. See `_unbrotli` in pyfilters/models/http.py. 1.2.1 is
+    # the floor rather than 1.2.0 because of CVE-2026-111497, a buffer overflow in the
+    # decoder (1.0.3 through 1.2.0): that decoder is handed the raw bytes of any body
+    # arriving as `content-encoding: br`, so the attacker chooses them.
+    "brotli>=1.2.1",
     # Python 3.14 has `compression.zstd` in the standard library; this fills the gap
     # below it. See firegex/pyfilters/internals/zstd_compat.py.
     "zstandard; python_version < '3.14'",

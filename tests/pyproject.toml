@@ -36,7 +36,7 @@ test = [
     # firegex itself, so it has to be *built*: `run_tests.sh` does that with an editable
     # install of `../fgex-lib`. Running `pytest` by hand without it gives
     # `ImportError: cannot import name '_llhttp' from 'firegex'`.
-    "brotli",
+    "brotli>=1.2.1",
     "websockets",
     # Unconditional here, unlike in the library, which only needs it below 3.14: the
     # suite uses it to build the corpus *and* to exercise the fallback backend, so
