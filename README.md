@@ -66,12 +66,11 @@ The same docs are shown inside the app via the docs button on each page.
   reaches firegex is an administrator**, so bind it to loopback or a socket.
 
   ```bash
-  python3 run.py start --host 127.0.0.1 --unsafe-disable-auth -P 'a-password-for-later'
+  python3 run.py start --host 127.0.0.1 --unsafe-disable-auth
   ```
 
   The setting is persisted; `--no-unsafe-disable-auth` (or `run.py config --password`)
-  turns authentication back on. Set a password with `-P` anyway, or re-enabling lands on
-  the initial-setup screen. It can also be toggled from the interface (*Firewall Access*
+  turns authentication back on. It can also be toggled from the interface (*Firewall Access*
   menu) until the next restart; only the browser that turned it off can turn it back on.
   Password endpoints answer `403` while it is off.
 
