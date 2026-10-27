@@ -147,4 +147,6 @@ change can be undone instantly.
 
 ## Credits
 
+The web interface layout (sidebar, problem strip and services table) is inspired by [Icegex](https://github.com/ECSC-Team-Poland/icegex) by ECSC Team Poland.
+
 Copyright (c) 2022-2026 Pwnzer0tt1
