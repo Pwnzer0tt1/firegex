@@ -76,7 +76,7 @@ export default function ServiceDetails() {
                         <Badge color={running ? "teal" : "red"} variant="light" size="sm" radius="sm">
                             {service.status.toUpperCase()}
                         </Badge>
-                        <Tooltip position="bottom" multiline w={360}
+                        <Tooltip position="bottom"
                             label={transportSummary(service.transport, service.proto)}>
                             <Badge color="indigo" variant="light" size="sm" radius="sm">
                                 {transportLabel(service.transport)}

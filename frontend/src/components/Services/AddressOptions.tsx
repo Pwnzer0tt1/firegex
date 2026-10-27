@@ -52,10 +52,10 @@ export const EDGE_OPTIONS = [
 
 export const edgeHint = (edge: string) =>
     edge === L4.QUIC
-        ? "A UDP port speaking HTTP/3."
+        ? "HTTP/3 over UDP."
         : edge === L4.TLS
-            ? "Encrypted only: a client that arrives in the clear here is refused."
-            : "Cleartext HTTP/1.1 and HTTP/2 — and a client that brings TLS anyway is taken too."
+            ? "TLS only; cleartext clients are refused."
+            : "Cleartext; clients bringing TLS are accepted too."
 
 export const upstreamHint = (upstream: string) =>
     upstream === Upstream.TCP
@@ -86,19 +86,19 @@ export function addressTags(values: Extras, caps: ReturnType<typeof addressCapab
     const target = Number(values.target_port)
     if (caps.canPublish && target && target !== values.port) tags.push({
         label: `→ :${target}`,
-        hint: `Clients arrive on :${values.port} — firegex dials the service on :${target}, which is where it listens.`,
+        hint: `The service listens on :${target}`,
     })
     if (caps.canChooseUpstream && values.upstream === Upstream.TCP) tags.push({
         label: "plaintext to the service",
-        hint: upstreamHint(Upstream.TCP),
+        hint: "Sent to the service in the clear",
     })
     if (caps.canChooseUpstream && values.upstream === Upstream.TLS) tags.push({
         label: "TLS to the service",
-        hint: upstreamHint(Upstream.TLS),
+        hint: "Sent to the service over TLS",
     })
     if (caps.isExternal && values.proxy_port) tags.push({
         label: `→ ${values.proxy_ip ?? "127.0.0.1"}:${values.proxy_port}`,
-        hint: "Traffic for this address is handed to your own proxy there, and put back on the way out.",
+        hint: "Handed to your own proxy",
     })
     return tags
 }

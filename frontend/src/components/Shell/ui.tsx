@@ -106,5 +106,4 @@ export const backendLink = (connected: boolean, everConnected: boolean): { tone:
             : { tone: "muted", text: "connecting…" }
 
 /** What the backend status means, for a tooltip beside it. */
-export const BACKEND_LINK_HELP =
-    "The live connection between this page and the firegex backend. While it is up, every page updates by itself; when it is lost, what you see may be out of date until it comes back."
+export const BACKEND_LINK_HELP = "Keeps this page up to date"

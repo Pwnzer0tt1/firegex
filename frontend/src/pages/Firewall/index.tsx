@@ -346,9 +346,9 @@ export const Firewall = () => {
       <Chip tone={fwEnabled ? policyTone : "muted"} label="Status">
         {fwEnabled ? `enabled · ${rules.data?.policy ?? currentPolicy}` : "off"}
       </Chip>
-      <Chip label="Rules" tooltip="Rules saved on the firewall, in both tables">{ruleCount}</Chip>
+      <Chip label="Rules" tooltip="Saved rules, both tables">{ruleCount}</Chip>
       {valuesChanged
-        ? <Chip tone="warn" label="Changes" tooltip="Edits on this page that the firewall is not running yet. Apply them to put them in force.">not applied</Chip>
+        ? <Chip tone="warn" label="Changes" tooltip="Edits not applied yet">not applied</Chip>
         : null}
       <span className="flex-spacer" />
       <Group gap="xs" wrap="nowrap">

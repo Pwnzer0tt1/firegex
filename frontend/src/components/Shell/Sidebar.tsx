@@ -7,7 +7,7 @@ import { firewallRulesQuery } from '../Firewall/utils'
 import { Service } from '../Services/utils'
 import InstanceMenu from './InstanceMenu'
 import ProblemSummary from './ProblemSummary'
-import { backendLink, BACKEND_LINK_HELP, Dot, serviceTone, toneColor, Tone } from './ui'
+import { backendLink, Dot, serviceTone, toneColor, Tone } from './ui'
 
 /** The port a service is best known by: its first address's. */
 const primaryPort = (service: Service) => service.addresses?.[0]?.port
@@ -92,7 +92,7 @@ export default function Sidebar({ services }: { services: Service[] }) {
             <div className="fg-nav-foot">
                 {/* Only the dot: the page header already says it in words, and the
                     tooltip says it here for whoever is on another page. */}
-                <Tooltip label={`Backend ${backend.text}. ${BACKEND_LINK_HELP}`} multiline w={280} position="top-start">
+                <Tooltip label={`Backend ${backend.text}`} position="top-start">
                     <span role="status" aria-label={`Backend ${backend.text}`}
                         style={{ display: "inline-flex", alignItems: "center", padding: 6, cursor: "default" }}>
                         <Dot tone={backend.tone} pulse={!socketConnected && socketEverConnected} />

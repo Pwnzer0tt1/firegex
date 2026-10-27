@@ -19,24 +19,19 @@ export const transportLabel = (transport: string) => ({
 }[transport] ?? transport.toUpperCase())
 
 /**
- * What choosing this layer means, in one sentence, wherever a service is shown.
+ * What a service's layer does, in one short line, for the tooltip on its badge.
  *
- * The trade is real and neither layer is the better one, so it belongs on the service
- * itself and not only in the form where it was picked — an operator looking at a
- * running service should be able to see what it gave up without opening anything.
+ * Short on purpose: a tooltip is glanced at, not read. The whole trade between the
+ * layers is explained where the choice is made (`LayerChoice.tsx`) and in
+ * `docs/services.md`; this only has to remind an operator which one they picked.
  */
 export const transportSummary = (transport: string, proto: string) => {
-    if (transport === Transport.EXTERNAL)
-        return "Firegex only steers this traffic to a proxy you run; nothing here inspects it, so no filter can be attached."
-    if (transport === Transport.NFQUEUE)
-        return "Packets are inspected and a verdict handed back; nothing is terminated. Fully transparent, and the kernel keeps forwarding if a filter dies — at the cost of a userspace round trip per packet, userspace reassembly, and a process per filter."
-    if (proto === L4.HTTP)
-        return "Every version of HTTP through one chain: HTTP/1.1 and HTTP/2 on the TCP addresses — in the clear or under TLS, whichever each client opens with — and HTTP/3 on the UDP ones. All three are shown to the filters as the same HTTP/1.1, so one pattern and one Python filter cover them; without that, HTTP/2 and HTTP/3 put the request line and the headers in a compression format no filter could read. The service still sees the real client address."
-    if (proto === L4.QUIC)
-        return "QUIC is terminated here: the engine decrypts it, and each stream inside is filtered on its own with its own state. It has to be — past the first packet QUIC encrypts its frames and its stream boundaries as well as the payload, so no other layer can see anything. One endpoint per address, and the service still sees the real client address."
-    return proto === L4.UDP
-        ? "Each address is relayed by a dedicated socket. Filters keep per-flow state, source IP transparency is preserved, and a new address is relayed without restarting the service."
-        : "The connection is terminated and reopened, so the kernel reassembles and the chain has no length limit. It also carries bulk traffic several times faster than NFQUEUE, which pays a userspace round trip per packet; what it costs is fail-open being rebuilt in userspace rather than guaranteed by the kernel. The service still sees the real client address."
+    if (transport === Transport.EXTERNAL) return "Handed to your own proxy; no filters"
+    if (transport === Transport.NFQUEUE) return "Packets inspected in place; fails open"
+    if (proto === L4.HTTP) return "HTTP/1.1, /2 and /3 through one chain"
+    if (proto === L4.QUIC) return "QUIC decrypted; each stream filtered"
+    if (proto === L4.UDP) return "Relayed per address; state per flow"
+    return "Connection terminated and reopened"
 }
 
 /** How long a warning stays on the row after it happened, unless the log is cleared first. */
@@ -54,7 +49,7 @@ export function ProblemBadge({ service }: { service: Service }) {
     if (!problem || Date.now() - problem.at > PROBLEM_SHOWN_MS) return null
     const error = problem.level === "error"
     return <Tooltip position="bottom" multiline w={380}
-        label={`${new Date(problem.at).toLocaleTimeString(undefined, { hour12: false })} — ${problem.text}. Clear the service's log to dismiss this.`}>
+        label={`${new Date(problem.at).toLocaleTimeString(undefined, { hour12: false })} · ${problem.text}`}>
         <Badge color={error ? "red" : "orange"} variant="light" size="xs" radius="sm"
             leftSection={<TbAlertTriangle size={10} />}>
             {error ? "ERROR" : "WARNING"}
@@ -203,7 +198,7 @@ export default function ServiceTableRow({ service, onClick }: { service: Service
             </td>
             <td><Pill tone={tone}>{serviceStateLabel(service)}</Pill></td>
             <td className="fg-hide-sm">
-                <Tooltip position="bottom" multiline w={340} label={transportSummary(service.transport, service.proto)}>
+                <Tooltip position="bottom" label={transportSummary(service.transport, service.proto)}>
                     <span className="fg-tag"><b>{transportLabel(service.transport)}</b>{protoLabel(service.proto)}</span>
                 </Tooltip>
             </td>
