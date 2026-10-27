@@ -12,7 +12,7 @@ authors = [{ name = "Pwnzer0tt1", email = "pwnzer0tt1@poliba.it" }]
 requires-python = ">=3.10"
 classifiers = [
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
 ]
 dependencies = [
     "typer",
