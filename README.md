@@ -81,8 +81,6 @@ The same docs are shown inside the app via the docs button on each page.
 - [Backend (FastAPI + C++ and Rust datapaths)](backend/README.md)
 - [Python filter library (`firegex` on PyPI)](fgex-lib/README.md)
 
-Background on the internals (Italian): [engineering thesis](https://github.com/domysh/engineering-thesis).
-
 ![Firegex architecture](docs/architecture.svg)
 
 Firegex is built to **never be the reason a service is down**: filters fail open, and any
@@ -91,3 +89,5 @@ change can be undone instantly.
 ## Credits
 
 Copyright (c) 2022-2026 Pwnzer0tt1
+
+The original design of Python filters is described in the [@domysh](https://domy.sh) [engineering thesis](https://github.com/domysh/engineering-thesis) (Italian); the current implementation has since evolved.

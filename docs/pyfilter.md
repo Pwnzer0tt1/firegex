@@ -271,3 +271,7 @@ def repeated_probe_filter(hist: HttpHistory):
 FGEX_STREAM_MAX_SIZE = 4096
 FGEX_FULL_STREAM_ACTION = FullStreamAction.REJECT
 ```
+
+## Background
+
+The original design of Python filters is described in the [@domysh](https://domy.sh) [engineering thesis](https://github.com/domysh/engineering-thesis) (Italian); the current implementation has since evolved, so this page is the reference.
