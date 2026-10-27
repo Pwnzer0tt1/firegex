@@ -15,10 +15,11 @@ import { useAuthStore, useSystemStore } from './js/store';
 
 const AuthShell = ({ children }: { children: React.ReactNode }) => (
   <Box style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
-    <Card withBorder radius="lg" p="xl" shadow="md" style={{ width: "100%", maxWidth: 440, borderColor: 'var(--fourth_color)', backgroundColor: 'var(--third_color)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+    <Card withBorder radius="lg" p="xl" shadow="md" style={{ width: "100%", maxWidth: 440, borderColor: 'var(--fourth_color)', backgroundColor: 'var(--fg-surface)', boxShadow: '0 12px 48px rgba(0,0,0,0.6)' }}>
       <Stack align="center" gap={2} mb="lg">
         <Image src="/header-logo.png" alt="Firegex logo" w={56} />
-        <Title order={2} ta="center" style={{ fontFamily: 'Hanken Grotesk', color: 'var(--accent-color)' }}>[Fi]*regex</Title>
+        <Title order={2} ta="center" style={{ color: 'var(--fg-text)' }}>Firegex</Title>
+        <Text size="xs" c="dimmed">by Pwnzer0tt1</Text>
       </Stack>
       {children}
     </Card>
@@ -27,7 +28,7 @@ const AuthShell = ({ children }: { children: React.ReactNode }) => (
 
 const StatusCard = ({ title, description, color, children }: { title: string, description: string, color: string, children?: React.ReactNode }) => (
   <Box style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
-    <Card withBorder radius="lg" p="xl" shadow="md" style={{ width: "100%", maxWidth: 480, borderColor: 'var(--fourth_color)', backgroundColor: 'var(--third_color)', boxShadow: '0 8px 32px rgba(0,0,0,0.3)' }}>
+    <Card withBorder radius="lg" p="xl" shadow="md" style={{ width: "100%", maxWidth: 480, borderColor: 'var(--fourth_color)', backgroundColor: 'var(--fg-surface)', boxShadow: '0 12px 48px rgba(0,0,0,0.6)' }}>
       <Stack align="center" gap="md">
         <ThemeIcon size={64} radius="xl" color={color} variant="light">
           <MdCloudOff size={32} />
@@ -49,10 +50,14 @@ function App() {
   const [loadinBtn, setLoadingBtn] = useState(false);
   const queryClient = useQueryClient()
   const { access_token } = useAuthStore()
-  const { setVersion, setAuthDisabled } = useSystemStore()
+  const { setVersion, setAuthDisabled, setSocketConnected } = useSystemStore()
 
   useEffect(() => {
     socketio.auth = { token: access_token || "" }
+    // Listeners first: a client that connects synchronously would otherwise report
+    // "connected" before anybody was listening for it.
+    socketio.on("connect", () => setSocketConnected(true))
+    socketio.on("disconnect", () => setSocketConnected(false))
     socketio.connect()
     getStatus()
     socketio.on("update", (data) => {
@@ -65,6 +70,8 @@ function App() {
       getStatus()
     });
     return () => {
+      socketio.off("connect")
+      socketio.off("disconnect")
       socketio.off("update")
       socketio.off("connect_error")
       socketio.disconnect()
@@ -132,7 +139,7 @@ function App() {
           {...form.getInputProps('password')}
         />
         <Group mt="xl">
-          <Button loading={loadinBtn} type="submit" variant="light" color="cyan" fullWidth>Set Password</Button>
+          <Button loading={loadinBtn} type="submit" fullWidth>Set Password</Button>
         </Group>
       </form>
       {error && <>
@@ -167,7 +174,7 @@ function App() {
           {...form.getInputProps('password')}
         />
         <Group mt="xl">
-          <Button loading={loadinBtn} type="submit" variant="light" color="cyan" fullWidth>Login</Button>
+          <Button loading={loadinBtn} type="submit" fullWidth>Login</Button>
         </Group>
       </form>
       {error && <>

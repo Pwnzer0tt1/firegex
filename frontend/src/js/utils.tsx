@@ -308,7 +308,3 @@ export function b64decode(regexB64:string){
 export function isMediumScreen(){
     return useMediaQuery('(min-width: 600px)');
 }
-
-export function isLargeScreen(){
-    return useMediaQuery('(min-width: 992px)');
-}
