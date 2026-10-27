@@ -15,11 +15,11 @@ export const DocsButton = ({ doc, ...props }: { doc: EnumToPrimitiveUnion<DocTyp
     const [open, setOpen] = useState(false);
 
     return <Box>
-        <Tooltip label="Read the documentation" color="pink">
-            <ActionIcon color="pink" onClick={()=>setOpen(true)} size="lg" radius="md" variant="filled" {...props}><FaBookBookmark size="20px" /></ActionIcon>
+        <Tooltip label="Read the documentation">
+            <ActionIcon onClick={()=>setOpen(true)} size="lg" radius="md" variant="default" aria-label="Documentation" {...props}><FaBookBookmark size="16px" /></ActionIcon>
         </Tooltip>
         <Modal opened={open} onClose={() => setOpen(false)} fullScreen title={
-            <Title order={2}>Firegex Docs 📕</Title>
+            <Title order={3}>Firegex documentation</Title>
         } scrollAreaComponent={ScrollArea.Autosize}>
             <Container style={{padding: "1rem", maxWidth:"90vw"}}>
                 {

@@ -1,55 +1,44 @@
-import { useEffect } from 'react';
-import { ActionIcon, Container, Menu, Space, Tooltip } from '@mantine/core';
-import { AppShell } from '@mantine/core';
-import NavBar from './NavBar';
-import HeaderPage from './Header';
-import { getMainPath, HOME_SECTIONS } from '../js/utils';
+import { ReactNode, useEffect } from 'react';
 import { useLocation } from 'react-router';
-import { useNavbarStore, useSessionStore } from '../js/store';
-import { HiMenu } from "react-icons/hi";
+import { getMainPath, HOME_SECTIONS } from '../js/utils';
+import { useSessionStore } from '../js/store';
 import ProblemNotifier from './Services/ProblemNotifier';
+import { servicesQuery } from './Services/utils';
+import ProblemStrip from './Shell/ProblemStrip';
+import { problemsOf } from './Shell/problems';
+import Sidebar from './Shell/Sidebar';
 
-
-function MainLayout({ children }:{ children:any }) {
-  const { navOpened } = useNavbarStore()
+/**
+ * The frame every page is drawn in: the sidebar on the left, the problem strip across
+ * the top of the main column, and the page under it.
+ *
+ * The services list is read here once and handed to both, because the two must agree
+ * — a service marked red in the sidebar with nothing said in the strip is exactly the
+ * kind of disagreement that makes an operator distrust both.
+ */
+function MainLayout({ children }: { children: ReactNode }) {
   const { setHomeSection } = useSessionStore()
   const location = useLocation()
-  useEffect(()=>{
+  const list = servicesQuery()
+  const services = Array.isArray(list.data) ? list.data : []
+
+  useEffect(() => {
     // Only a page that exists is worth coming back to: "/" redirects to it.
-    if (HOME_SECTIONS.includes(getMainPath())){
+    if (HOME_SECTIONS.includes(getMainPath())) {
       setHomeSection(getMainPath())
     }
-  },[location.pathname])
-  return <AppShell
-    header={{ height: 70 }}
-    navbar={{ width: 300 , breakpoint: "md", collapsed: { mobile: !navOpened } }}
-    p="md"
-  >
-    <HeaderPage />
-    <NavBar />
+  }, [location.pathname])
+
+  return <div className="fg-app">
+    <Sidebar services={services} />
     <ProblemNotifier />
-    <AppShell.Main>
-      <Container size="lg">
-          {children}
-      </Container>
-    </AppShell.Main>
-  <Space h="lg" />
-
-  </AppShell>
-
+    <main className="fg-main">
+      <ProblemStrip problems={problemsOf(services)} />
+      <div className="fg-page">
+        {children}
+      </div>
+    </main>
+  </div>
 }
 
 export default MainLayout;
-
-export const MenuDropDownWithButton = ({children}:{children:any}) => <Menu withArrow>
-        <Menu.Target>
-            <Tooltip label="More options" color="gray">
-              <ActionIcon variant='transparent'>
-                  <HiMenu size={24} color='#FFF'/>
-              </ActionIcon>
-            </Tooltip>
-        </Menu.Target>
-        <Menu.Dropdown>
-            {children}
-        </Menu.Dropdown>
-</Menu>

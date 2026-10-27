@@ -79,6 +79,15 @@ interface SystemState {
   setVersion: (version: string | null) => void;
   authDisabled: boolean;
   setAuthDisabled: (authDisabled: boolean) => void;
+  /**
+   * Whether the live channel is up. It is the only thing that refreshes what the page
+   * shows (`staleTime` is infinite), so a page that lost it is a page showing the past,
+   * and the sidebar says so.
+   */
+  socketConnected: boolean;
+  /** Tells "still connecting" apart from "was connected and lost it". */
+  socketEverConnected: boolean;
+  setSocketConnected: (connected: boolean) => void;
 }
 
 export const useSystemStore = create<SystemState>()((set) => ({
@@ -86,4 +95,35 @@ export const useSystemStore = create<SystemState>()((set) => ({
   setVersion: (version) => set({ version }),
   authDisabled: false,
   setAuthDisabled: (authDisabled) => set({ authDisabled }),
+  socketConnected: false,
+  socketEverConnected: false,
+  setSocketConnected: (connected) => set((state) => ({
+    socketConnected: connected,
+    socketEverConnected: state.socketEverConnected || connected,
+  })),
 }));
+
+interface ProblemStripState {
+  /**
+   * Problems the operator closed, by key. A key carries the state it was raised for
+   * (see `components/Shell/problems.ts`), so a dismissal silences that one situation
+   * and the same service going wrong in a new way is shown again.
+   */
+  dismissed: string[];
+  dismiss: (key: string) => void;
+}
+
+/** Kept per browser tab: a dismissal is about what this operator has already seen. */
+export const useProblemStripStore = create<ProblemStripState>()(
+  persist(
+    (set) => ({
+      dismissed: [],
+      // Bounded, so a long round of dismissals cannot grow the stored list forever.
+      dismiss: (key) => set((state) => ({ dismissed: [...state.dismissed.filter(k => k !== key), key].slice(-200) })),
+    }),
+    {
+      name: 'problem-strip',
+      storage: createJSONStorage(() => sessionStorage),
+    }
+  )
+);
