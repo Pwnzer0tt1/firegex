@@ -15,7 +15,11 @@ const when = (at: number, now: number) => {
     return new Date(at).toLocaleString(undefined, { hour12: false, dateStyle: "short", timeStyle: "short" })
 }
 
-function Row({ problem, now, trailing }: { problem: StripProblem, now: number, trailing?: ReactNode }) {
+function Row({ problem, now, trailing, onDismiss }: {
+    problem: StripProblem, now: number, trailing?: ReactNode,
+    /** Present on a problem still shown on the page: hides it there, as its × does. */
+    onDismiss?: () => void,
+}) {
     const setSummaryOpen = useProblemStripStore(s => s.setSummaryOpen)
     return <div className="fg-summary-row">
         <div className="fg-problem-head">
@@ -25,6 +29,10 @@ function Row({ problem, now, trailing }: { problem: StripProblem, now: number, t
             <span className="flex-spacer" />
             {trailing}
             <ProblemAction problem={problem} onDone={() => setSummaryOpen(false)} />
+            {onDismiss
+                ? <button type="button" className="fg-strip-close" aria-label="Dismiss"
+                    title="Dismiss" onClick={onDismiss}>×</button>
+                : null}
         </div>
         <div className="fg-summary-text">{problem.text}</div>
     </div>
@@ -52,7 +60,7 @@ function Section({ title, count, action, children }: {
  * The count on the bell is only what still needs attention, so a dismissal quiets it.
  */
 export default function ProblemSummary({ services }: { services: Service[] }) {
-    const { dismissed, dismissAll, restore, restoreAll, summaryOpen, setSummaryOpen } = useProblemStripStore()
+    const { dismissed, dismiss, dismissAll, restore, restoreAll, summaryOpen, setSummaryOpen } = useProblemStripStore()
     const { showStrip, setShowStrip } = useProblemPrefsStore()
     const now = Date.now()
     const all = problemsOf(services, { now, includeStale: true })
@@ -86,7 +94,7 @@ export default function ProblemSummary({ services }: { services: Service[] }) {
             <Section title="Needs attention" count={active.length}
                 action={<Button size="compact-xs" variant="subtle" color="gray"
                     onClick={() => dismissAll(active.map(p => p.key))}>Dismiss all</Button>}>
-                {active.map(p => <Row key={p.key} problem={p} now={now} />)}
+                {active.map(p => <Row key={p.key} problem={p} now={now} onDismiss={() => dismiss(p.key)} />)}
             </Section>
             <Section title="Dismissed" count={hidden.length}
                 action={<Button size="compact-xs" variant="subtle" color="gray" onClick={restoreAll}>Show all again</Button>}>
