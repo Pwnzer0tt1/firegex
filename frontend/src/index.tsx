@@ -65,7 +65,8 @@ root.render(
   <QueryClientProvider client={queryClient}>
     <MantineProvider forceColorScheme='dark' theme={theme}>
       <CodeHighlightAdapterProvider adapter={customShikiAdapter}>
-        <Notifications />
+        {/* Top-right: the bottom of the page belongs to the problem strip. */}
+        <Notifications position="top-right" />
         <BrowserRouter>
           <App />
         </BrowserRouter>

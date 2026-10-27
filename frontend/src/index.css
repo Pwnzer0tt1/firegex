@@ -251,71 +251,69 @@ a:hover { color: var(--fg-accent-hover); }
 .fg-nav-scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 39; }
 
 /* ---------------------------------------------------------------------------------- */
-/* Problems: cards floating over the page, and the summary drawer.                    */
+/* Problems: the strip pinned over the bottom of the page, and the summary drawer.     */
 /* ---------------------------------------------------------------------------------- */
 
-.fg-problems {
+.fg-strip {
   position: fixed;
-  left: calc(var(--fg-nav-width) + 20px);
-  bottom: 20px;
+  left: var(--fg-nav-width);
+  right: 0;
+  bottom: 0;
   z-index: 30;
-  width: min(520px, calc(100vw - var(--fg-nav-width) - 40px));
+  border-top: 1px solid var(--fg-border);
+  background: var(--fg-nav);
+  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.55);
+}
+.fg-strip-row {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  /* The column itself lets clicks through; only the cards catch them. */
-  pointer-events: none;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 28px;
+  font-size: 13.5px;
+  min-width: 0;
 }
-
-/* The cards take no room in the layout, but the end of a page must still be
-   reachable from under them: while any are shown, the page can scroll past them. */
-.fg-app:has(.fg-problems) .fg-page { padding-bottom: 260px; }
-
-.fg-problem {
-  pointer-events: auto;
-  background: var(--fg-surface-raised);
-  border: 1px solid var(--fg-border-strong);
-  border-left-width: 3px;
-  border-radius: 10px;
-  padding: 9px 10px 10px 12px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.65);
-  font-size: 13px;
-  animation: fg-rise 160ms var(--fg-ease);
-}
-@keyframes fg-rise {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: none; }
-}
-.fg-problem-more {
-  font-family: inherit;
-  color: var(--fg-text-muted);
-  text-align: left;
-  cursor: pointer;
-  border-left-color: var(--fg-border-strong);
-}
-.fg-problem-more:hover { color: var(--fg-text); }
-
-.fg-problem-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.fg-problem-kind { font-weight: 600; white-space: nowrap; font-size: 13px; }
-.fg-problem-text {
+.fg-strip-row + .fg-strip-row { border-top: 1px solid var(--fg-border-soft); }
+.fg-strip-kind { font-weight: 600; white-space: nowrap; }
+.fg-strip-text {
   color: var(--fg-text);
-  margin-top: 4px;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.fg-problem-close {
+.fg-strip-close {
   background: none;
   border: none;
   color: var(--fg-text-faint);
   cursor: pointer;
-  font-size: 17px;
-  padding: 0 2px;
+  font-size: 16px;
+  padding: 0 4px;
   line-height: 1;
 }
-.fg-problem-close:hover { color: var(--fg-text); }
+.fg-strip-close:hover { color: var(--fg-text); }
+/* The "N more" row: a button laid out as a row, quieter than the problems above it. */
+.fg-strip-more {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--fg-border-soft);
+  background: none;
+  font-family: inherit;
+  color: var(--fg-text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.fg-strip-more .fg-strip-text { color: var(--fg-text-muted); }
+.fg-strip-more:hover, .fg-strip-more:hover .fg-strip-text { color: var(--fg-text); }
+.fg-strip-open { color: var(--fg-accent); font-weight: 600; white-space: nowrap; }
+
+/* The strip takes no room in the layout, but the end of a page must still be
+   reachable from under it: while it is shown, the page can scroll past it. */
+.fg-app:has(.fg-strip) .fg-page { padding-bottom: 200px; }
+
+/* Rows shared with the summary drawer. */
+.fg-problem-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fg-problem-kind { font-weight: 600; white-space: nowrap; font-size: 13px; }
 
 .fg-summary-section + .fg-summary-section { margin-top: 22px; }
 .fg-summary-title {
@@ -466,7 +464,11 @@ a:hover { color: var(--fg-accent-hover); }
   .fg-nav-toggle { display: inline-flex; }
   .fg-main { margin-left: 0; }
   .fg-page { padding: 64px 16px 40px; }
-  .fg-problems { left: 12px; right: 12px; bottom: 12px; width: auto; }
+  .fg-strip { left: 0; }
+  .fg-strip-row { padding: 9px 16px; flex-wrap: wrap; row-gap: 4px; }
+  .fg-strip-kind { flex: 1; }
+  /* The sentence takes a line of its own under the kind and the action. */
+  .fg-strip-row:not(.fg-strip-more) .fg-strip-text { white-space: normal; order: 5; flex-basis: 100%; }
   .fg-hide-md { display: none; }
 }
 

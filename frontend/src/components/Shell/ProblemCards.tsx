@@ -1,4 +1,5 @@
 import { Button } from '@mantine/core'
+import { TbBell } from 'react-icons/tb'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
@@ -8,7 +9,7 @@ import { serviceQueryKey, services } from '../Services/utils'
 import { StripProblem } from './problems'
 import { Dot, toneColor } from './ui'
 
-/** At most this many cards float at once; the rest are counted into one more. */
+/** At most this many rows at once; the rest are counted into one more row. */
 const MAX_CARDS = 3
 
 /**
@@ -49,12 +50,12 @@ export function ProblemAction({ problem, onDone }: { problem: StripProblem, onDo
 }
 
 /**
- * What is costing protection right now, floating over the bottom of the page.
+ * What is costing protection right now: the strip pinned to the bottom of the page.
  *
- * Over the page rather than above it, so a problem never moves what the operator was
- * reading or about to click. Each card carries the one action that fixes it and can be
- * closed; nothing closed is lost, since the bell in the sidebar lists everything,
- * dismissed or not.
+ * The same rows the strip used to show across the top, laid over the page instead of
+ * pushing it down, so a problem appearing never moves what the operator was reading or
+ * about to click. At most {@link MAX_CARDS} rows; past that one more row says how many
+ * are left and opens the summary, which is also where a closed row can be found again.
  */
 export default function ProblemCards({ problems }: { problems: StripProblem[] }) {
     const dismissed = useProblemStripStore(s => s.dismissed)
@@ -63,23 +64,24 @@ export default function ProblemCards({ problems }: { problems: StripProblem[] })
 
     const visible = problems.filter(p => !dismissed.includes(p.key))
     if (visible.length === 0) return null
+    const more = visible.length - MAX_CARDS
 
-    return <div className="fg-problems" role="status" aria-live="polite">
-        {visible.slice(0, MAX_CARDS).map(problem =>
-            <div className="fg-problem" key={problem.key} style={{ borderLeftColor: toneColor[problem.tone] }}>
-                <div className="fg-problem-head">
-                    <Dot tone={problem.tone} />
-                    <span className="fg-problem-kind" style={{ color: toneColor[problem.tone] }}>{problem.kind}</span>
-                    <span className="flex-spacer" />
-                    <ProblemAction problem={problem} />
-                    <button type="button" className="fg-problem-close" aria-label="Dismiss"
-                        title="Dismiss — it stays in the summary" onClick={() => dismiss(problem.key)}>×</button>
-                </div>
-                <div className="fg-problem-text" title={problem.text}>{problem.text}</div>
-            </div>)}
-        {visible.length > MAX_CARDS
-            ? <button type="button" className="fg-problem fg-problem-more" onClick={() => setSummaryOpen(true)}>
-                and {visible.length - MAX_CARDS} more — open the summary
+    return <div className="fg-strip" role="status" aria-live="polite">
+        {visible.slice(0, MAX_CARDS).map(problem => <div className="fg-strip-row" key={problem.key}>
+            <Dot tone={problem.tone} />
+            <span className="fg-strip-kind" style={{ color: toneColor[problem.tone] }}>{problem.kind}</span>
+            <span className="fg-strip-text" title={problem.text}>{problem.text}</span>
+            <ProblemAction problem={problem} />
+            <button type="button" className="fg-strip-close" aria-label="Dismiss"
+                title="Dismiss — it stays in the summary" onClick={() => dismiss(problem.key)}>×</button>
+        </div>)}
+        {more > 0
+            ? <button type="button" className="fg-strip-row fg-strip-more" onClick={() => setSummaryOpen(true)}>
+                <TbBell size={14} />
+                <span className="fg-strip-text">
+                    {more} more problem{more === 1 ? "" : "s"} not shown — see them all in the summary
+                </span>
+                <span className="fg-strip-open">Show all</span>
             </button>
             : null}
     </div>
