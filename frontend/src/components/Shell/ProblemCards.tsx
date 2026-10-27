@@ -3,7 +3,7 @@ import { TbBell } from 'react-icons/tb'
 import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { useNavbarStore, useProblemStripStore } from '../../js/store'
+import { useNavbarStore, useProblemPrefsStore, useProblemStripStore } from '../../js/store'
 import { errorNotify } from '../../js/utils'
 import { serviceQueryKey, services } from '../Services/utils'
 import { StripProblem } from './problems'
@@ -61,9 +61,11 @@ export default function ProblemCards({ problems }: { problems: StripProblem[] })
     const dismissed = useProblemStripStore(s => s.dismissed)
     const dismiss = useProblemStripStore(s => s.dismiss)
     const setSummaryOpen = useProblemStripStore(s => s.setSummaryOpen)
+    const showStrip = useProblemPrefsStore(s => s.showStrip)
 
     const visible = problems.filter(p => !dismissed.includes(p.key))
-    if (visible.length === 0) return null
+    // Switched off in the summary: the bell still counts them.
+    if (!showStrip || visible.length === 0) return null
     const more = visible.length - MAX_CARDS
 
     return <div className="fg-strip" role="status" aria-live="polite">

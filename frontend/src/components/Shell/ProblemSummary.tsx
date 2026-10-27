@@ -1,7 +1,7 @@
-import { ActionIcon, Button, Drawer, Group, Indicator, Text, Tooltip } from '@mantine/core'
+import { ActionIcon, Button, Drawer, Group, Indicator, Switch, Text, Tooltip } from '@mantine/core'
 import { ReactNode } from 'react'
 import { TbBell } from 'react-icons/tb'
-import { useProblemStripStore } from '../../js/store'
+import { useProblemPrefsStore, useProblemStripStore } from '../../js/store'
 import { Service } from '../Services/utils'
 import { ProblemAction } from './ProblemCards'
 import { problemsOf, StripProblem } from './problems'
@@ -52,7 +52,8 @@ function Section({ title, count, action, children }: {
  * The count on the bell is only what still needs attention, so a dismissal quiets it.
  */
 export default function ProblemSummary({ services }: { services: Service[] }) {
-    const { dismissed, restore, restoreAll, summaryOpen, setSummaryOpen } = useProblemStripStore()
+    const { dismissed, dismissAll, restore, restoreAll, summaryOpen, setSummaryOpen } = useProblemStripStore()
+    const { showStrip, setShowStrip } = useProblemPrefsStore()
     const now = Date.now()
     const all = problemsOf(services, { now, includeStale: true })
     const active = all.filter(p => !p.stale && !dismissed.includes(p.key))
@@ -76,10 +77,15 @@ export default function ProblemSummary({ services }: { services: Service[] }) {
                 content: { backgroundColor: 'var(--fg-nav)', borderLeft: '1px solid var(--fg-border)' },
                 header: { backgroundColor: 'var(--fg-nav)', borderBottom: '1px solid var(--fg-border)' },
             }}>
+            <Switch mt="md" mb="lg" label="Show problems on the page" checked={showStrip}
+                description="Off: they are only counted on the bell and listed here."
+                onChange={e => setShowStrip(e.currentTarget.checked)} />
             {all.length === 0
                 ? <Text c="dimmed" size="sm" ta="center" py="xl">Nothing to report: every service is running with filters and none has logged a problem.</Text>
                 : null}
-            <Section title="Needs attention" count={active.length}>
+            <Section title="Needs attention" count={active.length}
+                action={<Button size="compact-xs" variant="subtle" color="gray"
+                    onClick={() => dismissAll(active.map(p => p.key))}>Dismiss all</Button>}>
                 {active.map(p => <Row key={p.key} problem={p} now={now} />)}
             </Section>
             <Section title="Dismissed" count={hidden.length}
