@@ -1,3 +1,4 @@
+import { Tooltip } from '@mantine/core'
 import { NavLink, useLocation, useNavigate } from 'react-router'
 import { PiWallLight } from 'react-icons/pi'
 import { TbLayoutDashboard } from 'react-icons/tb'
@@ -6,7 +7,7 @@ import { firewallRulesQuery } from '../Firewall/utils'
 import { Service } from '../Services/utils'
 import InstanceMenu from './InstanceMenu'
 import ProblemSummary from './ProblemSummary'
-import { Dot, serviceTone, toneColor, Tone } from './ui'
+import { backendLink, BACKEND_LINK_HELP, Dot, serviceTone, toneColor, Tone } from './ui'
 
 /** The port a service is best known by: its first address's. */
 const primaryPort = (service: Service) => service.addresses?.[0]?.port
@@ -32,8 +33,7 @@ export default function Sidebar({ services }: { services: Service[] }) {
     const sorted = [...services].sort((a, b) =>
         (primaryPort(a) ?? 0) - (primaryPort(b) ?? 0) || a.name.localeCompare(b.name))
 
-    const socketTone: Tone = socketConnected ? "ok" : socketEverConnected ? "danger" : "muted"
-    const socketText = socketConnected ? "live" : socketEverConnected ? "disconnected" : "connecting…"
+    const backend = backendLink(socketConnected, socketEverConnected)
 
     return <>
         {navOpened && <div className="fg-nav-scrim" onClick={closeNav} />}
@@ -90,8 +90,12 @@ export default function Sidebar({ services }: { services: Service[] }) {
             </div>
 
             <div className="fg-nav-foot">
-                <Dot tone={socketTone} pulse={!socketConnected && socketEverConnected} />
-                <span title="The live channel that keeps every page up to date">{socketText}</span>
+                <Tooltip label={BACKEND_LINK_HELP} multiline w={280} position="top-start">
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <Dot tone={backend.tone} pulse={!socketConnected && socketEverConnected} />
+                        Backend {backend.text}
+                    </span>
+                </Tooltip>
                 <span className="flex-spacer" />
                 <ProblemSummary services={services} />
                 <InstanceMenu />

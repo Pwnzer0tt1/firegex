@@ -65,7 +65,7 @@ function App() {
     })
     socketio.on("connect_error", (err) => {
       if (access_token) {
-        errorNotify("Socket.Io connection failed! ", `Error message: [${err.message}]`)
+        errorNotify("Cannot reach the firegex backend", `The page will not update by itself until the connection is back (${err.message}).`)
       }
       getStatus()
     });

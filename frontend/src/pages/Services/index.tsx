@@ -9,7 +9,7 @@ import { firewallRulesQuery } from '../../components/Firewall/utils';
 import AddEditService from '../../components/Services/AddEditService';
 import ServiceTableRow from '../../components/Services/ServiceRow';
 import { Service, serviceQueryKey, servicesQuery } from '../../components/Services/utils';
-import { Chip } from '../../components/Shell/ui';
+import { backendLink, BACKEND_LINK_HELP, Chip } from '../../components/Shell/ui';
 import { useSystemStore } from '../../js/store';
 import { bareAddress, errorNotify, getErrorMessage } from '../../js/utils';
 
@@ -45,6 +45,7 @@ export default function Services({ children }: { children: ReactNode }) {
     const all = Array.isArray(list.data) ? list.data : []
     const shown = all.filter(s => matches(s, query))
     const running = all.filter(s => s.status === "active").length
+    const backend = backendLink(socketConnected, socketEverConnected)
     const firewallOn = rules.data?.enabled ?? false
     const policy = rules.data?.policy ?? "accept"
 
@@ -54,9 +55,7 @@ export default function Services({ children }: { children: ReactNode }) {
             <Chip tone={firewallOn ? (policy === "accept" ? "ok" : "danger") : "muted"} label="Firewall">
                 {firewallOn ? `enabled · ${policy}` : "off"}
             </Chip>
-            <Chip tone={socketConnected ? "ok" : socketEverConnected ? "danger" : "muted"} label="Socket">
-                {socketConnected ? "connected" : socketEverConnected ? "disconnected" : "connecting…"}
-            </Chip>
+            <Chip tone={backend.tone} label="Backend" tooltip={BACKEND_LINK_HELP}>{backend.text}</Chip>
             <Chip tone={all.length && running === all.length ? "ok" : running ? "warn" : "muted"} label="Running">
                 {running} / {all.length}
             </Chip>
