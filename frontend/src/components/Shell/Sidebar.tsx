@@ -90,10 +90,12 @@ export default function Sidebar({ services }: { services: Service[] }) {
             </div>
 
             <div className="fg-nav-foot">
-                <Tooltip label={BACKEND_LINK_HELP} multiline w={280} position="top-start">
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                {/* Only the dot: the page header already says it in words, and the
+                    tooltip says it here for whoever is on another page. */}
+                <Tooltip label={`Backend ${backend.text}. ${BACKEND_LINK_HELP}`} multiline w={280} position="top-start">
+                    <span role="status" aria-label={`Backend ${backend.text}`}
+                        style={{ display: "inline-flex", alignItems: "center", padding: 6, cursor: "default" }}>
                         <Dot tone={backend.tone} pulse={!socketConnected && socketEverConnected} />
-                        Backend {backend.text}
                     </span>
                 </Tooltip>
                 <span className="flex-spacer" />
