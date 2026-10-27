@@ -113,6 +113,7 @@ a:hover { color: var(--fg-accent-hover); }
   padding: 24px 28px 48px;
   width: 100%;
   max-width: 1440px;
+  margin-inline: auto;
   box-sizing: border-box;
   min-width: 0;
 }
