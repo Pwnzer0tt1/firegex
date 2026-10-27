@@ -3,7 +3,7 @@ name = "fgex-proxy"
 version = "0.1.0"
 edition = "2021"
 description = "Proxy datapath engine for firegex (fail-open spike)"
-license = "GPL-3.0-or-later"
+license = "AGPL-3.0-or-later"
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "io-std", "macros", "time", "sync"] }

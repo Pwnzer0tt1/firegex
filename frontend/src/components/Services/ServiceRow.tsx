@@ -1,14 +1,15 @@
-import { Badge, Box, Button, Card, Group, Menu, Text, Tooltip } from '@mantine/core';
-import { useQueryClient } from '@tanstack/react-query';
+import { ActionIcon, Badge, Button, Group, Menu, Tooltip } from '@mantine/core';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { FaPlay, FaStop, FaTrash } from 'react-icons/fa';
 import { IoSettingsSharp } from 'react-icons/io5';
-import { MdChevronRight, MdMoreHoriz } from 'react-icons/md';
-import { TbAlertTriangle, TbHexagon, TbShieldLock } from 'react-icons/tb';
-import { bareAddress, errorNotify, isMediumScreen, okNotify } from '../../js/utils';
+import { MdMoreHoriz } from 'react-icons/md';
+import { TbAlertTriangle } from 'react-icons/tb';
+import { bareAddress, errorNotify, okNotify } from '../../js/utils';
+import { Pill, serviceStateLabel, serviceTone, Sparkline } from '../Shell/ui';
 import YesNoModal from '../YesNoModal';
 import AddEditService from './AddEditService';
-import { Address, decrypts, L4, protoLabel, Service, serviceQueryKey, services, Transport, Upstream } from './utils';
+import { Address, L4, protoLabel, Service, serviceQueryKey, services, Transport } from './utils';
 
 /** What the network layer means, in one line, where the operator is choosing. */
 export const transportLabel = (transport: string) => ({
@@ -76,12 +77,16 @@ export const addressSummary = (addresses: Address[]) => {
  * settings in one place, a row of separate buttons in the other — so which actions
  * existed depended on where you happened to be looking at it from.
  */
-export function ServiceMenu({ onSettings, onDelete }: {
+export function ServiceMenu({ onSettings, onDelete, compact }: {
     onSettings: () => void, onDelete: () => void,
+    /** An icon instead of a labelled button, for the tight space at the end of a row. */
+    compact?: boolean,
 }) {
     return <Menu position="bottom-end">
         <Menu.Target>
-            <Button variant="default" size="xs" leftSection={<MdMoreHoriz size={14} />}>Options</Button>
+            {compact
+                ? <ActionIcon variant="default" size={26} aria-label="Options"><MdMoreHoriz size={16} /></ActionIcon>
+                : <Button variant="default" size="xs" leftSection={<MdMoreHoriz size={14} />}>Options</Button>}
         </Menu.Target>
         <Menu.Dropdown>
             <Menu.Label>Network layer</Menu.Label>
@@ -96,15 +101,57 @@ export function ServiceMenu({ onSettings, onDelete }: {
     </Menu>
 }
 
-export default function ServiceRow({ service, onClick }: { service: Service, onClick?: () => void }) {
+/** How far back the sparkline and the "recent" count look. */
+const RECENT_SECONDS = 15 * 60
+
+/**
+ * What a service refused in the last {@link RECENT_SECONDS}, one number per bucket.
+ *
+ * Keyed exactly as `serviceStatsQuery` keys a relative range, so the list and the
+ * service's own page share one cache entry instead of asking twice. Polled, because a
+ * block does not emit the `update` event (a flood of them would flood every browser),
+ * and the point of this column is to show an attack starting.
+ */
+function useRecentBlocks(service: Service) {
+    const enabled = service.n_filters > 0
+    const stats = useQuery({
+        queryKey: [...serviceQueryKey, service.service_id, "stats", RECENT_SECONDS, "auto"],
+        queryFn: () => services.stats(service.service_id, { seconds: RECENT_SECONDS }),
+        enabled,
+        refetchInterval: 30_000,
+    })
+    if (!enabled || !stats.data) return { perBucket: [] as number[], total: null as number | null }
+    const { buckets, series, total } = stats.data
+    const perBucket = buckets.map((_, i) => series.reduce((sum, s) => sum + (s.counts[i] ?? 0), 0))
+    return { perBucket, total }
+}
+
+/** A number in the table, or a dash where there is nothing it could be. */
+const Num = ({ value }: { value: number | null }) => value === null
+    ? <span className="fg-dash">—</span>
+    : <span className="fg-num" style={{ color: value > 0 ? "var(--fg-text)" : "var(--fg-text-muted)" }}>
+        {value.toLocaleString()}
+    </span>
+
+/**
+ * One service as a row of the overview table.
+ *
+ * Everything an operator scans for during a round is a column — state, filters, what
+ * was refused lately and the shape of it — and everything else is one click away on
+ * the service's own page. Start and stop stay on the row because they are the action
+ * the problem strip most often asks for.
+ */
+export default function ServiceTableRow({ service, onClick }: { service: Service, onClick: () => void }) {
     const queryClient = useQueryClient()
     const [loading, setLoading] = useState(false)
     const [deleteModal, setDeleteModal] = useState(false)
     const [editModal, setEditModal] = useState(false)
-    const isMedium = isMediumScreen()
+    const recent = useRecentBlocks(service)
 
     const running = service.status === "active"
-    const statusColor = running ? "teal" : "red"
+    const tone = serviceTone(service)
+    const external = service.transport === Transport.EXTERNAL
+    const first = service.addresses?.[0]
 
     const act = async (what: "start" | "stop") => {
         setLoading(true)
@@ -138,84 +185,51 @@ export default function ServiceRow({ service, onClick }: { service: Service, onC
     }
 
     return <>
-        <Card withBorder radius="md" p="md" w="100%" bg="transparent"
-            className="firegex__clickable_row"
-            style={{ borderColor: 'var(--fourth_color)' }}
-            onClick={onClick}>
-            <Group justify="space-between" align="center" wrap={isMedium ? "nowrap" : "wrap"}>
-                <Group wrap="nowrap" align="flex-start">
-                    <Box style={{
-                        width: 42, height: 42, borderRadius: 8,
-                        backgroundColor: running ? 'rgba(32, 201, 151, 0.1)' : 'rgba(250, 82, 82, 0.1)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        color: running ? 'var(--mantine-color-teal-filled)' : 'var(--mantine-color-red-filled)',
-                    }}>
-                        <TbHexagon size={24} />
-                    </Box>
-                    <Box>
-                        <Group gap="xs" align="center">
-                            <Text fw={600} size="md">{service.name}</Text>
-                            <Badge color={statusColor} variant="light" size="xs" radius="sm">
-                                {service.status.toUpperCase()}
-                            </Badge>
-                            <ProblemBadge service={service} />
-                            <Tooltip position="bottom" multiline w={340}
-                                label={transportSummary(service.transport, service.proto)}>
-                                <Badge color="indigo" variant="light" size="xs" radius="sm">
-                                    {transportLabel(service.transport)}
-                                </Badge>
-                            </Tooltip>
-                            {/* The plaintext leg is worth saying here and not only in
-                            the form: a service whose backend speaks in the clear is one
-                            firegex is *adding* encryption to, which changes what stopping
-                            firegex does to it. */}
-                            {decrypts(service) ? <Tooltip position="bottom" multiline w={320}
-                                label={(service.proto === L4.HTTP
-                                    ? "Every version of HTTP, decrypted where it is encrypted and rendered to the filters as one"
-                                    : "The engine decrypts this service, so the filters see the plaintext")
-                                    + ((service.addresses ?? []).some(a => a.upstream === Upstream.TCP)
-                                        ? ". Behind at least one of its addresses the service answers in the clear, so firegex is what encrypts it."
-                                        : "")}>
-                                <Badge color="grape" variant="light" size="xs" radius="sm"
-                                    leftSection={<TbShieldLock size={10} />}>
-                                    {protoLabel(service.proto)}
-                                </Badge>
-                            </Tooltip> : null}
-                        </Group>
-                        <Group gap="xs" mt={4}>
-                            <Tooltip position="bottom" disabled={(service.addresses?.length ?? 0) < 2}
-                                label={(service.addresses ?? []).map(a => `${bareAddress(a.ip_int)}:${a.port}`).join(", ")}>
-                                <Text size="xs" c="dimmed" style={{ letterSpacing: 0.5 }}>
-                                    {addressSummary(service.addresses)} ON {protoLabel(service.proto)}
-                                </Text>
-                            </Tooltip>
-                            <Text size="xs" c="dimmed" style={{ letterSpacing: 0.5 }}>
-                                {service.transport === Transport.EXTERNAL
-                                    ? "• handed to your own proxy"
-                                    : `• ${service.n_filters} filter${service.n_filters === 1 ? "" : "s"} • ${service.n_blocked} blocked`}
-                            </Text>
-                        </Group>
-                    </Box>
+        <tr className={tone === "danger" ? "danger" : tone === "warn" ? "warn" : undefined} onClick={onClick}>
+            <td>
+                <Group gap={8} wrap="nowrap">
+                    <span className="fg-svc-name">{service.name}</span>
+                    <ProblemBadge service={service} />
                 </Group>
-
-                <Group gap="xs" wrap="nowrap">
-                    <Group gap="xs" onClick={e => e.stopPropagation()}>
-                        {running
-                            ? <Button variant="default" size="xs" leftSection={<FaStop size={10} />}
-                                onClick={() => act("stop")} loading={loading}>Stop</Button>
-                            : <Button variant="default" size="xs" leftSection={<FaPlay size={10} />}
-                                onClick={() => act("start")} loading={loading}>Start</Button>}
-                        <ServiceMenu onSettings={() => setEditModal(true)}
-                            onDelete={() => setDeleteModal(true)} />
-                    </Group>
-                    <Tooltip label="Filters" position="left">
-                        <Box style={{ display: 'flex', alignItems: 'center', color: 'var(--text-secondary)' }}>
-                            <MdChevronRight size={22} />
-                        </Box>
-                    </Tooltip>
+                <Tooltip position="bottom" disabled={(service.addresses?.length ?? 0) < 2}
+                    label={(service.addresses ?? []).map(a => `${bareAddress(a.ip_int)}:${a.port}/${a.proto}`).join(", ")}>
+                    <div className="fg-svc-sub">
+                        {first
+                            ? <>{first.port}/{first.proto} · {bareAddress(first.ip_int)}
+                                {service.addresses.length > 1 ? ` +${service.addresses.length - 1}` : ""}</>
+                            : "no address yet"}
+                    </div>
+                </Tooltip>
+            </td>
+            <td><Pill tone={tone}>{serviceStateLabel(service)}</Pill></td>
+            <td className="fg-hide-sm">
+                <Tooltip position="bottom" multiline w={340} label={transportSummary(service.transport, service.proto)}>
+                    <span className="fg-tag"><b>{transportLabel(service.transport)}</b>{protoLabel(service.proto)}</span>
+                </Tooltip>
+            </td>
+            <td className="fg-hide-sm" style={{ whiteSpace: "nowrap" }}>
+                {external
+                    ? <span className="fg-dash">—</span>
+                    : service.n_filters === 0
+                        ? <span style={{ color: "var(--fg-warn)" }}>none</span>
+                        : <span>{service.n_filters} filter{service.n_filters === 1 ? "" : "s"}</span>}
+            </td>
+            <td className="num fg-hide-sm"><Num value={external ? null : recent.total} /></td>
+            <td className="num fg-hide-md"><Num value={external ? null : service.n_blocked} /></td>
+            <td className="fg-hide-lg"><Sparkline values={recent.perBucket} width={100} /></td>
+            <td onClick={e => e.stopPropagation()} style={{ width: 1 }}>
+                <Group gap={6} wrap="nowrap" justify="flex-end">
+                    <Button variant="default" size="compact-sm" loading={loading}
+                        leftSection={running ? <FaStop size={9} /> : <FaPlay size={9} />}
+                        onClick={() => act(running ? "stop" : "start")}>
+                        {running ? "Stop" : "Start"}
+                    </Button>
+                    <span className="fg-hide-sm">
+                        <ServiceMenu compact onSettings={() => setEditModal(true)} onDelete={() => setDeleteModal(true)} />
+                    </span>
                 </Group>
-            </Group>
-        </Card>
+            </td>
+        </tr>
         <YesNoModal
             title="Delete this service?"
             description={`This stops protecting ${addressSummary(service.addresses)} and deletes every filter attached to it. The service itself keeps running, unprotected.`}

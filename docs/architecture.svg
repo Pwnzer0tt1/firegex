@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="556" viewBox="0 0 900 556" font-family="Helvetica, Arial, sans-serif" text-anchor="middle">
+  <title>Firegex architecture</title>
+  <defs>
+    <marker id="head" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="bighead" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="12" markerHeight="12" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#1e293b"/>
+    </marker>
+    <style>
+      .box { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.2; }
+      .inner { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1.2; }
+      .title { font-size: 13px; font-weight: bold; fill: #475569; }
+      .ctl { fill: #dbeafe; stroke: #2563eb; stroke-width: 1.3; }
+      .dp { fill: #fee2e2; stroke: #dc2626; stroke-width: 1.3; }
+      .flt { fill: #dcfce7; stroke: #16a34a; stroke-width: 1.3; }
+      .out { fill: #f1f5f9; stroke: #64748b; stroke-width: 1.3; }
+      .main { font-size: 14px; fill: #0f172a; }
+      .sub { font-size: 12px; fill: #475569; }
+      .note { font-size: 11px; fill: #475569; font-style: italic; }
+      .ctlline { stroke: #334155; stroke-width: 1.5; fill: none; }
+      .traffic { stroke: #1e293b; stroke-width: 3; fill: none; }
+      .dash { stroke: #334155; stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }
+    </style>
+  </defs>
+
+  <rect width="900" height="556" fill="#ffffff"/>
+
+  <!-- Outside firegex: who drives it and who it is in front of -->
+  <rect class="out" x="80" y="22" width="140" height="38" rx="19"/>
+  <text class="main" x="150" y="46">Team members</text>
+
+  <rect class="out" x="480" y="16" width="160" height="46" rx="23"/>
+  <text class="main" x="560" y="35">Other teams</text>
+  <text class="main" x="560" y="52">and checkers</text>
+
+  <!-- Control plane -->
+  <rect class="box" x="20" y="90" width="230" height="380" rx="8"/>
+  <text class="title" x="34" y="110" text-anchor="start">Control plane</text>
+
+  <rect class="ctl" x="70" y="130" width="160" height="50" rx="6"/>
+  <text class="main" x="150" y="151">Web UI</text>
+  <text class="sub" x="150" y="169">React · Vite · Mantine</text>
+
+  <rect class="ctl" x="70" y="250" width="160" height="50" rx="6"/>
+  <text class="main" x="150" y="271">Backend</text>
+  <text class="sub" x="150" y="289">FastAPI · Socket.IO</text>
+
+  <path class="ctl" d="M95,368 v46 a55,8 0 0 0 110,0 v-46 a55,8 0 0 0 -110,0 z"/>
+  <path d="M95,368 a55,8 0 0 0 110,0" fill="none" stroke="#2563eb" stroke-width="1.3"/>
+  <text class="main" x="150" y="394">SQLite</text>
+  <text class="sub" x="150" y="410">rules · stats</text>
+
+  <!-- Data plane -->
+  <rect class="box" x="350" y="90" width="530" height="380" rx="8"/>
+  <text class="title" x="366" y="110" text-anchor="start">Data plane · Linux host</text>
+
+  <polygon class="dp" points="492,128 628,128 640,150 628,172 492,172 480,150"/>
+  <text class="main" x="560" y="147">nftables</text>
+  <text class="sub" x="560" y="164">inet fgex · fgex_filter</text>
+
+  <rect class="inner" x="440" y="200" width="232" height="200" rx="6"/>
+  <text class="title" x="454" y="219" text-anchor="start">Network layer</text>
+
+  <rect class="dp" x="456" y="230" width="200" height="80" rx="6"/>
+  <text class="main" x="556" y="250">fgex-proxy · Rust</text>
+  <text class="sub" x="556" y="268">TCP · UDP · TLS · QUIC</text>
+  <text class="sub" x="556" y="284">HTTP/1.1 · HTTP/2 · HTTP/3</text>
+  <text class="note" x="556" y="300">terminates the connection</text>
+
+  <rect class="dp" x="456" y="320" width="200" height="68" rx="6"/>
+  <text class="main" x="556" y="340">NFQUEUE · C++</text>
+  <text class="sub" x="556" y="358">cppregex · cpproxy</text>
+  <text class="note" x="556" y="375">per-packet verdict · fail-open</text>
+
+  <!-- Filter chain: an ordered list, first refusal wins -->
+  <rect class="inner" x="716" y="130" width="150" height="270" rx="6"/>
+  <text class="title" x="791" y="150">Filter chain</text>
+  <text class="note" x="791" y="166">runs in order</text>
+
+  <rect class="flt" x="731" y="190" width="120" height="46" rx="6"/>
+  <text class="main" x="791" y="210">Regex</text>
+  <text class="sub" x="791" y="227">Hyperscan</text>
+
+  <rect class="flt" x="731" y="264" width="120" height="46" rx="6"/>
+  <text class="main" x="791" y="284">Python</text>
+  <text class="sub" x="791" y="301">@pyfilter</text>
+
+  <rect class="out" x="731" y="338" width="120" height="36" rx="18"/>
+  <text class="sub" x="791" y="360" font-weight="bold">ACCEPT · REJECT</text>
+
+  <rect class="out" x="366" y="420" width="150" height="40" rx="6"/>
+  <text class="main" x="441" y="436">firegex0</text>
+  <text class="sub" x="441" y="452">decrypted capture</text>
+
+  <!-- Arrows, drawn after the boxes so no box covers them -->
+  <line class="ctlline" x1="150" y1="60" x2="150" y2="128" marker-end="url(#head)"/>
+  <line class="ctlline" x1="150" y1="182" x2="150" y2="248" marker-start="url(#head)" marker-end="url(#head)"/>
+  <text class="note" x="158" y="211" text-anchor="start">REST</text>
+  <text class="note" x="158" y="225" text-anchor="start">live updates</text>
+  <line class="ctlline" x1="150" y1="302" x2="150" y2="358" marker-start="url(#head)" marker-end="url(#head)"/>
+
+  <line class="ctlline" x1="232" y1="275" x2="438" y2="275" marker-start="url(#head)" marker-end="url(#head)"/>
+  <text class="note" x="300" y="266">spawn · configure</text>
+  <text class="note" x="300" y="292">blocks · stats</text>
+
+  <line class="traffic" x1="560" y1="62" x2="560" y2="126" marker-end="url(#bighead)"/>
+  <line class="traffic" x1="560" y1="172" x2="560" y2="198" marker-end="url(#bighead)"/>
+
+  <line class="ctlline" x1="791" y1="236" x2="791" y2="262" marker-end="url(#head)"/>
+  <line class="ctlline" x1="791" y1="310" x2="791" y2="336" marker-end="url(#head)"/>
+
+  <line class="dash" x1="674" y1="300" x2="714" y2="300" marker-start="url(#head)" marker-end="url(#head)"/>
+  <text class="note" x="694" y="291">judge</text>
+
+  <line class="dash" x1="470" y1="400" x2="470" y2="418" marker-end="url(#head)"/>
+
+  <line class="traffic" x1="560" y1="400" x2="560" y2="500" marker-end="url(#bighead)"/>
+  <rect class="out" x="475" y="502" width="170" height="36" rx="3"/>
+  <line x1="485" y1="502" x2="485" y2="538" stroke="#64748b" stroke-width="1.3"/>
+  <line x1="635" y1="502" x2="635" y2="538" stroke="#64748b" stroke-width="1.3"/>
+  <text class="main" x="560" y="525">Protected services</text>
+</svg>
