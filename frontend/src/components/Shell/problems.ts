@@ -17,6 +17,13 @@ export type StripProblem = {
     service: Service,
     /** What one click does about it. */
     action: "start" | "open",
+    /** Unix milliseconds, for a problem read from a log; states have no moment. */
+    at?: number,
+    /**
+     * A logged problem older than {@link PROBLEM_SHOWN_MS}: past the point of being
+     * pushed at anyone, still worth finding in the summary.
+     */
+    stale?: boolean,
 }
 
 /**
@@ -26,8 +33,14 @@ export type StripProblem = {
  * traffic is passing unfiltered), a running one with none (reachable and protected by
  * nothing), and a warning or error from a service's own log. A stopped service with
  * nothing attached is not a problem: it is switched off, which is a choice.
+ *
+ * Logged problems older than an hour are left out unless `includeStale` asks for
+ * them: the floating cards are for what is happening, the summary for what happened.
  */
-export function problemsOf(services: Service[], now: number = Date.now()): StripProblem[] {
+export function problemsOf(
+    services: Service[],
+    { now = Date.now(), includeStale = false }: { now?: number, includeStale?: boolean } = {},
+): StripProblem[] {
     const found: StripProblem[] = []
     for (const service of services) {
         const where = addressSummary(service.addresses)
@@ -51,7 +64,8 @@ export function problemsOf(services: Service[], now: number = Date.now()): Strip
             })
         }
         const logged = service.problem
-        if (logged && now - logged.at <= PROBLEM_SHOWN_MS) {
+        const stale = !!logged && now - logged.at > PROBLEM_SHOWN_MS
+        if (logged && (!stale || includeStale)) {
             const error = logged.level === "error"
             found.push({
                 // The timestamp is part of the key, so a new problem is never
@@ -62,6 +76,8 @@ export function problemsOf(services: Service[], now: number = Date.now()): Strip
                 text: `${service.name}: ${logged.text}`,
                 service,
                 action: "open",
+                at: logged.at,
+                stale,
             })
         }
     }

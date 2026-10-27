@@ -5,6 +5,7 @@ import { useNavbarStore, useSystemStore } from '../../js/store'
 import { firewallRulesQuery } from '../Firewall/utils'
 import { Service } from '../Services/utils'
 import InstanceMenu from './InstanceMenu'
+import ProblemSummary from './ProblemSummary'
 import { Dot, serviceTone, toneColor, Tone } from './ui'
 
 /** The port a service is best known by: its first address's. */
@@ -92,6 +93,7 @@ export default function Sidebar({ services }: { services: Service[] }) {
                 <Dot tone={socketTone} pulse={!socketConnected && socketEverConnected} />
                 <span title="The live channel that keeps every page up to date">{socketText}</span>
                 <span className="flex-spacer" />
+                <ProblemSummary services={services} />
                 <InstanceMenu />
             </div>
         </nav>

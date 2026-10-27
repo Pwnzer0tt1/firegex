@@ -1,4 +1,4 @@
-import { ActionIcon, Badge, Box, Card, Divider, FloatingIndicator, Group, LoadingOverlay, Space, Stack, Switch, Table, Tabs, TextInput, ThemeIcon, Title, Tooltip, useMantineTheme } from "@mantine/core"
+import { ActionIcon, Box, Button, Card, Group, LoadingOverlay, SegmentedControl, Space, Stack, Switch, Text, TextInput, Title, Tooltip, useMantineTheme } from "@mantine/core"
 import { useEffect, useState } from "react";
 import { BsPlusLg, BsTrashFill } from "react-icons/bs"
 import { rem } from '@mantine/core';
@@ -20,9 +20,8 @@ import { LuArrowBigRightDash } from "react-icons/lu"
 import { ImCheckmark, ImCross } from "react-icons/im";
 import { IoSettingsSharp } from "react-icons/io5";
 import { SettingsModal } from "./SettingsModal";
-import { FaDirections } from "react-icons/fa";
-import { PiWallLight } from "react-icons/pi";
 import { DocsButton } from "../../components/DocsButton";
+import { Chip } from "../../components/Shell/ui";
 
 export const Firewall = () => {
 
@@ -337,66 +336,58 @@ export const Firewall = () => {
   ));
 
 
+  const ruleCount = rules.data?.rules.length ?? 0
+  const policyTone = currentPolicy === ActionType.ACCEPT ? "ok" : "danger"
+
   return <>
-    <Space h="sm" />
     <LoadingOverlay visible={rules.isLoading} />
-    <Box className={isMedium ? 'center-flex' : 'center-flex-row'}>
-      <Title order={5} className="center-flex"><ThemeIcon radius="md" size="md" variant='filled' color='red' ><PiWallLight size={20} /></ThemeIcon><Space w="xs" />Firewall Rules</Title>
-      {isMedium ? <Box className='flex-spacer' /> : <Space h="sm" />}
-      <Box className='center-flex'>
-        Enabled: <Space w="sm" /> <Switch checked={fwEnabled} onChange={switchState} />
-        <Space w="sm" />
-        Policy:
-        <Space w="xs" />
+    <div className="fg-page-head">
+      <h1 className="fg-page-title">Firewall</h1>
+      <Chip tone={fwEnabled ? policyTone : "muted"} label="Status">
+        {fwEnabled ? `enabled · ${rules.data?.policy ?? currentPolicy}` : "off"}
+      </Chip>
+      <Chip label="Rules" tooltip="Rules saved on the firewall, in both tables">{ruleCount}</Chip>
+      {valuesChanged
+        ? <Chip tone="warn" label="Changes" tooltip="Edits on this page that the firewall is not running yet. Apply them to put them in force.">not applied</Chip>
+        : null}
+      <span className="flex-spacer" />
+      <Group gap="xs" wrap="nowrap">
+        <Tooltip label="Refresh">
+          <ActionIcon variant="default" size="lg" aria-label="Refresh" loading={rules.isFetching}
+            onClick={() => queryClient.invalidateQueries({ queryKey: ["firewall"] })}>
+            <TbReload size={16} />
+          </ActionIcon>
+        </Tooltip>
+        <Tooltip label="Firewall settings">
+          <ActionIcon variant="default" size="lg" aria-label="Firewall settings" onClick={() => setSettingsModal(true)}>
+            <IoSettingsSharp size={16} />
+          </ActionIcon>
+        </Tooltip>
+        <DocsButton doc="firewall" />
+        <Button leftSection={<TiTick size={18} />} onClick={applyChanges} disabled={!valuesChanged}>
+          Apply changes
+        </Button>
+      </Group>
+    </div>
+
+    <div className="fg-toolbar">
+      <Switch checked={fwEnabled} onChange={switchState} label="Enabled" />
+      <Group gap="xs" wrap="nowrap">
+        <Text size="sm" c="dimmed">Default policy</Text>
         <ActionTypeSelector
           value={currentPolicy}
           onChange={(value) => setCurrentPolicy(value as ActionType)}
         />
-      </Box>
-      {isMedium ? <Box className='flex-spacer' /> : <Space h="sm" />}
-      <Box className='center-flex'>
-        <Space w="xs" />
-        <Tooltip label="Total number of firewall rules configured" position="bottom" color="green">
-          <Badge size="md" radius="sm" color="green" variant="filled"><FaDirections style={{ marginBottom: -1, marginRight: 4 }} />Rules: {rules.isLoading ? 0 : rules.data?.rules.length}</Badge>
-        </Tooltip>
-        <Space w="md" />
-        <Tooltip label="Add a new rule" position='bottom' color="blue">
-          <ActionIcon color="blue" onClick={emptyRuleAdd} size="lg" radius="md" variant="filled"><BsPlusLg size={18} /></ActionIcon>
-        </Tooltip>
-        <Space w="xs" />
-        <Tooltip label="Refresh" position='bottom' color="indigo">
-          <ActionIcon color="indigo" onClick={() => queryClient.invalidateQueries({ queryKey: ["firewall"] })} size="lg" radius="md" variant="filled"
-            loading={rules.isFetching}><TbReload size={18} /></ActionIcon>
-        </Tooltip>
-        <Space w="xs" />
-        <Tooltip label="Settings" position='bottom' color="cyan">
-          <ActionIcon color="cyan" onClick={() => setSettingsModal(true)} size="lg" radius="md" variant="filled"><IoSettingsSharp size={18} /></ActionIcon>
-        </Tooltip>
-        <Space w="xs" />
-        <DocsButton doc="firewall" />
-        <Space w="xs" />
-        <Tooltip label="Apply" position='bottom' color="grape">
-          <ActionIcon color="grape" onClick={applyChanges} size="lg" radius="md" variant="filled" disabled={!valuesChanged}>
-            <TiTick size={22} /></ActionIcon>
-        </Tooltip>
-      </Box>
-    </Box>
-    <Space h="xl" />
-    <Divider />
-    <Space h="md" />
-    <Group justify="center" gap="sm">
-      <Box>Filtering Table:</Box>
-      <Tabs variant="pills" value={selectedTab} onChange={(v) => setSelectedTab(v == NFTables.MANGLE ? NFTables.MANGLE : NFTables.FILTER)}>
-        <Tabs.List>
-          <Tabs.Tab value={NFTables.FILTER}>
-            Filter
-          </Tabs.Tab>
-          <Tabs.Tab value={NFTables.MANGLE}>
-            Mangle
-          </Tabs.Tab>
-        </Tabs.List>
-      </Tabs>
-    </Group>
+      </Group>
+      <Group gap="xs" wrap="nowrap">
+        <Text size="sm" c="dimmed">Table</Text>
+        <SegmentedControl size="xs" value={selectedTab}
+          onChange={(v) => setSelectedTab(v == NFTables.MANGLE ? NFTables.MANGLE : NFTables.FILTER)}
+          data={[{ value: NFTables.FILTER, label: "Filter" }, { value: NFTables.MANGLE, label: "Mangle" }]} />
+      </Group>
+      <span className="flex-spacer" />
+      <Button variant="default" leftSection={<BsPlusLg size={13} />} onClick={emptyRuleAdd}>Add rule</Button>
+    </div>
     {items.length > 0 ? <DragDropContext
       onDragEnd={({ destination, source }) => {
         if (!destination || destination.index == source.index) return
@@ -415,21 +406,16 @@ export const Firewall = () => {
           </Box>
         )}
       </Droppable>
-    </DragDropContext> : <>
-      <Box className='center-flex-row'>
-        <Space h="xl" />
-        <Title className='center-flex' style={{ textAlign: "center" }} order={3}>Firewall Rules allows you to use nftables but through a web interface</Title>
-        <Space h="xs" />
-        <Title className='center-flex' style={{ textAlign: "center" }} order={5}>Add new rules, sort it and enable the firewall: be carefull, wrong rules could also drops out firegex access</Title>
-        <Space h="lg" />
-        <Box className='center-flex' style={{ gap: 20 }}>
-          <Tooltip label="Add a new rule" color="blue">
-            <ActionIcon color="blue" onClick={emptyRuleAdd} size="xl" radius="md" variant="filled">
-              <BsPlusLg size="20px" /></ActionIcon>
-          </Tooltip>
-        </Box>
-      </Box>
-    </>}
+    </DragDropContext> : <div className="fg-table-wrap" style={{ padding: "56px 24px", textAlign: "center", marginTop: 16 }}>
+      <Title order={3}>No rules in the {selectedTab} table</Title>
+      <Text c="dimmed" mt="xs" maw={560} mx="auto">
+        Firewall rules are nftables rules managed from here. Add them, order them, then
+        enable the firewall — and be careful: a wrong rule can cut off your own access to firegex.
+      </Text>
+      <Group justify="center" mt="lg">
+        <Button leftSection={<BsPlusLg size={13} />} onClick={emptyRuleAdd}>Add rule</Button>
+      </Group>
+    </div>}
 
     <YesNoModal
       title='Are you sure to apply the changes to the firewall?'

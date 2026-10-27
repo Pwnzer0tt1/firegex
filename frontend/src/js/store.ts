@@ -111,6 +111,12 @@ interface ProblemStripState {
    */
   dismissed: string[];
   dismiss: (key: string) => void;
+  /** Put a dismissed problem back among the floating cards. */
+  restore: (key: string) => void;
+  restoreAll: () => void;
+  /** Whether the summary of every problem is open. Shared so a card can open it too. */
+  summaryOpen: boolean;
+  setSummaryOpen: (open: boolean) => void;
 }
 
 /** Kept per browser tab: a dismissal is about what this operator has already seen. */
@@ -120,10 +126,16 @@ export const useProblemStripStore = create<ProblemStripState>()(
       dismissed: [],
       // Bounded, so a long round of dismissals cannot grow the stored list forever.
       dismiss: (key) => set((state) => ({ dismissed: [...state.dismissed.filter(k => k !== key), key].slice(-200) })),
+      restore: (key) => set((state) => ({ dismissed: state.dismissed.filter(k => k !== key) })),
+      restoreAll: () => set({ dismissed: [] }),
+      summaryOpen: false,
+      setSummaryOpen: (open) => set({ summaryOpen: open }),
     }),
     {
       name: 'problem-strip',
       storage: createJSONStorage(() => sessionStorage),
+      // Only the dismissals outlive a reload; an open panel does not.
+      partialize: (state) => ({ dismissed: state.dismissed }),
     }
   )
 );
