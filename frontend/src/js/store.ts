@@ -111,6 +111,8 @@ interface ProblemStripState {
    */
   dismissed: string[];
   dismiss: (key: string) => void;
+  /** Dismiss every problem currently shown, in one go. */
+  dismissAll: (keys: string[]) => void;
   /** Put a dismissed problem back among the floating cards. */
   restore: (key: string) => void;
   restoreAll: () => void;
@@ -126,6 +128,9 @@ export const useProblemStripStore = create<ProblemStripState>()(
       dismissed: [],
       // Bounded, so a long round of dismissals cannot grow the stored list forever.
       dismiss: (key) => set((state) => ({ dismissed: [...state.dismissed.filter(k => k !== key), key].slice(-200) })),
+      dismissAll: (keys) => set((state) => ({
+        dismissed: [...state.dismissed.filter(k => !keys.includes(k)), ...keys].slice(-200),
+      })),
       restore: (key) => set((state) => ({ dismissed: state.dismissed.filter(k => k !== key) })),
       restoreAll: () => set({ dismissed: [] }),
       summaryOpen: false,
@@ -136,6 +141,30 @@ export const useProblemStripStore = create<ProblemStripState>()(
       storage: createJSONStorage(() => sessionStorage),
       // Only the dismissals outlive a reload; an open panel does not.
       partialize: (state) => ({ dismissed: state.dismissed }),
+    }
+  )
+);
+
+interface ProblemPrefsState {
+  /**
+   * Whether the problem strip is drawn over the page at all. Off, problems are only
+   * counted on the bell and listed in its summary: for an operator who checks them
+   * there and wants the whole screen for the page.
+   */
+  showStrip: boolean;
+  setShowStrip: (show: boolean) => void;
+}
+
+/** Kept per browser across reloads: it is a preference about this screen, not a dismissal. */
+export const useProblemPrefsStore = create<ProblemPrefsState>()(
+  persist(
+    (set) => ({
+      showStrip: true,
+      setShowStrip: (show) => set({ showStrip: show }),
+    }),
+    {
+      name: 'problem-prefs',
+      storage: createJSONStorage(() => localStorage),
     }
   )
 );
