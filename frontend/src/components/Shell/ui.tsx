@@ -91,3 +91,19 @@ export function Sparkline({ values, width = 120, height = 26, color = "var(--fg-
             strokeLinejoin="round" strokeLinecap="round" />
     </svg>
 }
+
+/**
+ * Whether this page is talking to the firegex backend, in words an operator reads.
+ *
+ * What is measured is the Socket.IO channel, but that is an implementation detail: what
+ * the operator needs to know is whether what they see is current, and that channel is
+ * the only thing that keeps it so. One function, so the header chip and the sidebar
+ * cannot describe the same state in two ways.
+ */
+export const backendLink = (connected: boolean, everConnected: boolean): { tone: Tone, text: string } =>
+    connected ? { tone: "ok", text: "connected" }
+        : everConnected ? { tone: "danger", text: "connection lost" }
+            : { tone: "muted", text: "connecting…" }
+
+/** What the backend status means, for a tooltip beside it. */
+export const BACKEND_LINK_HELP = "Keeps this page up to date"

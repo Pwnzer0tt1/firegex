@@ -90,7 +90,7 @@ function Ranked({ entries, empty }: { entries: StatsEntry[], empty: string }) {
                         {entry.name}
                     </Code>}
                 <Group gap={6} wrap="nowrap">
-                    <Tooltip label="Its share of everything this service refused" position="left">
+                    <Tooltip label="Share of this service's blocks" position="left">
                         <Text size="xs" fw={600}>{entry.share}%</Text>
                     </Tooltip>
                     <Text size="xs" c="dimmed">({entry.blocked})</Text>
@@ -128,7 +128,7 @@ function TrafficSummary({ traffic }: { traffic?: Traffic }) {
             walks once per connection: a packet label on that count would be wrong by
             the length of every flow. Its connection counters say it properly. */}
         {packets > 0 ? <Tooltip position="bottom"
-            label="Counted by the kernel on the rules that intercept this service — no filter is involved in producing it">
+            label="Counted by the kernel">
             <Box>
                 <Text size="xs" c="dimmed">Reached the service</Text>
                 <Text size="sm" fw={600}>
@@ -142,7 +142,7 @@ function TrafficSummary({ traffic }: { traffic?: Traffic }) {
                 <Text size="sm" fw={600}>{connections.toLocaleString()}</Text>
             </Box>
             <Tooltip position="bottom"
-                label="Refused connections over connections seen — both counted by the proxy engine, so this is like divided by like">
+                label="Refused connections out of all seen">
                 <Box>
                     <Text size="xs" c="dimmed">Refused</Text>
                     <Text size="sm" fw={600} c={(refused_share ?? 0) > 0 ? "yellow" : undefined}>
@@ -152,7 +152,7 @@ function TrafficSummary({ traffic }: { traffic?: Traffic }) {
                 </Box>
             </Tooltip>
         </> : <Tooltip position="bottom"
-            label="This layer inspects packets, not connections, so there is no connection count to take a share of. Dividing refused connections by a packet count would look like a percentage and mean nothing.">
+            label="This layer counts packets, not connections">
             <Box>
                 <Text size="xs" c="dimmed">Refused share</Text>
                 <Text size="sm" c="dimmed">per-packet layer</Text>
@@ -193,9 +193,8 @@ export default function StatsPanel({ serviceId }: { serviceId: string }) {
                                 that ignores the button just pressed looks broken. Marked
                                 rather than explained — the explanation is a hover away. */}
                             {data.filtering_since !== null && data.range_from <= data.filtering_since
-                                ? <Tooltip position="bottom" multiline w={240}
-                                    label="This is where the service started: before it was
-                                        running with a filter there is nothing to draw.">
+                                ? <Tooltip position="bottom"
+                                    label="The service started filtering here">
                                     <Text span size="xs" c="dimmed" style={{
                                         textDecoration: 'underline dotted', cursor: 'help',
                                     }}> · from its start</Text>
@@ -269,9 +268,7 @@ export default function StatsPanel({ serviceId }: { serviceId: string }) {
                 </Popover>
             </Group>
             <Group gap={6} wrap="nowrap">
-                <Tooltip position="bottom" multiline w={230}
-                    label="How much time one bar covers. A step too fine for the range is
-                        widened to keep the chart readable; the header says what was drawn.">
+                <Tooltip position="bottom" label="Time covered by one bar">
                     <Select size="xs" w={86} allowDeselect={false} comboboxProps={{ width: 90 }}
                         value={step === null ? "auto" : String(step)}
                         onChange={v => setStep(!v || v === "auto" ? null : Number(v))}

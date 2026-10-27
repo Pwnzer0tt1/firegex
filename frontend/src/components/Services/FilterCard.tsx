@@ -92,7 +92,7 @@ export default function FilterCard({ filter, serviceId, dragHandle, position, tr
                                 three letters. */}
                             {!isRegex && filter.proto === "http" ?
                                 <Tooltip position="bottom"
-                                    label="Read off the code: asking for an HttpRequest is what makes a filter an HTTP one">
+                                    label="Detected from the code">
                                     <Badge size="xs" radius="sm" variant="outline" color="gray">
                                         HTTP
                                     </Badge>

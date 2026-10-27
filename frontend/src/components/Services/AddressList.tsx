@@ -259,7 +259,7 @@ export default function AddressList({ service }: { service: Service }) {
                     <Group gap="xs" wrap="nowrap" align="flex-start"
                         style={{ flex: 1, minWidth: 0 }}>
                         <Tooltip position="bottom" disabled={!isInterfaceName(address.ip_int)}
-                            label="An interface, not an address: the rules match on the name, so this follows whatever address the link is carrying.">
+                            label="Follows the address on this interface">
                             <Badge size="xs" variant="light" color={kind.color}
                                 style={{ flexShrink: 0, width: BADGE_WIDTH, marginTop: 4 }}>
                                 {kind.label}
@@ -272,7 +272,7 @@ export default function AddressList({ service }: { service: Service }) {
                             style={{ flex: '1 1 auto', minWidth: 0, rowGap: 2 }}>
                         <Code>{bareAddress(address.ip_int)}:{address.port}</Code>
                         {decrypts(service) ? <Tooltip position="bottom"
-                            label="The engine decrypts here: clients dial this address as they always did, and the filters see the plaintext inside the process.">
+                            label="Decrypted here: filters see plaintext">
                             <Badge size="xs" variant="light" color="grape"
                                 leftSection={<TbShieldLock size={10} />}>
                                 {edgeLabel(service, address)}
@@ -284,8 +284,7 @@ export default function AddressList({ service }: { service: Service }) {
                         different setting. Clicking one opens that panel. */}
                         {addressTags(address,
                             addressCapabilities(service.proto, service.transport, address.edge)).map(tag =>
-                            <Tooltip key={tag.label} position="bottom" multiline w={300}
-                                label={tag.hint}>
+                            <Tooltip key={tag.label} position="bottom" label={tag.hint}>
                                 <Badge size="xs" variant="light" color="teal"
                                     style={{ cursor: 'pointer' }}
                                     onClick={() => setEditing(address)}>

@@ -305,7 +305,7 @@ export default function AddEditService({ opened, onClose, edit }: {
                                     : "One service, one filter chain, as many ways in as it has — IPv4 and IPv6 together if that is how it is reachable, and an interface name where the address is not yours to know. One more way in is one more address here."}
                             </Text>
                         </Box>
-                        <Tooltip label="Protect another address with the same chain" position="left">
+                        <Tooltip label="Add another address" position="left">
                             <ActionIcon variant="light" style={{ flexShrink: 0 }}
                                 onClick={() => form.insertListItem('addresses', emptyAddress())}>
                                 <BsPlusLg size={14} />

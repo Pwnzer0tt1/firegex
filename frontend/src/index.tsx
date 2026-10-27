@@ -65,6 +65,8 @@ root.render(
   <QueryClientProvider client={queryClient}>
     <MantineProvider forceColorScheme='dark' theme={theme}>
       <CodeHighlightAdapterProvider adapter={customShikiAdapter}>
+        {/* Bottom-right, over the problem strip: they last a few seconds, so covering
+            it briefly costs less than moving them somewhere unexpected. */}
         <Notifications />
         <BrowserRouter>
           <App />

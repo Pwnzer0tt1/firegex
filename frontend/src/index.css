@@ -251,15 +251,18 @@ a:hover { color: var(--fg-accent-hover); }
 .fg-nav-scrim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); z-index: 39; }
 
 /* ---------------------------------------------------------------------------------- */
-/* Problem strip: what needs doing, above every page.                                 */
+/* Problems: the strip pinned over the bottom of the page, and the summary drawer.     */
 /* ---------------------------------------------------------------------------------- */
 
 .fg-strip {
-  border-bottom: 1px solid var(--fg-border);
+  position: fixed;
+  left: var(--fg-nav-width);
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  border-top: 1px solid var(--fg-border);
   background: var(--fg-nav);
-  position: sticky;
-  top: 0;
-  z-index: 20;
+  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.55);
 }
 .fg-strip-row {
   display: flex;
@@ -289,6 +292,48 @@ a:hover { color: var(--fg-accent-hover); }
   line-height: 1;
 }
 .fg-strip-close:hover { color: var(--fg-text); }
+/* The "N more" row: a button laid out as a row, quieter than the problems above it. */
+.fg-strip-more {
+  width: 100%;
+  border: none;
+  border-top: 1px solid var(--fg-border-soft);
+  background: none;
+  font-family: inherit;
+  color: var(--fg-text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.fg-strip-more .fg-strip-text { color: var(--fg-text-muted); }
+.fg-strip-more:hover, .fg-strip-more:hover .fg-strip-text { color: var(--fg-text); }
+.fg-strip-open { color: var(--fg-accent); font-weight: 600; white-space: nowrap; }
+
+/* The strip takes no room in the layout, but the end of a page must still be
+   reachable from under it: while it is shown, the page can scroll past it. */
+.fg-app:has(.fg-strip) .fg-page { padding-bottom: 200px; }
+
+/* Rows shared with the summary drawer. */
+.fg-problem-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fg-problem-kind { font-weight: 600; white-space: nowrap; font-size: 13px; }
+
+.fg-summary-section + .fg-summary-section { margin-top: 22px; }
+.fg-summary-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-text-faint);
+  margin: 4px 0 8px;
+}
+.fg-summary-row {
+  border: 1px solid var(--fg-border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--fg-surface);
+  font-size: 13px;
+}
+.fg-summary-row + .fg-summary-row { margin-top: 6px; }
+.fg-summary-when { font-size: 12px; color: var(--fg-text-faint); white-space: nowrap; }
+.fg-summary-text { color: var(--fg-text); margin-top: 4px; line-height: 1.4; overflow-wrap: anywhere; }
 
 /* ---------------------------------------------------------------------------------- */
 /* Page header, chips and pills.                                                      */
@@ -302,6 +347,17 @@ a:hover { color: var(--fg-accent-hover); }
   margin-bottom: 18px;
 }
 .fg-page-title { font-size: 24px; font-weight: 700; letter-spacing: -0.015em; margin: 0 8px 0 0; }
+
+.fg-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px 22px;
+  padding: 10px 14px;
+  border: 1px solid var(--fg-border);
+  border-radius: 12px;
+  background: var(--fg-surface);
+}
 
 .fg-chip {
   display: inline-flex;
@@ -408,13 +464,11 @@ a:hover { color: var(--fg-accent-hover); }
   .fg-nav-toggle { display: inline-flex; }
   .fg-main { margin-left: 0; }
   .fg-page { padding: 64px 16px 40px; }
-  .fg-strip { position: static; }
-  /* The strip already clears the menu button; the page under it need not again. */
-  .fg-strip + .fg-page { padding-top: 20px; }
-  .fg-strip-row { padding: 9px 16px 9px 60px; flex-wrap: wrap; row-gap: 4px; }
+  .fg-strip { left: 0; }
+  .fg-strip-row { padding: 9px 16px; flex-wrap: wrap; row-gap: 4px; }
   .fg-strip-kind { flex: 1; }
   /* The sentence takes a line of its own under the kind and the action. */
-  .fg-strip-text { white-space: normal; order: 5; flex-basis: 100%; }
+  .fg-strip-row:not(.fg-strip-more) .fg-strip-text { white-space: normal; order: 5; flex-basis: 100%; }
   .fg-hide-md { display: none; }
 }
 

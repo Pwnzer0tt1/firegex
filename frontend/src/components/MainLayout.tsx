@@ -4,16 +4,16 @@ import { getMainPath, HOME_SECTIONS } from '../js/utils';
 import { useSessionStore } from '../js/store';
 import ProblemNotifier from './Services/ProblemNotifier';
 import { servicesQuery } from './Services/utils';
-import ProblemStrip from './Shell/ProblemStrip';
+import ProblemCards from './Shell/ProblemCards';
 import { problemsOf } from './Shell/problems';
 import Sidebar from './Shell/Sidebar';
 
 /**
- * The frame every page is drawn in: the sidebar on the left, the problem strip across
- * the top of the main column, and the page under it.
+ * The frame every page is drawn in: the sidebar on the left, the page beside it, and
+ * the problem cards floating over the bottom of the page.
  *
  * The services list is read here once and handed to both, because the two must agree
- * — a service marked red in the sidebar with nothing said in the strip is exactly the
+ * — a service marked red in the sidebar with nothing said in the cards is exactly the
  * kind of disagreement that makes an operator distrust both.
  */
 function MainLayout({ children }: { children: ReactNode }) {
@@ -33,11 +33,11 @@ function MainLayout({ children }: { children: ReactNode }) {
     <Sidebar services={services} />
     <ProblemNotifier />
     <main className="fg-main">
-      <ProblemStrip problems={problemsOf(services)} />
       <div className="fg-page">
         {children}
       </div>
     </main>
+    <ProblemCards problems={problemsOf(services)} />
   </div>
 }
 
