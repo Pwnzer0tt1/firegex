@@ -15,7 +15,7 @@ import { useAuthStore, useSystemStore } from './js/store';
 
 const AuthShell = ({ children }: { children: React.ReactNode }) => (
   <Box style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
-    <Card withBorder radius="lg" p="xl" shadow="md" style={{ width: "100%", maxWidth: 440, borderColor: 'var(--fourth_color)', backgroundColor: 'var(--fg-surface)', boxShadow: '0 12px 48px rgba(0,0,0,0.6)' }}>
+    <Card withBorder radius="lg" p="xl" style={{ width: "100%", maxWidth: 440, borderColor: 'var(--fourth_color)', backgroundColor: 'var(--fg-surface)' }}>
       <Stack align="center" gap={2} mb="lg">
         <Image src="/header-logo.png" alt="Firegex logo" w={56} />
         <Title order={2} ta="center" style={{ color: 'var(--fg-text)' }}>Firegex</Title>
@@ -28,7 +28,7 @@ const AuthShell = ({ children }: { children: React.ReactNode }) => (
 
 const StatusCard = ({ title, description, color, children }: { title: string, description: string, color: string, children?: React.ReactNode }) => (
   <Box style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: "40px 20px" }}>
-    <Card withBorder radius="lg" p="xl" shadow="md" style={{ width: "100%", maxWidth: 480, borderColor: 'var(--fourth_color)', backgroundColor: 'var(--fg-surface)', boxShadow: '0 12px 48px rgba(0,0,0,0.6)' }}>
+    <Card withBorder radius="lg" p="xl" style={{ width: "100%", maxWidth: 480, borderColor: 'var(--fourth_color)', backgroundColor: 'var(--fg-surface)' }}>
       <Stack align="center" gap="md">
         <ThemeIcon size={64} radius="xl" color={color} variant="light">
           <MdCloudOff size={32} />

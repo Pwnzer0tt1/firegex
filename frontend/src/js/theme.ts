@@ -1,4 +1,4 @@
-import { Badge, Card, Checkbox, createTheme, Menu, Modal, Paper, Popover, Table, Tooltip, type MantineColorsTuple } from '@mantine/core'
+import { Badge, Card, Checkbox, createTheme, Menu, Modal, Paper, Popover, SegmentedControl, Table, Tooltip, type MantineColorsTuple } from '@mantine/core'
 
 /**
  * The palette the whole interface is drawn from.
@@ -93,13 +93,14 @@ function shadesFromMain(mainHex: string): MantineColorsTuple {
  * 0 text, 1 strong secondary text, 2 `c="dimmed"`, 3 placeholders, 4 every default
  * border, 5 hover surfaces, 6 inputs, 7 the body, 8–9 cards and modals.
  *
- * Fills stay at (or within a few units of) black, because on an OLED panel even a small
- * lift reads as a grey patch; borders and hovers are the steps deliberately well above
- * that floor, since a black-on-black layout is told apart by its edges alone.
+ * Every resting fill (inputs, body, cards, modals, the track of a segmented control) is
+ * exactly black. They used to sit a few units apart, and an OLED panel shows each of
+ * those steps as a seam between two blacks; borders and hovers are the steps kept well
+ * above that floor, since a black-on-black layout is told apart by its edges alone.
  */
 const DARK: MantineColorsTuple = [
     '#EDEEF0', '#DCDEE2', '#8B909A', '#6B7078', '#2A2C31',
-    '#17181A', '#0A0A0B', '#000000', '#070708', '#070708',
+    '#17181A', '#000000', '#000000', '#000000', '#000000',
 ]
 
 /** What `color="gray"` resolves to: neutral controls that should not shout. */
@@ -140,7 +141,7 @@ export const theme = createTheme({
             styles: { root: { borderColor: 'var(--fg-border)' } },
         }),
         Modal: Modal.extend({
-            defaultProps: { radius: 'lg', overlayProps: { backgroundOpacity: 0.6, blur: 2 } },
+            defaultProps: { radius: 'lg', overlayProps: { backgroundOpacity: 0.75 } },
             styles: {
                 content: { backgroundColor: 'var(--fg-surface)', border: '1px solid var(--fg-border)' },
                 header: { backgroundColor: 'var(--fg-surface)' },
@@ -151,6 +152,10 @@ export const theme = createTheme({
         }),
         Popover: Popover.extend({
             styles: { dropdown: { backgroundColor: 'var(--fg-surface)', borderColor: 'var(--fg-border)' } },
+        }),
+        // Its track is black like every other fill, so the edge is what shows it is there.
+        SegmentedControl: SegmentedControl.extend({
+            styles: { root: { border: '1px solid var(--fg-border)' } },
         }),
         Tooltip: Tooltip.extend({ defaultProps: { color: 'dark.5' } }),
         Badge: Badge.extend({ defaultProps: { radius: 'xl' } }),
