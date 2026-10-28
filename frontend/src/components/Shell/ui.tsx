@@ -107,3 +107,19 @@ export const backendLink = (connected: boolean, everConnected: boolean): { tone:
 
 /** What the backend status means, for a tooltip beside it. */
 export const BACKEND_LINK_HELP = "Keeps this page up to date"
+
+/**
+ * The Mantine colour each kind of event is drawn in, everywhere it appears.
+ *
+ * One table, because the same event used to wear different colours on different
+ * screens: a warning was orange on one, red on another and yellow on a third, and a
+ * block was yellow — the warning colour — so a busy filter read as a filter in trouble.
+ * Orange is the accent and the colour of the block sparkline, so it is what a block is;
+ * yellow means "look at this"; red means something is broken or unprotected.
+ */
+export const LEVEL_COLOR = {
+    block: "orange",
+    warn: "yellow",
+    error: "red",
+    info: "blue",
+} as const

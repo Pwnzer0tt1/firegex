@@ -13,6 +13,7 @@ import AddRegexModal from './AddRegexModal';
 import CodeEditorModal from './CodeEditorModal';
 import RegexDebugger from './RegexDebugger';
 import { Filter, filterCodeQuery, filterFunctionsQuery, filterRegexesQuery, FilterKind, modeLabel, Regex, serviceQueryKey, services } from './utils';
+import { LEVEL_COLOR } from '../Shell/ui';
 
 const decode = (b64: string) => {
     try { return decodeURIComponent(escape(atob(b64))) } catch { return atob(b64) }
@@ -98,7 +99,7 @@ export default function FilterCard({ filter, serviceId, dragHandle, position, tr
                                     </Badge>
                                 </Tooltip> : null}
                             {filter.blocked > 0 ?
-                                <Badge size="xs" radius="sm" variant="light" color="yellow">
+                                <Badge size="xs" radius="sm" variant="light" color={LEVEL_COLOR.block}>
                                     {filter.blocked} blocked
                                 </Badge> : null}
                         </Group>
@@ -174,7 +175,7 @@ export default function FilterCard({ filter, serviceId, dragHandle, position, tr
                             {rx.case_sensitive ? null :
                                 <Badge size="xs" variant="outline" color="gray">any case</Badge>}
                             {rx.blocked > 0 ?
-                                <Badge size="xs" variant="light" color="yellow">{rx.blocked}</Badge> : null}
+                                <Badge size="xs" variant="light" color={LEVEL_COLOR.block}>{rx.blocked}</Badge> : null}
                         </Group>
                         <Group gap={4} wrap="nowrap">
                             <Switch size="xs" checked={rx.active} disabled={busy}
@@ -211,7 +212,7 @@ export default function FilterCard({ filter, serviceId, dragHandle, position, tr
                         <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
                             <Code style={{ opacity: fn.active ? 1 : 0.5 }}>{fn.name}()</Code>
                             {fn.blocked > 0 ?
-                                <Badge size="xs" variant="light" color="yellow">{fn.blocked}</Badge> : null}
+                                <Badge size="xs" variant="light" color={LEVEL_COLOR.block}>{fn.blocked}</Badge> : null}
                             {fn.active ? null :
                                 <Badge size="xs" variant="outline" color="gray">off</Badge>}
                         </Group>

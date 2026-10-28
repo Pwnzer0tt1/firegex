@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { FaMinus, FaPlus } from 'react-icons/fa';
 import { IoInformationCircleOutline } from 'react-icons/io5';
 import { carries, L4, Transport } from './utils';
+import { LEVEL_COLOR } from '../Shell/ui';
 
 /**
  * Choosing the network layer.
@@ -114,12 +115,12 @@ function Points({ items, good }: { items: string[], good: boolean }) {
             <Box style={{
                 width: 16, height: 16, borderRadius: 8, flexShrink: 0,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: good ? 'rgba(32,201,151,0.15)' : 'rgba(253,126,20,0.15)',
-                color: good ? 'var(--mantine-color-teal-4)' : 'var(--mantine-color-orange-4)',
+                background: good ? 'var(--fg-ok-soft)' : 'var(--fg-warn-soft)',
+                color: good ? 'var(--mantine-color-teal-4)' : `var(--mantine-color-${LEVEL_COLOR.warn}-4)`,
             }}>
                 {good ? <FaPlus size={8} /> : <FaMinus size={8} />}
             </Box>
-            <Text size="xs" fw={600} c={good ? "teal.4" : "orange.4"}>
+            <Text size="xs" fw={600} c={good ? "teal.4" : `${LEVEL_COLOR.warn}.4`}>
                 {good ? "What it buys" : "What it costs"}
             </Text>
         </Group>

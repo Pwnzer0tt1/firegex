@@ -6,7 +6,7 @@ import { IoSettingsSharp } from 'react-icons/io5';
 import { MdMoreHoriz } from 'react-icons/md';
 import { TbAlertTriangle } from 'react-icons/tb';
 import { bareAddress, errorNotify, okNotify } from '../../js/utils';
-import { Pill, serviceStateLabel, serviceTone, Sparkline } from '../Shell/ui';
+import { LEVEL_COLOR, Pill, serviceStateLabel, serviceTone, Sparkline } from '../Shell/ui';
 import YesNoModal from '../YesNoModal';
 import AddEditService from './AddEditService';
 import { Address, L4, protoLabel, Service, serviceQueryKey, services, Transport } from './utils';
@@ -50,7 +50,7 @@ export function ProblemBadge({ service }: { service: Service }) {
     const error = problem.level === "error"
     return <Tooltip position="bottom" multiline w={380}
         label={`${new Date(problem.at).toLocaleTimeString(undefined, { hour12: false })} · ${problem.text}`}>
-        <Badge color={error ? "red" : "orange"} variant="light" size="xs" radius="sm"
+        <Badge color={error ? LEVEL_COLOR.error : LEVEL_COLOR.warn} variant="light" size="xs" radius="sm"
             leftSection={<TbAlertTriangle size={10} />}>
             {error ? "ERROR" : "WARNING"}
         </Badge>

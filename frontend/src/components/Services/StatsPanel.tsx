@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { MdOutlineDateRange } from 'react-icons/md';
 import { Chart, CHART_LABELS, ChartKind, clock, Legend, PALETTE } from './StatsCharts';
 import { serviceStatsQuery, StatsEntry, Traffic } from './utils';
+import { LEVEL_COLOR } from '../Shell/ui';
 
 /**
  * What each rule has refused, over a window you choose, in the shape you find readable.
@@ -145,7 +146,7 @@ function TrafficSummary({ traffic }: { traffic?: Traffic }) {
                 label="Refused connections out of all seen">
                 <Box>
                     <Text size="xs" c="dimmed">Refused</Text>
-                    <Text size="sm" fw={600} c={(refused_share ?? 0) > 0 ? "yellow" : undefined}>
+                    <Text size="sm" fw={600} c={(refused_share ?? 0) > 0 ? LEVEL_COLOR.block : undefined}>
                         {refused_share ?? 0}%
                         <Text span size="xs" c="dimmed"> · {(connections_refused ?? 0).toLocaleString()}</Text>
                     </Text>
@@ -205,7 +206,7 @@ export default function StatsPanel({ serviceId }: { serviceId: string }) {
             </Box>
             <Group gap="xs">
                 <Tooltip label="Refused in this range" position="bottom">
-                    <Badge color="yellow" variant="light" radius="sm">{data?.total ?? 0}</Badge>
+                    <Badge color={LEVEL_COLOR.block} variant="light" radius="sm">{data?.total ?? 0}</Badge>
                 </Tooltip>
                 <Tooltip label="Refused since these rules were created" position="bottom">
                     <Badge color="gray" variant="outline" radius="sm">

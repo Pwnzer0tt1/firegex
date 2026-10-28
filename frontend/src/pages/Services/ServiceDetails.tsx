@@ -16,6 +16,7 @@ import StatsPanel from '../../components/Services/StatsPanel';
 import { decrypts, Filter, FilterKind, protoLabel, serviceFiltersQuery, serviceQueryKey, services, servicesQuery, Transport } from '../../components/Services/utils';
 import YesNoModal from '../../components/YesNoModal';
 import { errorNotify, okNotify } from '../../js/utils';
+import { LEVEL_COLOR, Pill, serviceStateLabel, serviceTone } from '../../components/Shell/ui';
 
 /** A unix second, as a human reads it. */
 const stamp = (seconds: number) => new Date(seconds * 1000).toLocaleString()
@@ -73,9 +74,7 @@ export default function ServiceDetails() {
                 <Box>
                     <Group gap="xs" align="center">
                         <Title order={4}>{service.name}</Title>
-                        <Badge color={running ? "teal" : "red"} variant="light" size="sm" radius="sm">
-                            {service.status.toUpperCase()}
-                        </Badge>
+                        <Pill tone={serviceTone(service)}>{serviceStateLabel(service)}</Pill>
                         <Tooltip position="bottom"
                             label={transportSummary(service.transport, service.proto)}>
                             <Badge color="indigo" variant="light" size="sm" radius="sm">
@@ -112,7 +111,7 @@ export default function ServiceDetails() {
             the one thing here that has already happened rather than being a setting. */}
         {service.over_limit_hits > 0 ? <>
             <Space h="lg" />
-            <Alert color={service.over_limit_forwards ? "yellow" : "red"} variant="light"
+            <Alert color={LEVEL_COLOR.warn} variant="light"
                 icon={<TbAlertTriangle size={18} />}
                 title={`The connection limit has turned away ${service.over_limit_hits.toLocaleString()} ${service.over_limit_hits === 1 ? "connection" : "connections"}`}>
                 <Text size="sm">
