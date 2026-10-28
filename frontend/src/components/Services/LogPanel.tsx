@@ -3,11 +3,12 @@ import { useEffect, useRef, useState } from 'react';
 import { BsTrashFill } from 'react-icons/bs';
 import { socketio } from '../../js/utils';
 import { LogEntry, services } from './utils';
+import { LEVEL_COLOR } from '../Shell/ui';
 
 const COLOURS: Record<string, string> = {
-    block: 'var(--mantine-color-yellow-4)',
-    warn: 'var(--mantine-color-orange-4)',
-    error: 'var(--mantine-color-red-4)',
+    block: `var(--mantine-color-${LEVEL_COLOR.block}-4)`,
+    warn: `var(--mantine-color-${LEVEL_COLOR.warn}-4)`,
+    error: `var(--mantine-color-${LEVEL_COLOR.error}-4)`,
     output: 'var(--mantine-color-cyan-4)',
     info: 'var(--mantine-color-dimmed)',
 }

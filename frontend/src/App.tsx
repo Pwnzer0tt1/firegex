@@ -186,7 +186,7 @@ function App() {
   } else if (systemStatus.status === "run" && systemStatus.loggined) {
     return <PageRouting getStatus={getStatus} />
   } else {
-    return <StatusCard title="Unexpected error 🔥" description="Firegex returned an unexpected status. Try reloading the page." color="orange" />
+    return <StatusCard title="Unexpected error 🔥" description="Firegex returned an unexpected status. Try reloading the page." color="red" />
   }
 }
 

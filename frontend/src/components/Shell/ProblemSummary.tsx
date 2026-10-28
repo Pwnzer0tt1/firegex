@@ -5,7 +5,7 @@ import { useProblemPrefsStore, useProblemStripStore } from '../../js/store'
 import { Service } from '../Services/utils'
 import { ProblemAction } from './ProblemCards'
 import { problemsOf, StripProblem } from './problems'
-import { Dot, toneColor } from './ui'
+import { Dot, LEVEL_COLOR, toneColor } from './ui'
 
 /** "4 min ago" for the last hour, a time of day after that: what a round is measured in. */
 const when = (at: number, now: number) => {
@@ -72,7 +72,7 @@ export default function ProblemSummary({ services }: { services: Service[] }) {
     return <>
         <Tooltip label={active.length ? `${active.length} problem${active.length === 1 ? "" : "s"} need attention` : "Warnings and errors"} position="top">
             <Indicator label={active.length} size={16} offset={4} disabled={active.length === 0}
-                color={urgent ? "red" : "yellow"}>
+                color={urgent ? LEVEL_COLOR.error : LEVEL_COLOR.warn}>
                 <ActionIcon variant="subtle" color="gray" size="lg" aria-label="Warnings and errors"
                     onClick={() => setSummaryOpen(true)}>
                     <TbBell size={18} />
