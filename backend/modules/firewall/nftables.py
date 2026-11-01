@@ -123,7 +123,7 @@ class FiregexTables(NFTableManager):
             rules.extend([
                 { "add":{ "rule": {
                     "family": "ip", "table": self.filter_table, "chain": self.rules_chain_out,
-                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "oif" }}, "right": "lo"}},{"accept": None}]
                 }}},
                 { "add":{ "rule": {
                     "family": "ip", "table": self.filter_table, "chain": self.rules_chain_in,
@@ -131,7 +131,7 @@ class FiregexTables(NFTableManager):
                 }}},
                 { "add":{ "rule": {
                     "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_out,
-                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "iif" }}, "right": "lo"}},{"accept": None}]
+                    "expr": [{ "match": { "op": "==", "left": { "meta": { "key": "oif" }}, "right": "lo"}},{"accept": None}]
                 }}},
                 { "add":{ "rule": {
                     "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
@@ -238,8 +238,8 @@ class FiregexTables(NFTableManager):
                 { "add":{ "rule": {
                     "family": "ip6", "table": self.filter_table, "chain": self.rules_chain_in,
                     "expr": [
-                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'sport'}}, 'op': '==', 'right': 67} },
-                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 68} },
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'sport'}}, 'op': '==', 'right': 547} },
+                        { 'match': {'left': {'payload': {'protocol': "udp", 'field': 'dport'}}, 'op': '==', 'right': 546} },
                         { "accept": None }
                     ]
                 }}},
@@ -373,14 +373,16 @@ class FiregexTables(NFTableManager):
                     ip_filters.append({'match': {'left': {'payload': {'protocol': ip_family(srv.src), 'field': 'saddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.src)}})
                     families = [ip_family(srv.src)]
                 else:
-                    ip_filters.append({"match": { "op": "==", "left": { "meta": { "key": "iifname" } }, "right": srv.src} })
+                    iface_key = "oifname" if srv.output_mode else "iifname"
+                    ip_filters.append({"match": { "op": "==", "left": { "meta": { "key": iface_key } }, "right": srv.src} })
             
             if srv.dst != "":
                 if is_ip_parse(srv.dst):
                     ip_filters.append({'match': {'left': {'payload': {'protocol': ip_family(srv.dst), 'field': 'daddr'}}, 'op': '==', 'right': nftables_int_to_json(srv.dst)}})
                     families = [ip_family(srv.dst)]
                 else:
-                    ip_filters.append({"match": { "op": "==", "left": { "meta": { "key": "oifname" } }, "right": srv.dst} })
+                    iface_key = "iifname" if srv.input_mode else "oifname"
+                    ip_filters.append({"match": { "op": "==", "left": { "meta": { "key": iface_key } }, "right": srv.dst} })
                 
             port_filters = []
             if srv.proto not in [Protocol.ANY, Protocol.BOTH]:

@@ -16,7 +16,11 @@ import { Filter, filterCodeQuery, filterFunctionsQuery, filterRegexesQuery, Filt
 import { LEVEL_COLOR } from '../Shell/ui';
 
 const decode = (b64: string) => {
-    try { return decodeURIComponent(escape(atob(b64))) } catch { return atob(b64) }
+    try {
+        return new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)))
+    } catch {
+        return ""
+    }
 }
 
 /**

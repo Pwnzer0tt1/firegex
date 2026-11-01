@@ -49,6 +49,8 @@ def log_client(packet: RawPacket):
 `
 
 const b64 = (text: string) => btoa(text)
+const decodeB64 = (s: string) =>
+    new TextDecoder().decode(Uint8Array.from(atob(s), c => c.charCodeAt(0)))
 
 // A trimmed copy of what the backend introspects out of the library, so the demo's
 // editor offers the same completion. Short on purpose: the real one is generated.
@@ -201,14 +203,14 @@ const state = {
         // Switched off rather than deleted: the code is still there to turn back on.
         { filter_id: fltShopPy, name: "log_client", active: false, blocked: 0 },
     ] as Json[],
-    certs: { [svcVault]: DEMO_CERT, [svcArena]: DEMO_CERT } as Record<string, string>,
+    certs: { [svcVault]: DEMO_CERT, [svcArena]: DEMO_CERT, [svcWeb]: DEMO_CERT } as Record<string, string>,
     firewall: {
         enabled: true,
         policy: "accept",
         rules: [
-            { active: true, name: "allow team vpn", proto: "any", src: "10.10.0.0/16", dst: "", port_src_from: 0, port_dst_from: 0, port_src_to: 0, port_dst_to: 0, action: "accept", mode: "in", table: "filter" },
-            { active: true, name: "drop ssh from outside", proto: "tcp", src: "0.0.0.0/0", dst: "", port_src_from: 0, port_dst_from: 22, port_src_to: 0, port_dst_to: 22, action: "drop", mode: "in", table: "filter" },
-            { active: false, name: "reject smtp egress", proto: "tcp", src: "", dst: "0.0.0.0/0", port_src_from: 0, port_dst_from: 25, port_src_to: 0, port_dst_to: 25, action: "reject", mode: "out", table: "filter" },
+            { active: true, name: "allow team vpn", proto: "any", src: "10.10.0.0/16", dst: "", port_src_from: 1, port_dst_from: 1, port_src_to: 65535, port_dst_to: 65535, action: "accept", mode: "in", table: "filter" },
+            { active: true, name: "drop ssh from outside", proto: "tcp", src: "0.0.0.0/0", dst: "", port_src_from: 1, port_dst_from: 22, port_src_to: 65535, port_dst_to: 22, action: "drop", mode: "in", table: "filter" },
+            { active: false, name: "reject smtp egress", proto: "tcp", src: "", dst: "0.0.0.0/0", port_src_from: 1, port_dst_from: 25, port_src_to: 65535, port_dst_to: 25, action: "reject", mode: "out", table: "filter" },
         ] as Json[],
         settings: {
             keep_rules: false, allow_loopback: true, allow_established: true, allow_icmp: true,
@@ -351,7 +353,7 @@ const decorate = (s: Json) => ({
  */
 const demoDebug = (patterns: Json[], sample: string) => {
     let text = ""
-    try { text = atob(sample) } catch { text = "" }
+    try { text = decodeB64(sample) } catch { text = "" }
     const matches: Json[] = []
     const errors: Json[] = []
     for (const p of patterns) {
@@ -434,7 +436,10 @@ const routes: [string, RegExp, Handler][] = [
             if (b[key] !== undefined && b[key] !== null) srv[key] = b[key]
         }
         // The addresses carry it too, so `(ip, port, proto)` stays a usable key.
-        if (b.proto) for (const a of addressesOf(srv.service_id)) a.proto = b.proto
+        if (b.proto) for (const a of addressesOf(srv.service_id)) {
+            a.edge = b.proto === "http" ? (a.edge ?? "tcp") : b.proto
+            a.proto = a.edge === "quic" || a.edge === "udp" ? "udp" : "tcp"
+        }
         if (b.tls_cert) state.certs[srv.service_id] = b.tls_cert
         emit(["services"]); return ok
     }],
@@ -458,21 +463,31 @@ const routes: [string, RegExp, Handler][] = [
             throw "This service hands its traffic to your own proxy, so the new address " +
                   "needs the port that proxy listens on for it"
         }
-        if (state.addresses.some(a => a.ip_int === b.ip_int && a.port === b.port && a.proto === srv.proto))
+        const edge = srv.proto === "http" ? (b.edge ?? "tcp") : (srv.proto ?? "tcp")
+        const proto = edge === "quic" || edge === "udp" ? "udp" : "tcp"
+        if (state.addresses.some(a => a.ip_int === b.ip_int && a.port === b.port && a.proto === proto))
             throw "one of these addresses is already protected by a service"
         state.addresses.push({
             address_id: uuid(), service_id: srv.service_id, ip_int: b.ip_int, port: b.port,
-            proto: srv.proto, proxy_ip: b.proxy_ip ?? null, proxy_port: b.proxy_port ?? null,
+            proto, edge,
+            target_port: b.target_port ?? null,
+            upstream: b.upstream ?? "same",
+            proxy_ip: b.proxy_ip ?? null, proxy_port: b.proxy_port ?? null,
         })
         addLog(srv.service_id, "info",
             `also protecting ${b.ip_int}:${b.port} (no connection was dropped)`)
         emit(["services"]); return ok
     }],
     ["PUT", /^services\/([^/]+)\/addresses\/([^/]+)$/, (m, b) => {
-        service(m[1])
+        const srv = service(m[1])
         const addr = state.addresses.find(a => a.address_id === m[2] && a.service_id === m[1])
             ?? notFound("Address")
+        const edge = srv.proto === "http" ? (b.edge ?? addr.edge ?? "tcp") : (srv.proto ?? "tcp")
+        const proto = edge === "quic" || edge === "udp" ? "udp" : "tcp"
         addr.ip_int = b.ip_int; addr.port = b.port
+        addr.edge = edge; addr.proto = proto
+        addr.target_port = b.target_port ?? null
+        addr.upstream = b.upstream ?? "same"
         addr.proxy_ip = b.proxy_ip ?? null; addr.proxy_port = b.proxy_port ?? null
         emit(["services"]); return ok
     }],
@@ -559,7 +574,7 @@ const routes: [string, RegExp, Handler][] = [
         const patterns = state.regexes
             .filter(r => chain.some(f => f.filter_id === r.filter_id))
             .map(r => ({
-                id: r.regex_id, name: atob(r.regex), kind: "regex",
+                id: r.regex_id, name: decodeB64(r.regex), kind: "regex",
                 filter_id: r.filter_id,
                 blocked: Math.round(r.blocked * (0.15 + 0.85 * fraction)),
             }))
@@ -744,7 +759,7 @@ const routes: [string, RegExp, Handler][] = [
         const f = filter(m[1], m[2])
         if (f.kind !== "regex") throw "This filter does not hold patterns"
         let expr = ""
-        try { expr = atob(b.regex) } catch { throw "The pattern must be base64-encoded" }
+        try { expr = decodeB64(b.regex) } catch { throw "The pattern must be base64-encoded" }
         try { new RegExp(expr) } catch (err) { throw `Invalid pattern: ${err}` }
         state.regexes.push({
             regex_id: uuid(), filter_id: m[2], regex: b.regex, mode: b.mode ?? "B",
@@ -758,7 +773,7 @@ const routes: [string, RegExp, Handler][] = [
         if (b.active !== undefined && b.active !== null) rx.active = b.active
         if (b.regex != null && b.regex !== rx.regex) {
             let expr = ""
-            try { expr = atob(b.regex) } catch { throw "The pattern must be base64-encoded" }
+            try { expr = decodeB64(b.regex) } catch { throw "The pattern must be base64-encoded" }
             try { new RegExp(expr) } catch (err) { throw `Invalid pattern: ${err}` }
             if (state.regexes.some(r => r.filter_id === m[2] && r.regex_id !== rx.regex_id
                 && r.regex === b.regex && r.case_sensitive === (b.case_sensitive ?? rx.case_sensitive)))

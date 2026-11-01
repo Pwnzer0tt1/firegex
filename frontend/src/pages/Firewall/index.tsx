@@ -23,6 +23,269 @@ import { SettingsModal } from "./SettingsModal";
 import { DocsButton } from "../../components/DocsButton";
 import { Chip } from "../../components/Shell/ui";
 
+const customInt = [
+  { value: "0.0.0.0/0", netint: "ANY IPv4", label: "0.0.0.0/0" },
+  { value: "::/0", netint: "ANY IPv6", label: "::/0" },
+  { value: "", netint: "ANY", label: "ANY" }
+]
+
+const normalizePortFrom = (p: number) => (p >= 1 && p <= 65535 ? p : 1)
+const normalizePortTo = (p: number) => (p >= 1 && p <= 65535 ? p : 65535)
+const formatPortRange = (from: number, to: number) => (from === to ? `${from}` : `${from}-${to}`)
+
+const parsePort = (s?: string) => {
+  const n = s ? parseInt(s, 10) : NaN
+  return Number.isFinite(n) && n >= 1 && n <= 65535 ? n : null
+}
+/** What a port box says, as `[from, to]`: blank is every port, `80` and `80-` are 80. */
+const parsePortRange = (v: string): [number, number] => {
+  const elements = v.split("-")
+  const p0 = parsePort(elements[0])
+  const p1 = parsePort(elements[1]) ?? p0
+  return [p0 ?? 1, p1 ?? 65535]
+}
+
+function FirewallRuleRow({
+  item,
+  index,
+  visibleIndex,
+  isMedium,
+  onRemove,
+  onUpdate,
+}: {
+  item: Rule & { rule_id: string },
+  index: number,
+  visibleIndex: number,
+  isMedium: boolean,
+  onRemove: (index: number) => void,
+  onUpdate: () => void,
+}) {
+  const theme = useMantineTheme();
+  const srcFrom = normalizePortFrom(item.port_src_from)
+  const srcTo = normalizePortTo(item.port_src_to)
+  const dstFrom = normalizePortFrom(item.port_dst_from)
+  const dstTo = normalizePortTo(item.port_dst_to)
+
+  const [srcPortEnabled, setSrcPortEnabled] = useState(srcFrom != 1 || srcTo != 65535)
+  const [dstPortEnabled, setDstPortEnabled] = useState(dstFrom != 1 || dstTo != 65535)
+  const [srcPortValue, setSrcPortValue] = useState(formatPortRange(srcFrom, srcTo))
+  const [dstPortValue, setDstPortValue] = useState(formatPortRange(dstFrom, dstTo))
+
+  // Re-synced only when the text no longer says what the rule holds (a reorder, a
+  // reload). Rewriting it on every keystroke erased the `-` of a range being typed, and
+  // turned the port off the moment the field was cleared.
+  useEffect(() => {
+    const sf = normalizePortFrom(item.port_src_from)
+    const st = normalizePortTo(item.port_src_to)
+    const [cf, ct] = parsePortRange(srcPortValue)
+    if (cf === sf && ct === st) return
+    setSrcPortEnabled(sf != 1 || st != 65535)
+    setSrcPortValue(formatPortRange(sf, st))
+  }, [item.rule_id, item.port_src_from, item.port_src_to])
+  useEffect(() => {
+    const df = normalizePortFrom(item.port_dst_from)
+    const dt = normalizePortTo(item.port_dst_to)
+    const [cf, ct] = parsePortRange(dstPortValue)
+    if (cf === df && ct === dt) return
+    setDstPortEnabled(df != 1 || dt != 65535)
+    setDstPortValue(formatPortRange(df, dt))
+  }, [item.rule_id, item.port_dst_from, item.port_dst_to])
+
+  const src_custom_int = customInt.map(v => v.value).includes(item.src) ? [] : [{ value: item.src, netint: "SELECTED", label: item.src }]
+  const dst_custom_int = customInt.map(v => v.value).includes(item.dst) ? [] : [{ value: item.dst, netint: "SELECTED", label: item.dst }]
+
+  const port_range_setter = (rule: Rule, v: string, { src = false, dst = false }: { src?: boolean, dst?: boolean }) => {
+    const [from, to] = parsePortRange(v)
+    if (src) {
+      rule.port_src_from = from
+      rule.port_src_to = to
+      setSrcPortValue(v)
+    }
+    if (dst) {
+      rule.port_dst_from = from
+      rule.port_dst_to = to
+      setDstPortValue(v)
+    }
+    onUpdate()
+  }
+
+  const ip_setter = (rule: Rule, v: string | null, { src = false, dst = false }: { src?: boolean, dst?: boolean }) => {
+    const values = v ? v : ""
+    if (src) {
+      rule.src = values
+    }
+    if (dst) {
+      rule.dst = values
+    }
+    onUpdate()
+  }
+
+  const proto_any = item.proto == Protocol.ANY
+  const disabletab = {
+    port_box: proto_any,
+    src_port: !srcPortEnabled || proto_any,
+    dst_port: !dstPortEnabled || proto_any
+  }
+
+  return (
+    <Draggable index={visibleIndex} draggableId={item.rule_id}>
+      {(provided, snapshot) => (
+        <Card
+          ref={provided.innerRef}
+          {...provided.draggableProps}
+          withBorder
+          radius="md"
+          p="md"
+          mb="md"
+          bg="transparent"
+          style={{
+            // not the `w` prop: Mantine's style props would beat the width dnd measures, and
+            // `100%` against a `position: fixed` card resolves to the viewport, not the list
+            width: '100%',
+            transition: 'border-color 0.2s ease',
+            // dnd puts the drag transform/transition in here: it has to win over our defaults
+            ...provided.draggableProps.style,
+            borderColor: snapshot.isDragging ? 'var(--accent-color)' : 'var(--fourth_color)',
+          }}
+        >
+          <Group wrap="nowrap" align="flex-start" gap="sm">
+            <Box {...provided.dragHandleProps} style={{ display: 'flex', alignItems: 'center', height: rem(36) }}>
+              <TbGripVertical style={{ width: rem(20), height: rem(20), color: 'var(--text-secondary)' }} />
+            </Box>
+            <Stack gap="sm" style={{ flex: 1, minWidth: 0 }}>
+              <Group wrap="nowrap" gap="sm">
+                <Switch
+                  checked={item.active}
+                  onChange={() => {
+                    item.active = !item.active
+                    onUpdate()
+                  }}
+                  color="teal"
+                  size="lg"
+                  thumbIcon={
+                    item.active ? (
+                      <ImCheckmark
+                        style={{ width: rem(12), height: rem(12) }}
+                        color={theme.colors.teal[6]}
+                      />
+                    ) : (
+                      <ImCross
+                        style={{ width: rem(12), height: rem(12) }}
+                        color={theme.colors.red[6]}
+                      />
+                    )
+                  }
+                />
+                <ActionIcon color="red" onClick={() => onRemove(index)} size="lg" radius="md" variant="filled"><BsTrashFill size={18} /></ActionIcon>
+                <TextInput value={item.name} onChange={(v) => { item.name = v.target.value; onUpdate() }} style={{ flex: 1 }} />
+              </Group>
+
+              <Group wrap={isMedium ? "nowrap" : "wrap"} align="flex-start" gap="md">
+                <Stack gap="xs" style={{ flex: 1, minWidth: isMedium ? 0 : "100%" }}>
+                  <InterfaceInput
+                    initialCustomInterfaces={[...src_custom_int, ...customInt]}
+                    value={item.src}
+                    onChange={v => ip_setter(item, v, { src: true })}
+                    placeholder="Any source"
+                    includeInterfaceNames
+                  />
+                  <Group gap="xs" wrap="nowrap">
+                    <OnOffButton value={srcPortEnabled} onClick={() => {
+                      const value = !srcPortEnabled
+                      setSrcPortEnabled(value)
+                      if (!value) {
+                        item.port_src_from = 1
+                        item.port_src_to = 65535
+                        onUpdate()
+                      } else {
+                        port_range_setter(item, srcPortValue, { src: true })
+                      }
+                    }} size="lg" disabled={disabletab.port_box} variant="light" />
+                    <PortRangeInput
+                      onChange={v => port_range_setter(item, v.target.value, { src: true })}
+                      value={srcPortValue}
+                      disabled={disabletab.src_port}
+                      error={!disabletab.src_port && !srcPortValue}
+                      style={{ flex: 1 }}
+                    />
+                  </Group>
+                </Stack>
+
+                <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', alignSelf: isMedium ? 'stretch' : 'center', padding: isMedium ? '28px 0 0' : '4px 0' }}>
+                  <LuArrowBigRightDash size={22} color="var(--text-secondary)" style={isMedium ? undefined : { transform: 'rotate(90deg)' }} />
+                </Box>
+
+                <Stack gap="xs" style={{ flex: 1, minWidth: isMedium ? 0 : "100%" }}>
+                  <InterfaceInput
+                    initialCustomInterfaces={[...dst_custom_int, ...customInt]}
+                    // Controlled, like the source beside it: uncontrolled, the box kept
+                    // whatever it was first rendered with, so a rule reordered or reset
+                    // under it went on showing the old destination.
+                    value={item.dst}
+                    onChange={v => ip_setter(item, v, { dst: true })}
+                    placeholder="Any destination"
+                    includeInterfaceNames
+                  />
+                  <Group gap="xs" wrap="nowrap">
+                    <OnOffButton value={dstPortEnabled} onClick={() => {
+                      const value = !dstPortEnabled
+                      setDstPortEnabled(value)
+                      if (!value) {
+                        item.port_dst_from = 1
+                        item.port_dst_to = 65535
+                        onUpdate()
+                      } else {
+                        port_range_setter(item, dstPortValue, { dst: true })
+                      }
+                    }} size="lg" disabled={disabletab.port_box} variant="light" />
+                    <PortRangeInput
+                      onChange={v => port_range_setter(item, v.target.value, { dst: true })}
+                      value={dstPortValue}
+                      disabled={disabletab.dst_port}
+                      error={!disabletab.dst_port && !dstPortValue}
+                      style={{ flex: 1 }}
+                    />
+                  </Group>
+                </Stack>
+              </Group>
+
+              <Group gap="xs" wrap="wrap">
+                <ModeSelector
+                  value={item.mode}
+                  onChange={(value) => { item.mode = value as RuleMode; onUpdate() }}
+                  style={{ flexGrow: 1, minWidth: rem(160) }}
+                  table={item.table}
+                />
+                <ProtocolSelector
+                  value={item.proto}
+                  onChange={(value) => {
+                    item.proto = value as Protocol
+                    if (item.proto === Protocol.ANY) {
+                      item.port_src_from = 1
+                      item.port_src_to = 65535
+                      item.port_dst_from = 1
+                      item.port_dst_to = 65535
+                      setSrcPortEnabled(false)
+                      setDstPortEnabled(false)
+                    }
+                    onUpdate()
+                  }}
+                  style={{ flexGrow: 1, minWidth: rem(160) }}
+                />
+                <ActionTypeSelector
+                  value={item.action}
+                  onChange={(value) => { item.action = value as ActionType; onUpdate() }}
+                  style={{ flexGrow: 1, minWidth: rem(160) }}
+                />
+              </Group>
+            </Stack>
+          </Group>
+        </Card>
+      )}
+    </Draggable>
+  )
+}
+
 export const Firewall = () => {
 
   const [currentPolicy, setCurrentPolicy] = useState<ActionType>(ActionType.ACCEPT)
@@ -32,7 +295,6 @@ export const Firewall = () => {
   const [enableFwModal, setEnableFwModal] = useState(false)
   const [applyChangeModal, setApplyChangeModal] = useState(false)
   const [settingsModal, setSettingsModal] = useState(false)
-  const theme = useMantineTheme();
   const isMedium = useMediaQuery(`(min-width: 950px)`) ?? true
 
   const [updateMevalueinternal, internalUpdateme] = useState(false)
@@ -48,7 +310,14 @@ export const Firewall = () => {
   useEffect(() => {
     if (!rules.isLoading && rules.isFetched && !rules.isFetching) {
       setCurrentPolicy(rules.data?.policy ?? ActionType.ACCEPT)
-      handlers.setState(JSON.parse(JSON.stringify((rules.data?.rules ?? []).map(v => ({ rule_id: makeid(30), ...v })))))
+      handlers.setState(JSON.parse(JSON.stringify((rules.data?.rules ?? []).map(v => ({
+        rule_id: makeid(30),
+        ...v,
+        port_src_from: normalizePortFrom(v.port_src_from),
+        port_src_to: normalizePortTo(v.port_src_to),
+        port_dst_from: normalizePortFrom(v.port_dst_from),
+        port_dst_to: normalizePortTo(v.port_dst_to),
+      })))))
     }
   }, [rules.isFetched, rules.isLoading, rules.isFetching])
 
@@ -62,7 +331,9 @@ export const Firewall = () => {
 
   const enableFirewall = () => {
     if (valuesChanged) {
-      applyChangesRaw().then(() => enableFirewallRaw())
+      applyChangesRaw().then((ok) => {
+        if (ok) enableFirewallRaw()
+      })
     } else {
       enableFirewallRaw()
     }
@@ -121,15 +392,19 @@ export const Firewall = () => {
     return state
   }
 
-  const applyChangesRaw = () => {
+  const applyChangesRaw = async (): Promise<boolean> => {
     const parsedRules = parseRules()
     if (parsedRules === undefined) {
       errorNotify("Firewall rules apply failed!", "The firewall rules are not valid")
-      return Promise.reject()
-    } else {
-      return firewall.ruleset({ rules: state, policy: currentPolicy })
-        .then(() => okNotify("Firewall rules applied", "The firewall rules has been applied"))
-        .catch((e) => errorNotify("Firewall rules apply failed!", getErrorMessage(e)))
+      return false
+    }
+    try {
+      await firewall.ruleset({ rules: state, policy: currentPolicy })
+      okNotify("Firewall rules applied", "The firewall rules has been applied")
+      return true
+    } catch (e) {
+      errorNotify("Firewall rules apply failed!", getErrorMessage(e))
+      return false
     }
   }
 
@@ -142,197 +417,15 @@ export const Firewall = () => {
     .filter(({ item }) => item.table == selectedTab)
 
   const items = visibleRules.map(({ item, index }, visibleIndex) => (
-    <Draggable key={item.rule_id} index={visibleIndex} draggableId={item.rule_id}>
-      {(provided, snapshot) => {
-        const customInt = [
-          { value: "0.0.0.0/0", netint: "ANY IPv4", label: "0.0.0.0/0" },
-          { value: "::/0", netint: "ANY IPv6", label: "::/0" },
-          { value: "", netint: "ANY", label: "ANY" }
-        ]
-        const src_custom_int = customInt.map(v => v.value).includes(item.src) ? [] : [{ value: item.src, netint: "SELECTED", label: item.src }]
-        const dst_custom_int = customInt.map(v => v.value).includes(item.dst) ? [] : [{ value: item.dst, netint: "SELECTED", label: item.dst }]
-        const [srcPortEnabled, setSrcPortEnabled] = useState(item.port_src_from != 1 || item.port_src_to != 65535)
-        const [dstPortEnabled, setDstPortEnabled] = useState(item.port_dst_from != 1 || item.port_dst_to != 65535)
-        const [srcPortValue, setSrcPortValue] = useState(item.port_src_from == item.port_src_to ? `${item.port_src_from}` : `${item.port_src_from}-${item.port_src_to}`)
-        const [dstPortValue, setDstPortValue] = useState(item.port_dst_from == item.port_dst_to ? `${item.port_dst_from}` : `${item.port_dst_from}-${item.port_dst_to}`)
-
-        const port_range_setter = (rule: Rule, v: string, { src = false, dst = false }: { src?: boolean, dst?: boolean }) => {
-          const elements = v.split("-")
-          const values = [elements[0] ? parseInt(elements[0]) : 0, elements[1] ? parseInt(elements[1]) : 0]
-          values[1] = values[1] ? values[1] : values[0]
-          if (src) {
-            rule.port_src_from = values[0]
-            rule.port_src_to = values[1]
-            setSrcPortValue(v)
-          }
-          if (dst) {
-            rule.port_dst_from = values[0]
-            rule.port_dst_to = values[1]
-            setDstPortValue(v)
-          }
-          updateMe()
-        }
-
-        const ip_setter = (rule: Rule, v: string | null, { src = false, dst = false }: { src?: boolean, dst?: boolean }) => {
-          const values = v ? v : ""
-          if (src) {
-            rule.src = values
-          }
-          if (dst) {
-            rule.dst = values
-          }
-          updateMe()
-        }
-
-        const proto_any = item.proto == Protocol.ANY
-        const disabletab = {
-          port_box: proto_any,
-          src_port: !srcPortEnabled || proto_any,
-          dst_port: !dstPortEnabled || proto_any
-        }
-
-        return <Card
-          ref={provided.innerRef}
-          {...provided.draggableProps}
-          withBorder
-          radius="md"
-          p="md"
-          mb="md"
-          bg="transparent"
-          style={{
-            // not the `w` prop: Mantine's style props would beat the width dnd measures, and
-            // `100%` against a `position: fixed` card resolves to the viewport, not the list
-            width: '100%',
-            transition: 'border-color 0.2s ease',
-            // dnd puts the drag transform/transition in here: it has to win over our defaults
-            ...provided.draggableProps.style,
-            borderColor: snapshot.isDragging ? 'var(--accent-color)' : 'var(--fourth_color)',
-          }}
-        >
-          <Group wrap="nowrap" align="flex-start" gap="sm">
-            <Box {...provided.dragHandleProps} style={{ display: 'flex', alignItems: 'center', height: rem(36) }}>
-              <TbGripVertical style={{ width: rem(20), height: rem(20), color: 'var(--text-secondary)' }} />
-            </Box>
-            <Stack gap="sm" style={{ flex: 1, minWidth: 0 }}>
-              <Group wrap="nowrap" gap="sm">
-                <Switch
-                  checked={item.active}
-                  onChange={() => {
-                    item.active = !item.active
-                    updateMe()
-                  }}
-                  color="teal"
-                  size="lg"
-                  thumbIcon={
-                    item.active ? (
-                      <ImCheckmark
-                        style={{ width: rem(12), height: rem(12) }}
-                        color={theme.colors.teal[6]}
-                      />
-                    ) : (
-                      <ImCross
-                        style={{ width: rem(12), height: rem(12) }}
-                        color={theme.colors.red[6]}
-                      />
-                    )
-                  }
-                />
-                <ActionIcon color="red" onClick={() => handlers.remove(index)} size="lg" radius="md" variant="filled"><BsTrashFill size={18} /></ActionIcon>
-                <TextInput defaultValue={item.name} onChange={(v) => { item.name = v.target.value; updateMe() }} style={{ flex: 1 }} />
-              </Group>
-
-              <Group wrap={isMedium ? "nowrap" : "wrap"} align="flex-start" gap="md">
-                <Stack gap="xs" style={{ flex: 1, minWidth: isMedium ? 0 : "100%" }}>
-                  <InterfaceInput
-                    initialCustomInterfaces={[...src_custom_int, ...customInt]}
-                    value={item.src}
-                    onChange={v => ip_setter(item, v, { src: true })}
-                    placeholder="Any source"
-                    includeInterfaceNames
-                  />
-                  <Group gap="xs" wrap="nowrap">
-                    <OnOffButton value={srcPortEnabled} onClick={() => {
-                      const value = !srcPortEnabled
-                      setSrcPortEnabled(value)
-                      if (!value) {
-                        item.port_src_from = 1
-                        item.port_src_to = 65535
-                        updateMe()
-                      } else {
-                        port_range_setter(item, srcPortValue, { src: true })
-                      }
-                    }} size="lg" disabled={disabletab.port_box} variant="light" />
-                    <PortRangeInput
-                      onChange={v => port_range_setter(item, v.target.value, { src: true })}
-                      value={srcPortValue}
-                      disabled={disabletab.src_port}
-                      error={!disabletab.src_port && !srcPortValue}
-                      style={{ flex: 1 }}
-                    />
-                  </Group>
-                </Stack>
-
-                <Box style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', alignSelf: isMedium ? 'stretch' : 'center', padding: isMedium ? '28px 0 0' : '4px 0' }}>
-                  <LuArrowBigRightDash size={22} color="var(--text-secondary)" style={isMedium ? undefined : { transform: 'rotate(90deg)' }} />
-                </Box>
-
-                <Stack gap="xs" style={{ flex: 1, minWidth: isMedium ? 0 : "100%" }}>
-                  <InterfaceInput
-                    initialCustomInterfaces={[...dst_custom_int, ...customInt]}
-                    // Controlled, like the source beside it: uncontrolled, the box kept
-                    // whatever it was first rendered with, so a rule reordered or reset
-                    // under it went on showing the old destination.
-                    value={item.dst}
-                    onChange={v => ip_setter(item, v, { dst: true })}
-                    placeholder="Any destination"
-                    includeInterfaceNames
-                  />
-                  <Group gap="xs" wrap="nowrap">
-                    <OnOffButton value={dstPortEnabled} onClick={() => {
-                      const value = !dstPortEnabled
-                      setDstPortEnabled(value)
-                      if (!value) {
-                        item.port_dst_from = 1
-                        item.port_dst_to = 65535
-                        updateMe()
-                      } else {
-                        port_range_setter(item, dstPortValue, { dst: true })
-                      }
-                    }} size="lg" disabled={disabletab.port_box} variant="light" />
-                    <PortRangeInput
-                      onChange={v => port_range_setter(item, v.target.value, { dst: true })}
-                      value={dstPortValue}
-                      disabled={disabletab.dst_port}
-                      error={!disabletab.dst_port && !dstPortValue}
-                      style={{ flex: 1 }}
-                    />
-                  </Group>
-                </Stack>
-              </Group>
-
-              <Group gap="xs" wrap="wrap">
-                <ModeSelector
-                  value={item.mode}
-                  onChange={(value) => { item.mode = value as RuleMode; updateMe() }}
-                  style={{ flexGrow: 1, minWidth: rem(160) }}
-                  table={item.table}
-                />
-                <ProtocolSelector
-                  value={item.proto}
-                  onChange={(value) => { item.proto = value as Protocol; updateMe() }}
-                  style={{ flexGrow: 1, minWidth: rem(160) }}
-                />
-                <ActionTypeSelector
-                  value={item.action}
-                  onChange={(value) => { item.action = value as ActionType; updateMe() }}
-                  style={{ flexGrow: 1, minWidth: rem(160) }}
-                />
-              </Group>
-            </Stack>
-          </Group>
-        </Card>
-      }}
-    </Draggable>
+    <FirewallRuleRow
+      key={item.rule_id}
+      item={item}
+      index={index}
+      visibleIndex={visibleIndex}
+      isMedium={isMedium}
+      onRemove={(idx) => handlers.remove(idx)}
+      onUpdate={updateMe}
+    />
   ));
 
 

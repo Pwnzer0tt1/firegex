@@ -2,35 +2,27 @@ import { ActionIcon, Badge, Box, Divider, Group, Popover, SegmentedControl, Spac
 import { useState } from 'react';
 import { IoInformationCircleOutline } from 'react-icons/io5';
 import { TbShieldLock } from 'react-icons/tb';
-import { carries, decrypts, L4, protoLabel } from './utils';
+import { decrypts, L4, protoLabel, Transport } from './utils';
 
 /**
- * Choosing what the service speaks — two questions, not one list of five answers.
+ * Choosing what the service speaks — one row of five, with the encrypted ones marked.
  *
- * The list of five was reported as confusing and it deserved to be. `TCP`, `UDP`, `TLS`,
- * `QUIC` and `HTTP` side by side look like five alternatives on one axis, and they are
- * not: an operator with a plain HTTP/1.1 service on `:80` had no way to tell whether
- * `TCP` or `HTTP` was meant for them — both are true sentences about their service — and
- * picking `HTTP` then asked for a certificate for something with nothing encrypted about
- * it.
+ * A bare row of five was reported as confusing, and it deserved to be: `TCP` and `HTTP`
+ * side by side gave an operator with a plain HTTP/1.1 service on `:80` no way to tell
+ * which was theirs, and picking `HTTP` then asked for a certificate for something with
+ * nothing encrypted about it. What fixed it was making **is the traffic encrypted?** the
+ * visible division, since it is the one the certificate hangs off.
  *
- * So the first question is the one that actually divides them, and it is the one the
- * certificate hangs off: **is the traffic encrypted?** The second question is then asked
- * inside that answer, and only ever offers protocols of that kind —
- *
- *   - in the clear: `TCP` · `UDP`
- *   - encrypted: `TLS` · `QUIC` · `HTTPS`
- *
- * Nothing is derived and nothing is hidden: every option is the protocol under its own
- * name, which is what the service is stored as and what the rest of the interface calls
- * it. An earlier attempt asked "on what transport?" and computed the protocol from the
- * pair — the names then appeared only in a badge under the controls, which reads as the
- * form having decided something on your behalf.
+ * That division is kept, but it is no longer a question of its own. Asked as two stacked
+ * controls ("Is the traffic encrypted?", then "What does it speak?", then a sentence) it
+ * read as two decisions for one choice. Now TCP and UDP come first, then HTTP(S), then
+ * TLS and QUIC with a lock: those two are always decrypted. HTTP(S) carries no lock
+ * because whether it decrypts depends on its addresses, which the form groups as HTTP,
+ * HTTPS and HTTP/3 once it is picked.
  *
  * **The text stays short on purpose.** What an operator needs here is which option is
  * theirs, which is one clause each; what a protocol costs and what filters can be
- * attached to it is documentation, and it is a click away in the popover rather than
- * three paragraphs nobody reads twice.
+ * attached to it is documentation, and it is a click away in the popover.
  */
 
 type Protocol = {
@@ -46,10 +38,10 @@ type Protocol = {
 
 const PROTOCOLS: Record<string, Protocol> = {
     [L4.TCP]: {
-        line: "A stream in the clear — HTTP/1.1 and HTTP/2 included.",
+        line: "Any stream in the clear. For a web service, pick HTTP(S).",
         pick: [
-            "Anything unencrypted on TCP: a web service on :80, a game protocol, a shell",
-            "The default, and the right answer unless the traffic is encrypted",
+            "Anything unencrypted on TCP that is not a web service: a game protocol, a shell, a custom binary protocol",
+            "A web service, even one only on plain HTTP, is better as HTTP(S): it is built for it, and gains HTTPS and HTTP/3 ways in without becoming another service",
         ],
         sees: [
             "The bytes as they travel",
@@ -68,7 +60,7 @@ const PROTOCOLS: Record<string, Protocol> = {
     },
     [L4.TLS]: {
         line: "TCP under TLS, decrypted here.",
-        pick: ["Everything reaching this port is encrypted — an HTTPS service, or any TLS protocol"],
+        pick: ["Any protocol under TLS that is not a web service — for HTTPS, pick HTTP(S)"],
         sees: [
             "The decrypted stream, and the same models a cleartext service gives",
             "The protocol the two ends agreed on: ALPN is mirrored, so h2 is rendered as HTTP/1.1 too",
@@ -91,45 +83,25 @@ const PROTOCOLS: Record<string, Protocol> = {
         ],
     },
     [L4.HTTP]: {
-        line: "Every version of HTTP through one chain — HTTP/1.1 and HTTP/2 on its TCP addresses, encrypted or in the clear, HTTP/3 on its UDP ones.",
+        line: "A web service reached over HTTP, HTTPS and HTTP/3 — as many ports of each as you need, all through the same filters.",
         pick: [
-            "A web service reached more than one way: :80, :443 and :443 over UDP, which would otherwise be two or three services with the chain copied between them by hand",
-            "Its cleartext ports come with it — whether a connection is TLS is decided per connection, from what the client sent",
+            "Any web service, including one only on plain HTTP",
+            "One reached more than one way — :80, :443 and :443 over UDP — which would otherwise be two or three services with the chain copied between them by hand",
         ],
         sees: [
             "Every version as the same HTTP/1.1, so one pattern and one Python filter cover all three",
             "gRPC included: the request line, the headers and the trailer section",
         ],
         needs: [
-            "A certificate and its key, in PEM — including for the cleartext addresses beside them",
-            "The proxy layer, and each address saying whether it is reached over TCP or UDP",
+            "A certificate and its key, in PEM — only once it has an HTTPS or HTTP/3 address",
+            "The proxy layer",
         ],
     },
 }
 
-/** The first question. It is the one the certificate hangs off, and nothing else. */
-const CLEAR = "clear"
-const ENCRYPTED = "encrypted"
-
-/** The second question, asked inside the first one's answer. */
-const OFFERED: Record<string, string[]> = {
-    [CLEAR]: [L4.TCP, L4.UDP],
-    [ENCRYPTED]: [L4.TLS, L4.QUIC, L4.HTTP],
-}
-
-const edgeOf = (proto: string) => decrypts({ proto }) ? ENCRYPTED : CLEAR
-
-/**
- * The same service, said the other way.
- *
- * Switching the first answer has to land on something, and the honest something is the
- * counterpart on the same transport: a TCP service that turns out to be encrypted is TLS,
- * a UDP one is QUIC, and back again. `http` is several transports at once, so it comes
- * back as the one its first address would be.
- */
-const acrossEdge = (proto: string, edge: string) => edge === ENCRYPTED
-    ? (proto === L4.UDP ? L4.QUIC : L4.TLS)
-    : (proto === L4.QUIC ? L4.UDP : L4.TCP)
+/** The transports in the clear, then the web, then the two that are always decrypted —
+ *  which wear a lock. HTTP(S) does not: whether it decrypts depends on its addresses. */
+const ORDER = [L4.TCP, L4.UDP, L4.HTTP, L4.TLS, L4.QUIC]
 
 function Section({ title, items }: { title: string, items: string[] }) {
     return <Stack gap={5}>
@@ -140,14 +112,6 @@ function Section({ title, items }: { title: string, items: string[] }) {
     </Stack>
 }
 
-/** One question: its label, and the control that answers it. */
-function Question({ label, children }: { label: string, children: React.ReactNode }) {
-    return <Box>
-        <Text size="xs" fw={500} c="dimmed" mb={4}>{label}</Text>
-        {children}
-    </Box>
-}
-
 export default function ProtocolChoice({ value, transport, onChange }: {
     value: string,
     /** The layer chosen below: it cannot carry anything that has to be decrypted. */
@@ -156,15 +120,16 @@ export default function ProtocolChoice({ value, transport, onChange }: {
 }) {
     const [open, setOpen] = useState(false)
     const proto = PROTOCOLS[value] ?? PROTOCOLS[L4.TCP]
-    const edge = edgeOf(value)
+    const encrypted = decrypts({ proto: value })
     //: One rule, asked once: a layer that does not terminate cannot decrypt.
-    const canDecrypt = carries(transport, L4.TLS)
+    //  Picked while NFQUEUE is selected, the form moves the service to the proxy; only a
+    //  service handed to the operator's own proxy has no layer here that could.
+    const canDecrypt = transport !== Transport.EXTERNAL
 
     return <>
         <Group justify="space-between" align="center" mb={8}>
             <Box style={{ minWidth: 0 }}>
-                <Text size="sm" fw={500}>What the service speaks</Text>
-                <Text size="xs" c="dimmed">What is on the wire, and whether firegex has to decrypt it.</Text>
+                <Text size="sm" fw={500}>Protocol</Text>
             </Box>
             <Popover opened={open} onChange={setOpen} width={420} position="top-end"
                 withArrow shadow="md" radius="md">
@@ -178,8 +143,8 @@ export default function ProtocolChoice({ value, transport, onChange }: {
                 <Popover.Dropdown>
                     <Group gap="xs" mb={6}>
                         <Badge size="sm" radius="sm" variant="light"
-                            color={edge === ENCRYPTED ? "grape" : "indigo"}
-                            leftSection={edge === ENCRYPTED ? <TbShieldLock size={10} /> : undefined}>
+                            color={encrypted ? "grape" : "indigo"}
+                            leftSection={encrypted ? <TbShieldLock size={10} /> : undefined}>
                             {protoLabel(value)}
                         </Badge>
                     </Group>
@@ -194,40 +159,23 @@ export default function ProtocolChoice({ value, transport, onChange }: {
             </Popover>
         </Group>
 
-        <Stack gap="xs">
-            {/* Disabled, not removed, the same way the layer picker below says no and from
-                the same `carries` rule: an option that vanishes leaves nothing to ask
-                about. The lock answers, before the click, which half of this form will
-                want a certificate. */}
-            <Question label="Is the traffic encrypted?">
-                <SegmentedControl fullWidth value={edge}
-                    onChange={e => onChange(acrossEdge(value, e))}
-                    data={[
-                        { value: CLEAR, label: "In the clear" },
-                        {
-                            value: ENCRYPTED,
-                            disabled: !canDecrypt,
-                            label: <Group gap={4} justify="center" wrap="nowrap">
-                                <TbShieldLock size={12} style={{ flexShrink: 0 }} />
-                                <span>Encrypted</span>
-                            </Group>,
-                        },
-                    ]}
-                />
-            </Question>
-
-            <Question label={edge === ENCRYPTED ? "Encrypted with what?" : "What does it speak?"}>
-                <SegmentedControl fullWidth value={value} onChange={onChange}
-                    data={OFFERED[edge].map(p => ({ value: p, label: protoLabel(p) }))}
-                />
-            </Question>
-        </Stack>
-
+        {/* Disabled, not removed: an option that vanishes leaves nothing to ask about. */}
+        <SegmentedControl fullWidth value={value} onChange={onChange}
+            data={ORDER.map(p => {
+                const locked = decrypts({ proto: p }) && p !== L4.HTTP
+                return {
+                    value: p,
+                    disabled: decrypts({ proto: p }) && !canDecrypt,
+                    label: locked
+                        ? <Group gap={4} justify="center" wrap="nowrap">
+                            <TbShieldLock size={12} style={{ flexShrink: 0 }} />
+                            <span>{protoLabel(p)}</span>
+                        </Group>
+                        : protoLabel(p),
+                }
+            })}
+        />
         <Space h={8} />
         <Text size="xs" c="dimmed">{proto.line}</Text>
-        {!canDecrypt ? <Text size="xs" c="dimmed" mt={4}>
-            Encrypted traffic needs the proxy layer: decrypting means terminating the
-            connection, and the layer chosen below does not.
-        </Text> : null}
     </>
 }

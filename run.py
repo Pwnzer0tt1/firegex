@@ -251,11 +251,11 @@ def gen_args(args_to_parse: list[str]|None = None):
     parser_config = subcommands.add_parser('config', help='Manage configuration settings')
     parser_config.add_argument('--port', "-p", type=int, required=False, help='Set default port for web service')
     parser_config.add_argument('--host', required=False, help='Set default host IP address to bind the service to')
-    parser_config.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=config["socket_dir"])
+    parser_config.add_argument('--socket-dir', required=False, type=str, help=f'Listen on socket_dir/firegex.sock instead of TCP (default from config: {config["socket_dir"]})', default=None)
     parser_config.add_argument('--password', required=False, type=str, nargs='?', const='', help='Change the password of the firewall (omit the value to be prompted for it interactively)')
     parser_config.add_argument('--env', '-e', required=False, action='append', metavar='KEY=VALUE', default=None, help='Extra environment variable for the firegex container, as KEY=VALUE (repeatable; KEY= removes one). For what the engine reads straight out of its environment, such as FGEX_PROXY_FILTER_TIMEOUT_MS. Stored, so later runs keep it.')
-    parser_config.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=config.get("allowed_ips"))
-    parser_config.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=config.get("proxy_ip_header"))
+    parser_config.add_argument('--allowed-ips', required=False, type=str, help=f'Comma-separated list of CIDR addresses allowed to contact firegex (default from config: {config.get("allowed_ips")})', default=None)
+    parser_config.add_argument('--proxy-ip-header', required=False, type=str, help=f'Header name to read the client IP from (default from config: {config.get("proxy_ip_header")})', default=None)
     parser_config.add_argument('--unsafe-disable-auth', action=argparse.BooleanOptionalAction, default=None, help='UNSAFE: turn Firegex password/JWT authentication off or back on, on the running instance and for the next start')
     parser_config.add_argument('--keep-auth-disabled', required=False, action="store_true", default=False, help='With --password: store the new password without turning authentication back on (for an instance kept open behind a trusted reverse proxy)')
     parser_config.add_argument('--show', required=False, action="store_true", help='Show current configuration', default=False)
@@ -305,13 +305,13 @@ def gen_args(args_to_parse: list[str]|None = None):
     if hasattr(args, 'host') and args.host is not None and args.host != config["host"]:
         config["host"] = args.host
         config_changed = True
-    if hasattr(args, 'socket_dir') and args.socket_dir != config["socket_dir"]:
+    if hasattr(args, 'socket_dir') and args.socket_dir is not None and args.socket_dir != config["socket_dir"]:
         config["socket_dir"] = args.socket_dir
         config_changed = True
-    if hasattr(args, 'allowed_ips') and args.allowed_ips != config.get("allowed_ips"):
+    if hasattr(args, 'allowed_ips') and args.allowed_ips is not None and args.allowed_ips != config.get("allowed_ips"):
         config["allowed_ips"] = args.allowed_ips
         config_changed = True
-    if hasattr(args, 'proxy_ip_header') and args.proxy_ip_header != config.get("proxy_ip_header"):
+    if hasattr(args, 'proxy_ip_header') and args.proxy_ip_header is not None and args.proxy_ip_header != config.get("proxy_ip_header"):
         config["proxy_ip_header"] = args.proxy_ip_header
         config_changed = True
     if getattr(args, 'unsafe_disable_auth', None) is not None and args.unsafe_disable_auth != config.get("unsafe_disable_auth", False):
@@ -585,38 +585,37 @@ def warn_if_auth_disabled():
 
 def nfqueue_exists():
     import socket
-    import fcntl
-    import os
     import time
 
     NETLINK_NETFILTER = 12
     SOL_NETLINK = 270
     NETLINK_EXT_ACK = 11
     try:
-        nfsock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_NETFILTER)
-        fcntl.fcntl(nfsock, fcntl.F_SETFL, os.O_RDONLY|os.O_NONBLOCK)
-        nfsock.setsockopt(SOL_NETLINK, NETLINK_EXT_ACK, 1)
+        with socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_NETFILTER) as nfsock:
+            nfsock.settimeout(1.0)
+            nfsock.setsockopt(SOL_NETLINK, NETLINK_EXT_ACK, 1)
+            for rev in [3,2,1,0]:
+                timestamp = int(time.time()).to_bytes(4, byteorder='big')
+                rev = rev.to_bytes(4, byteorder='big')
+                #Prepared payload to check if the nfqueue module is loaded (from iptables code "nft_compatible_revision")
+                payload = b"\x30\x00\x00\x00\x00\x0b\x05\x00"+timestamp+b"\x00\x00\x00\x00\x02\x00\x00\x00\x0c\x00\x01\x00\x4e\x46\x51\x55\x45\x55\x45\x00\x08\x00\x02\x00"+rev+b"\x08\x00\x03\x00\x00\x00\x00\x01"
+                nfsock.send(payload)
+                data = nfsock.recv(1024)
+                is_error = data[4] == 2
+                if not is_error:
+                    return True # The module exists and we have permission to use it
+                error_code = int.from_bytes(data[16:16+4], signed=True, byteorder='little')
+                if error_code == -1:
+                    return True # EPERM (the user is not root, but the module exists)
+                if error_code == -2:
+                    pass # ENOENT (the module does not exist)
+                else:
+                    puts("Error while trying to check if the nfqueue module is loaded, this check will be skipped!", color=colors.yellow)
+                    return True
+    except (PermissionError, BlockingIOError, TimeoutError, OSError):
+        return False
     except Exception:
         return False
-    
-    for rev in [3,2,1,0]:
-        timestamp = int(time.time()).to_bytes(4, byteorder='big')
-        rev = rev.to_bytes(4, byteorder='big')
-        #Prepared payload to check if the nfqueue module is loaded (from iptables code "nft_compatible_revision")
-        payload = b"\x30\x00\x00\x00\x00\x0b\x05\x00"+timestamp+b"\x00\x00\x00\x00\x02\x00\x00\x00\x0c\x00\x01\x00\x4e\x46\x51\x55\x45\x55\x45\x00\x08\x00\x02\x00"+rev+b"\x08\x00\x03\x00\x00\x00\x00\x01"
-        nfsock.send(payload)
-        data = nfsock.recv(1024)
-        is_error = data[4] == 2
-        if not is_error:
-            return True # The module exists and we have permission to use it
-        error_code = int.from_bytes(data[16:16+4], signed=True, byteorder='little')
-        if error_code == -1:
-            return True # EPERM (the user is not root, but the module exists)
-        if error_code == -2:
-            pass # ENOENT (the module does not exist)
-        else:
-            puts("Error while trying to check if the nfqueue module is loaded, this check will be skipped!", color=colors.yellow)
-            return True
     return False
 
 
@@ -1046,15 +1045,19 @@ def run_standalone():
     puts("Starting as daemon...", color=colors.green)
     
     try:
-        out_file = open('/tmp/app.log', 'w')
-        process = subprocess.Popen(
-            chroot_cmd,
-            shell=True,
-            stdout=out_file,
-            stderr=out_file,
-            stdin=subprocess.DEVNULL,
-            preexec_fn=os.setsid  # Create new session
-        )
+        log_fd = os.open('/tmp/app.log', os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        out_file = os.fdopen(log_fd, 'w')
+        try:
+            process = subprocess.Popen(
+                chroot_cmd,
+                shell=True,
+                stdout=out_file,
+                stderr=out_file,
+                stdin=subprocess.DEVNULL,
+                preexec_fn=os.setsid  # Create new session
+            )
+        finally:
+            out_file.close()
         
         # Write PID to file
         if write_pid_file(process.pid):
@@ -1237,6 +1240,16 @@ def handle_config_command(args):
         config["socket_dir"] = args.socket_dir
         config_changed = True
         puts(f"Socket dir set to: {args.socket_dir}", color=colors.green)
+
+    if hasattr(args, 'allowed_ips') and args.allowed_ips is not None:
+        config["allowed_ips"] = args.allowed_ips
+        config_changed = True
+        puts(f"Allowed IPs set to: {args.allowed_ips}", color=colors.green)
+
+    if hasattr(args, 'proxy_ip_header') and args.proxy_ip_header is not None:
+        config["proxy_ip_header"] = args.proxy_ip_header
+        config_changed = True
+        puts(f"Proxy IP header set to: {args.proxy_ip_header}", color=colors.green)
     
     if getattr(args, 'unsafe_disable_auth', None) is not None:
         config["unsafe_disable_auth"] = args.unsafe_disable_auth

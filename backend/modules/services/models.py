@@ -375,12 +375,35 @@ class Service:
         unopened, while a QUIC packet past the handshake has its frames encrypted too.
         Both need the same thing from the operator, which is a certificate.
 
-        `http` is in the list because a certificate is the whole of what it adds: a
-        cleartext HTTP service is already `tcp`, and HTTP/2 in the clear is recognised
-        there from the connection preface whatever the service is called. What `http`
-        buys over that is the TLS and the QUIC edges, and neither exists without one.
+        `http` is in the list because it is the proxy layer's own: it terminates
+        every connection to render each HTTP version for the filters. Whether it holds
+        anything to decrypt is a separate question, asked of its addresses —
+        `needs_certificate` — since a web service on plain HTTP alone decrypts nothing.
+        It is the protocol for a web service, plain HTTP included; `tcp` filters
+        HTTP/1.1 too, but has no HTTPS or HTTP/3 ways in to grow into.
         """
         return str(self.proto) in (L4.TLS, L4.QUIC, L4.HTTP)
+
+    @property
+    def needs_certificate(self) -> bool:
+        """Whether this service cannot run without a certificate.
+
+        TLS and QUIC always: every connection is decrypted. `http` only once one of its
+        addresses is reached over HTTPS or HTTP/3 — a web service answering in the clear
+        alone decrypts nothing, and asking it for a certificate was asking for something
+        the engine would never read. The rule lives here and in `needs_certificate` in
+        the router (which asks it of addresses not written yet) and in
+        `needsCertificate` on the frontend; they have to agree.
+        """
+        if str(self.proto) in (L4.TLS, L4.QUIC):
+            return True
+        return str(self.proto) == L4.HTTP and any(
+            str(a.edge) in (L4.TLS, L4.QUIC) for a in self.addresses)
+
+    @property
+    def has_certificate(self) -> bool:
+        return bool(self.tls_cert and self.tls_cert.strip()
+                    and self.tls_key and self.tls_key.strip())
 
     @property
     def l4(self) -> str:

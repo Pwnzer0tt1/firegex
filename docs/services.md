@@ -45,7 +45,7 @@ The **⚙ button on an address** opens the options that apply to that service:
 
 | Option | Offered on | What it does |
 |---|---|---|
-| **What clients speak here** — clear · TLS · HTTP/3 | HTTPS services | What this address is |
+| **What clients speak here** — HTTP · HTTPS · HTTP/3 | HTTP(S) services | What this address is (the creation form groups the addresses by it instead) |
 | **The service is on another port** | proxy layer | Clients arrive here; firegex dials the service on that port |
 | **Send to the service** — what arrived · plaintext · TLS | addresses firegex decrypts | What firegex speaks to the service (see [below](#what-the-service-behind-speaks)) |
 | **Hand it to your proxy at** | your-own-proxy layer | Where your proxy listens for this address |
@@ -81,14 +81,18 @@ One choice per service, asked in the form as *Is the traffic encrypted?* and the
 
 | | Pick it for | Filters are shown | Needs |
 |---|---|---|---|
-| **TCP** | anything unencrypted on TCP, including plain web services | the bytes; HTTP/1.1 parsed, cleartext HTTP/2 (`h2c`) rendered as HTTP/1.1 | addresses |
+| **TCP** | anything unencrypted on TCP that is not a web service | the bytes; HTTP/1.1 parsed, cleartext HTTP/2 (`h2c`) rendered as HTTP/1.1 | addresses |
 | **UDP** | game servers, DNS, anything datagram-based | one datagram at a time, `RawPacket` only | addresses |
 | **TLS** | a port where everything is encrypted | the decrypted stream | certificate + key, proxy layer |
 | **QUIC** | a QUIC service, usually HTTP/3 | each stream as its own connection; HTTP/3 rendered as HTTP/1.1 | certificate + key, proxy layer |
-| **HTTPS** (`http` in the API) | one web daemon reached several ways — `:80`, `:443`, `:443/udp` | every HTTP version as HTTP/1.1, gRPC included | certificate + key, proxy layer |
+| **HTTP(S)** (`http` in the API) | any web service, plain HTTP included, reached one way or several — `:80`, `:443`, `:443/udp` | every HTTP version as HTTP/1.1, gRPC included | proxy layer; certificate + key once an address is HTTPS or HTTP/3 |
 
-**A plain web service is TCP.** Decrypting means terminating the connection, so TLS, QUIC
-and HTTPS are available on the proxy layer only.
+**A web service is HTTP(S), even on plain HTTP alone.** TCP would filter its HTTP/1.1
+too, but HTTP(S) is built for it: its addresses are grouped as HTTP, HTTPS and HTTP/3, and
+an HTTPS or HTTP/3 way in is one more address rather than another service with the filters
+copied by hand. Use TCP for the web only on the NFQUEUE layer, which cannot carry HTTP(S).
+Decrypting means terminating the connection, so TLS, QUIC and HTTP(S) are available on the
+proxy layer only.
 
 ## Network layers
 
@@ -270,9 +274,10 @@ it proxy-only. It needs a certificate and key, as TLS does.
 - Forwarding past the connection limit still terminates QUIC. It only skips the
   inspection.
 
-## HTTPS: every version through one chain
+## HTTP(S): every version through one chain
 
-`http` (labelled **HTTPS**) describes the service rather than the wire. Its TCP addresses
+`http` (labelled **HTTP(S)**) describes the service rather than the wire. It is the
+protocol for any web service, plain HTTP included. Its TCP addresses
 carry HTTP/1.1 and HTTP/2, in the clear or under TLS, decided per connection. Its UDP
 addresses carry HTTP/3. One service, one chain, one certificate, instead of copies kept
 in step by hand.
@@ -281,8 +286,10 @@ What leaves matches what arrived: cleartext is forwarded in the clear, TLS is
 re-encrypted. A per-address [upstream choice](#what-the-service-behind-speaks) can turn
 every edge into plain HTTP/1.1.
 
-A certificate is required even for the cleartext addresses. A cleartext-only web service
-should be a TCP service. Everything above about TLS and QUIC limits applies here too.
+A certificate is needed only once the service has an HTTPS or HTTP/3 address. With plain
+HTTP addresses alone nothing is decrypted, so none is asked for; adding an HTTPS or HTTP/3
+address later asks for one first. Everything above about TLS and QUIC limits applies here
+too.
 
 ## Filters
 

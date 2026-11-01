@@ -75,6 +75,7 @@ class InternalHTTPMessage:
     upgrading_to_h2: bool = field(default=False)
     upgrading_to_ws: bool = field(default=False)
     added_to_history: bool = field(default=False)
+    headers_emitted: bool = field(default=False)
     #: How much of `body` has already been handed to a model that consumes it.
     #:
     #: On the message rather than beside it because that is what it belongs to: a
@@ -303,76 +304,77 @@ class InternalCallbackHandler:
         self.msg.body = self.buffers._body_buffer
         self.msg.should_upgrade = self.should_upgrade
         self.buffers._body_buffer = b""
-        encodings = [ele.strip() for ele in self.content_encoding.lower().split(",")]
-        decode_success = True
-        decoding_body = self.msg.body
-        # Every step under the same limit, so a stack of encodings cannot multiply past it.
-        limit = self.max_decoded_size
-        try:
-            for enc in reversed(encodings):
-                if not enc:
-                    continue
-                if enc == "deflate":
-                    # Both spellings, because both are on the wire. RFC 7230 defines
-                    # `deflate` as the zlib format of RFC 1950, and plenty of servers
-                    # send the raw stream instead — browsers accept either, and a decoder
-                    # that takes only one lets half the compressed traffic reach a filter
-                    # still compressed, where a pattern finds nothing and the only trace
-                    # is a line on stdout saying it skipped.
-                    for wbits in (-zlib.MAX_WBITS, zlib.MAX_WBITS):
+        if self.save_body:
+            encodings = [ele.strip() for ele in self.content_encoding.lower().split(",")]
+            decode_success = True
+            decoding_body = self.msg.body
+            # Every step under the same limit, so a stack of encodings cannot multiply past it.
+            limit = self.max_decoded_size
+            try:
+                for enc in reversed(encodings):
+                    if not enc:
+                        continue
+                    if enc == "deflate":
+                        # Both spellings, because both are on the wire. RFC 7230 defines
+                        # `deflate` as the zlib format of RFC 1950, and plenty of servers
+                        # send the raw stream instead — browsers accept either, and a decoder
+                        # that takes only one lets half the compressed traffic reach a filter
+                        # still compressed, where a pattern finds nothing and the only trace
+                        # is a line on stdout saying it skipped.
+                        for wbits in (-zlib.MAX_WBITS, zlib.MAX_WBITS):
+                            try:
+                                decoding_body = _inflate(decoding_body, wbits, limit)
+                            except zlib.error:
+                                continue
+                            break
+                        else:
+                            print("Error decompressing deflate: neither raw nor zlib-wrapped: "
+                                  "skipping", flush=True)
+                            decode_success = False
+                            break
+                    elif enc == "br":
                         try:
-                            decoding_body = _inflate(decoding_body, wbits, limit)
-                        except zlib.error:
-                            continue
-                        break
+                            decoding_body = _unbrotli(decoding_body, limit)
+                        except _TooLarge:
+                            raise
+                        except Exception as e:
+                            print(f"Error decompressing brotli: {e}: skipping", flush=True)
+                            decode_success = False
+                            break
+                    elif (
+                        enc == "gzip" or enc == "x-gzip"
+                    ):  # https://datatracker.ietf.org/doc/html/rfc2616#section-3.5
+                        try:
+                            decoding_body = _gunzip(decoding_body, limit)
+                        except _TooLarge:
+                            raise
+                        except Exception as e:
+                            print(f"Error decompressing gzip: {e}: skipping", flush=True)
+                            decode_success = False
+                            break
+                    elif enc == "zstd":
+                        try:
+                            decoding_body = _unzstd(decoding_body, limit)
+                        except _TooLarge:
+                            raise
+                        except Exception as e:
+                            print(f"Error decompressing zstd: {e}: skipping", flush=True)
+                            decode_success = False
+                            break
+                    elif enc == "identity":
+                        pass  # No need to do anything https://datatracker.ietf.org/doc/html/rfc2616#section-3.5 (it's possible to be found also if it should't be used)
                     else:
-                        print("Error decompressing deflate: neither raw nor zlib-wrapped: "
-                              "skipping", flush=True)
                         decode_success = False
                         break
-                elif enc == "br":
-                    try:
-                        decoding_body = _unbrotli(decoding_body, limit)
-                    except _TooLarge:
-                        raise
-                    except Exception as e:
-                        print(f"Error decompressing brotli: {e}: skipping", flush=True)
-                        decode_success = False
-                        break
-                elif (
-                    enc == "gzip" or enc == "x-gzip"
-                ):  # https://datatracker.ietf.org/doc/html/rfc2616#section-3.5
-                    try:
-                        decoding_body = _gunzip(decoding_body, limit)
-                    except _TooLarge:
-                        raise
-                    except Exception as e:
-                        print(f"Error decompressing gzip: {e}: skipping", flush=True)
-                        decode_success = False
-                        break
-                elif enc == "zstd":
-                    try:
-                        decoding_body = _unzstd(decoding_body, limit)
-                    except _TooLarge:
-                        raise
-                    except Exception as e:
-                        print(f"Error decompressing zstd: {e}: skipping", flush=True)
-                        decode_success = False
-                        break
-                elif enc == "identity":
-                    pass  # No need to do anything https://datatracker.ietf.org/doc/html/rfc2616#section-3.5 (it's possible to be found also if it should't be used)
-                else:
-                    decode_success = False
-                    break
-        except _TooLarge:
-            print(f"[WARNING] The body decodes to more than {limit} bytes "
-                  f"(FGEX_STREAM_MAX_SIZE): left as it arrived", flush=True)
-            self.msg.decoded_too_large = True
-            decode_success = False
+            except _TooLarge:
+                print(f"[WARNING] The body decodes to more than {limit} bytes "
+                      f"(FGEX_STREAM_MAX_SIZE): left as it arrived", flush=True)
+                self.msg.decoded_too_large = True
+                decode_success = False
 
-        if decode_success:
-            self.msg.body = decoding_body
-            self.msg.body_decoded = True
+            if decode_success:
+                self.msg.body = decoding_body
+                self.msg.body_decoded = True
 
         self.msg.message_complete = True
         self.has_begun = False
@@ -602,6 +604,18 @@ class HttpHistory:
                 elif hasattr(obj, "history"):
                     return obj.history
 
+        for key in ("http_module", "http_full", "http_header"):
+            if (
+                f"{key}_in" in internal_data.data_handler_context
+                or f"{key}_out" in internal_data.data_handler_context
+            ):
+                if not internal_data.call_mem.get(key, False):
+                    _flush_pending_history(internal_data, key)
+                req_history_deque, resp_history_deque = _get_history_deques(
+                    internal_data, key
+                )
+                return HttpHistory(list(req_history_deque), list(resp_history_deque))
+
         req_history_deque = internal_data.data_handler_context.get(
             "http_history_requests", deque()
         )
@@ -633,6 +647,75 @@ def _trim_history(history: deque, budget: int) -> None:
     total = sum(_held(entry) for entry in history)
     while len(history) > 1 and total > budget:
         total -= _held(history.popleft())
+
+
+def _get_history_deques(
+    internal_data: DataStreamCtx, parser_class: str
+) -> tuple[deque, deque]:
+    raw_max = internal_data.filter_glob.get("FGEX_MAX_HISTORY_SIZE", 100)
+    try:
+        max_history = max(0, int(raw_max))
+    except (ValueError, TypeError):
+        max_history = 100
+
+    req_key = f"{parser_class}_history_requests"
+    req_history_deque: deque = internal_data.data_handler_context.setdefault(
+        req_key, deque(maxlen=max_history)
+    )
+    if req_history_deque.maxlen != max_history:
+        req_history_deque = deque(req_history_deque, maxlen=max_history)
+        internal_data.data_handler_context[req_key] = req_history_deque
+
+    resp_key = f"{parser_class}_history_responses"
+    resp_history_deque: deque = internal_data.data_handler_context.setdefault(
+        resp_key, deque(maxlen=max_history)
+    )
+    if resp_history_deque.maxlen != max_history:
+        resp_history_deque = deque(resp_history_deque, maxlen=max_history)
+        internal_data.data_handler_context[resp_key] = resp_history_deque
+
+    internal_data.data_handler_context["http_history_requests"] = req_history_deque
+    internal_data.data_handler_context["http_history_responses"] = resp_history_deque
+    return req_history_deque, resp_history_deque
+
+
+def _record_in_history(
+    internal_data: DataStreamCtx,
+    parser_class: str,
+    parser: InternalHttpRequest | InternalHttpResponse,
+    msg: InternalHTTPMessage,
+    is_input: bool,
+) -> None:
+    if not msg.message_complete or msg.added_to_history:
+        return
+    req_history_deque, resp_history_deque = _get_history_deques(
+        internal_data, parser_class
+    )
+    msg.added_to_history = True
+    if is_input:
+        req_history_deque.append(HttpFullRequest(parser, msg))
+        _trim_history(req_history_deque, internal_data.stream_max_size)
+    else:
+        resp_history_deque.append(HttpFullResponse(parser, msg))
+        _trim_history(resp_history_deque, internal_data.stream_max_size)
+
+
+def _flush_pending_history(
+    internal_data: DataStreamCtx, parser_class: str
+) -> tuple[deque, deque]:
+    """Move any completed messages still waiting in `parser_class`'s queues into its
+    history before a new packet clears them.
+    """
+    req_history_deque, resp_history_deque = _get_history_deques(
+        internal_data, parser_class
+    )
+    for suffix, is_req in (("in", True), ("out", False)):
+        p = internal_data.data_handler_context.get(f"{parser_class}_{suffix}")
+        if p is None:
+            continue
+        for msg in p.pop_all_messages():
+            _record_in_history(internal_data, parser_class, p, msg, is_req)
+    return req_history_deque, resp_history_deque
 
 
 class InternalBasicHttpMetaClass:
@@ -751,6 +834,10 @@ class InternalBasicHttpMetaClass:
     def _should_release_body_chunks(cls) -> bool:
         return False
 
+    @classmethod
+    def _save_body(cls) -> bool:
+        return True
+
     @staticmethod
     def _before_fetch_callable_checks(internal_data: DataStreamCtx) -> bool:
         raise NotImplementedError()
@@ -789,6 +876,7 @@ class InternalBasicHttpMetaClass:
         # above is: parsing happens before any instance exists, and a flag applied
         # afterwards would take effect one packet late.
         parser.release_body_chunks = cls._should_release_body_chunks()
+        parser.save_body = cls._save_body()
         parser.max_decoded_size = internal_data.stream_max_size
 
 
@@ -796,7 +884,7 @@ class InternalBasicHttpMetaClass:
             cls._parser_class(), False
         ):  # Need to parse HTTP
             internal_data.call_mem[cls._parser_class()] = True
-            parser.pop_all_messages()  # Delete content on message deque
+            _flush_pending_history(internal_data, cls._parser_class())
 
             # Setting websocket options if needed to the client parser
             if internal_data.current_pkt.is_input:
@@ -835,7 +923,7 @@ class InternalBasicHttpMetaClass:
                         raise NotReadyToRun()
 
             internal_data.call_mem["headers_were_set"] = (
-                parser.msg.headers_complete
+                parser.msg.headers_complete and not parser.msg.message_complete
             )  # This information is usefull for building the real object
 
             try:
@@ -922,10 +1010,15 @@ class InternalBasicHttpMetaClass:
             raise NotReadyToRun()
 
         messages_tosend: list[InternalHTTPMessage] = []
+        completed_for_history: list[InternalHTTPMessage] = []
         for i in range(len(parser.messages)):
-            messages_tosend.append(parser.pop_message())
+            msg = parser.pop_message()
+            if not cls._save_body() and msg.headers_emitted:
+                completed_for_history.append(msg)
+            else:
+                messages_tosend.append(msg)
 
-        if len(messages_tosend) > 0:
+        if len(messages_tosend) > 0 or len(completed_for_history) > 0:
             internal_data.call_mem["headers_were_set"] = (
                 False  # New messages completed so the current message headers were not set in this case
             )
@@ -945,6 +1038,7 @@ class InternalBasicHttpMetaClass:
             # the second one twice: once from the queue and once from here. Blocking is
             # idempotent and survived that, which is why it went unnoticed — anything
             # that counts did not.
+            parser.msg.headers_emitted = True
             messages_tosend.append(parser.msg)
 
         if (
@@ -965,34 +1059,22 @@ class InternalBasicHttpMetaClass:
                 parser.msg
             )  # Also the current message needs to beacase a stream is going on
 
+        req_history_deque, resp_history_deque = _get_history_deques(
+            internal_data, cls._parser_class()
+        )
+        for msg in completed_for_history:
+            _record_in_history(
+                internal_data,
+                cls._parser_class(),
+                parser,
+                msg,
+                internal_data.current_pkt.is_input,
+            )
+
         messages_to_call = len(messages_tosend)
 
         if messages_to_call == 0:
             raise NotReadyToRun()
-
-        raw_max = internal_data.filter_glob.get("FGEX_MAX_HISTORY_SIZE", 100)
-        try:
-            max_history = max(0, int(raw_max))
-        except (ValueError, TypeError):
-            max_history = 100
-
-        req_history_deque: deque = (
-            internal_data.data_handler_context.setdefault(
-                "http_history_requests", deque(maxlen=max_history)
-            )
-        )
-        if req_history_deque.maxlen != max_history:
-            req_history_deque = deque(req_history_deque, maxlen=max_history)
-            internal_data.data_handler_context["http_history_requests"] = req_history_deque
-
-        resp_history_deque: deque = (
-            internal_data.data_handler_context.setdefault(
-                "http_history_responses", deque(maxlen=max_history)
-            )
-        )
-        if resp_history_deque.maxlen != max_history:
-            resp_history_deque = deque(resp_history_deque, maxlen=max_history)
-            internal_data.data_handler_context["http_history_responses"] = resp_history_deque
 
         built_instances = []
         for msg in messages_tosend:
@@ -1003,14 +1085,13 @@ class InternalBasicHttpMetaClass:
             instance._history = history_snapshot
             built_instances.append(instance)
 
-            if msg.message_complete and not msg.added_to_history:
-                msg.added_to_history = True
-                if internal_data.current_pkt.is_input:
-                    req_history_deque.append(HttpFullRequest(parser, msg))
-                    _trim_history(req_history_deque, internal_data.stream_max_size)
-                else:
-                    resp_history_deque.append(HttpFullResponse(parser, msg))
-                    _trim_history(resp_history_deque, internal_data.stream_max_size)
+            _record_in_history(
+                internal_data,
+                cls._parser_class(),
+                parser,
+                msg,
+                internal_data.current_pkt.is_input,
+            )
 
         if len(built_instances) == 1:
             res = built_instances[0]
@@ -1133,6 +1214,10 @@ class HttpRequestHeader(HttpRequest):
     This data handler will be called only once, the headers are complete, the body will be empty and not buffered
     """
 
+    @classmethod
+    def _save_body(cls) -> bool:
+        return False
+
     def _contructor_hook(self):
         self._parser.save_body = False
 
@@ -1146,6 +1231,10 @@ class HttpResponseHeader(HttpResponse):
     HTTP Response Header handler
     This data handler will be called only once, the headers are complete, the body will be empty and not buffered
     """
+
+    @classmethod
+    def _save_body(cls) -> bool:
+        return False
 
     def _contructor_hook(self):
         self._parser.save_body = False

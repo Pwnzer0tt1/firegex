@@ -1,16 +1,16 @@
-import { ActionIcon, Badge, Box, Group, Popover, SegmentedControl, Space, Text, Tooltip } from '@mantine/core';
+import { ActionIcon, Badge, Box, Group, Popover, Space, Text, Tooltip } from '@mantine/core';
 import { useState } from 'react';
 import { BsTrashFill } from 'react-icons/bs';
 import { IoSettingsSharp } from 'react-icons/io5';
 import PortAndInterface from '../PortAndInterface';
-import AddressOptions, { addressCapabilities, addressTags, edgeHint, EDGE_OPTIONS } from './AddressOptions';
+import AddressOptions, { addressCapabilities, addressTags } from './AddressOptions';
 
 /**
  * One address being filled in, and everything that can be said about it.
  *
- * The row itself stays what it was — where the service answers, and on an HTTPS service
- * what is spoken there — because that is what every address needs and most addresses need
- * only that. Everything else is **behind one button**: traffic sent on to another port,
+ * The row itself stays what it was — where the service answers — because that is what
+ * every address needs and most addresses need only that. How a web service's address is
+ * reached is not on the row: the form groups the rows by it (HTTP, HTTPS, HTTP/3). Everything else is **behind one button**: traffic sent on to another port,
  * what firegex speaks to the service, the endpoint of somebody else's proxy. Those were
  * inline once, each of them, and a list of three addresses became a screenful of fields
  * for cases most services never have.
@@ -19,17 +19,15 @@ import AddressOptions, { addressCapabilities, addressTags, edgeHint, EDGE_OPTION
  * from: folded is not hidden, and an option an operator cannot see they set is an option
  * that will surprise them at the worst moment.
  *
- * Which options exist at all, and how they are worded, live in `AddressOptions` — the
- * modal on the service's own page asks for the same things and has to ask in the same
- * words.
+ * Which options exist at all, and how they are worded, live in `AddressOptions`; the
+ * service page reads them back with the same `addressTags`.
  */
-export default function AddressRow({ form, index, proto, transport, canRemove }: {
+export default function AddressRow({ form, index, proto, transport }: {
     form: any,
     index: number,
     /** What the service speaks, which decides which options exist at all. */
     proto: string,
     transport: string,
-    canRemove: boolean,
 }) {
     const [open, setOpen] = useState(false)
     const address = form.values.addresses[index]
@@ -45,13 +43,6 @@ export default function AddressRow({ form, index, proto, transport, canRemove }:
                     port_name={`addresses.${index}.port`}
                     includeInterfaceNames={!caps.isExternal} />
             </Box>
-            {/* What is spoken here — on the row rather than in the panel, because on an
-                HTTPS service it is not an extra: it is what this address *is*. */}
-            {caps.isHttp ? <Tooltip label={edgeHint(String(address.edge))} position="top"
-                multiline w={260}>
-                <SegmentedControl size="xs" mb={4} data={EDGE_OPTIONS}
-                    {...form.getInputProps(`addresses.${index}.edge`)} />
-            </Tooltip> : null}
             {anything ? <Popover opened={open} onChange={setOpen} width={330}
                 position="bottom-end" withArrow shadow="md" radius="md">
                 <Popover.Target>
@@ -72,7 +63,6 @@ export default function AddressRow({ form, index, proto, transport, canRemove }:
                 </Popover.Dropdown>
             </Popover> : null}
             <ActionIcon variant="subtle" color="red" mb={4}
-                disabled={!canRemove}
                 onClick={() => form.removeListItem('addresses', index)}>
                 <BsTrashFill size={14} />
             </ActionIcon>

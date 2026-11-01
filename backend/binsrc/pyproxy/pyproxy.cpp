@@ -49,6 +49,7 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	public:
 	stream_ctx sctx;
 	StreamFollower follower;
+	PyThreadState * main_tstate = nullptr;
 	PyThreadState * tstate = nullptr;
 
 	PyInterpreterConfig py_thread_config = {
@@ -67,9 +68,11 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 
     void before_loop() override {
 		PyStatus pystatus;
-		// Create a new interpreter for the thread
-		tstate = PyThreadState_New(PyInterpreterState_Main());
-		PyEval_AcquireThread(tstate);
+		// Attach a temporary thread state on the main interpreter so
+		// Py_NewInterpreterFromConfig can switch from it into the new sub-interpreter
+		// without overwriting or leaking the main interpreter's PyThreadState.
+		main_tstate = PyThreadState_New(PyInterpreterState_Main());
+		PyEval_RestoreThread(main_tstate);
 		pystatus = Py_NewInterpreterFromConfig(&tstate, &py_thread_config);
 		if(tstate == nullptr){
 			cerr << "[fatal] [main] Failed to create new interpreter" << endl;
@@ -331,15 +334,24 @@ class PyProxyQueue: public NfQueue::ThreadNfQueue<PyProxyQueue> {
 	}
 
 	~PyProxyQueue() {
-		// Closing first the interpreter
-		
-		Py_EndInterpreter(tstate);
-		PyEval_ReleaseThread(tstate);
-		PyThreadState_Clear(tstate);
-		PyThreadState_Delete(tstate);
-		Py_DECREF(handle_packet_code);
-	
-		sctx.clean();
+		if (tstate != nullptr) {
+			if (PyThreadState_Get() != tstate) {
+				PyEval_RestoreThread(tstate);
+			}
+			// Release all Python objects belonging to this sub-interpreter before
+			// tearing the sub-interpreter down.
+			sctx.clean();
+			Py_XDECREF(handle_packet_code);
+			handle_packet_code = nullptr;
+			Py_EndInterpreter(tstate);
+			tstate = nullptr;
+		}
+		if (main_tstate != nullptr) {
+			PyEval_RestoreThread(main_tstate);
+			PyThreadState_Clear(main_tstate);
+			PyThreadState_DeleteCurrent();
+			main_tstate = nullptr;
+		}
 	}
 
 };

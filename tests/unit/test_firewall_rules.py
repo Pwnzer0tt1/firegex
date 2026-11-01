@@ -168,3 +168,55 @@ def test_a_change_nft_refuses_puts_the_database_back(monkeypatch):
     assert refused.value.status_code == 400
     assert undone == [True], "the database was left holding what nft refused"
     assert len(attempts) == 2, "the previous firewall was not put back after the undo"
+
+
+# --- the settings and interface rules match the hook they are written into -------------
+
+
+def _matches(commands: list[dict], chain: str) -> list[list[dict]]:
+    return [c["add"]["rule"]["expr"] for c in commands
+            if "rule" in c.get("add", {}) and c["add"]["rule"]["chain"] == chain]
+
+
+def test_loopback_is_allowed_out_by_the_interface_it_leaves_on():
+    """A packet this host sends has no input interface: `iif lo` in the output chain
+    matched nothing, so with an output drop policy the host could not reach itself."""
+    nft = FiregexTables()
+    commands = nft.init_comands(Action.DROP, settings(allow_loopback=True))
+    out = _matches(commands, nft.rules_chain_out)
+    keys = [e[0]["match"]["left"]["meta"]["key"] for e in out
+            if e[0].get("match", {}).get("right") == "lo"]
+    assert keys and set(keys) == {"oif"}, keys
+    inbound = _matches(commands, nft.rules_chain_in)
+    assert any(e[0].get("match", {}).get("right") == "lo"
+               and e[0]["match"]["left"]["meta"]["key"] == "iif" for e in inbound)
+
+
+def test_dhcpv6_answers_are_let_in_on_their_own_ports():
+    """DHCPv6 is server 547 to client 546; 67/68 are IPv4's and never arrive over ip6."""
+    nft = FiregexTables()
+    commands = nft.init_comands(Action.DROP, settings(allow_dhcp=True))
+    ports = set()
+    for c in commands:
+        r = c.get("add", {}).get("rule")
+        if not r or r["family"] != "ip6":
+            continue
+        for e in r["expr"]:
+            left = e.get("match", {}).get("left", {})
+            if left.get("payload", {}).get("protocol") == "udp":
+                ports.add((left["payload"]["field"], e["match"]["right"]))
+    assert {("sport", 547), ("dport", 546)} <= ports, ports
+    assert ("sport", 67) not in ports
+
+
+def test_an_interface_names_the_side_of_the_hook_that_has_one():
+    """On output only the leaving interface exists, on input only the arriving one, so
+    an interface in either field is read as that one. Forward keeps both meanings."""
+    def iface_keys(r: Rule) -> list[str]:
+        [cmd] = [c for c in FiregexTables().get_rules(r)
+                 if c["add"]["rule"]["family"] == "ip"]
+        return [e["match"]["left"]["meta"]["key"] for e in cmd["add"]["rule"]["expr"]
+                if "meta" in e.get("match", {}).get("left", {})]
+    assert iface_keys(rule(src="eth0", mode=Mode.OUT)) == ["oifname"]
+    assert iface_keys(rule(dst="eth0", mode=Mode.IN)) == ["iifname"]
+    assert iface_keys(rule(src="eth0", dst="eth1", mode=Mode.FORWARD)) == ["iifname", "oifname"]

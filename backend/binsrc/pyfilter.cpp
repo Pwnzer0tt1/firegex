@@ -97,9 +97,8 @@ Final note: is not raccomanded to use variables that starts with __firegex_ in y
     length prefix makes us try to allocate an arbitrary amount of memory. */
 const uint32_t MAX_PYFILTER_CODE_SIZE = 64 * 1024 * 1024;
 
-void config_updater (){
+void config_updater (PyThreadState* state){
 	while (true){
-		PyThreadState* state = PyEval_SaveThread(); // Release GIL while doing IO operation
 		uint32_t code_size;
 		string code;
 		try{
@@ -114,12 +113,12 @@ void config_updater (){
 			// The control socket is the only link with the backend: if it is
 			// gone there is nothing left to filter for, so exit cleanly instead
 			// of letting the exception terminate the process.
-			PyEval_AcquireThread(state);
+			PyEval_RestoreThread(state);
 			cerr << "[fatal] [updater] Control socket error: " << e.what() << endl;
 			exit(EXIT_FAILURE);
 		}
 		cerr << "[info] [updater] Updating configuration" << endl;
-		PyEval_AcquireThread(state); //Restore GIL before executing python code
+		PyEval_RestoreThread(state); // Restore GIL before executing python code
 		try{
 			config.store(make_shared<PyCodeConfig>(code));
 			cerr << "[info] [updater] Config update done" << endl;
@@ -131,6 +130,7 @@ void config_updater (){
 			cerr << "[error] [updater] Failed to build new configuration!" << endl;
 			control_socket << "ACK FAIL unknown error" << endl;
 		}
+		state = PyEval_SaveThread(); // Release GIL while waiting for the next update
 	}
 }
 
@@ -151,6 +151,9 @@ int main(int argc, char *argv[]) {
 	if(n_of_threads <= 0) n_of_threads = 1;
 
 	config.store(make_shared<PyCodeConfig>());
+	// Release the main interpreter's GIL before starting worker threads so their
+	// before_loop() sub-interpreter creation never races the main thread for the GIL.
+	PyThreadState* main_state = PyEval_SaveThread();
 
 	MultiThreadQueue<PyProxyQueue> queue(n_of_threads);
 
@@ -172,6 +175,6 @@ int main(int argc, char *argv[]) {
 			exit(EXIT_FAILURE);
 		}
 	});
-	config_updater();
+	config_updater(main_state);
 	qthr.join();
 }

@@ -12,6 +12,8 @@
 #include <iostream>
 #include <cerrno>
 #include <sstream>
+#include <mutex>
+#include <memory>
 
 bool unhexlify(std::string const &hex, std::string &newString) {
    try{
@@ -34,8 +36,14 @@ public:
     int sockfd = -1;
     struct sockaddr_un addr;
 private:
-    // Internal buffer to accumulate the output until flush
-    std::ostringstream streamBuffer;
+    std::unique_ptr<std::mutex> write_mtx = std::make_unique<std::mutex>();
+
+    // Per-thread buffer to accumulate `<<` output until flush, so concurrent worker
+    // threads never interleave tokens in a shared std::ostringstream.
+    static std::ostringstream& stream_buffer() {
+        static thread_local std::ostringstream buf;
+        return buf;
+    }
 public:
 
     UnixClientConnection(){};
@@ -49,6 +57,8 @@ public:
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
         if (connect(sockfd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) != 0) {
+            close(sockfd);
+            sockfd = -1;
             throw std::runtime_error(std::string("connect error: ") + std::strerror(errno));
         }
     }
@@ -59,8 +69,11 @@ public:
 
     // Move constructor
     UnixClientConnection(UnixClientConnection&& other) noexcept 
-        : sockfd(other.sockfd), addr(other.addr) {
+        : sockfd(other.sockfd), addr(other.addr), write_mtx(std::move(other.write_mtx)) {
         other.sockfd = -1;
+        if (!write_mtx) {
+            write_mtx = std::make_unique<std::mutex>();
+        }
     }
 
     // Move assignment operator
@@ -71,6 +84,10 @@ public:
             }
             sockfd = other.sockfd;
             addr = other.addr;
+            write_mtx = std::move(other.write_mtx);
+            if (!write_mtx) {
+                write_mtx = std::make_unique<std::mutex>();
+            }
             other.sockfd = -1;
         }
         return *this;
@@ -79,6 +96,7 @@ public:
     // Stream sockets are free to accept fewer bytes than asked for, so a single
     // write() can silently truncate a message and desynchronise the protocol.
     void send(const std::string& data) {
+        std::lock_guard<std::mutex> lock(*write_mtx);
         size_t sent = 0;
         while (sent < data.size()) {
             ssize_t written = ::write(sockfd, data.c_str() + sent, data.size() - sent);
@@ -118,12 +136,13 @@ public:
     // Template overload for generic types
     template<typename T>
     UnixClientConnection& operator<<(const T& data) {
-        streamBuffer << data;
+        stream_buffer() << data;
         return *this;
     }
 
     // Overload for manipulators (e.g., std::endl)
     UnixClientConnection& operator<<(std::ostream& (*manip)(std::ostream&)) {
+        auto& streamBuffer = stream_buffer();
         // The flush test used to be `if (static_cast<...>(std::flush))`, i.e. the
         // address of a function, which is always true: every manipulator flushed
         // and std::endl flushed twice.
@@ -136,6 +155,7 @@ public:
         }
         std::string packet = streamBuffer.str();
         streamBuffer.str("");  // Clear the buffer
+        streamBuffer.clear();
         // Send the accumulated data as one packet
         if (!packet.empty()) {
             send(packet);

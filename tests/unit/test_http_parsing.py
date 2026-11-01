@@ -488,3 +488,63 @@ def watch(req: HttpFullRequest):
     assert len(glob["held"]) == 8
     assert max(glob["held"]) <= 1000, glob["held"]
     assert glob["held"][-1] > 0, "the history was emptied rather than trimmed"
+
+
+# --- header-only models and the shared history ------------------------------------------
+
+def _run_code(code: str, enabled: list[str], *chunks: tuple[bytes, bool]) -> dict:
+    glob = {"__firegex_pyfilter_enabled": enabled}
+    exec(code, glob, glob)
+    compile(glob)
+    for payload, is_input in chunks:
+        glob["__firegex_packet_info"] = packet(payload, is_input)
+        handle_packet(glob)
+    return glob
+
+
+HEADER_CODE = """
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import HttpRequestHeader
+heads = []
+@pyfilter
+def watch_head(req: HttpRequestHeader):
+    heads.append(req.url)
+    return ACCEPT
+"""
+
+
+def test_pipelined_requests_reach_a_header_filter_once_each():
+    """Three requests in one segment are three heads: none dropped, none repeated."""
+    three = b"".join(
+        f"GET /{n} HTTP/1.1\r\nHost: a\r\nContent-Length: 2\r\n\r\nok".encode()
+        for n in "abc"
+    )
+    glob = _run_code(HEADER_CODE, ["watch_head"], (three, True))
+    assert glob["heads"] == ["/a", "/b", "/c"]
+
+
+def test_a_request_split_across_packets_reaches_a_header_filter_once():
+    request = b"POST /up HTTP/1.1\r\nHost: a\r\nContent-Length: 6\r\n\r\nabcdef"
+    glob = _run_code(HEADER_CODE, ["watch_head"],
+                     (request[:10], True), (request[10:40], True),
+                     (request[40:-3], True), (request[-3:], True))
+    assert glob["heads"] == ["/up"]
+
+
+def test_a_header_filter_beside_a_full_one_leaves_the_history_whole():
+    """Both models parse the same stream with parsers of their own. Each message is
+    in the history once — not missing because the header parser threw it away, and not
+    twice because both parsers recorded it."""
+    code = HEADER_CODE + """
+from firegex.pyfilters.models import HttpFullRequest
+lengths = []
+@pyfilter
+def watch_full(req: HttpFullRequest):
+    lengths.append([r.url for r in req.history.requests])
+    return ACCEPT
+"""
+    reqs = [f"GET /{n} HTTP/1.1\r\nHost: a\r\n\r\n".encode() for n in "abc"]
+    glob = _run_code(code, ["watch_head", "watch_full"], *[(r, True) for r in reqs])
+    assert glob["heads"] == ["/a", "/b", "/c"]
+    # A message's history is what came before it.
+    assert glob["lengths"] == [[], ["/a"], ["/a", "/b"]], glob["lengths"]

@@ -100,10 +100,18 @@ struct pyfilter_ctx {
 		py_handle_packet = handle_packet_code;
 		Py_INCREF(py_handle_packet);
 		glob = PyDict_New();
+		if (glob == nullptr){
+			Py_DECREF(py_handle_packet);
+			Py_XDECREF(compiled_code);
+			if (PyErr_Occurred())
+				PyErr_Print();
+			throw invalid_argument("Failed to allocate global dict");
+		}
 		PyObject* result = PyEval_EvalCode(compiled_code, glob, glob);
 		Py_XDECREF(compiled_code);
 		if (PyErr_Occurred()){
 			PyErr_Print();
+			Py_DECREF(py_handle_packet);
 			Py_XDECREF(glob);
 			std::cerr << "[fatal] [main] Failed to compile the code" << endl;
 			throw invalid_argument("Failed to execute the code, maybe an invalid filter code has been provided");
@@ -145,12 +153,18 @@ struct pyfilter_ctx {
 	}
 
 	inline void set_item_to_dict(PyObject* dict, const char* key, PyObject* value){
-		if (PyDict_SetItemString(dict, key, value) != 0){
+		if (value == nullptr){
+			if (PyErr_Occurred())
+				PyErr_Print();
+			throw invalid_argument("Failed to create item for dict");
+		}
+		int rc = PyDict_SetItemString(dict, key, value);
+		Py_DECREF(value);
+		if (rc != 0){
 			if (PyErr_Occurred())
 				PyErr_Print();
 			throw invalid_argument("Failed to set item to dict");
 		}
-		Py_DECREF(value);
 	}
 
 	py_filter_response handle_packet(
@@ -159,21 +173,29 @@ struct pyfilter_ctx {
 		bool is_client
 	){
 		PyObject * packet_info = PyDict_New();
-		
-		pkt->reserialize();
+		if (packet_info == nullptr){
+			if (PyErr_Occurred())
+				PyErr_Print();
+			return py_filter_response(PyFilterResponse::EXCEPTION);
+		}
 		// The application payload, and metadata about everything under it. No header
 		// bytes cross this boundary in either direction: a filter reads where the
 		// traffic came from and edits what it carries, which is the one contract both
 		// network layers can honestly offer.
-		string src_ip = pkt->src_ip(), dst_ip = pkt->dst_ip();
-		set_item_to_dict(packet_info, "data", PyBytes_FromStringAndSize(data.c_str(), data.size()));
-		set_item_to_dict(packet_info, "is_input", PyBool_FromLong(is_client));
-		set_item_to_dict(packet_info, "is_ipv6", PyBool_FromLong(pkt->is_ipv6));
-		set_item_to_dict(packet_info, "is_tcp", PyBool_FromLong(pkt->l4_proto == NfQueue::L4Proto::TCP));
-		set_item_to_dict(packet_info, "src_ip", PyUnicode_FromStringAndSize(src_ip.c_str(), src_ip.size()));
-		set_item_to_dict(packet_info, "dst_ip", PyUnicode_FromStringAndSize(dst_ip.c_str(), dst_ip.size()));
-		set_item_to_dict(packet_info, "src_port", PyLong_FromLong(pkt->src_port()));
-		set_item_to_dict(packet_info, "dst_port", PyLong_FromLong(pkt->dst_port()));
+		try {
+			string src_ip = pkt->src_ip(), dst_ip = pkt->dst_ip();
+			set_item_to_dict(packet_info, "data", PyBytes_FromStringAndSize(data.c_str(), data.size()));
+			set_item_to_dict(packet_info, "is_input", PyBool_FromLong(is_client));
+			set_item_to_dict(packet_info, "is_ipv6", PyBool_FromLong(pkt->is_ipv6));
+			set_item_to_dict(packet_info, "is_tcp", PyBool_FromLong(pkt->l4_proto == NfQueue::L4Proto::TCP));
+			set_item_to_dict(packet_info, "src_ip", PyUnicode_FromStringAndSize(src_ip.c_str(), src_ip.size()));
+			set_item_to_dict(packet_info, "dst_ip", PyUnicode_FromStringAndSize(dst_ip.c_str(), dst_ip.size()));
+			set_item_to_dict(packet_info, "src_port", PyLong_FromLong(pkt->src_port()));
+			set_item_to_dict(packet_info, "dst_port", PyLong_FromLong(pkt->dst_port()));
+		} catch (...) {
+			Py_DECREF(packet_info);
+			throw;
+		}
 
 		// Set packet info to the global context
 		set_item_to_glob("__firegex_packet_info", packet_info);
@@ -188,7 +210,7 @@ struct pyfilter_ctx {
 			// Shown at most once every TRACEBACK_QUIET_SECONDS; the EXCEPTION below goes
 			// every time, and is what carries the count.
 			if (traceback_is_due()){
-				cerr << "[error] [handle_packet] Failed to execute the code " << result << endl;
+				cerr << "[error] [handle_packet] Failed to execute the code" << endl;
 				PyErr_Print();
 			} else {
 				PyErr_Clear();
@@ -271,7 +293,14 @@ struct pyfilter_ctx {
 			#endif
 			return py_filter_response(PyFilterResponse::INVALID);
 		}
-		string* func_name = new string(PyUnicode_AsUTF8(func_name_py));
+		const char* func_name_utf8 = PyUnicode_AsUTF8(func_name_py);
+		if (func_name_utf8 == nullptr){
+			if (PyErr_Occurred())
+				PyErr_Clear();
+			del_item_from_glob("__firegex_pyfilter_result");
+			return py_filter_response(PyFilterResponse::INVALID);
+		}
+		string* func_name = new string(func_name_utf8);
 		if (action_enum == PyFilterResponse::DROP || action_enum == PyFilterResponse::REJECT){
 			del_item_from_glob("__firegex_pyfilter_result");
 			return py_filter_response(action_enum, func_name);

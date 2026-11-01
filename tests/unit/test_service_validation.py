@@ -18,9 +18,10 @@ from fastapi import HTTPException
 
 from routers.services import (AddressForm, _address_edge, _address_target,
                               _address_under, _address_upstream, _check_tls_material,
-                              _decoded_pattern, _hijack_ip, _hijack_port, describe_error,
-                              needs_a_stream, upstream_applies)
-from modules.services.models import L4, TRANSPORT, UPSTREAM
+                              _decoded_pattern, _hijack_ip, _hijack_port,
+                              _refuse_encrypted_without_certificate, describe_error,
+                              needs_a_stream, needs_certificate, upstream_applies)
+from modules.services.models import L4, TRANSPORT, UPSTREAM, Address, Service
 
 
 def form(**kw) -> AddressForm:
@@ -322,3 +323,53 @@ def test_an_endpoint_is_one_address_in_the_family_of_what_it_stands_in_for():
                                     form(proxy_ip="::1", proxy_port=8080))
     assert _hijack_ip(TRANSPORT.EXTERNAL, "10.0.0.1/32",
                       form(proxy_ip=" 127.0.0.2 ", proxy_port=8080)) == "127.0.0.2"
+
+
+# --- when a certificate is needed --------------------------------------------
+
+
+def test_a_web_service_in_the_clear_needs_no_certificate():
+    """It decrypts nothing, so a certificate would be read by nothing. It used to be
+    refused without one."""
+    assert not needs_certificate(L4.HTTP, [L4.TCP, L4.TCP])
+    assert not needs_certificate(L4.HTTP, [])
+    assert not needs_certificate(L4.TCP, [L4.TCP])
+    assert not needs_certificate(L4.UDP, [L4.UDP])
+
+
+def test_one_encrypted_address_is_enough_to_need_one():
+    assert needs_certificate(L4.HTTP, [L4.TCP, L4.TLS])
+    assert needs_certificate(L4.HTTP, [L4.QUIC])
+
+
+def test_tls_and_quic_always_need_one():
+    assert needs_certificate(L4.TLS, [])
+    assert needs_certificate(L4.QUIC, [])
+
+
+def test_the_model_and_the_router_ask_the_same_question():
+    def svc(proto, edges, cert=None):
+        return Service(service_id="s", status="stop", name="n", proto=proto,
+                       transport=TRANSPORT.PROXY, tls_cert=cert, tls_key=cert,
+                       addresses=[Address(address_id=str(i), service_id="s",
+                                          ip_int="10.0.0.1", port=80 + i,
+                                          proto=L4.l4_of(e), edge=e)
+                                  for i, e in enumerate(edges)])
+    for proto, edges in [(L4.HTTP, [L4.TCP]), (L4.HTTP, [L4.TCP, L4.QUIC]),
+                         (L4.TLS, [L4.TLS]), (L4.TCP, [L4.TCP])]:
+        assert svc(proto, edges).needs_certificate == needs_certificate(proto, edges)
+    assert not svc(L4.HTTP, [L4.TLS]).has_certificate
+    assert not svc(L4.HTTP, [L4.TLS], cert="  ").has_certificate
+    assert svc(L4.HTTP, [L4.TLS], cert="pem").has_certificate
+
+
+def test_an_encrypted_address_on_a_web_service_without_one_is_refused():
+    bare = {"proto": L4.HTTP, "tls_cert": None, "tls_key": None}
+    held = {"proto": L4.HTTP, "tls_cert": "c", "tls_key": "k"}
+    assert "certificate" in refusal(_refuse_encrypted_without_certificate, bare, L4.TLS)
+    assert "HTTP/3" in refusal(_refuse_encrypted_without_certificate, bare, L4.QUIC)
+    _refuse_encrypted_without_certificate(bare, L4.TCP)
+    _refuse_encrypted_without_certificate(held, L4.QUIC)
+    # Not this check's business: a TLS service carries its own requirement.
+    _refuse_encrypted_without_certificate({"proto": L4.TLS, "tls_cert": None,
+                                           "tls_key": None}, L4.TLS)

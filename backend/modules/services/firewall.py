@@ -145,6 +145,8 @@ class ServiceManager:
         self._owners: dict[str, str] = {}
         #: Work started after an engine has gone, kept referenced until it is done.
         self._background: set[asyncio.Task] = set()
+        #: Ports guarded by engines still draining, so a table rebuild puts them back too.
+        self._draining_guards: list[set[tuple[str, int]]] = []
 
     # --- reading the configuration -------------------------------------------
 
@@ -522,16 +524,27 @@ class ServiceManager:
                     self._set_status(False)
                 return
             guarded = nft.delete(self.srv, keep_guards=True)
+            if guarded:
+                self._draining_guards.append(guarded)
             self._steer = {}
             # A restart claims them again in a moment, from the engine replacing this one.
             if not handing_over:
                 await self._release_udp(self.srv.addresses)
             if self.transport:
                 if drain:
+                    retired_now = False
+
+                    def _on_retired():
+                        nonlocal retired_now
+                        retired_now = True
+                        self._in_background(self._engine_gone(guarded))
+
                     await self.transport.retire(
                         keep_filtering=handing_over,
-                        then=lambda: self._in_background(self._engine_gone(guarded)),
+                        then=_on_retired,
                     )
+                    if retired_now and self._background:
+                        await asyncio.gather(*list(self._background))
                 else:
                     await self.transport.stop()
                     await self._engine_gone(guarded)
@@ -554,10 +567,16 @@ class ServiceManager:
         have its rules put back behind it.
         """
         async with self.lock:
+            for guarded in self._draining_guards:
+                for l4, port in guarded:
+                    nft.cmd(nft._element("add", l4, port))
             if not self.active or self.transport is None:
                 return
             nft.delete(self.srv)
             nft.add(self.srv, **self._steer)
+            for port in (self._steer.get("udp_ports") or {}).values():
+                if (L4.UDP, int(port)) not in nft._guarded.get(str(self.srv.id), set()):
+                    nft._guard(self.srv, L4.UDP, port)
             # Whatever arrived while the rules were gone went straight to the service, and
             # a datagram flow that did so would go on doing it.
             await self._claim_udp(self.srv.addresses)
@@ -848,6 +867,8 @@ class ServiceManager:
         refreshed the entry that sent it there — a client that kept talking was cut off
         from the service until it happened to fall silent for two minutes.
         """
+        if guarded in self._draining_guards:
+            self._draining_guards.remove(guarded)
         nft.release_guards(guarded)
         ports = [port for l4, port in guarded if l4 == L4.UDP]
         if not ports:

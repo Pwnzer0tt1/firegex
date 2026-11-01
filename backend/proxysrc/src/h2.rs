@@ -650,6 +650,10 @@ where
                 .await
                 .map_err(io::Error::other)?
             {
+                if chunk.is_empty() {
+                    from_client.release(0).map_err(io::Error::other)?;
+                    continue;
+                }
                 let mut view = Vec::new();
                 push_body(&mut view, &chunk, &framing);
                 if !judge(&rendered, Direction::ClientToServer, &view, &mut sessions, tap.as_ref())
@@ -749,6 +753,10 @@ where
                 .await
                 .map_err(io::Error::other)?
             {
+                if chunk.is_empty() {
+                    from_service.release(0).map_err(io::Error::other)?;
+                    continue;
+                }
                 let mut view = Vec::new();
                 push_body(&mut view, &chunk, &framing);
                 if !judge(&rendered, Direction::ServerToClient, &view, &mut sessions, tap.as_ref())

@@ -5,8 +5,8 @@ import { decrypts, L4, Transport, Upstream } from './utils';
 /**
  * Everything an address can say beyond where it is, written once.
  *
- * Two places ask for it — the rows of the creation form, behind each row's ⚙, and the
- * modal on the service's own page — and they used to ask in two sets of words. The same
+ * It is asked behind each row's ⚙ in the service form. It used to be asked again by a
+ * modal on the service's own page, in another set of words. The same
  * setting described twice reads as two settings, which is the whole reason this file
  * exists; the capability rules below were written twice as well, so the form could offer
  * something the backend then refused.
@@ -41,21 +41,6 @@ export function addressCapabilities(proto: string, transport: string, edge?: str
             && !(proto === L4.HTTP && (edge ?? L4.TCP) === L4.TCP),
     }
 }
-
-/** What clients speak at one address of an HTTPS service. Shared so the row, the modal
- *  and the badge on the service page cannot come to call them three different things. */
-export const EDGE_OPTIONS = [
-    { label: 'Clear', value: L4.TCP },
-    { label: 'TLS', value: L4.TLS },
-    { label: 'HTTP/3', value: L4.QUIC },
-]
-
-export const edgeHint = (edge: string) =>
-    edge === L4.QUIC
-        ? "HTTP/3 over UDP."
-        : edge === L4.TLS
-            ? "TLS only; cleartext clients are refused."
-            : "Cleartext; clients bringing TLS are accepted too."
 
 export const upstreamHint = (upstream: string) =>
     upstream === Upstream.TCP

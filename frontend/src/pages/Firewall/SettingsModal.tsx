@@ -3,18 +3,31 @@ import { useEffect, useState } from 'react';
 import { errorNotify, okNotify } from '../../js/utils';
 import { FirewallSettings, firewall } from '../../components/Firewall/utils';
 
+const DEFAULT_SETTINGS: FirewallSettings = {
+    keep_rules: false,
+    allow_loopback: false,
+    allow_established: false,
+    allow_icmp: false,
+    multicast_dns: false,
+    allow_upnp: false,
+    drop_invalid: false,
+    allow_dhcp: false,
+    allow_dnat: false,
+}
+
 export function SettingsModal({ opened, onClose }:{ opened:boolean, onClose:()=>void }) {
 
-    const [settings, setSettings] = useState<FirewallSettings>({} as FirewallSettings)
+    const [settings, setSettings] = useState<FirewallSettings>(DEFAULT_SETTINGS)
 
     useEffect(()=>{
+        if (!opened) return
         firewall.settings().then( res => {
-            setSettings(res)
+            setSettings({ ...DEFAULT_SETTINGS, ...res })
         }).catch( err => {
             errorNotify("Setting fetch failed!", err.toString())
             onClose()
         })
-    },[])
+    },[opened])
 
     const [submitLoading, setSubmitLoading] = useState(false)
  

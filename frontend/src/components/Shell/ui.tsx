@@ -22,6 +22,9 @@ const toneSoft: Record<Tone, string> = {
     muted: "var(--fg-muted-soft)",
 }
 
+/** How long a logged warning or error keeps its place on the row, sidebar and strip. */
+export const PROBLEM_SHOWN_MS = 60 * 60 * 1000
+
 /**
  * How worried to be about a service, read off what it is doing.
  *
@@ -29,14 +32,24 @@ const toneSoft: Record<Tone, string> = {
  * operator set up and is not getting, while traffic goes straight to the service. A
  * stopped service with nothing attached is simply switched off.
  */
-export const serviceTone = (service: Service): Tone => {
+export const serviceTone = (
+    service: Pick<Service, "status" | "n_filters" | "problem"> & { transport?: string },
+    now: number = Date.now(),
+): Tone => {
+    const recentProblem = service.problem && now - service.problem.at <= PROBLEM_SHOWN_MS
+        ? service.problem
+        : null
+    if (recentProblem?.level === "error") return "danger"
     if (service.status === "active") {
         // A running service with nothing to run is reachable and protected by nothing;
         // the hand-off layer is the exception, since a filter there is not possible.
         if (service.n_filters === 0 && service.transport !== Transport.EXTERNAL) return "warn"
+        if (recentProblem?.level === "warn") return "warn"
         return "ok"
     }
-    return service.n_filters > 0 ? "danger" : "muted"
+    if (service.n_filters > 0) return "danger"
+    if (recentProblem?.level === "warn") return "warn"
+    return "muted"
 }
 
 export const serviceStateLabel = (service: Service) =>

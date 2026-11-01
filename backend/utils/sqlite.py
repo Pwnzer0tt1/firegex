@@ -157,7 +157,8 @@ class SQLite():
         column called `table` — the firewall's — a syntax error: no backup holding a
         single firewall rule could be imported at all.
         """
-        self.connect()
+        if self.conn is None:
+            self.connect()
         cur = self.conn.cursor()
         try:
             cur.execute("BEGIN")
@@ -176,7 +177,7 @@ class SQLite():
                     # crafted backup from injecting arbitrary identifiers into the query.
                     cur.execute(f'PRAGMA table_info("{table_name}");')
                     valid_cols = {r["name"] for r in cur.fetchall()}
-                    cols = [c for c in rows[0].keys() if c in valid_cols]
+                    cols = list(dict.fromkeys(c for r in rows for c in r.keys() if c in valid_cols))
                     if not cols:
                         continue
                     placeholders = ", ".join(["?"] * len(cols))

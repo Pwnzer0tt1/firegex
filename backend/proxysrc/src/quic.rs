@@ -350,11 +350,12 @@ impl QuicRelay {
         // request to send.
         let (endpoint, behind, agreed) = match self.cfg.upstream {
             Onward::Same => {
-                let offered = self.offered(&incoming, client).await;
+                let (offered, sni) = self.offered(&incoming, client).await;
                 // The endpoint is held for as long as the connection is: it owns the
                 // socket the connection speaks through, and dropping it would take the
                 // connection with it.
-                let (endpoint, service) = self.dial_upstream(client, &offered).await?;
+                let (endpoint, service) =
+                    self.dial_upstream(client, &offered, sni.as_deref()).await?;
                 let agreed = negotiated_protocol(&service);
                 (Some(endpoint), Behind::Quic(service), agreed)
             }
@@ -374,6 +375,7 @@ impl QuicRelay {
                     connect_timeout: self.cfg.connect_timeout,
                     self_mark: self.cfg.self_mark,
                     spoof: self.cfg.spoof_source,
+                    stats: Arc::clone(&self.stats),
                 }),
                 Some(b"h3".to_vec()),
             ),
@@ -436,11 +438,19 @@ impl QuicRelay {
         Ok(())
     }
 
-    /// The protocols this client offered, read off its hello; `h3` if it could not be.
-    async fn offered(&self, incoming: &Incoming, client: SocketAddr) -> Vec<Vec<u8>> {
-        match self.hellos.offered(incoming.remote_address(), HELLO_WAIT).await {
-            Some(offered) if !offered.is_empty() => offered,
-            _ => {
+    /// The protocols and SNI this client offered, read off its hello; `h3` if it could not be.
+    async fn offered(
+        &self,
+        incoming: &Incoming,
+        client: SocketAddr,
+    ) -> (Vec<Vec<u8>>, Option<String>) {
+        match self
+            .hellos
+            .offered_hello(incoming.remote_address(), HELLO_WAIT)
+            .await
+        {
+            Some(hello) if !hello.alpn.is_empty() => (hello.alpn, hello.sni),
+            other => {
                 if !self.warned_hello.swap(true, Ordering::Relaxed) {
                     crate::diag!(
                         "[warn] [quic] could not read which protocols {client} offered; \
@@ -450,7 +460,7 @@ impl QuicRelay {
                         self.upstream,
                     );
                 }
-                vec![FALLBACK_ALPN.to_vec()]
+                (vec![FALLBACK_ALPN.to_vec()], other.and_then(|h| h.sni))
             }
         }
     }
@@ -461,6 +471,7 @@ impl QuicRelay {
         &self,
         client: SocketAddr,
         offered: &[Vec<u8>],
+        sni: Option<&str>,
     ) -> io::Result<(Endpoint, Connection)> {
         let endpoint = match self.endpoint_as(client) {
             Ok(endpoint) => endpoint,
@@ -482,15 +493,18 @@ impl QuicRelay {
             }
         };
 
-        // An IP literal is what the TCP path presents too. Nothing verifies it — the
-        // service being protected is the thing we are defending, not a peer to be
-        // authenticated — but rustls needs a name to put in the handshake.
-        let name = self.upstream.ip().to_string();
+        // Present the client's SNI when read from its Initial packet so an upstream
+        // routing by server name sees the name the client asked for; fall back to the
+        // upstream IP literal otherwise.
+        let fallback = self.upstream.ip().to_string();
+        let name = sni
+            .filter(|s| rustls::pki_types::ServerName::try_from(*s).is_ok())
+            .unwrap_or(&fallback);
         let connecting = endpoint
             .connect_with(
                 self.cfg.setup.client_for(offered).map_err(io::Error::other)?,
                 self.upstream,
-                &name,
+                name,
             )
             .map_err(io::Error::other)?;
         let connection = tokio::time::timeout(self.cfg.connect_timeout, connecting)
@@ -816,9 +830,10 @@ impl Carrier {
             return;
         }
         let flow = tokio::sync::OnceCell::new();
+        let refused = AtomicBool::new(false);
         tokio::join!(
-            self.datagrams(&service, Direction::ClientToServer, &flow),
-            self.datagrams(&service, Direction::ServerToClient, &flow),
+            self.datagrams(&service, Direction::ClientToServer, &flow, &refused),
+            self.datagrams(&service, Direction::ServerToClient, &flow, &refused),
         );
         // Released once, by whichever direction opened it: the two share one flow, and a
         // filter told twice that a connection ended would be asked to forget it twice.
@@ -833,6 +848,7 @@ impl Carrier {
         service: &Connection,
         direction: Direction,
         flow: &tokio::sync::OnceCell<ConnectionId>,
+        refused: &AtomicBool,
     ) {
         let (from, to) = match direction {
             Direction::ClientToServer => (&self.peer, service),
@@ -859,6 +875,9 @@ impl Carrier {
                 .run(direction, &datagram, sessions)
                 .await
             {
+                if !refused.swap(true, Ordering::Relaxed) {
+                    self.stats.closed_by_filter.fetch_add(1, Ordering::Relaxed);
+                }
                 continue;
             }
             if let Err(e) = to.send_datagram(datagram) {

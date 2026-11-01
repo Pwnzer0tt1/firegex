@@ -391,6 +391,9 @@ where
             // A pattern split across two DATA frames is still a pattern, so the session
             // carries on from the head.
             while let Some(chunk) = from_client.data().await.map_err(io::Error::other)? {
+                if chunk.is_empty() {
+                    continue;
+                }
                 let mut view = Vec::new();
                 push_body(&mut view, &chunk, &framing);
                 if !judge(&rendered, Direction::ClientToServer, &view, &mut sessions, tap.as_ref())
@@ -473,6 +476,9 @@ where
         Some(trailers) => trailers,
         None => {
             while let Some(chunk) = from_service.data().await.map_err(io::Error::other)? {
+                if chunk.is_empty() {
+                    continue;
+                }
                 let mut view = Vec::new();
                 push_body(&mut view, &chunk, &framing);
                 if !judge(&rendered, Direction::ServerToClient, &view, &mut sessions, tap.as_ref())

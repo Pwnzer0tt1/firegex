@@ -93,7 +93,13 @@ class PktRequest {
 
 	inline void __internal_fetch_data_size(Tins::PDU* pdu){
 		_data_original_size = inner_data_size(pdu);
+		if (_original_size > packet.size() || _data_original_size > _original_size){
+			throw Tins::malformed_packet();
+		}
 		_header_size = _original_size - _data_original_size;
+		if (_header_size > packet.size()){
+			throw Tins::malformed_packet();
+		}
 	}
 
 	L4Proto fill_l4_info(){
@@ -144,16 +150,22 @@ class PktRequest {
 		packet(string(payload, plen)),
 		ctx(ctx)
 	{
-		if (is_ipv6){
-			ipv6 = new Tins::IPv6((uint8_t*)packet.c_str(), plen);
-			sid = stream_id::make_identifier(*ipv6);
-			_original_size = ipv6->size();
-		}else{
-			ipv4 = new Tins::IP((uint8_t*)packet.c_str(), plen);
-			sid = stream_id::make_identifier(*ipv4);
-			_original_size = ipv4->size();
+		try {
+			if (is_ipv6){
+				ipv6 = new Tins::IPv6((uint8_t*)packet.c_str(), plen);
+				sid = stream_id::make_identifier(*ipv6);
+				_original_size = ipv6->size();
+			}else{
+				ipv4 = new Tins::IP((uint8_t*)packet.c_str(), plen);
+				sid = stream_id::make_identifier(*ipv4);
+				_original_size = ipv4->size();
+			}
+			l4_proto = fill_l4_info();
+		} catch (...) {
+			delete ipv4;
+			delete ipv6;
+			throw;
 		}
-		l4_proto = fill_l4_info();
 		#ifdef PKTDEBUG
 		if (tcp){			
 			cerr << "[DEBUG] NEW_PACKET " << (is_input?"-> IN ":"<- OUT")  << " [SIZE: " << data_size() << "] FLAGS: " << (tcp->get_flag(Tins::TCP::FIN)?"FIN ":"") << (tcp->get_flag(Tins::TCP::SYN)?"SYN ":"") << (tcp->get_flag(Tins::TCP::RST)?"RST ":"") << (tcp->get_flag(Tins::TCP::ACK)?"ACK ":"") << (tcp->get_flag(Tins::TCP::PSH)?"PSH ":"") << endl;
@@ -200,7 +212,7 @@ class PktRequest {
 	}
 
 	size_t data_size(){
-		return packet.size()-_header_size;
+		return packet.size() >= _header_size ? packet.size() - _header_size : 0;
 	}
 
 	size_t data_original_size(){
@@ -261,7 +273,7 @@ class PktRequest {
 		auto bef_raw = before_raw_pdu_ptr();
 		if (bef_raw){
 			delete bef_raw->release_inner_pdu();
-			auto new_data_size = packet.size()-_header_size;
+			auto new_data_size = data_size();
 			if (new_data_size > 0){
 				bef_raw /= move(Tins::RawPDU((uint8_t*)packet.data()+_header_size, new_data_size));
 			}
@@ -303,12 +315,7 @@ class PktRequest {
 		if (tcp){
 			//If the packet has data, we have to remove it
 			set_data(nullptr, 0);
-			//For the first matched data or only for data packets, we set RST bit
-			//This only for client packets, because this will trigger server to close the connection
-			//Packets will be filtered anyway also if client don't send packets
-			if (_data_original_size != 0){
-				tcp->set_flag(Tins::TCP::RST,1);
-			}
+			tcp->set_flag(Tins::TCP::RST, 1);
 			//Send the edited packet to the kernel
 			mangle();
 		}else{
@@ -373,8 +380,8 @@ class PktRequest {
 					cerr << "[SEQ: " << tcp->seq() << "] [ACK: " << tcp->ack_seq() << "]" << " [WIN: " << tcp->window() << "] [FLAGS: " << tcp->flags() << "]\n" << endl;
 				}
 				#endif
-				size_t payload_offset = data_size() - _data_original_size;
-				if (tcp && ack_seq_offset && payload_offset != 0){
+				ssize_t payload_offset = static_cast<ssize_t>(data_size()) - static_cast<ssize_t>(_data_original_size);
+				if (tcp && !tcp->get_flag(Tins::TCP::RST) && ack_seq_offset && payload_offset != 0){
 					if (is_input){
 						ack_seq_offset->in += payload_offset;
 					}else{

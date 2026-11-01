@@ -6,11 +6,14 @@
 :root {
   color-scheme: dark;
 
-  /* surfaces: true black, told apart by borders */
+  /* Surfaces: one black, told apart by borders. They used to be four near-blacks a few
+     units apart, and an OLED panel renders each of those steps as a visible seam (a
+     modal on one, its footer on another), so every resting fill is the same #000. Only
+     a hover lifts, because that is a state and not a surface. */
   --fg-bg: #000000;
-  --fg-nav: #050506;
-  --fg-surface: #0A0A0B;
-  --fg-surface-raised: #111214;
+  --fg-nav: #000000;
+  --fg-surface: #000000;
+  --fg-surface-raised: #000000;
   --fg-surface-hover: #17181A;
   --fg-border: #232529;
   --fg-border-soft: #18191C;
@@ -52,7 +55,13 @@
   --text-primary: var(--fg-text);
   --text-secondary: var(--fg-text-muted);
 
-  /* Mantine bridge */
+  /* Mantine bridge. No soft shadows: on black they are only visible as a gradient over
+     whatever is underneath, which on an OLED is banding. Edges come from borders. */
+  --mantine-shadow-xs: none !important;
+  --mantine-shadow-sm: none !important;
+  --mantine-shadow-md: none !important;
+  --mantine-shadow-lg: none !important;
+  --mantine-shadow-xl: none !important;
   --mantine-color-body: var(--fg-bg) !important;
   --mantine-font-family: var(--fg-font-ui) !important;
   --mantine-font-family-monospace: var(--fg-font-mono) !important;
@@ -262,7 +271,6 @@ a:hover { color: var(--fg-accent-hover); }
   z-index: 30;
   border-top: 1px solid var(--fg-border);
   background: var(--fg-nav);
-  box-shadow: 0 -12px 32px rgba(0, 0, 0, 0.55);
 }
 .fg-strip-row {
   display: flex;
@@ -460,7 +468,7 @@ a:hover { color: var(--fg-accent-hover); }
 
 @media (max-width: 899px) {
   .fg-nav { transform: translateX(-100%); }
-  .fg-nav.open { transform: none; box-shadow: 12px 0 40px rgba(0, 0, 0, 0.6); }
+  .fg-nav.open { transform: none; }
   .fg-nav-toggle { display: inline-flex; }
   .fg-main { margin-left: 0; }
   .fg-page { padding: 64px 16px 40px; }
