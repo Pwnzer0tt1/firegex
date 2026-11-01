@@ -202,6 +202,25 @@ pub trait Filter: Send + Sync + 'static {
     fn reuse_key(&self) -> Option<&str> {
         None
     }
+
+    /// Connections currently known to this filter, and whether they have already had a
+    /// chunk inspected, so a replacement filter can be told their metadata without
+    /// treating them as freshly opened.
+    fn active_connections(
+        &self,
+    ) -> Option<std::collections::HashMap<ConnectionId, (ConnectionMeta, bool)>> {
+        None
+    }
+
+    /// Tell a newly installed filter about a connection that was already open before
+    /// this filter joined the chain.
+    fn connection_carried_over(
+        &self,
+        _connection: ConnectionId,
+        _meta: &ConnectionMeta,
+        _started: bool,
+    ) {
+    }
 }
 
 /// One filter's state for one direction of one connection.
@@ -227,6 +246,9 @@ pub struct ChainSessions {
     /// chains number from one.
     generation: u64,
     slots: Vec<Option<Box<dyn FilterSession>>>,
+    /// Whether the chain has been told this connection carried a chunk. Once is enough,
+    /// and asking every chunk would take the chain-wide lock on the datapath.
+    started: bool,
 }
 
 impl ChainSessions {
@@ -235,6 +257,7 @@ impl ChainSessions {
             connection,
             generation: 0,
             slots: Vec::new(),
+            started: false,
         }
     }
 }
@@ -304,6 +327,14 @@ pub struct FilterChain {
     next_rearm_ms: AtomicU64,
     /// Trips when no filter is left to consult, making the chain a pure relay.
     degraded: AtomicBool,
+    /// Serialises the cold disable/rearm transitions so concurrent timeouts and rearms
+    /// cannot leave `degraded`, `disabled` or `next_rearm_ms` out of step with the slots.
+    state_lock: std::sync::Mutex<()>,
+    /// Live connections on this chain and whether a chunk has been inspected on them,
+    /// carried across [`ChainHandle::replace`] so newly added filters still know who is
+    /// talking to whom.
+    active_connections:
+        std::sync::Mutex<std::collections::HashMap<ConnectionId, (ConnectionMeta, bool)>>,
     pub stats: Arc<ChainStats>,
 }
 
@@ -350,6 +381,8 @@ impl FilterChain {
             rearm_after: REARM_AFTER,
             next_rearm_ms: AtomicU64::new(0),
             degraded,
+            state_lock: std::sync::Mutex::new(()),
+            active_connections: std::sync::Mutex::new(std::collections::HashMap::new()),
             stats: Arc::new(ChainStats::default()),
         }
     }
@@ -369,28 +402,40 @@ impl FilterChain {
     /// entirely — no copy, no thread hop. The degraded path has to be the cheap
     /// one, otherwise failing open costs more than working normally.
     pub fn is_bypassed(&self) -> bool {
-        self.degraded.load(Ordering::Relaxed)
+        let due = self.next_rearm_ms.load(Ordering::Acquire);
+        if due != 0 && monotonic_ms() >= due {
+            self.rearm();
+        }
+        self.degraded.load(Ordering::Acquire)
     }
 
     pub fn disabled_filters(&self) -> Vec<&str> {
+        let due = self.next_rearm_ms.load(Ordering::Acquire);
+        if due != 0 && monotonic_ms() >= due {
+            self.rearm();
+        }
         self.slots
             .iter()
-            .filter(|s| s.disabled.load(Ordering::Relaxed))
+            .filter(|s| s.disabled.load(Ordering::Acquire))
             .map(|s| s.filter.name())
             .collect()
     }
 
     fn disable(&self, slot: &Slot, reason: DisableReason) {
-        if slot.disabled.swap(true, Ordering::Relaxed) {
+        let _guard = self.state_lock.lock().unwrap_or_else(|e| e.into_inner());
+        if reason == DisableReason::TimedOut
+            && slot.consecutive_timeouts.load(Ordering::Acquire) < self.max_consecutive_timeouts
+        {
+            return;
+        }
+        if slot.disabled.swap(true, Ordering::AcqRel) {
             return; // already out of the loop, do not double count
         }
         self.stats.filters_disabled.fetch_add(1, Ordering::Relaxed);
         match reason {
             DisableReason::TimedOut => {
                 let at = monotonic_ms() + self.rearm_after.as_millis() as u64;
-                slot.rearm_at_ms.store(at, Ordering::Relaxed);
-                let _ = self.next_rearm_ms.try_update(Ordering::Relaxed, Ordering::Relaxed,
-                    |next| (next == 0 || at < next).then_some(at));
+                slot.rearm_at_ms.store(at, Ordering::Release);
                 crate::diag!(
                     "[warn] [filter] '{}' kept missing its {:?} deadline: traffic keeps \
                      flowing without it, and it is asked again in {}s",
@@ -399,24 +444,41 @@ impl FilterChain {
                     self.rearm_after.as_secs(),
                 );
             }
-            DisableReason::Panicked => crate::diag!(
-                "[warn] [filter] '{}' panicked: traffic keeps flowing without it until the \
-                 filters are next applied — save a change to them, or restart the service",
-                slot.filter.name(),
-            ),
+            DisableReason::Panicked => {
+                slot.rearm_at_ms.store(0, Ordering::Release);
+                crate::diag!(
+                    "[warn] [filter] '{}' panicked: traffic keeps flowing without it until the \
+                     filters are next applied — save a change to them, or restart the service",
+                    slot.filter.name(),
+                );
+            }
         }
+        let next = self
+            .slots
+            .iter()
+            .map(|s| s.rearm_at_ms.load(Ordering::Acquire))
+            .filter(|&at| at != 0)
+            .min()
+            .unwrap_or(0);
+        self.next_rearm_ms.store(next, Ordering::Release);
         if self
             .slots
             .iter()
-            .all(|s| s.disabled.load(Ordering::Relaxed))
+            .all(|s| s.disabled.load(Ordering::Acquire))
         {
-            self.degraded.store(true, Ordering::Relaxed);
+            self.degraded.store(true, Ordering::Release);
             crate::diag!("[warn] [filter] every filter is disabled, chain is now a plain relay");
         }
     }
 
     /// Tell every filter that a connection has started, and what it is.
     pub fn connection_opened(&self, connection: ConnectionId, meta: &ConnectionMeta) {
+        if let Ok(mut active) = self.active_connections.lock() {
+            if active.len() >= 65_536 && !active.contains_key(&connection) {
+                active.clear();
+            }
+            active.insert(connection, (*meta, false));
+        }
         for slot in &self.slots {
             slot.filter.connection_opened(connection, meta);
         }
@@ -427,19 +489,21 @@ impl FilterChain {
     /// Called once per connection, not once per direction: a stream is one thing to a
     /// filter, and telling it twice would free state the other direction still needs.
     pub fn connection_closed(&self, connection: ConnectionId) {
+        if let Ok(mut active) = self.active_connections.lock() {
+            active.remove(&connection);
+        }
         for slot in &self.slots {
             slot.filter.connection_closed(connection);
         }
     }
 
-    /// Run the chain over one chunk.
-    ///
     /// Put back the filters whose pause is over. See `REARM_AFTER`.
     fn rearm(&self) {
+        let _guard = self.state_lock.lock().unwrap_or_else(|e| e.into_inner());
         let now = monotonic_ms();
         let mut next = 0;
         for slot in &self.slots {
-            let at = slot.rearm_at_ms.load(Ordering::Relaxed);
+            let at = slot.rearm_at_ms.load(Ordering::Acquire);
             if at == 0 {
                 continue;
             }
@@ -447,25 +511,25 @@ impl FilterChain {
                 next = if next == 0 { at } else { next.min(at) };
                 continue;
             }
-            // Whoever wins this puts the filter back; everybody else sees it done.
-            if slot
-                .rearm_at_ms
-                .compare_exchange(at, 0, Ordering::Relaxed, Ordering::Relaxed)
-                .is_ok()
-            {
-                slot.consecutive_timeouts.store(0, Ordering::Relaxed);
-                slot.disabled.store(false, Ordering::Relaxed);
-                self.degraded.store(false, Ordering::Relaxed);
-                crate::diag!(
-                    "[info] [filter] '{}' is back in the chain after sitting out {}s",
-                    slot.filter.name(),
-                    self.rearm_after.as_secs(),
-                );
-            }
+            slot.rearm_at_ms.store(0, Ordering::Release);
+            slot.consecutive_timeouts.store(0, Ordering::Release);
+            slot.disabled.store(false, Ordering::Release);
+            crate::diag!(
+                "[info] [filter] '{}' is back in the chain after sitting out {}s",
+                slot.filter.name(),
+                self.rearm_after.as_secs(),
+            );
         }
-        self.next_rearm_ms.store(next, Ordering::Relaxed);
+        self.next_rearm_ms.store(next, Ordering::Release);
+        let all_disabled = self
+            .slots
+            .iter()
+            .all(|s| s.disabled.load(Ordering::Acquire));
+        self.degraded.store(all_disabled, Ordering::Release);
     }
 
+    /// Run the chain over one chunk.
+    ///
     /// Any way a filter can fail — panic, or simply never returning — resolves to
     /// `Accept` for the chunk in flight. The chunk is never held hostage by the
     /// filter's failure.
@@ -475,9 +539,13 @@ impl FilterChain {
         data: &[u8],
         sessions: &mut ChainSessions,
     ) -> Verdict {
-        let due = self.next_rearm_ms.load(Ordering::Relaxed);
-        if due != 0 && monotonic_ms() >= due {
-            self.rearm();
+        if !sessions.started {
+            sessions.started = true;
+            if let Ok(mut active) = self.active_connections.lock() {
+                if let Some(entry) = active.get_mut(&sessions.connection) {
+                    entry.1 = true;
+                }
+            }
         }
         if self.is_bypassed() {
             self.stats.bypassed_chunks.fetch_add(1, Ordering::Relaxed);
@@ -613,6 +681,69 @@ impl ChainHandle {
 
     /// Install a new chain. Connections in flight pick it up on their next chunk.
     pub fn replace(&self, chain: FilterChain) {
+        let previous = self.current();
+        if let Ok(prev_active) = previous.active_connections.lock() {
+            if !prev_active.is_empty() {
+                if let Ok(mut next_active) = chain.active_connections.lock() {
+                    for (&conn, &(ref meta, started)) in prev_active.iter() {
+                        next_active
+                            .entry(conn)
+                            .and_modify(|e| e.1 |= started)
+                            .or_insert((*meta, started));
+                    }
+                }
+                for (&conn, &(ref meta, started)) in prev_active.iter() {
+                    for slot in &chain.slots {
+                        slot.filter.connection_carried_over(conn, meta, started);
+                    }
+                }
+            }
+        }
         let _ = self.tx.send(Arc::new(chain));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct SlowFilter;
+
+    impl Filter for SlowFilter {
+        fn name(&self) -> &str {
+            "slow"
+        }
+        fn inspect(&self, _ctx: &FilterCtx<'_>) -> Verdict {
+            std::thread::sleep(Duration::from_millis(80));
+            Verdict::Accept
+        }
+    }
+
+    #[tokio::test]
+    async fn is_bypassed_rearms_expired_filters_without_waiting_for_run() {
+        let rearm = Duration::from_millis(120);
+        let chain = FilterChain::with_policy(
+            vec![Arc::new(SlowFilter)],
+            Duration::from_millis(15),
+            1,
+        )
+        .rearming_after(rearm);
+
+        let mut sessions = ChainSessions::new(next_connection_id());
+        assert_eq!(
+            chain
+                .run(Direction::ClientToServer, b"trip", &mut sessions)
+                .await,
+            Verdict::Accept
+        );
+        assert!(chain.is_bypassed());
+        assert_eq!(chain.disabled_filters(), vec!["slow"]);
+
+        tokio::time::sleep(rearm + Duration::from_millis(50)).await;
+        assert!(
+            !chain.is_bypassed(),
+            "is_bypassed() must check next_rearm_ms and rearm expired filters"
+        );
+        assert!(chain.disabled_filters().is_empty());
     }
 }

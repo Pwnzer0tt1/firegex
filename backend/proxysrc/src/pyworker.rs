@@ -85,6 +85,28 @@ const MAX_FRAME: u32 = 64 * 1024 * 1024;
 /// behind in a worker that was not going to be asked anything anyway.
 const MAX_PENDING: usize = 1024 * 1024;
 
+/// Cap on active connections tracked for metadata replay when a worker is respawned.
+const MAX_ACTIVE_CONNECTIONS: usize = 65_536;
+
+fn build_open_frame(connection: ConnectionId, meta: &ConnectionMeta, joined_late: bool) -> Vec<u8> {
+    // Both, and they are not the same question. `is_tcp` is what the NFQUEUE side has
+    // always sent and what a filter reads to know the wire; `l4` is what decides whether
+    // a stream can be built, which is true of QUIC and not of a datagram. A library that
+    // only received the first would have to guess one of them.
+    let payload = serde_json::json!({
+        "client_ip": meta.client.ip().to_string(),
+        "client_port": meta.client.port(),
+        "server_ip": meta.server.ip().to_string(),
+        "server_port": meta.server.port(),
+        "is_ipv6": meta.server.is_ipv6(),
+        "is_tcp": meta.l4 == L4::Tcp,
+        "l4": meta.l4.name(),
+        "joined_late": joined_late,
+    })
+    .to_string();
+    build_frame(connection, KIND_OPEN, payload.as_bytes())
+}
+
 #[derive(Debug, Default)]
 pub struct WorkerStats {
     /// Times the worker was killed for missing its deadline or dying on its own.
@@ -105,6 +127,11 @@ pub struct PyWorkerRule {
     /// thing: a frame is a request and a response, and interleaving them would need
     /// request ids and a worker able to answer out of order. A pool comes later.
     child: Mutex<Option<Child>>,
+    /// Currently open connections and whether a chunk has already been inspected for
+    /// them, so a worker respawned after a crash or replaced on a ruleset reload still
+    /// learns each connection's endpoints while marking mid-stream connections as
+    /// `joined_late`.
+    active: Mutex<std::collections::HashMap<ConnectionId, (ConnectionMeta, bool)>>,
     /// Open and close frames not yet written, in order. They need no answer, and they
     /// are told from the relay itself — on the async runtime — where taking `child`
     /// meant waiting out whatever exchange held it, up to its whole deadline, and where
@@ -134,10 +161,32 @@ impl PyWorkerRule {
             enabled,
             deadline,
             child: Mutex::new(None),
+            active: Mutex::new(std::collections::HashMap::new()),
             pending: Mutex::new(Vec::new()),
             stats: std::sync::Arc::new(WorkerStats::default()),
             reuse_key: None,
         }
+    }
+
+    /// Seed this rule with the connections already open on the previous ruleset.
+    pub fn with_active_connections(
+        self,
+        connections: std::collections::HashMap<ConnectionId, (ConnectionMeta, bool)>,
+    ) -> Self {
+        if !connections.is_empty() {
+            if let Ok(mut pending) = self.pending.lock() {
+                for (&conn, &(ref meta, started)) in &connections {
+                    let frame = build_open_frame(conn, meta, started);
+                    if pending.len() + frame.len() <= MAX_PENDING {
+                        pending.extend_from_slice(&frame);
+                    }
+                }
+            }
+            if let Ok(mut active) = self.active.lock() {
+                *active = connections;
+            }
+        }
+        self
     }
 
     /// What this rule would be built from, as one string: the id, the command, which
@@ -221,21 +270,22 @@ impl PyWorkerRule {
             let _ = child.wait();
             return Err(format!("the filter code did not load: {why}"));
         }
-        Ok(child)
-    }
-
-    /// Which `@pyfilter` functions of the file are switched on, or `None` for all.
-    ///
-    /// Deciding here rather than in the file is the point: a function is turned off
-    /// without editing the code that defines it, and turned back on without the
-    /// operator having to remember what they deleted.
-    /// Hold a frame that needs no answer for the next exchange. See `pending`.
-    fn queue(&self, frame: Vec<u8>) {
-        let Ok(mut pending) = self.pending.lock() else { return };
-        if pending.len() + frame.len() > MAX_PENDING {
-            pending.clear();
+        // A freshly spawned worker has no memory of connections that opened before it
+        // started. Rebuild `pending` from `active` so every live connection's metadata is
+        // delivered ahead of the next chunk, with `joined_late` set for any connection
+        // that already had chunks inspected.
+        if let Ok(active) = self.active.lock() {
+            if let Ok(mut pending) = self.pending.lock() {
+                pending.clear();
+                for (&conn, &(ref meta, started)) in active.iter() {
+                    let frame = build_open_frame(conn, meta, started);
+                    if pending.len() + frame.len() <= MAX_PENDING {
+                        pending.extend_from_slice(&frame);
+                    }
+                }
+            }
         }
-        pending.extend_from_slice(&frame);
+        Ok(child)
     }
 
     pub fn enabled(&self) -> Option<&[String]> {
@@ -277,6 +327,11 @@ impl PyWorkerRule {
             .map_err(|_| "worker lock poisoned".to_string())?;
         if slot.is_none() {
             *slot = Some(self.spawn()?);
+        }
+        if let Ok(mut active) = self.active.lock() {
+            if let Some(entry) = active.get_mut(&connection) {
+                entry.1 = true;
+            }
         }
 
         let deadline_at = Instant::now() + self.deadline;
@@ -346,32 +401,75 @@ impl Filter for PyWorkerRule {
         &self.id
     }
     fn connection_opened(&self, connection: ConnectionId, meta: &ConnectionMeta) {
-        // Best effort and unanswered, like the close frame: the metadata is a
-        // convenience for the filter, and a worker that has died will be respawned by
-        // the first chunk anyway — which then arrives without endpoints rather than not
-        // at all. Losing the traffic over it would be the wrong trade.
-        let payload = serde_json::json!({
-            "client_ip": meta.client.ip().to_string(),
-            "client_port": meta.client.port(),
-            "server_ip": meta.server.ip().to_string(),
-            "server_port": meta.server.port(),
-            "is_ipv6": meta.server.is_ipv6(),
-            // Both, and they are not the same question. `is_tcp` is what the NFQUEUE
-            // side has always sent and what a filter reads to know the wire; `l4` is what
-            // decides whether a stream can be built, which is true of QUIC and not of a
-            // datagram. A library that only received the first would have to guess one
-            // of them.
-            "is_tcp": meta.l4 == L4::Tcp,
-            "l4": meta.l4.name(),
-        })
-        .to_string();
-        self.queue(build_frame(connection, KIND_OPEN, payload.as_bytes()));
+        let frame = build_open_frame(connection, meta, false);
+        if let Ok(mut active) = self.active.lock() {
+            if active.len() >= MAX_ACTIVE_CONNECTIONS && !active.contains_key(&connection) {
+                active.clear();
+            }
+            active.insert(connection, (*meta, false));
+            if let Ok(mut pending) = self.pending.lock() {
+                if pending.len() + frame.len() > MAX_PENDING {
+                    pending.clear();
+                }
+                pending.extend_from_slice(&frame);
+            }
+        }
     }
     fn connection_closed(&self, connection: ConnectionId) {
         // Best effort, and deliberately not on the datapath's critical path: the
         // connection is already over, so nothing is waiting on this. A worker that
         // has died in the meantime simply has no state left to free.
-        self.queue(build_frame(connection, KIND_CLOSE, &[]));
+        let frame = build_frame(connection, KIND_CLOSE, &[]);
+        if let Ok(mut active) = self.active.lock() {
+            active.remove(&connection);
+            if let Ok(mut pending) = self.pending.lock() {
+                if pending.len() + frame.len() > MAX_PENDING {
+                    pending.clear();
+                }
+                pending.extend_from_slice(&frame);
+            }
+        }
+    }
+    fn active_connections(
+        &self,
+    ) -> Option<std::collections::HashMap<ConnectionId, (ConnectionMeta, bool)>> {
+        self.active.lock().ok().map(|active| active.clone())
+    }
+    fn connection_carried_over(
+        &self,
+        connection: ConnectionId,
+        meta: &ConnectionMeta,
+        started: bool,
+    ) {
+        if let Ok(mut active) = self.active.lock() {
+            if let Some(entry) = active.get_mut(&connection) {
+                // Already announced, but perhaps as fresh: this filter's predecessor
+                // may have sat out the chunks the chain carried meanwhile. Say it again,
+                // late, or the new code would judge the stream from its middle.
+                if started && !entry.1 {
+                    entry.1 = true;
+                    if let Ok(mut pending) = self.pending.lock() {
+                        let frame = build_open_frame(connection, meta, true);
+                        if pending.len() + frame.len() > MAX_PENDING {
+                            pending.clear();
+                        }
+                        pending.extend_from_slice(&frame);
+                    }
+                }
+                return;
+            }
+            if active.len() >= MAX_ACTIVE_CONNECTIONS {
+                active.clear();
+            }
+            active.insert(connection, (*meta, started));
+            if let Ok(mut pending) = self.pending.lock() {
+                let frame = build_open_frame(connection, meta, started);
+                if pending.len() + frame.len() > MAX_PENDING {
+                    pending.clear();
+                }
+                pending.extend_from_slice(&frame);
+            }
+        }
     }
     fn prepare(&self) -> Result<(), String> {
         self.warm_up()

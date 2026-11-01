@@ -51,49 +51,55 @@ struct stream_ctx {
 	}
 
 	void clean_stream_by_id(stream_id sid){
+		hs_error_t in_err = HS_SUCCESS;
+		hs_error_t out_err = HS_SUCCESS;
+
 		auto stream_search = in_hs_streams.find(sid);
-		hs_stream_t* stream_match;
 		if (stream_search != in_hs_streams.end()){
-			stream_match = stream_search->second;
-			if (hs_close_stream(stream_match, in_scratch, nullptr, nullptr) != HS_SUCCESS) {
-                cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
-                throw invalid_argument("Cannot close stream match on hyperscan");
-            }
+			hs_stream_t* stream_match = stream_search->second;
 			in_hs_streams.erase(stream_search);
+			in_err = hs_close_stream(stream_match, in_scratch, nullptr, nullptr);
 		}
 
 		stream_search = out_hs_streams.find(sid);
 		if (stream_search != out_hs_streams.end()){
-			stream_match = stream_search->second;
-			if (hs_close_stream(stream_match, out_scratch, nullptr, nullptr) != HS_SUCCESS) {
-                cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
-                throw invalid_argument("Cannot close stream match on hyperscan");
-            }
+			hs_stream_t* stream_match = stream_search->second;
 			out_hs_streams.erase(stream_search);
+			out_err = hs_close_stream(stream_match, out_scratch, nullptr, nullptr);
+		}
+
+		if (in_err != HS_SUCCESS || out_err != HS_SUCCESS) {
+			cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
+			throw invalid_argument("Cannot close stream match on hyperscan");
 		}
 	}
 
 	void clean(){
+		hs_error_t err = HS_SUCCESS;
+		matching_map in_streams = std::move(in_hs_streams);
+		in_hs_streams.clear();
 		if (in_scratch){
-			for(auto ele: in_hs_streams){
+			for (auto& ele: in_streams){
 				if (hs_close_stream(ele.second, in_scratch, nullptr, nullptr) != HS_SUCCESS) {
-					cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
-					throw invalid_argument("Cannot close stream match on hyperscan");
+					err = HS_INVALID;
 				}
 			}
-			in_hs_streams.clear();
 		}
-		
+
+		matching_map out_streams = std::move(out_hs_streams);
+		out_hs_streams.clear();
 		if (out_scratch){
-			for(auto ele: out_hs_streams){
+			for (auto& ele: out_streams){
 				if (hs_close_stream(ele.second, out_scratch, nullptr, nullptr) != HS_SUCCESS) {
-					cerr << "[error] [NetfilterQueue.clean_stream_by_id] Error closing the stream matcher (hs)" << endl;
-					throw invalid_argument("Cannot close stream match on hyperscan");
+					err = HS_INVALID;
 				}
 			}
-			out_hs_streams.clear();
 		}
 		clean_scratches();
+		if (err != HS_SUCCESS) {
+			cerr << "[error] [NetfilterQueue.clean] Error closing the stream matcher (hs)" << endl;
+			throw invalid_argument("Cannot close stream match on hyperscan");
+		}
 	}
 };
 

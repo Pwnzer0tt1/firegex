@@ -663,6 +663,7 @@ class FiregexTables(NFTableManager):
 
     def init(self):
         super().init()
+        self._guarded.clear()
         # The `local` default route is what makes marked packets be delivered here
         # instead of routed by destination; without it a preserved-source connection
         # does not fail, it hangs.

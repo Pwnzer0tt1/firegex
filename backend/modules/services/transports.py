@@ -398,6 +398,7 @@ class _QueueStage:
         self._reader_task: asyncio.Task | None = None
         self._output_task: asyncio.Task | None = None
         self._ack: asyncio.Future | None = None
+        self._cmd_lock = asyncio.Lock()
         self._sock_path: str | None = None
         self._sock_server: asyncio.Server | None = None
         self._sock_reader: asyncio.StreamReader | None = None
@@ -669,36 +670,37 @@ class _QueueStage:
         return len(body).to_bytes(4, byteorder="big") + body
 
     async def _push(self, payload: bytes):
-        self._ack = asyncio.get_running_loop().create_future()
-        if self._sock_writer:
-            self._sock_writer.write(payload)
-            await self._sock_writer.drain()
-        elif self.process and self.process.stdin:
-            self.process.stdin.write(payload)
-            await self.process.stdin.drain()
-        else:
-            raise Exception("the nfqueue binary is not running")
-        try:
-            ok, detail = await asyncio.wait_for(self._ack, timeout=LOAD_TIMEOUT)
-        except asyncio.TimeoutError:
-            # Whether it took the new filters or is still at it cannot be known now, and
-            # an answer arriving later would be read as the answer to the next push. So
-            # it is killed *without* being marked stopped: the watchdog reports it and
-            # the service is rebuilt from what the database says — which, after an edit
-            # that was refused, is what it said before. At start the caller stops every
-            # stage anyway.
-            self.owner._abandon(self.process, f"the {self.link.filter.name} interceptor",
-                                "the filters", LOAD_TIMEOUT)
-            raise Exception("the nfqueue binary did not acknowledge the filters")
-        finally:
-            self._ack = None
-        if not ok:
-            # Not fatal, and it must not be made so: both binaries answer `ACK FAIL` with
-            # the filters they had still in force. This used to stop the stage, which
-            # during an edit left a service reported active with nothing reading its
-            # queue — unfiltered where it fails open, silent where it does not — and
-            # stopped on purpose, so the watchdog had nothing to say about it.
-            raise Exception(f"the nfqueue binary rejected the filters: {detail}")
+        async with self._cmd_lock:
+            self._ack = asyncio.get_running_loop().create_future()
+            if self._sock_writer:
+                self._sock_writer.write(payload)
+                await self._sock_writer.drain()
+            elif self.process and self.process.stdin:
+                self.process.stdin.write(payload)
+                await self.process.stdin.drain()
+            else:
+                raise Exception("the nfqueue binary is not running")
+            try:
+                ok, detail = await asyncio.wait_for(self._ack, timeout=LOAD_TIMEOUT)
+            except asyncio.TimeoutError:
+                # Whether it took the new filters or is still at it cannot be known now, and
+                # an answer arriving later would be read as the answer to the next push. So
+                # it is killed *without* being marked stopped: the watchdog reports it and
+                # the service is rebuilt from what the database says — which, after an edit
+                # that was refused, is what it said before. At start the caller stops every
+                # stage anyway.
+                self.owner._abandon(self.process, f"the {self.link.filter.name} interceptor",
+                                    "the filters", LOAD_TIMEOUT)
+                raise Exception("the nfqueue binary did not acknowledge the filters")
+            finally:
+                self._ack = None
+            if not ok:
+                # Not fatal, and it must not be made so: both binaries answer `ACK FAIL` with
+                # the filters they had still in force. This used to stop the stage, which
+                # during an edit left a service reported active with nothing reading its
+                # queue — unfiltered where it fails open, silent where it does not — and
+                # stopped on purpose, so the watchdog had nothing to say about it.
+                raise Exception(f"the nfqueue binary rejected the filters: {detail}")
 
     async def stop(self) -> None:
         # Said before anything is torn down, or the watchdog wakes on the kill below and

@@ -1,9 +1,8 @@
 import { addressSummary } from '../Services/ServiceRow'
 import { Service, Transport } from '../Services/utils'
-import { Tone } from './ui'
+import { PROBLEM_SHOWN_MS, Tone } from './ui'
 
-/** How long a logged warning keeps a place in the strip, matching the badge on the row. */
-export const PROBLEM_SHOWN_MS = 60 * 60 * 1000
+export { PROBLEM_SHOWN_MS }
 
 export type StripProblem = {
     /**

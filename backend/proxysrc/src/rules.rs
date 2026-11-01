@@ -331,10 +331,24 @@ pub fn parse_ruleset_reusing(
                 });
                 out.push(match kept {
                     Some(filter) => filter,
-                    None => Arc::new(
-                        PyWorkerRule::new(id, command, code_path, enabled, deadline)
-                            .reusable_as(key),
-                    ),
+                    None => {
+                        let mut active = std::collections::HashMap::new();
+                        for prev in previous {
+                            if let Some(conns) = prev.active_connections() {
+                                for (conn, (meta, started)) in conns {
+                                    active
+                                        .entry(conn)
+                                        .and_modify(|e: &mut (_, bool)| e.1 |= started)
+                                        .or_insert((meta, started));
+                                }
+                            }
+                        }
+                        Arc::new(
+                            PyWorkerRule::new(id, command, code_path, enabled, deadline)
+                                .reusable_as(key)
+                                .with_active_connections(active),
+                        )
+                    }
                 })
             }
         }

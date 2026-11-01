@@ -239,23 +239,31 @@ pub(crate) async fn head_framing<B: Incoming + Send>(
     }
     // Both crates keep a half-read frame's state in the stream rather than in the future,
     // so letting the deadline drop it loses nothing.
-    match tokio::time::timeout(HEAD_HOLD, body.data()).await {
-        Ok(first) => match first? {
-            Some(chunk) => Ok((Framing::Chunked, Some(chunk), None)),
-            None => {
-                // The body is over. Whatever ended it — the end of the stream or a
-                // trailer section — has already been read into the stream, so this
-                // resolves without waiting for anything.
-                let trailers = body.trailers().await?;
-                let framing = if trailers.is_some() {
-                    Framing::Chunked
-                } else {
-                    Framing::Empty
-                };
-                Ok((framing, None, Some(trailers)))
-            }
-        },
-        Err(_) => Ok((Framing::Chunked, None, None)),
+    let deadline = tokio::time::Instant::now() + HEAD_HOLD;
+    loop {
+        match tokio::time::timeout_at(deadline, body.data()).await {
+            Ok(first) => match first? {
+                // An empty DATA frame carries no body bytes; writing it into a chunked
+                // rendering would emit `0\r\n\r\n` and close the body prematurely.
+                Some(chunk) if chunk.is_empty() => {
+                    body.release(0)?;
+                }
+                Some(chunk) => return Ok((Framing::Chunked, Some(chunk), None)),
+                None => {
+                    // The body is over. Whatever ended it — the end of the stream or a
+                    // trailer section — has already been read into the stream, so this
+                    // resolves without waiting for anything.
+                    let trailers = body.trailers().await?;
+                    let framing = if trailers.is_some() {
+                        Framing::Chunked
+                    } else {
+                        Framing::Empty
+                    };
+                    return Ok((framing, None, Some(trailers)));
+                }
+            },
+            Err(_) => return Ok((Framing::Chunked, None, None)),
+        }
     }
 }
 
@@ -464,6 +472,9 @@ fn render_headers(view: &mut Vec<u8>, headers: &http::HeaderMap, framing: &Frami
 
 /// One body frame, framed the way the head said it would be.
 pub(crate) fn push_body(view: &mut Vec<u8>, chunk: &[u8], framing: &Framing) {
+    if chunk.is_empty() {
+        return;
+    }
     match framing {
         Framing::Chunked => {
             view.extend_from_slice(format!("{:x}\r\n", chunk.len()).as_bytes());
@@ -519,5 +530,16 @@ mod tests {
     fn two_authorities_that_disagree_are_malformed() {
         assert!(conflicting_authority(&request(Some("admin.internal"), &["public.example"])).is_some());
         assert!(conflicting_authority(&request(None, &["a.example", "b.example"])).is_some());
+    }
+
+    #[test]
+    fn empty_data_frame_does_not_terminate_chunked_body() {
+        use super::{close_body, push_body, Framing};
+        let mut view = Vec::new();
+        push_body(&mut view, b"", &Framing::Chunked);
+        assert!(view.is_empty(), "an empty DATA frame must not emit a 0-length terminator chunk");
+        push_body(&mut view, b"hello", &Framing::Chunked);
+        close_body(&mut view, &Framing::Chunked, None);
+        assert_eq!(view, b"5\r\nhello\r\n0\r\n\r\n");
     }
 }

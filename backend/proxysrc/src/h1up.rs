@@ -82,6 +82,7 @@ pub(crate) struct H1Upstream {
     /// the same reason: a service seeing one source address for everyone is a regression
     /// nobody would attribute to us.
     pub(crate) spoof: bool,
+    pub(crate) stats: Arc<crate::proxy::ProxyStats>,
 }
 
 impl H1Upstream {
@@ -103,7 +104,14 @@ impl H1Upstream {
         .await
         {
             Ok(Ok(stream)) => Ok(stream),
+            // A refusal means the packet reached the service and the service said no —
+            // spoofing worked, and falling back to a plain connect would just ask a
+            // closed port a second time and miscount it as a spoof failure.
+            Ok(Err(e)) if e.kind() == io::ErrorKind::ConnectionRefused => Err(e),
             failed => {
+                self.stats
+                    .source_spoof_failures
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let why = match failed {
                     Ok(Err(e)) => e.to_string(),
                     _ => "timed out (is the return path diverted?)".to_string(),

@@ -607,3 +607,145 @@ def second_after_first(packet: RawPacket):
         Verdict::Accept
     );
 }
+
+/// Connection metadata (`client_ip`, `server_ip`, ports, `l4`) survives both a worker
+/// crash/respawn and a filter edit/reload, while still marking the mid-stream takeover
+/// as `joined_late`.
+#[tokio::test]
+async fn connection_metadata_survives_worker_respawn_and_ruleset_reload() {
+    let body = r#"import os
+from firegex.pyfilters import pyfilter, ACCEPT, REJECT
+from firegex.pyfilters.models import RawPacket
+
+@pyfilter
+def check_meta(packet: RawPacket):
+    if b"CRASH" in packet.data:
+        os._exit(1)
+    if packet.client_ip != "10.0.0.9" or packet.client_port != 51000:
+        return REJECT
+    if packet.server_ip != "10.0.0.1" or packet.server_port != 8080:
+        return REJECT
+    return ACCEPT
+"#;
+    let path = filter_file("meta_survives", body);
+    let json = format!(
+        r#"[{{"kind":"python","id":"py1","code_path":"{path}","timeout_ms":2000,
+             "command":["python3","{}"]}}]"#,
+        worker()
+    );
+    let deadline = Duration::from_secs(10);
+    let chain = FilterChain::new(parse_ruleset(&json).unwrap(), deadline);
+
+    let connection = next_connection_id();
+    let meta = ConnectionMeta {
+        client: "10.0.0.9:51000".parse().unwrap(),
+        server: "10.0.0.1:8080".parse().unwrap(),
+        l4: L4::Tcp,
+    };
+    chain.connection_opened(connection, &meta);
+    let mut sessions = ChainSessions::new(connection);
+
+    assert_eq!(
+        chain.run(Direction::ClientToServer, b"first", &mut sessions).await,
+        Verdict::Accept
+    );
+    // Crash the worker mid-connection; the next chunk respawns it and must still see
+    // the connection's endpoints.
+    assert_eq!(
+        chain.run(Direction::ClientToServer, b"CRASH", &mut sessions).await,
+        Verdict::Accept
+    );
+    assert_eq!(
+        chain.run(Direction::ClientToServer, b"after_crash", &mut sessions).await,
+        Verdict::Accept,
+        "respawned worker lost connection metadata"
+    );
+
+    // Edit the filter and reload the ruleset; the replacement worker must also be told
+    // the open connection's endpoints.
+    filter_file("meta_survives", &format!("{body}\n# edited\n"));
+    let reloaded = FilterChain::new(
+        parse_ruleset_reusing(&json, &chain.filters()).unwrap(),
+        deadline,
+    );
+    let mut sessions = ChainSessions::new(connection);
+    assert_eq!(
+        reloaded
+            .run(Direction::ClientToServer, b"after_reload", &mut sessions)
+            .await,
+        Verdict::Accept,
+        "reloaded worker lost connection metadata"
+    );
+}
+
+/// New code for a filter that sat out while a connection carried chunks is told that
+/// connection is under way. Its predecessor never saw a chunk of it (it had lost its say),
+/// so only the chain knew — and a worker told "fresh" would judge the stream from its
+/// middle.
+#[tokio::test]
+async fn new_code_learns_a_connection_its_benched_predecessor_never_saw_is_under_way() {
+    use fgex_proxy::filter::ChainHandle;
+    let slow = r#"import time
+from firegex.pyfilters import pyfilter, ACCEPT
+from firegex.pyfilters.models import RawPacket
+
+@pyfilter
+def stall(packet: RawPacket):
+    if b"SLOW" in packet.data:
+        time.sleep(5)
+    return ACCEPT
+"#;
+    let late = r#"from firegex.pyfilters import pyfilter, ACCEPT, REJECT
+from firegex.pyfilters.models import RawPacket
+
+@pyfilter
+def stall(packet: RawPacket):
+    return REJECT if globals().get("__firegex_joined_late") else ACCEPT
+"#;
+    let path = filter_file("benched_predecessor", slow);
+    let json = format!(
+        r#"[{{"kind":"python","id":"py1","code_path":"{path}","timeout_ms":300,
+             "command":["python3","{}"]}}]"#,
+        worker()
+    );
+    let meta = ConnectionMeta {
+        client: "10.0.0.9:51000".parse().unwrap(),
+        server: "10.0.0.1:8080".parse().unwrap(),
+        l4: L4::Tcp,
+    };
+    let handle = ChainHandle::new(FilterChain::with_policy(
+        parse_ruleset(&json).unwrap(),
+        Duration::from_millis(300),
+        1,
+    ));
+
+    // One connection takes the filter out of the chain...
+    let first = next_connection_id();
+    handle.current().connection_opened(first, &meta);
+    let mut s1 = ChainSessions::new(first);
+    handle.current().run(Direction::ClientToServer, b"SLOW", &mut s1).await;
+    assert!(handle.current().is_bypassed());
+
+    // ...and another carries a chunk past it, which the worker never sees.
+    let second = next_connection_id();
+    handle.current().connection_opened(second, &meta);
+    let mut s2 = ChainSessions::new(second);
+    assert_eq!(
+        handle.current().run(Direction::ClientToServer, b"GET / HTTP", &mut s2).await,
+        Verdict::Accept
+    );
+
+    // The operator saves new code. The second connection is mid-stream to it.
+    let path = filter_file("benched_predecessor", late);
+    let json = json.replace("\"timeout_ms\":300", "\"timeout_ms\":10000");
+    assert!(json.contains(&path));
+    let previous = handle.current().filters();
+    handle.replace(FilterChain::new(
+        parse_ruleset_reusing(&json, &previous).unwrap(),
+        Duration::from_secs(10),
+    ));
+    assert!(matches!(
+        handle.current().run(Direction::ClientToServer, b"/1.1\r\n", &mut s2).await,
+        Verdict::Reject(_)
+    ));
+}

@@ -62,6 +62,13 @@ const MAX_HELLO: usize = 16 * 1024;
 /// every packet sort all of them again, inside the endpoint's receive path.
 const MAX_FRAGMENTS: usize = 64;
 
+/// What a QUIC ClientHello offered before the handshake was answered.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClientHello {
+    pub alpn: Vec<Vec<u8>>,
+    pub sni: Option<String>,
+}
+
 /// One client's hello as it arrives.
 struct Pending {
     /// The connection ID its Initials were protected with. A new one means a new attempt —
@@ -69,7 +76,7 @@ struct Pending {
     dcid: Vec<u8>,
     fragments: Vec<(u64, Vec<u8>)>,
     held: usize,
-    alpn: Option<Vec<Vec<u8>>>,
+    hello: Option<ClientHello>,
     since: Instant,
 }
 
@@ -113,7 +120,7 @@ impl Table {
             dcid,
             fragments: Vec::new(),
             held: 0,
-            alpn: None,
+            hello: None,
             since: now,
         });
         self.by_client.get_mut(&from).expect("just inserted")
@@ -157,11 +164,18 @@ impl Hellos {
     /// Look at one datagram received from `from`. Cheap for anything but an Initial.
     pub fn observe(&self, from: SocketAddr, datagram: &[u8]) {
         let mut rest = datagram;
-        // An Initial can have other packets coalesced behind it in one datagram; only
-        // the Initials matter, and they come first.
-        while let Some(packet) = decrypt_initial(&self.suite, rest) {
-            rest = &rest[packet.length..];
-            self.absorb(from, packet);
+        // Several long-header packets can be coalesced in one UDP datagram; if a
+        // non-Initial or undecryptable long-header packet precedes an Initial, skip
+        // past its declared length rather than abandoning the rest of the datagram.
+        while !rest.is_empty() {
+            if let Some(packet) = decrypt_initial(&self.suite, rest) {
+                rest = &rest[packet.length..];
+                self.absorb(from, packet);
+            } else if let Some(len) = long_header_len(rest) {
+                rest = &rest[len..];
+            } else {
+                break;
+            }
         }
     }
 
@@ -185,7 +199,7 @@ impl Hellos {
         } else {
             table.by_client.get_mut(&from).expect("looked up above")
         };
-        if entry.alpn.is_some() {
+        if entry.hello.is_some() {
             return;
         }
         let mut grew = false;
@@ -209,37 +223,48 @@ impl Hellos {
         if !grew {
             return;
         }
-        if let Some(alpn) = client_hello_alpn(&entry.fragments) {
-            entry.alpn = Some(alpn);
+        if let Some(hello) = client_hello(&entry.fragments) {
+            entry.hello = Some(hello);
             entry.fragments.clear();
             self.arrived.notify_waiters();
         }
     }
 
-    fn take(&self, from: SocketAddr) -> Option<Vec<Vec<u8>>> {
+    fn take_hello(&self, from: SocketAddr) -> Option<ClientHello> {
         let mut table = self.pending.lock().ok()?;
-        if table.by_client.get(&from)?.alpn.is_some() {
-            return table.by_client.remove(&from).and_then(|p| p.alpn);
+        if table.by_client.get(&from)?.hello.is_some() {
+            return table.by_client.remove(&from).and_then(|p| p.hello);
         }
         None
     }
 
-    /// The protocols the client at `from` offered, waiting up to `wait` for the rest of a
-    /// hello split across datagrams. `None` when it could not be read.
-    pub async fn offered(&self, from: SocketAddr, wait: Duration) -> Option<Vec<Vec<u8>>> {
+    #[cfg(test)]
+    fn take(&self, from: SocketAddr) -> Option<Vec<Vec<u8>>> {
+        self.take_hello(from).map(|h| h.alpn)
+    }
+
+    /// The protocols and SNI the client at `from` offered, waiting up to `wait` for the
+    /// rest of a hello split across datagrams. `None` when it could not be read.
+    pub async fn offered_hello(&self, from: SocketAddr, wait: Duration) -> Option<ClientHello> {
         let deadline = tokio::time::Instant::now() + wait;
         loop {
             // Registered before looking, so a hello completed in between is not missed.
             let notified = self.arrived.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
-            if let Some(alpn) = self.take(from) {
-                return Some(alpn);
+            if let Some(hello) = self.take_hello(from) {
+                return Some(hello);
             }
             if tokio::time::timeout_at(deadline, notified).await.is_err() {
-                return self.take(from);
+                return self.take_hello(from);
             }
         }
+    }
+
+    /// The protocols the client at `from` offered, waiting up to `wait` for the rest of a
+    /// hello split across datagrams. `None` when it could not be read.
+    pub async fn offered(&self, from: SocketAddr, wait: Duration) -> Option<Vec<Vec<u8>>> {
+        self.offered_hello(from, wait).await.map(|h| h.alpn)
     }
 }
 
@@ -326,6 +351,41 @@ fn varint(buf: &[u8], pos: &mut usize) -> Option<u64> {
     }
     *pos += len;
     Some(value)
+}
+
+/// Total byte length of one long-header packet (Initial, 0-RTT or Handshake) at the
+/// start of `packet`, so a non-Initial or undecryptable packet coalesced ahead of an
+/// Initial can be skipped over.
+fn long_header_len(packet: &[u8]) -> Option<usize> {
+    let first = *packet.first()?;
+    if first & 0x80 == 0 {
+        return None;
+    }
+    let version = u32::from_be_bytes(packet.get(1..5)?.try_into().ok()?);
+    let (initial_type, retry_type) = match version {
+        0x0000_0001 | 0xff00_001d..=0xff00_0020 => (0, 3),
+        0x6b33_43cf => (1, 0),
+        _ => return None,
+    };
+    let pkt_type = (first >> 4) & 0x03;
+    if pkt_type == retry_type {
+        return None;
+    }
+    let mut pos = 5;
+    let dcid_len = usize::from(*packet.get(pos)?);
+    pos = pos.checked_add(1 + dcid_len)?;
+    let scid_len = usize::from(*packet.get(pos)?);
+    pos = pos.checked_add(1 + scid_len)?;
+    if pkt_type == initial_type {
+        let token_len = usize::try_from(varint(packet, &mut pos)?).ok()?;
+        pos = pos.checked_add(token_len)?;
+    }
+    let length = usize::try_from(varint(packet, &mut pos)?).ok()?;
+    let end = pos.checked_add(length)?;
+    if end == 0 || end > packet.len() {
+        return None;
+    }
+    Some(end)
 }
 
 /// Decrypt the Initial packet at the start of `packet`, if that is what it is.
@@ -427,11 +487,11 @@ fn crypto_frames(payload: &[u8]) -> Option<Vec<(u64, Vec<u8>)>> {
     Some(frames)
 }
 
-/// The ALPN list of a ClientHello, once enough of it has arrived to have one.
+/// The ALPN list and SNI of a ClientHello, once enough of it has arrived to have them.
 ///
-/// `Some(vec![])` for a complete hello that offers none — which QUIC does not allow, and
+/// `alpn` is empty for a complete hello that offers none — which QUIC does not allow, and
 /// which the handshake is left to refuse.
-fn client_hello_alpn(fragments: &[(u64, Vec<u8>)]) -> Option<Vec<Vec<u8>>> {
+fn client_hello(fragments: &[(u64, Vec<u8>)]) -> Option<ClientHello> {
     // What has arrived contiguously from the start, in whatever order it came.
     let mut sorted: Vec<&(u64, Vec<u8>)> = fragments.iter().collect();
     sorted.sort_by_key(|(offset, _)| *offset);
@@ -451,10 +511,13 @@ fn client_hello_alpn(fragments: &[(u64, Vec<u8>)]) -> Option<Vec<Vec<u8>>> {
     }
     let len = (usize::from(hello[1]) << 16) | (usize::from(hello[2]) << 8) | usize::from(hello[3]);
     let body = hello.get(4..4 + len)?;
-    Some(alpn_of(body).unwrap_or_default())
+    Some(parse_extensions(body).unwrap_or(ClientHello {
+        alpn: Vec::new(),
+        sni: None,
+    }))
 }
 
-fn alpn_of(body: &[u8]) -> Option<Vec<Vec<u8>>> {
+fn parse_extensions(body: &[u8]) -> Option<ClientHello> {
     let u16_at = |pos: usize| -> Option<usize> {
         Some(usize::from(u16::from_be_bytes(body.get(pos..pos + 2)?.try_into().ok()?)))
     };
@@ -464,25 +527,55 @@ fn alpn_of(body: &[u8]) -> Option<Vec<Vec<u8>>> {
     pos += 2 + u16_at(pos)?;
     pos += 1 + usize::from(*body.get(pos)?);
     let end = pos.checked_add(2 + u16_at(pos)?)?;
+    if end > body.len() {
+        return None;
+    }
     pos += 2;
+    let mut alpn = Vec::new();
+    let mut sni = None;
     while pos + 4 <= end {
         let kind = u16_at(pos)?;
         let len = u16_at(pos + 2)?;
         let data = body.get(pos + 4..pos + 4 + len)?;
         pos += 4 + len;
-        if kind != 16 {
-            continue;
+        match kind {
+            0 => {
+                if data.len() >= 2 {
+                    let list_len = usize::from(u16::from_be_bytes([data[0], data[1]]));
+                    if let Some(mut list) = data.get(2..2 + list_len) {
+                        while list.len() >= 3 {
+                            let name_type = list[0];
+                            let name_len = usize::from(u16::from_be_bytes([list[1], list[2]]));
+                            let Some(name_bytes) = list.get(3..3 + name_len) else {
+                                break;
+                            };
+                            if name_type == 0 {
+                                if let Ok(host) = std::str::from_utf8(name_bytes) {
+                                    if !host.is_empty() {
+                                        sni = Some(host.to_string());
+                                        break;
+                                    }
+                                }
+                            }
+                            list = &list[3 + name_len..];
+                        }
+                    }
+                }
+            }
+            16 => {
+                let mut names = Vec::new();
+                let mut at = 2;
+                while at < data.len() {
+                    let name_len = usize::from(data[at]);
+                    names.push(data.get(at + 1..at + 1 + name_len)?.to_vec());
+                    at += 1 + name_len;
+                }
+                alpn = names;
+            }
+            _ => {}
         }
-        let mut names = Vec::new();
-        let mut at = 2;
-        while at < data.len() {
-            let name_len = usize::from(data[at]);
-            names.push(data.get(at + 1..at + 1 + name_len)?.to_vec());
-            at += 1 + name_len;
-        }
-        return Some(names);
     }
-    Some(Vec::new())
+    Some(ClientHello { alpn, sni })
 }
 
 #[cfg(test)]
@@ -674,5 +767,71 @@ mod tests {
         });
         assert_eq!(hellos.offered(from(), Duration::from_secs(2)).await, Some(vec![b"h3".to_vec()]));
         assert_eq!(hellos.offered(from(), Duration::from_millis(50)).await, None);
+    }
+
+    #[test]
+    fn sni_is_extracted_alongside_alpn() {
+        let hellos = Hellos::new();
+        let host = b"quic.example.test";
+        let mut sni_ext = vec![0x00, 0x00];
+        let entry_len = 3 + host.len();
+        sni_ext.extend_from_slice(&((entry_len + 2) as u16).to_be_bytes());
+        sni_ext.extend_from_slice(&(entry_len as u16).to_be_bytes());
+        sni_ext.push(0x00); // host_name
+        sni_ext.extend_from_slice(&(host.len() as u16).to_be_bytes());
+        sni_ext.extend_from_slice(host);
+
+        let mut alpn_ext = vec![0x00, 0x10, 0x00, 0x05, 0x00, 0x03, 0x02];
+        alpn_ext.extend_from_slice(b"h3");
+
+        let mut ext = Vec::new();
+        ext.extend_from_slice(&sni_ext);
+        ext.extend_from_slice(&alpn_ext);
+
+        let mut body = vec![0x03, 0x03];
+        body.extend_from_slice(&[0u8; 32]);
+        body.push(0);
+        body.extend_from_slice(&[0x00, 0x02, 0x13, 0x01]);
+        body.extend_from_slice(&[0x01, 0x00]);
+        body.extend_from_slice(&(ext.len() as u16).to_be_bytes());
+        body.extend_from_slice(&ext);
+
+        let mut hello = vec![0x01];
+        hello.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+        hello.extend_from_slice(&body);
+
+        hellos.observe(
+            from(),
+            &client_initial(b"\x71\x72\x73\x74\x75\x76\x77\x78", 0, &[(0, &hello)]),
+        );
+        assert_eq!(
+            hellos.take_hello(from()),
+            Some(ClientHello {
+                alpn: vec![b"h3".to_vec()],
+                sni: Some("quic.example.test".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn an_initial_coalesced_behind_another_long_header_packet_is_read() {
+        let hellos = Hellos::new();
+        let hello = hello_with(&[b"h3"]);
+        // A 0-RTT long-header packet (type 1 in V1: 0xd0) ahead of the Initial.
+        let mut datagram = vec![
+            0xd0, // long header, type = 0-RTT (1)
+            0x00, 0x00, 0x00, 0x01, // Version 1
+            0x04, 1, 2, 3, 4, // DCID (4 bytes)
+            0x00, // SCID (0 bytes)
+            0x04, // Length = 4 bytes
+            0xaa, 0xbb, 0xcc, 0xdd, // 4 bytes of payload
+        ];
+        datagram.extend_from_slice(&client_initial(
+            b"\x81\x82\x83\x84\x85\x86\x87\x88",
+            0,
+            &[(0, &hello)],
+        ));
+        hellos.observe(from(), &datagram);
+        assert_eq!(hellos.take(from()), Some(vec![b"h3".to_vec()]));
     }
 }

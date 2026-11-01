@@ -174,7 +174,7 @@ export default function StatsPanel({ serviceId }: { serviceId: string }) {
     // comparable by eye: five minutes is five minutes in both.
     const [step, setStep] = useState<number | null>(null)
 
-    const stats = serviceStatsQuery(serviceId, custom && !seconds
+    const stats = serviceStatsQuery(serviceId, custom !== null
         ? { from: custom.from, to: custom.to, step }
         : { seconds: seconds ?? 3600, step })
     const data = stats.data
@@ -237,20 +237,26 @@ export default function StatsPanel({ serviceId }: { serviceId: string }) {
                     <Popover.Dropdown>
                         <Stack gap="xs">
                             <TextInput size="xs" type="datetime-local" label="From"
-                                defaultValue={toLocalInput(data?.range_from ?? 0)}
+                                value={toLocalInput(custom?.from ?? data?.range_from ?? 0)}
                                 onChange={e => {
                                     const from = Math.floor(new Date(e.currentTarget.value).getTime() / 1000)
-                                    if (!isNaN(from)) setCustom(c => ({
-                                        from, to: c?.to ?? Math.floor(Date.now() / 1000),
-                                    }))
+                                    if (!isNaN(from)) {
+                                        setSeconds(null)
+                                        setCustom(c => ({
+                                            from, to: c?.to ?? data?.range_to ?? Math.floor(Date.now() / 1000),
+                                        }))
+                                    }
                                 }} />
                             <TextInput size="xs" type="datetime-local" label="To"
-                                defaultValue={toLocalInput(data?.range_to ?? 0)}
+                                value={toLocalInput(custom?.to ?? data?.range_to ?? 0)}
                                 onChange={e => {
                                     const to = Math.floor(new Date(e.currentTarget.value).getTime() / 1000)
-                                    if (!isNaN(to)) setCustom(c => ({
-                                        from: c?.from ?? Math.floor(Date.now() / 1000) - 3600, to,
-                                    }))
+                                    if (!isNaN(to)) {
+                                        setSeconds(null)
+                                        setCustom(c => ({
+                                            from: c?.from ?? data?.range_from ?? Math.floor(Date.now() / 1000) - 3600, to,
+                                        }))
+                                    }
                                 }} />
                             <Group justify="space-between">
                                 <Text size="xs" c="dimmed">

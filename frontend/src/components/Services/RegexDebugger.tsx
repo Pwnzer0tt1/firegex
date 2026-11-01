@@ -147,6 +147,8 @@ export default function RegexDebugger({ opened, onClose, initial }: {
         <Stack gap="xs">
             {drafts.map(draft => {
                 const error = errorFor(draft.key)
+                const unscannable = unscannableFor(draft.key)
+                const count = countFor(draft.key)
                 return <Box key={draft.key} p="sm" bg="dark.8" style={{ borderRadius: 8 }}>
                     <Group align="flex-start" wrap="nowrap">
                         <ActionIcon color="red" variant="subtle" mt={4} onClick={() => setDrafts(d => d.filter(item => item.key !== draft.key))}>
@@ -156,9 +158,17 @@ export default function RegexDebugger({ opened, onClose, initial }: {
                             <TextInput placeholder="Pattern" value={draft.expr}
                                 onChange={(e) => update(draft.key, { expr: e.target.value })}
                                 error={error} styles={{ input: { fontFamily: 'monospace' } }} />
-                            <Group>
+                            {unscannable ? <Text size="xs" c="yellow">
+                                Valid pattern, but its match positions cannot be highlighted here ({unscannable.error}).
+                            </Text> : null}
+                            <Group justify="space-between">
                                 <Switch label="Case sensitive" size="xs" checked={draft.caseSensitive}
                                     onChange={(e) => update(draft.key, { caseSensitive: e.currentTarget.checked })} />
+                                {sample !== "" && draft.expr !== "" && !error && !unscannable ? (
+                                    <Text size="xs" c={count > 0 ? "yellow" : "dimmed"}>
+                                        {count} {count === 1 ? "match" : "matches"}
+                                    </Text>
+                                ) : null}
                             </Group>
                         </Stack>
                     </Group>
@@ -196,7 +206,7 @@ export default function RegexDebugger({ opened, onClose, initial }: {
             </Code>
         </ScrollArea.Autosize>
 
-    const update        {result?.truncated ?
+        {result?.truncated ?
             <Alert color="yellow" mt="md" title="Too many matches to show">
                 Only the first thousand are listed. A pattern that matches this often will
                 block on the first connection carrying any of it.

@@ -6,7 +6,7 @@ import { IoSettingsSharp } from 'react-icons/io5';
 import { MdMoreHoriz } from 'react-icons/md';
 import { TbAlertTriangle } from 'react-icons/tb';
 import { bareAddress, errorNotify, okNotify } from '../../js/utils';
-import { LEVEL_COLOR, Pill, serviceStateLabel, serviceTone, Sparkline } from '../Shell/ui';
+import { LEVEL_COLOR, Pill, PROBLEM_SHOWN_MS, serviceStateLabel, serviceTone, Sparkline } from '../Shell/ui';
 import YesNoModal from '../YesNoModal';
 import AddEditService from './AddEditService';
 import { Address, L4, protoLabel, Service, serviceQueryKey, services, Transport } from './utils';
@@ -33,9 +33,6 @@ export const transportSummary = (transport: string, proto: string) => {
     if (proto === L4.UDP) return "Relayed per address; state per flow"
     return "Connection terminated and reopened"
 }
-
-/** How long a warning stays on the row after it happened, unless the log is cleared first. */
-const PROBLEM_SHOWN_MS = 60 * 60 * 1000
 
 /**
  * The newest warning or error in the service's log, on the row, for an hour.

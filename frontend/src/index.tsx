@@ -48,16 +48,22 @@ export const customShikiAdapter: CodeHighlightAdapter = {
       return ({ code }) => ({ highlightedCode: code, isHighlighted: false });
     }
 
-    return ({ code, language, colorScheme }) => ({
-      isHighlighted: true,
-      // stripShikiCodeBlocks removes <pre> and <code> tags from highlighted code
-      highlightedCode: stripShikiCodeBlocks(
-        ctx.codeToHtml(code, {
-          lang: language,
-          theme: colorScheme === 'dark' ? 'one-dark-pro' : 'one-light',
-        })
-      ),
-    });
+    return ({ code, language, colorScheme }) => {
+      const loaded = typeof ctx.getLoadedLanguages === 'function' ? ctx.getLoadedLanguages() : [];
+      if (!language || !loaded.includes(language)) {
+        return { highlightedCode: code, isHighlighted: false };
+      }
+      return {
+        isHighlighted: true,
+        // stripShikiCodeBlocks removes <pre> and <code> tags from highlighted code
+        highlightedCode: stripShikiCodeBlocks(
+          ctx.codeToHtml(code, {
+            lang: language,
+            theme: colorScheme === 'dark' ? 'one-dark-pro' : 'one-light',
+          })
+        ),
+      };
+    };
   },
 };
 

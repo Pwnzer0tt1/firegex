@@ -240,6 +240,8 @@ export default function AddEditService({ opened, onClose, edit }: {
             form.setFieldValue('transport', Transport.PROXY)
     }, [isEncrypted])
     useEffect(() => {
+        if (form.values.transport !== Transport.NFQUEUE && !form.values.fail_open)
+            form.setFieldValue('fail_open', true)
         if (form.values.transport === Transport.PROXY) return
         // Neither survives leaving the layer that honours it. A stored limit that does
         // nothing is the same trap as a stored protocol nothing can decrypt.

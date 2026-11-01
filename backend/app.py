@@ -430,7 +430,10 @@ async def export_db():
     for f in os.listdir('db'):
         if f.endswith('.db'):
             temp_db = SQLite(os.path.join('db', f))
-            dbs[f] = temp_db.dump()
+            try:
+                dbs[f] = temp_db.dump()
+            finally:
+                temp_db.disconnect()
             
     # Export the user's own filter code
     if os.path.exists('db/service_filters'):
@@ -491,14 +494,34 @@ async def import_db(data: dict):
     # instance's password and secret back, leaving it asking the next visitor to choose a
     # password. Load into the existing schema: SQLite.load only writes to tables and
     # columns that actually exist, so unknown fields in the backup are ignored.
+    from routers.services import db as services_db
+    from routers.firewall import db as firewall_db
+    known_schemas = {
+        "firegex.db": db.schema,
+        "services.db": services_db.schema,
+        "firewall-rules.db": firewall_db.schema,
+        "firewall.db": firewall_db.schema,
+    }
     try:
         for dry_run in (True, False):
             for db_path, db_data in db_imports:
-                temp_db = SQLite(str(db_path))
+                existed = os.path.exists(db_path)
+                schema = known_schemas.get(os.path.basename(db_path))
+                temp_db = SQLite(str(db_path), schema=schema)
                 try:
+                    temp_db.connect()
+                    if schema is not None and not temp_db.query(
+                        "SELECT name FROM sqlite_master WHERE type='table' AND name='keys_values';"
+                    ):
+                        temp_db.create_schema(schema)
                     temp_db.load(db_data, dry_run=dry_run)
+                    if not dry_run and schema is not None:
+                        temp_db.put('DB_VERSION', temp_db.DB_VER)
                 except Exception as e:
                     if dry_run:
+                        temp_db.disconnect()
+                        if not existed and os.path.exists(db_path):
+                            os.remove(db_path)
                         raise HTTPException(
                             status_code=400,
                             detail=f"Invalid backup: '{os.path.basename(db_path)}' cannot be "

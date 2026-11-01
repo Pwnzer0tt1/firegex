@@ -794,6 +794,7 @@ async fn handle_connection(
                         connect_timeout: cfg.connect_timeout,
                         self_mark: cfg.self_mark,
                         spoof: cfg.spoof_source,
+                        stats: Arc::clone(&stats),
                     },
                     carriage,
                 )

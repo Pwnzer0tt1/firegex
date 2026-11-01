@@ -10,14 +10,31 @@ from utils.models import ResetRequest
 import asyncio
 import traceback
 
-REACT_BUILD_DIR: str = "../frontend/build/" if not ON_DOCKER else "frontend/"
+REACT_BUILD_DIR: str = (
+    ("../frontend/dist/" if os.path.isdir("../frontend/dist/") else "../frontend/build/")
+    if not ON_DOCKER
+    else "frontend/"
+)
 REACT_HTML_PATH: str = os.path.join(REACT_BUILD_DIR,"index.html")
 
 async def frontend_debug_proxy(path):
     httpc = httpx.AsyncClient()
-    req = httpc.build_request("GET",f"http://127.0.0.1:{os.getenv('F_PORT','5173')}/"+path)
-    resp = await httpc.send(req, stream=True)
-    return StreamingResponse(resp.aiter_bytes(),status_code=resp.status_code, headers=resp.headers)
+    try:
+        req = httpc.build_request("GET",f"http://127.0.0.1:{os.getenv('F_PORT','5173')}/"+path)
+        resp = await httpc.send(req, stream=True)
+    except Exception:
+        await httpc.aclose()
+        raise
+
+    async def _stream():
+        try:
+            async for chunk in resp.aiter_bytes():
+                yield chunk
+        finally:
+            await resp.aclose()
+            await httpc.aclose()
+
+    return StreamingResponse(_stream(), status_code=resp.status_code, headers=resp.headers)
 
 async def react_deploy(path):
     file_request = safe_join(REACT_BUILD_DIR, path)

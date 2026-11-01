@@ -15,6 +15,7 @@ rather than asking it to change its mind.
 
 import importlib.util
 import os
+import sys
 import socket
 import tempfile
 
@@ -211,7 +212,12 @@ def test_run_py_keeps_an_explicit_password_when_authentication_is_disabled():
     spec = importlib.util.spec_from_file_location(
         "firegex_run", os.path.join(REPO_ROOT, "run.py"))
     run_module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(run_module)
+    # run.py parses sys.argv as it is imported, and this process's argv is pytest's.
+    saved, sys.argv = sys.argv, ["run.py", "status"]
+    try:
+        spec.loader.exec_module(run_module)
+    finally:
+        sys.argv = saved
 
     globs = run_module.get_password.__globals__
     globs["volume_exists"] = lambda: False  # pretend this is a first start
