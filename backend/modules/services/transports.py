@@ -1021,6 +1021,18 @@ class ProxyTransport(Transport):
         """
         if not self.srv.decrypts:
             return {}
+        if not self.srv.has_certificate:
+            if self.srv.needs_certificate:
+                # The router refuses every edit that lands here; this is what a backup or
+                # a database edited by hand meets instead of an engine dying on start.
+                raise UnsupportedChain(
+                    "this service decrypts HTTPS, HTTP/3, TLS or QUIC on at least one "
+                    "address and has no certificate. Give it one in its settings."
+                )
+            # A web service answering only in the clear: nothing to decrypt, so the engine
+            # is started as a plain TCP proxy. HTTP/1.1 and HTTP/2 are still rendered for
+            # the filters; a client opening TLS on such a port is carried, not opened.
+            return {}
         os.makedirs(TLS_DIR, exist_ok=True)
         cert_path = os.path.join(TLS_DIR, f"{self.srv.id}.crt")
         key_path = os.path.join(TLS_DIR, f"{self.srv.id}.key")

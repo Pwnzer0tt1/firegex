@@ -104,7 +104,7 @@ const LAYERS: Record<string, Layer> = {
 }
 
 const LABELS: Record<string, string> = {
-    [Transport.PROXY]: "Proxy",
+    [Transport.PROXY]: "Proxy (default)",
     [Transport.NFQUEUE]: "NFQUEUE",
     [Transport.EXTERNAL]: "Your own proxy",
 }
@@ -149,10 +149,7 @@ export default function LayerChoice({ value, onChange, proto }: {
     return <>
         <Group justify="space-between" align="center" mb={6}>
             <Box>
-                <Text size="sm" fw={500}>Network layer</Text>
-                <Text size="xs" c="dimmed">
-                    How the traffic is intercepted. What is done with it is up to the filters.
-                </Text>
+                <Text size="sm" fw={500}>Interception</Text>
             </Box>
             {/* Above the control, not beside it: the layer buttons stay clickable while
                 it is open, so the comparison can be read by switching between them. */}
@@ -188,9 +185,11 @@ export default function LayerChoice({ value, onChange, proto }: {
                 </Popover.Dropdown>
             </Popover>
         </Group>
-        {/* Disabled rather than hidden, unlike the protocol picker above: hiding two of
-            three would leave a control with one option, which is not a control. A
-            greyed-out button that says why is a button you can learn from. */}
+        {/* Inside the form's advanced settings, not in the open: the proxy is the
+            default and the answer for nearly every service, so NFQUEUE and the hand-off
+            are offered here, beside the settings that depend on them, rather than asked
+            of everyone. Only shown for a service in the clear; an encrypted one has one
+            layer and the form says so in a line. */}
         <SegmentedControl fullWidth value={value} onChange={onChange}
             data={Object.entries(LABELS).map(([transport, label]) => ({
                 label,

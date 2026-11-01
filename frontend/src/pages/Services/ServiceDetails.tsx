@@ -134,7 +134,7 @@ export default function ServiceDetails() {
         <Space h="lg" />
         <Card withBorder radius="md" p="md" bg="transparent"
             style={{ borderColor: 'var(--fourth_color)' }}>
-            <AddressList service={service} />
+            <AddressList service={service} onEdit={() => setEditOpen(true)} />
         </Card>
 
         <Space h="lg" />

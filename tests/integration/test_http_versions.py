@@ -424,3 +424,64 @@ def test_an_https_edge_on_an_interface_is_reached_as_one(
         "the HTTPS edge declared on an interface never reached the service"
     assert b"you asked for" not in _https11(tls_port, HTTP11_BLOCKED), \
         "the chain did not run on the HTTPS edge"
+
+
+def test_a_web_service_needs_a_certificate_only_once_something_is_encrypted(
+        api, service, http_stand_in, certificate):
+    """A web service on plain HTTP decrypts nothing, so it is created and run without a
+    certificate — it used to be refused one. The first HTTPS or HTTP/3 address is what
+    makes one necessary, and every way of getting one is refused until it is there:
+    created with one, added, or an existing address moved onto HTTPS. Once the
+    certificate is given, the same service decrypts, and one chain still covers both."""
+    cert, key = certificate("127.0.0.1")
+    server = http_stand_in()
+    tls_port = free_port()
+
+    assert "certificate" in (api.services_add_error(
+        name=f"webcert-refused-{server.port}", transport="proxy", proto="http",
+        addresses=[{"ip_int": "127.0.0.1", "port": tls_port, "edge": "tls",
+                    "target_port": server.port, "upstream": "tcp"}],
+    ) or ""), "an HTTPS address was created on a web service with no certificate"
+
+    service_id = service(f"webcert-{server.port}", "127.0.0.1", server.port, "proxy",
+                         proto="http",
+                         addresses=[{"ip_int": "127.0.0.1", "port": server.port,
+                                     "edge": "tcp"}])
+    add_regex_filter(api, service_id, BLOCKED_PATH)
+    start_and_settle(api, service_id)
+    assert b"you asked for" in _http11(server.port, HTTP11_ALLOWED), \
+        "a web service in the clear without a certificate does not answer"
+    assert b"you asked for" not in _http11(server.port, HTTP11_BLOCKED), \
+        "a web service in the clear without a certificate does not filter"
+
+    why = api.services_add_address_error(service_id, "127.0.0.1", tls_port, edge="tls",
+                                         target_port=server.port, upstream="tcp")
+    assert why and "certificate" in why, "an HTTPS address was added with no certificate"
+    [plain] = api.services_addresses(service_id)
+    why = api.services_edit_address_error(service_id, plain["address_id"], "127.0.0.1",
+                                          server.port, edge="quic")
+    assert why and "certificate" in why, "an address was moved onto HTTP/3 with no certificate"
+
+    assert api.services_edit(service_id, tls_cert=cert, tls_key=key)
+    assert api.services_add_address(service_id, "127.0.0.1", tls_port, edge="tls",
+                                    target_port=server.port, upstream="tcp")
+    # Giving the certificate restarted the running service (it now decrypts); the
+    # address was then added to the engine that came up.
+    import time
+    time.sleep(2)
+    assert b"you asked for" in _https11(tls_port, HTTP11_ALLOWED), \
+        "the HTTPS address added after the certificate does not answer"
+    assert b"you asked for" not in _https11(tls_port, HTTP11_BLOCKED), \
+        "the chain does not run on the HTTPS address added after the certificate"
+    assert b"you asked for" in _http11(server.port, HTTP11_ALLOWED), \
+        "the plain address stopped answering once the service had a certificate"
+
+
+def test_changing_protocol_asks_for_a_certificate_only_when_it_lands_on_encryption(
+        api, service):
+    port = free_port()
+    service_id = service(f"protocert-{port}", "127.0.0.1", port, "proxy", proto="tcp")
+    assert api.services_edit_error(service_id, proto="http") is None, \
+        "a TCP service could not become a web service on plain HTTP without a certificate"
+    why = api.services_edit_error(service_id, proto="tls")
+    assert why and "certificate" in why, "a service became TLS with no certificate"

@@ -968,7 +968,7 @@ def _address_edge(proto: str, form: AddressForm) -> str:
             raise HTTPException(
                 status_code=400,
                 detail=f"A {str(proto).upper()} service speaks {str(proto).upper()} at "
-                       f"every address, so this one cannot be {asked!r}. Only an HTTPS "
+                       f"every address, so this one cannot be {asked!r}. Only an HTTP(S) "
                        f"service is reached in more than one way at once.",
             )
         return str(proto)
@@ -977,8 +977,8 @@ def _address_edge(proto: str, form: AddressForm) -> str:
     if asked not in (L4.TCP, L4.TLS, L4.QUIC):
         raise HTTPException(
             status_code=400,
-            detail=f"An address of an HTTPS service is reached in the clear, under TLS "
-                   f"or over QUIC — not {asked!r}.",
+            detail=f"An address of an HTTP(S) service is reached over HTTP, HTTPS or "
+                   f"HTTP/3 — not {asked!r}.",
         )
     return asked
 
@@ -1131,6 +1131,41 @@ def _check_tls_material(cert: str | None, key: str | None) -> None:
             )
 
 
+
+def needs_certificate(proto: str, edges) -> bool:
+    """Whether a service speaking `proto`, reached at addresses spoken as `edges`, has
+    anything to decrypt. The same rule as `Service.needs_certificate`, asked of addresses
+    that are not written yet."""
+    if str(proto) in (L4.TLS, L4.QUIC):
+        return True
+    return str(proto) == L4.HTTP and any(str(e) in (L4.TLS, L4.QUIC) for e in edges)
+
+
+def _has_material(cert: str | None, key: str | None) -> bool:
+    return bool(cert and cert.strip() and key and key.strip())
+
+
+def _missing_material(cert: str | None, key: str | None) -> str:
+    if not (cert and cert.strip()) and not (key and key.strip()):
+        return "a certificate and a private key"
+    return "a certificate" if not (cert and cert.strip()) else "a private key"
+
+
+def _refuse_encrypted_without_certificate(row, edge: str) -> None:
+    """An HTTPS or HTTP/3 address added to, or moved onto, a web service holding no
+    certificate. Refused here rather than at the next start, where the engine would
+    have nothing to decrypt it with."""
+    if str(row["proto"]) != L4.HTTP or str(edge) not in (L4.TLS, L4.QUIC):
+        return
+    if _has_material(row["tls_cert"], row["tls_key"]):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=f"An {'HTTP/3' if str(edge) == L4.QUIC else 'HTTPS'} address is decrypted "
+               f"here, and this service has no certificate yet. Give it "
+               f"{_missing_material(row['tls_cert'], row['tls_key'])} first.",
+    )
+
 @app.post("", response_model=ServiceAddResponse)
 async def add_service(form: ServiceAddForm):
     if form.transport not in TRANSPORT.ALL:
@@ -1141,18 +1176,20 @@ async def add_service(form: ServiceAddForm):
         raise HTTPException(
             status_code=400, detail="A service needs at least one address to protect"
         )
-    if form.proto in (L4.TLS, L4.QUIC, L4.HTTP):
-        if not (form.tls_cert and form.tls_key):
+    # Only when something is decrypted: TLS and QUIC always, a web service once one of
+    # its addresses is HTTPS or HTTP/3. A web service answering in the clear alone used to
+    # be refused without one, for a certificate the engine would never have read.
+    if needs_certificate(form.proto, [_address_edge(form.proto, a) for a in form.addresses]):
+        if not _has_material(form.tls_cert, form.tls_key):
             raise HTTPException(
                 status_code=400,
-                detail=f"A service that speaks {form.proto.upper()} needs both a "
-                       f"certificate and a private key"
-                       + (". An HTTP service covers the TLS and HTTP/3 edges as well as "
-                          "the cleartext one, and neither exists without a certificate — "
-                          "a service that only answers in the clear is a `tcp` one, where "
-                          "HTTP/1.1 and HTTP/2 are already filtered."
-                          if form.proto == L4.HTTP else ""),
+                detail=f"{_missing_material(form.tls_cert, form.tls_key).capitalize()} "
+                       f"{'are' if not form.tls_cert and not form.tls_key else 'is'} needed: "
+                       + ("an HTTPS or HTTP/3 address is decrypted here."
+                          if form.proto == L4.HTTP
+                          else f"a {form.proto.upper()} service is decrypted here."),
             )
+    if form.tls_cert or form.tls_key:
         _check_tls_material(form.tls_cert, form.tls_key)
     # Each address answers for itself what the service behind it speaks, and is refused
     # here rather than at the first start if it cannot. Everything else an address says
@@ -1351,16 +1388,18 @@ async def edit_service(service_id: str, form: ServiceSettingsForm):
     # towards it, and a service already holding a certificate can be switched on without
     # pasting it again.
     lands_on = form.proto if form.proto is not None else row["proto"]
-    if lands_on in (L4.TLS, L4.QUIC, L4.HTTP):
+    edges_after = [_address_under(a, lands_on)["edge"] for a in _addresses(service_id)]
+    if needs_certificate(lands_on, edges_after):
         cert = form.tls_cert if form.tls_cert is not None else row["tls_cert"]
         key = form.tls_key if form.tls_key is not None else row["tls_key"]
-        if not (cert and cert.strip()) or not (key and key.strip()):
-            missing = "a certificate and a private key" if not (cert and cert.strip()) and not (key and key.strip()) \
-                else "a certificate" if not (cert and cert.strip()) else "a private key"
+        if not _has_material(cert, key):
+            missing = _missing_material(cert, key)
             raise HTTPException(
                 status_code=400,
-                detail=f"This service terminates {str(lands_on).upper()}, so it needs "
-                       f"{missing}. Give it one here — the engine would refuse to start "
+                detail=(f"This service has an HTTPS or HTTP/3 address, which is decrypted here, so it needs "
+                        if str(lands_on) == L4.HTTP else
+                        f"This service terminates {str(lands_on).upper()}, so it needs ")
+                       + f"{missing}. Give it one here — the engine would refuse to start "
                        f"without it, and the service would fail on its next start rather "
                        f"than now.",
             )
@@ -1512,6 +1551,7 @@ async def add_address(service_id: str, form: AddressForm):
         )
     # Before the row exists: what the address says has to mean something on this service.
     _address_upstream(row["proto"], _address_edge(row["proto"], form), form)
+    _refuse_encrypted_without_certificate(row, _address_edge(row["proto"], form))
     try:
         address_id = _insert_address(service_id, row["proto"], row["transport"], form)
     except sqlite3.IntegrityError as e:
@@ -1581,6 +1621,7 @@ async def edit_address(service_id: str, address_id: str, form: AddressForm):
     # Everything the row says is worked out *before* the old rules come back, so a
     # refusal leaves an address that is still steered exactly as it was.
     edge = _address_edge(row["proto"], form)
+    _refuse_encrypted_without_certificate(row, edge)
     if not upstream_mentioned and not upstream_applies(row["proto"], edge):
         # Moved to the clear without a word about the upstream: what the row had was an
         # answer for the decrypted leg this address no longer has, and keeping it would

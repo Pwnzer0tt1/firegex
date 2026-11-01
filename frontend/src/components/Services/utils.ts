@@ -79,13 +79,14 @@ export enum L4 {
  * difference an operator reasonably reads as two different settings.
  *
  * Only `http` is not simply its own name in capitals. Stored and served as `http` — it
- * *is* every version of HTTP — it is shown as **HTTPS** because of where it is chosen:
- * among the protocols firegex has to decrypt, beside TLS and QUIC, where a thing labelled
- * "HTTP" reads as the cleartext web protocol, which is the confusion this whole picker
- * was rebuilt around. What it adds to TLS is the cleartext ports carried beside it, and
- * that belongs in the sentence under the option rather than in its name.
+ * *is* every version of HTTP — it is shown as **HTTP(S)**: a web service whose addresses
+ * are grouped by how each is reached (HTTP, HTTPS, HTTP/3). It was labelled `HTTPS` while
+ * it sat among the decrypting protocols, and an operator wanting one page over plain HTTP
+ * on one port and HTTPS on another read that as "only HTTPS". The old confusion — a plain
+ * HTTP/1.1 service picking it and being asked for a certificate — is answered in the form
+ * instead: when every address is plain HTTP it says that TCP is the choice.
  */
-export const protoLabel = (proto: string) => proto === L4.HTTP ? "HTTPS" : proto.toUpperCase()
+export const protoLabel = (proto: string) => proto === L4.HTTP ? "HTTP(S)" : proto.toUpperCase()
 
 /**
  * What the service *behind one address* speaks.
@@ -112,6 +113,24 @@ export enum Upstream {
 /** Whether a service's traffic is decrypted before the filters see it. */
 export const decrypts = (service: { proto: string }) =>
     service.proto === L4.TLS || service.proto === L4.QUIC || service.proto === L4.HTTP
+
+/**
+ * Whether a service has anything to decrypt, and so needs a certificate: TLS and QUIC
+ * always, a web service once one of its addresses is HTTPS or HTTP/3. A web service on
+ * plain HTTP addresses alone needs none. The backend asks the same thing
+ * (`Service.needs_certificate`); the two have to agree.
+ */
+export const needsCertificate = (proto: string, edges: string[]) =>
+    proto === L4.TLS || proto === L4.QUIC
+    || (proto === L4.HTTP && edges.some(e => e === L4.TLS || e === L4.QUIC))
+
+/** What an address's edge becomes when its service changes protocol — the backend's
+ *  `_address_under`, asked before saving so the form knows whether a certificate is
+ *  about to be needed. */
+export const edgeUnder = (edge: string, proto: string) =>
+    proto !== L4.HTTP ? proto
+        : edge === L4.TLS || edge === L4.QUIC ? edge
+        : edge === L4.UDP ? L4.QUIC : L4.TCP
 
 /**
  * What an address of this service may be reached over.

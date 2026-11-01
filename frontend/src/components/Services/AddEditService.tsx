@@ -1,17 +1,20 @@
-import { Accordion, ActionIcon, Alert, Box, Button, Code, Group, Modal, NumberInput, Space, Switch, Text, TextInput, Tooltip } from '@mantine/core';
+import { Alert, Box, Button, Collapse, Group, Modal, NumberInput, Space, Switch, Text, TextInput, UnstyledButton } from '@mantine/core';
+import { TbChevronDown, TbChevronRight } from 'react-icons/tb';
 import { useForm } from '@mantine/form';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { BsPlusLg, BsTrashFill } from 'react-icons/bs';
-import { errorNotify, isAddressOrInterface, isInterfaceName, okNotify } from '../../js/utils';
+import { BsPlusLg } from 'react-icons/bs';
+import { bareAddress, errorNotify, isAddressOrInterface, isInterfaceName, okNotify } from '../../js/utils';
 import { addressCapabilities } from './AddressOptions';
 import AddressRow from './AddressRow';
 import LayerChoice from './LayerChoice';
 import PemInput from './PemInput';
 import ProtocolChoice from './ProtocolChoice';
-import { AddressForm, decrypts, L4, Upstream, Service, ServiceAddForm, serviceQueryKey, services, Transport } from './utils';
+import { Address, AddressForm, decrypts, edgeUnder, L4, needsCertificate, Upstream, Service, ServiceAddForm, serviceQueryKey, services, Transport } from './utils';
 
 type AddressValues = {
+    /** Set on a row that already exists, when editing: it is updated, not added. */
+    address_id?: string,
     ip_int: string,
     port: number,
     proxy_ip: string,
@@ -49,6 +52,45 @@ const emptyAddress = (): AddressValues => ({
     upstream: Upstream.SAME,
 })
 
+/** A stored address as a row of the form. */
+const rowOf = (a: Address): AddressValues => ({
+    address_id: a.address_id,
+    //: Only the prefix meaning "this one address" comes off: cutting at the first slash
+    //  saved a real range back as its first host.
+    ip_int: bareAddress(a.ip_int), port: a.port,
+    proxy_ip: a.proxy_ip ?? "127.0.0.1", proxy_port: a.proxy_port ?? 8080,
+    edge: a.edge ?? a.proto, target_port: a.target_port ?? "", upstream: a.upstream ?? Upstream.SAME,
+})
+
+/**
+ * What is sent for one row. `whole` is for a PUT over an existing row, where a field
+ * left out keeps what the row had — so switching a setting off has to be said (`0`,
+ * `same`) rather than omitted. A new row only sends what is set.
+ */
+const addressPayload = (a: AddressValues, proto: string, transport: string, whole: boolean): AddressForm => {
+    const edge = edgeUnder(a.edge, proto)
+    const caps = addressCapabilities(proto, transport, edge)
+    const target = caps.canPublish && Number(a.target_port) && Number(a.target_port) !== a.port
+        ? Number(a.target_port) : 0
+    const upstream = caps.canChooseUpstream ? a.upstream : Upstream.SAME
+    return {
+        ip_int: a.ip_int, port: a.port,
+        ...(proto === L4.HTTP ? { edge } : {}),
+        ...(whole ? (caps.canPublish ? { target_port: target } : {}) : target ? { target_port: target } : {}),
+        ...(whole ? (proto === L4.HTTP || caps.canChooseUpstream ? { upstream } : {})
+            : upstream !== Upstream.SAME ? { upstream } : {}),
+        ...(transport === Transport.EXTERNAL ? { proxy_ip: a.proxy_ip, proxy_port: a.proxy_port } : {}),
+    }
+}
+
+/** How a way into a web (`http`) service is reached: the groups its addresses are shown
+ *  in, and what a new one in each group starts as. */
+const WEB_KINDS = [
+    { edge: L4.TCP, label: "HTTP", note: "plain, over TCP", port: 80 },
+    { edge: L4.TLS, label: "HTTPS", note: "TLS over TCP, decrypted here", port: 443 },
+    { edge: L4.QUIC, label: "HTTP/3", note: "QUIC over UDP, decrypted here", port: 443 },
+]
+
 /**
  * Create or edit the network layer of a service.
  *
@@ -57,9 +99,9 @@ const emptyAddress = (): AddressValues => ({
  * point of the whole module — a service used to have to be recreated to swap between
  * regexes and Python, because the choice of one was also the choice of the other.
  *
- * Addresses are a list, and only when the service is being created. Editing them later
- * happens on the service's own page, one at a time, because adding an address to a
- * running service costs nothing while changing anything here restarts it.
+ * Addresses are the same list when creating and when editing, so a service is described
+ * in one place. On save they go through the per-address endpoints, row by row, so only
+ * the addresses that changed have their rules replaced and nothing else is dropped.
  */
 export default function AddEditService({ opened, onClose, edit }: {
     opened: boolean,
@@ -70,9 +112,15 @@ export default function AddEditService({ opened, onClose, edit }: {
     const queryClient = useQueryClient()
     const [submitting, setSubmitting] = useState(false)
     const [error, setError] = useState<string | null>(null)
+    const [advancedOpen, setAdvancedOpen] = useState(false)
     //: Whether leaving the two fields empty means anything. It does not for a new
     //  service, nor for one whose TLS switch has never been accompanied by material.
     const stored = !!edit?.has_tls_material
+
+    //: Whether what is being saved decrypts anything, so needs a certificate — asked of
+    //  the addresses in the form, as they will be under the protocol chosen.
+    const certNeededFor = (values: FormValues) => needsCertificate(values.proto,
+        values.addresses.map(a => edgeUnder(a.edge, values.proto)))
 
     const form = useForm<FormValues>({
         initialValues: {
@@ -92,13 +140,13 @@ export default function AddEditService({ opened, onClose, edit }: {
             // checked whenever something *was* typed is the PEM envelope, the same check
             // the backend makes — so the wrong field is named instead of the whole form.
             tls_cert: (v, values) => {
-                if (!decrypts(values)) return null
+                if (!certNeededFor(values)) return null
                 if (v === "") return stored ? null : "A certificate is required"
                 return v.includes("-----BEGIN CERTIFICATE-----") ? null
                     : "Not a PEM certificate: no 'BEGIN CERTIFICATE' block in it"
             },
             tls_key: (v, values) => {
-                if (!decrypts(values)) return null
+                if (!certNeededFor(values)) return null
                 if (v === "") return stored ? null : "A private key is required"
                 if (v.includes("ENCRYPTED PRIVATE KEY-----"))
                     return "Passphrase-protected keys cannot be used: decrypt it first"
@@ -122,13 +170,14 @@ export default function AddEditService({ opened, onClose, edit }: {
     useEffect(() => {
         if (!opened) return
         setError(null)
+        setAdvancedOpen(false)
         if (edit) form.setValues({
             name: edit.name, proto: edit.proto, transport: edit.transport,
             fail_open: edit.fail_open,
             max_connections: edit.max_connections, over_limit_forwards: edit.over_limit_forwards,
             first_byte_timeout: edit.first_byte_timeout,
             tls_cert: "", tls_key: "",
-            addresses: [emptyAddress()],
+            addresses: (edit.addresses ?? []).map(rowOf),
             autostart: true,
         })
         else form.reset()
@@ -137,42 +186,65 @@ export default function AddEditService({ opened, onClose, edit }: {
     const close = () => { onClose(); form.reset(); setError(null) }
 
     const submit = async (values: FormValues) => {
+        if (values.addresses.length === 0) {
+            setError("Add at least one address for the service to be reached at")
+            return
+        }
         setSubmitting(true)
-        const isExternal = values.transport === Transport.EXTERNAL
-        const addresses: AddressForm[] = values.addresses.map(a => {
-            // Per address, because on an HTTPS service what an address can say depends on
-            // what it is reached over.
-            const caps = addressCapabilities(values.proto, values.transport, a.edge)
-            return {
-                ip_int: a.ip_int,
-                port: a.port,
-                // Sent only where it means something — the same rules the ⚙ on each row
-                // offers them by. Everywhere else the backend refuses them rather than
-                // letting a stored value sit there being read by nothing.
-                ...(values.proto === L4.HTTP ? { edge: a.edge } : {}),
-                ...(caps.canPublish && Number(a.target_port) && Number(a.target_port) !== a.port
-                    ? { target_port: Number(a.target_port) } : {}),
-                ...(caps.canChooseUpstream && a.upstream !== Upstream.SAME
-                    ? { upstream: a.upstream } : {}),
-                ...(isExternal ? { proxy_ip: a.proxy_ip, proxy_port: a.proxy_port } : {}),
-            }
-        })
+        // Sent only where it means something — the same rules the ⚙ on each row offers
+        // them by. Everywhere else the backend refuses them rather than letting a stored
+        // value sit there being read by nothing.
+        const addresses: AddressForm[] = values.addresses.map(a =>
+            addressPayload(a, values.proto, values.transport, false))
 
         try {
             if (edit) {
-                // Addresses are not sent: they have their own endpoints, so that adding
-                // one does not drop the connections on the others.
+                // The service first, carrying the certificate an HTTPS row added here
+                // needs before that row can be. Its addresses are not sent with it.
                 const err = await services.edit(edit.service_id, {
                     name: values.name, proto: values.proto, transport: values.transport,
                     fail_open: values.fail_open,
                     max_connections: values.max_connections,
                     over_limit_forwards: values.over_limit_forwards,
                     first_byte_timeout: values.first_byte_timeout,
-                    ...(decrypts(values) && values.tls_cert !== "" ? { tls_cert: values.tls_cert } : {}),
-                    ...(decrypts(values) && values.tls_key !== "" ? { tls_key: values.tls_key } : {}),
+                    ...(certNeededFor(values) && values.tls_cert !== "" ? { tls_cert: values.tls_cert } : {}),
+                    ...(certNeededFor(values) && values.tls_key !== "" ? { tls_key: values.tls_key } : {}),
                 })
                 if (err) { setError(err); setSubmitting(false); return }
-                okNotify("Service updated", `${values.name} now uses the ${values.transport} transport`)
+                //: Then the addresses, one endpoint each, so only what changed has its
+                //  rules replaced. Removals first, so a row taken out and added back the
+                //  same does not collide with itself — except the last of the old ones,
+                //  which waits for the new rows: the backend refuses to remove the only address.
+                const id = edit.service_id
+                const before = edit.addresses ?? []
+                const kept = new Set(values.addresses.map(a => a.address_id).filter(Boolean))
+                const gone = before.filter(a => !kept.has(a.address_id))
+                const early = gone.length === before.length ? gone.slice(0, -1) : gone
+                const remove = (a: Address) => () => services.deleteAddress(id, a.address_id)
+                const isExt = values.transport === Transport.EXTERNAL
+                const steps: (() => Promise<string | undefined>)[] = [
+                    ...early.map(remove),
+                    ...values.addresses.filter(a => a.address_id).flatMap(a => {
+                        const was = before.find(b => b.address_id === a.address_id)!
+                        const now = addressPayload(a, values.proto, values.transport, true)
+                        const same = JSON.stringify(now)
+                            === JSON.stringify(addressPayload(rowOf(was), values.proto, values.transport, true))
+                            && (!isExt || (was.proxy_ip === a.proxy_ip && was.proxy_port === a.proxy_port))
+                        return same ? [] : [() => services.editAddress(id, a.address_id!, now)]
+                    }),
+                    ...values.addresses.filter(a => !a.address_id).map(a =>
+                        () => services.addAddress(id, addressPayload(a, values.proto, values.transport, false))),
+                    ...gone.slice(early.length).map(remove),
+                ]
+                for (const step of steps) {
+                    const stepErr = await step()
+                    // ponytail: not transactional — what was applied before a refusal stays.
+                    if (stepErr) {
+                        queryClient.invalidateQueries({ queryKey: serviceQueryKey })
+                        setError(stepErr); setSubmitting(false); return
+                    }
+                }
+                okNotify("Service updated", `${values.name} is saved`)
             } else {
                 const payload: ServiceAddForm = {
                     name: values.name, proto: values.proto, transport: values.transport,
@@ -181,8 +253,8 @@ export default function AddEditService({ opened, onClose, edit }: {
                     over_limit_forwards: values.over_limit_forwards,
                     first_byte_timeout: values.first_byte_timeout,
                 }
-                if (decrypts(values) && values.tls_cert !== "") payload.tls_cert = values.tls_cert
-                if (decrypts(values) && values.tls_key !== "") payload.tls_key = values.tls_key
+                if (certNeededFor(values) && values.tls_cert !== "") payload.tls_cert = values.tls_cert
+                if (certNeededFor(values) && values.tls_key !== "") payload.tls_key = values.tls_key
                 const res = await services.add(payload)
                 if (res.status !== "ok" || !res.service_id) { setError(res.status); setSubmitting(false); return }
                 if (values.autostart) {
@@ -202,6 +274,9 @@ export default function AddEditService({ opened, onClose, edit }: {
     }
 
     const isProxy = form.values.transport === Transport.PROXY
+    const noAddress = form.values.addresses.length === 0
+    const transportIsExternal = form.values.transport === Transport.EXTERNAL
+    const hasInterface = form.values.addresses.some(a => isInterfaceName(a.ip_int))
     //: On NFQUEUE the same number means something narrower: how many UDP flows keep what
     //  their Python filters hold. A datagram has no close to observe, so that is the one
     //  thing there with nothing but a count and an idle timeout to bound it; a TCP stream
@@ -212,6 +287,7 @@ export default function AddEditService({ opened, onClose, edit }: {
     //  certificate fields, their validation and the payload all key off, because the two
     //  protocols need exactly the same thing from the operator.
     const isEncrypted = decrypts(form.values)
+    const certNeeded = certNeededFor(form.values)
     // What the fold would tell you if you opened it. Built from what *differs* rather
     // than listing every setting, so a service nobody has tuned says so in three words
     // and a service that has been says exactly how.
@@ -228,7 +304,9 @@ export default function AddEditService({ opened, onClose, edit }: {
         isProxy && form.values.first_byte_timeout > 0
             ? `silent for ${form.values.first_byte_timeout}s is closed`
             : null,
-        !isProxy && !form.values.fail_open ? "fail-open off" : null,
+        transportIsExternal ? "handed to your own proxy" : null,
+        form.values.transport === Transport.NFQUEUE ? "NFQUEUE layer" : null,
+        !isProxy && !transportIsExternal && !form.values.fail_open ? "fail-open off" : null,
     ].filter(Boolean) as string[]
     // Leaving TLS selected while the layer that can decrypt it is not would send a
     // combination the backend refuses, and the operator would be looking at a protocol
@@ -260,23 +338,88 @@ export default function AddEditService({ opened, onClose, edit }: {
     // the fields scroll and the actions do not. A submit button that falls below the
     // fold of a modal is a button that is not there.
     return <Modal size="xl" opened={opened} onClose={close} centered closeOnClickOutside={false}
-        title={edit ? `Edit ${edit.name}` : "Add a new service"}
+        title={edit ? `Edit ${edit.name}` : "Add a service"}
         styles={{ body: { paddingBottom: 0 } }}>
         <form onSubmit={form.onSubmit(submit)}
             style={{ display: 'flex', flexDirection: 'column', maxHeight: '72vh' }}>
             <Box style={{ overflowY: 'auto', flex: 1, minHeight: 0, paddingRight: 10 }}>
-                <TextInput label="Service name" placeholder="shop-api" {...form.getInputProps('name')} />
+                <TextInput label="Name" placeholder="shop-api" {...form.getInputProps('name')} />
                 <Space h="md" />
+
+                {/* Where clients reach it comes first: it is what an operator knows about
+                the service before anything else. No paragraph above the list — the badge
+                in each field already says whether it read an address or an interface, and
+                the one sentence about interfaces appears only once one has been typed. */}
+                {<>
+                    <Text size="sm" fw={500} mb={6}>Where clients reach it</Text>
+                    {/* Every address can go, the last one included — starting over is easier
+                    than editing the one left — but a service with none is refused, here and
+                    on submit, rather than created protecting nothing. */}
+                    {noAddress ? <Text size="xs" c="dimmed" mb={6}>
+                        No address yet: a service needs at least one.
+                    </Text> : null}
+                    {isHttp ? <>
+                        {/* A web service is any number of ways in, each an address, a port
+                        and how it is reached. Grouped by that last one, and only the groups
+                        that have something in them: a service on one HTTPS port is one
+                        heading and one row, not three sections with two of them empty. */}
+                        {WEB_KINDS.map(kind => {
+                            const rows = form.values.addresses
+                                .map((a, index) => ({ a, index }))
+                                .filter(({ a }) => edgeUnder(a.edge, L4.HTTP) === kind.edge)
+                            if (rows.length === 0) return null
+                            return <Box key={kind.edge} mb={4}>
+                                <Group gap={8} mb={4}>
+                                    <Text size="xs" fw={600}>{kind.label}</Text>
+                                    <Text size="xs" c="dimmed">{kind.note}</Text>
+                                </Group>
+                                {rows.map(({ index }) =>
+                                    <AddressRow key={index} form={form} index={index}
+                                        proto={form.values.proto} transport={form.values.transport} />)}
+                            </Box>
+                        })}
+                        <Group gap={4}>
+                            <Text size="xs" c="dimmed" mr={4}>Add</Text>
+                            {WEB_KINDS.map(kind =>
+                                <Button key={kind.edge} variant="subtle" size="compact-xs"
+                                    leftSection={<BsPlusLg size={10} />}
+                                    onClick={() => form.insertListItem('addresses', {
+                                        ...emptyAddress(),
+                                        ip_int: form.values.addresses.at(-1)?.ip_int ?? "127.0.0.1",
+                                        port: kind.port, edge: kind.edge,
+                                    })}>
+                                    {kind.label}
+                                </Button>)}
+                        </Group>
+                    </> : <>
+                        {form.values.addresses.map((_, index) =>
+                            <AddressRow key={index} form={form} index={index}
+                                proto={form.values.proto} transport={form.values.transport} />)}
+                        <Button variant="subtle" size="compact-sm" leftSection={<BsPlusLg size={12} />}
+                            onClick={() => form.insertListItem('addresses', emptyAddress())}>
+                            Add another address or interface
+                        </Button>
+                    </>}
+                    {hasInterface && !isExternal ? <Text size="xs" c="dimmed" mt={4}>
+                        An interface protects whatever address that link carries now, and
+                        everyone else's traffic crossing it too.
+                        {(form.values.proto === L4.UDP || form.values.proto === L4.QUIC)
+                            && isProxy
+                            ? " On UDP and QUIC the proxy binds a relay to the interface's own address, so it has to have one."
+                            : ""}
+                    </Text> : null}
+                    <Space h="md" />
+                </>}
 
                 <ProtocolChoice value={form.values.proto} transport={form.values.transport}
                     onChange={v => form.setFieldValue('proto', v)} />
                 {/* Directly under the choice that asks for them, not at the far end of the
-                form. They used to sit below the advanced settings, which put the reason
-                and the request a screenful apart: an operator who had just picked HTTP for
-                a service answering in the clear met the fields with nothing next to them
-                saying which choice had produced them, and read it as firegex wanting a
-                certificate for a service that has none. */}
-                {isEncrypted ? <>
+                form: the reason and the request a screenful apart read as firegex wanting
+                a certificate for a service that has none. */}
+                {/* Only when something is decrypted. A web service on plain HTTP
+                addresses alone has nothing to open, and asking it for a certificate was
+                asking for something nothing would read. */}
+                {certNeeded ? <>
                     <Space h="md" />
                     <PemInput label="Certificate (PEM)"
                         placeholder={edit ? "unchanged" : "-----BEGIN CERTIFICATE-----"}
@@ -297,63 +440,19 @@ export default function AddEditService({ opened, onClose, edit }: {
                 </> : null}
                 <Space h="md" />
 
-                {edit ? null : <>
-                    <Group justify="space-between" align="center" wrap="nowrap">
-                        <Box style={{ minWidth: 0 }}>
-                            <Text size="sm" fw={500}>Addresses to protect</Text>
-                            <Text size="xs" c="dimmed">
-                                {isExternal
-                                    ? "One service, one hand-off, as many addresses as it answers on — IPv4 and IPv6 together if that is how it is reachable."
-                                    : "One service, one filter chain, as many ways in as it has — IPv4 and IPv6 together if that is how it is reachable, and an interface name where the address is not yours to know. One more way in is one more address here."}
-                            </Text>
-                        </Box>
-                        <Tooltip label="Add another address" position="left">
-                            <ActionIcon variant="light" style={{ flexShrink: 0 }}
-                                onClick={() => form.insertListItem('addresses', emptyAddress())}>
-                                <BsPlusLg size={14} />
-                            </ActionIcon>
-                        </Tooltip>
-                    </Group>
-                    <Space h="xs" />
-                    {form.values.addresses.map((_, index) =>
-                        <AddressRow key={index} form={form} index={index}
-                            proto={form.values.proto} transport={form.values.transport}
-                            canRemove={form.values.addresses.length > 1} />)}
-                    {/* Said once under the list rather than as a validation error per row:
-                    the operator is choosing between an address and an interface while they
-                    fill it in, and being told afterwards that half of what the picker
-                    offered was never available here is the worse way to learn it. */}
+                {/* The layer is not asked here. The proxy is the answer for nearly every
+                service, so it is the default nobody has to read past; NFQUEUE and the
+                hand-off are in Advanced, for whoever needs them. Only the hand-off is
+                repeated out here, because it changes the address rows above. */}
+                {isExternal ? <>
                     <Text size="xs" c="dimmed">
-                        {isExternal
-                            ? "Interface names are not offered on this layer: the return rule recognises your proxy by one address and port to put the original port back, and an interface is not one address."
-                            : <>
-                                An interface name — <Code>eth0</Code>, <Code>wg0</Code>, <Code>tun0</Code> —
-                                protects whatever address that link currently carries, which is what you
-                                want when somebody else hands it out. An address protects that one alone.
-                                {(form.values.proto === L4.UDP || form.values.proto === L4.QUIC)
-                                    && form.values.transport === Transport.PROXY
-                                    ? " On UDP and QUIC this layer binds a relay to the interface's own address, so it has to have one; NFQUEUE needs none."
-                                    : ""}
-                            </>}
+                        Handed to <b>your own proxy</b> (Interception, under Advanced): firegex
+                        only steers the traffic, so no filter can be attached and nothing
+                        encrypted can be opened. Each address needs the port your proxy
+                        listens on for it.
                     </Text>
                     <Space h="md" />
-                </>}
-
-                {/* Not a choice for a service that is decrypted: decrypting means
-                terminating the connection, and one layer does that. A picker with two
-                greyed-out options and one answer is a question nobody is being asked, so
-                it is said in a line instead — said rather than dropped, because the layer
-                is a real property of the service and an operator who has read about the
-                trade should not have to wonder which side of it they are on. */}
-                {isEncrypted
-                    ? <Text size="xs" c="dimmed">
-                        Carried by the <b>proxy</b> layer, which is the only one that can
-                        decrypt: the connection is terminated here and reopened towards
-                        the service.
-                    </Text>
-                    : <LayerChoice value={form.values.transport} proto={form.values.proto}
-                        onChange={v => form.setFieldValue('transport', v)} />}
-                <Space h="md" />
+                </> : null}
 
                 {/* One fold for everything an operator sets once — after something went
                 wrong, or before a competition — and then never looks at again. Left in
@@ -368,20 +467,34 @@ export default function AddEditService({ opened, onClose, edit }: {
                 descriptors are what a limit counts. Fail-open is NFQUEUE's: it hands the
                 kernel a verdict on packets already in flight, and what it can run out of
                 is queue. The hand-off layer runs nothing of ours, so it has neither. */}
-                {isExternal ? null : <>
-                    <Accordion variant="contained" chevronPosition="left"
-                        styles={{ content: { paddingInline: 'var(--mantine-spacing-sm)' } }}>
-                        <Accordion.Item value="advanced">
-                            <Accordion.Control>
-                                <Text size="sm" fw={500}>Advanced settings</Text>
-                                <Text size="xs" c="dimmed">
-                                    {changed.length > 0
-                                        ? changed.join(" · ")
-                                        : "Everything at its default."}
-                                </Text>
-                            </Accordion.Control>
-                            <Accordion.Panel>
-                                {isProxy ? <>
+                <>
+                    {/* A line of text, not a box: it is the part of the form most
+                    services never open, and drawn as a bordered panel with a bold title it
+                    competed with the questions everybody does answer. */}
+                    <UnstyledButton onClick={() => setAdvancedOpen(o => !o)}>
+                        <Group gap={6} wrap="nowrap">
+                            {advancedOpen ? <TbChevronDown size={14} color="var(--fg-text-muted)" />
+                                : <TbChevronRight size={14} color="var(--fg-text-muted)" />}
+                            <Text size="sm" c="dimmed">Advanced settings</Text>
+                            <Text size="xs" c="dimmed" style={{ opacity: changed.length ? 1 : 0.7 }}>
+                                · {changed.length > 0 ? changed.join(" · ") : "all at their defaults"}
+                            </Text>
+                        </Group>
+                    </UnstyledButton>
+                    <Collapse expanded={advancedOpen}>
+                        <Box mt="sm" pl="md" style={{ borderLeft: '1px solid var(--fg-border)' }}>
+                                {/* First, because every setting under it depends on it. An
+                                encrypted service has one answer, so it is said instead. */}
+                                {isEncrypted
+                                    ? <Text size="xs" c="dimmed" mb="sm">
+                                        Intercepted by the <b>proxy</b>, the only layer that can
+                                        decrypt.
+                                    </Text>
+                                    : <Box mb="sm">
+                                        <LayerChoice value={form.values.transport} proto={form.values.proto}
+                                            onChange={v => form.setFieldValue('transport', v)} />
+                                    </Box>}
+                                {isExternal ? null : isProxy ? <>
                                     <NumberInput
                                         label="Most connections at once"
                                         description={form.values.max_connections > 0
@@ -428,22 +541,18 @@ export default function AddEditService({ opened, onClose, edit }: {
                                         />
                                     </> : null}
                                 </>}
-                            </Accordion.Panel>
-                        </Accordion.Item>
-                    </Accordion>
+                        </Box>
+                    </Collapse>
                     <Space h="md" />
-                </>}
+                </>
 
 
-                {edit ? null : <>
-                    <Space h="md" />
-                    <Switch label="Start it immediately" {...form.getInputProps('autostart', { type: 'checkbox' })} />
-                </>}
 
                 {edit ?
                     <Alert color="blue" mt="md">
-                        Changing any of this restarts the service. The connections it is carrying
-                        are not cut; new ones get the new settings.
+                        Changing the protocol, the certificate or the advanced settings restarts
+                        the service; adding, moving or removing an address touches that address
+                        alone. Either way the connections it is carrying are not cut.
                     </Alert> : null}
                 <Space h="md" />
             </Box>
@@ -458,8 +567,10 @@ export default function AddEditService({ opened, onClose, edit }: {
                 {error ? <Alert color="red" mb="sm" withCloseButton onClose={() => setError(null)}>
                     {error}
                 </Alert> : null}
-                <Group justify="flex-end">
-                    <Button loading={submitting} type="submit">{edit ? "Save" : "Add service"}</Button>
+                <Group justify={edit ? "flex-end" : "space-between"}>
+                    {edit ? null
+                        : <Switch label="Start it now" {...form.getInputProps('autostart', { type: 'checkbox' })} />}
+                    <Button loading={submitting} type="submit" disabled={noAddress}>{edit ? "Save" : "Add service"}</Button>
                 </Group>
             </Box>
         </form>
