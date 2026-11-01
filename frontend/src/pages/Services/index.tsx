@@ -5,7 +5,6 @@ import { BsPlusLg } from 'react-icons/bs';
 import { TbReload, TbSearch } from 'react-icons/tb';
 import { useNavigate, useParams } from 'react-router';
 import { DocsButton } from '../../components/DocsButton';
-import { firewallRulesQuery } from '../../components/Firewall/utils';
 import AddEditService from '../../components/Services/AddEditService';
 import ServiceTableRow from '../../components/Services/ServiceRow';
 import { Service, serviceQueryKey, servicesQuery } from '../../components/Services/utils';
@@ -32,7 +31,6 @@ export default function Services({ children }: { children: ReactNode }) {
     const [addOpen, setAddOpen] = useState(false)
     const [query, setQuery] = useState("")
     const list = servicesQuery()
-    const rules = firewallRulesQuery()
     const { socketConnected, socketEverConnected } = useSystemStore()
 
     useEffect(() => {
@@ -46,15 +44,10 @@ export default function Services({ children }: { children: ReactNode }) {
     const shown = all.filter(s => matches(s, query))
     const running = all.filter(s => s.status === "active").length
     const backend = backendLink(socketConnected, socketEverConnected)
-    const firewallOn = rules.data?.enabled ?? false
-    const policy = rules.data?.policy ?? "accept"
 
     return <>
         <div className="fg-page-head">
             <h1 className="fg-page-title">Services</h1>
-            <Chip tone={firewallOn ? (policy === "accept" ? "ok" : "danger") : "muted"} label="Firewall">
-                {firewallOn ? `enabled · ${policy}` : "off"}
-            </Chip>
             <Chip tone={backend.tone} label="Backend" tooltip={BACKEND_LINK_HELP}>{backend.text}</Chip>
             <Chip tone={all.length && running === all.length ? "ok" : running ? "warn" : "muted"} label="Running">
                 {running} / {all.length}
